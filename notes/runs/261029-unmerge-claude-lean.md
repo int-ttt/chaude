@@ -36,3 +36,4 @@ build: scripts/build-release.sh 0.6.1 -> dist/chaude_0.6.1_darwin_arm64.tar.gz; 
 push: origin master:main, no force, no tags
 0.6.2: bumped (main.go, README, CHANGELOG), commit 4e03bd4 pushed to main, new tag v0.6.2 (v0.6.1 untouched)
 release run 40719026994 success; assets chaude_0.6.2_darwin_arm64.tar.gz + checksums.txt; install.sh into temp dir -> chaude --version checked
+install.sh into temp dir: chaude --version = 0.6.2 (first attempt with HOME override failed on gh auth, retried OK)
