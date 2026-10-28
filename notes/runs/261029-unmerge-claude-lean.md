@@ -34,3 +34,5 @@ verify: go build ok, go test ok; git diff 96765d3^1..HEAD = .gitignore, cmd/chau
 readme: README.md already pre-merge local version (merge did not touch it); updated version examples to 0.6.1
 build: scripts/build-release.sh 0.6.1 -> dist/chaude_0.6.1_darwin_arm64.tar.gz; chaude --version checked
 push: origin master:main, no force, no tags
+0.6.2: bumped (main.go, README, CHANGELOG), commit 4e03bd4 pushed to main, new tag v0.6.2 (v0.6.1 untouched)
+release run 40719026994 success; assets chaude_0.6.2_darwin_arm64.tar.gz + checksums.txt; install.sh into temp dir -> chaude --version checked
