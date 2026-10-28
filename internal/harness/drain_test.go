@@ -38,8 +38,17 @@ func TestAgentTrackerAndDrain(t *testing.T) {
 	}
 	past := time.Now().Add(-time.Minute)
 	_ = os.Chtimes(out, past, past)
+	if done, _ := d.finished(time.Now()); done {
+		t.Fatal("stalled file without done marker must not finish")
+	}
+	_ = os.WriteFile(out, []byte("x<!-- agent:done -->"), 0o644)
+	_ = os.Chtimes(out, past, past)
+	if done, _ := d.finished(time.Now()); done {
+		t.Fatal("file marker must not finish an agent")
+	}
+	tr.onNotification("<task-notification><tool-use-id>a</tool-use-id></task-notification>")
 	if done, to := d.finished(time.Now()); !done || to {
-		t.Fatal("expected done")
+		t.Fatal("expected done after completion notification")
 	}
 	tr2 := newAgentTracker()
 	tr2.onToolUse("z", "Agent", map[string]any{"run_in_background": true}, now)

@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,10 +15,13 @@ var outPathRe = regexp.MustCompile(`notes/runs/[^\s"'` + "`" + `)]+\.md`)
 type agentRec struct {
 	ID         string
 	Task       string
+	Prompt     string // first line of the prompt handed to the agent
 	OutPath    string
 	Background bool
 	Started    time.Time
 	Done       bool
+	startMod   time.Time // output file mtime/size when the agent started
+	startSize  int64
 }
 
 // agentTracker records delegations of one session.
@@ -39,8 +43,12 @@ func (t *agentTracker) onToolUse(id, name string, input map[string]any, now time
 	}
 	p := str(input["prompt"])
 	bg, _ := input["run_in_background"].(bool)
-	t.agents[id] = &agentRec{ID: id, Task: str(input["description"]), OutPath: outPathRe.FindString(p),
+	a := &agentRec{ID: id, Task: str(input["description"]), Prompt: firstLine(p), OutPath: outPathRe.FindString(p),
 		Background: bg, Started: now}
+	if st, err := os.Stat(a.OutPath); a.OutPath != "" && err == nil {
+		a.startMod, a.startSize = st.ModTime(), st.Size()
+	}
+	t.agents[id] = a
 }
 
 // onToolResult: foreground agents finish with their tool_result; background ones only "launch".
@@ -70,6 +78,17 @@ func (t *agentTracker) onNotification(text string) bool {
 	return found
 }
 
+// finishForeground marks every foreground agent done (turn ended without tool_result: esc, error).
+func (t *agentTracker) finishForeground() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, a := range t.agents {
+		if !a.Background {
+			a.Done = true
+		}
+	}
+}
+
 // finishOldestBackground marks the longest-running background agent done (fallback when the
 // completion notice itself was not visible on stdout).
 func (t *agentTracker) finishOldestBackground() {
@@ -83,24 +102,6 @@ func (t *agentTracker) finishOldestBackground() {
 	}
 	if old != nil {
 		old.Done = true
-	}
-}
-
-// pollFiles marks background agents done when the output file is non-empty and unchanged for quiet.
-func (t *agentTracker) pollFiles(now time.Time, quiet time.Duration) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	for _, a := range t.agents {
-		if a.Done || a.OutPath == "" {
-			continue
-		}
-		st, err := os.Stat(a.OutPath)
-		if err != nil || st.Size() == 0 {
-			continue
-		}
-		if now.Sub(st.ModTime()) >= quiet {
-			a.Done = true
-		}
 	}
 }
 
@@ -125,7 +126,6 @@ type drain struct {
 }
 
 func (d *drain) finished(now time.Time) (done, timedOut bool) {
-	d.tr.pollFiles(now, 2*time.Second)
 	if len(d.tr.running()) == 0 {
 		return true, false
 	}
@@ -159,4 +159,25 @@ func (t *agentTracker) counts() (fg, bg int) {
 		}
 	}
 	return
+}
+
+func firstLine(s string) string {
+	for _, l := range strings.Split(s, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			return l
+		}
+	}
+	return ""
+}
+
+// sortedRunning: running agents, oldest first (stable order for the session panel).
+func (t *agentTracker) sortedRunning() []*agentRec {
+	l := t.running()
+	sort.Slice(l, func(i, j int) bool {
+		if l[i].Started.Equal(l[j].Started) {
+			return l[i].ID < l[j].ID
+		}
+		return l[i].Started.Before(l[j].Started)
+	})
+	return l
 }

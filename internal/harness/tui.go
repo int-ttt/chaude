@@ -107,12 +107,17 @@ type tuiModel struct {
 	curCol   atomic.Int32
 	curUp    atomic.Int32
 	popH     int
+	panelH   int // foreground rows below the input box
+	bgH      int // background rows directly under the transcript
+	lastRun  int // running agent count at the last refresh (idle tick redraw)
 	unseen   bool
 	sig      int
 	mouse    bool
 	hist     inputHistory
 	rw       rewindState
 	lastEsc  time.Time
+	queue    []string // prompts typed while a foreground answer runs; sent one per finished answer
+	queueH   int
 }
 
 // slash commands (Claude Code style)
@@ -209,6 +214,40 @@ func (m *tuiModel) welcome() string {
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(orange).Padding(0, 1).Width(w).Render(body)
 }
 
+// mdBold turns paired **bold** spans on one line into ANSI bold (asterisks removed).
+// Unpaired markers stay verbatim; lines inside ``` fences are untouched.
+func mdBold(s string) string {
+	lines := strings.Split(s, "\n")
+	fence := false
+	for i, ln := range lines {
+		if strings.HasPrefix(strings.TrimSpace(ln), "```") {
+			fence = !fence
+			continue
+		}
+		if fence || !strings.Contains(ln, "**") {
+			continue
+		}
+		var sb strings.Builder
+		rest := ln
+		for {
+			a := strings.Index(rest, "**")
+			if a < 0 {
+				break
+			}
+			b := strings.Index(rest[a+2:], "**")
+			if b <= 0 { // no closing pair, or empty "****"
+				break
+			}
+			sb.WriteString(rest[:a])
+			sb.WriteString("\x1b[1m" + rest[a+2:a+2+b] + "\x1b[22m")
+			rest = rest[a+2+b+2:]
+		}
+		sb.WriteString(rest)
+		lines[i] = sb.String()
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m *tuiModel) render() string {
 	cw := m.w
 	if cw < 10 {
@@ -235,7 +274,7 @@ func (m *tuiModel) render() string {
 		case "user":
 			out = append(out, lipgloss.NewStyle().Foreground(grey).Render(indent(wrap(b.text, 2), "> ", "  ")), "")
 		case "asst":
-			out = append(out, indent(wrap(b.text, 2), lipgloss.NewStyle().Foreground(orange).Render("● "), "  "), "")
+			out = append(out, indent(wrap(mdBold(b.text), 2), lipgloss.NewStyle().Foreground(orange).Render("● "), "  "), "")
 		case "tool":
 			out = append(out, indent(wrap(b.text, 2), lipgloss.NewStyle().Foreground(lipgloss.Color("#5FAF87")).Render("● ")+"", "  "))
 		case "result":
@@ -244,7 +283,9 @@ func (m *tuiModel) render() string {
 			out = append(out, dimSt.Render(wrap(b.text, 0)), "")
 		}
 	}
-	if m.busy && !m.gotText && m.perm == nil {
+	if fg, _ := m.r.tracker.counts(); fg > 0 && !m.gotText && m.perm == nil {
+		out = append(out, m.sp.View()+dimSt.Render(" 생각중..."))
+	} else if m.busy && !m.gotText && m.perm == nil {
 		out = append(out, m.sp.View()+dimSt.Render(" Working… (esc to interrupt)"))
 	}
 	return strings.Join(out, "\n")
@@ -259,6 +300,7 @@ func (m *tuiModel) refresh() {
 	if sig > 0 {
 		sig = sig*100003 + len(m.blocks[sig-1].text)
 	}
+	m.lastRun = len(m.r.tracker.running())
 	m.vp.SetContent(m.render())
 	if atBottom {
 		m.vp.GotoBottom()
@@ -272,7 +314,7 @@ func (m *tuiModel) refresh() {
 func (m *tuiModel) layout() {
 	m.fit()
 	m.inH = m.in.Height(maxInputRows)
-	vh := m.h - m.inH - 2 - 1 - m.popH // input box + status line + suggestions
+	vh := m.h - m.inH - 2 - 1 - m.popH - m.panelH - m.bgH - m.queueH // input box + status line + suggestions
 	if vh < 1 {
 		vh = 1
 	}
@@ -304,7 +346,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var c tea.Cmd
 		m.sp, c = m.sp.Update(v)
 		cmds = append(cmds, c)
-		if m.busy {
+		if n := len(m.r.tracker.running()); m.busy || n != m.lastRun {
 			m.refresh()
 		}
 	case textMsg:
@@ -339,6 +381,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 	case doneMsg:
 		m.busy, m.gotText = false, false
+		m.r.tracker.finishForeground() // turn over: no foreground agent can still be running (esc/error)
+		if len(m.queue) > 0 {
+			next := m.queue[0]
+			m.queue = m.queue[1:]
+			m.sendPrompt(next)
+			m.after()
+			return m, nil
+		}
 		m.refresh()
 	case tea.MouseMsg:
 		var c tea.Cmd
@@ -354,6 +404,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) interrupt() {
+	m.r.tracker.finishForeground()
 	select {
 	case m.r.intr <- struct{}{}:
 	default:
@@ -504,9 +555,6 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.after()
 		return m, nil
 	case "enter":
-		if m.busy {
-			return m, nil
-		}
 		if v := m.in.val; len(v) > 0 && m.in.pos == len(v) && v[len(v)-1] == '\\' {
 			m.in.Backspace() // trailing "\" + enter = newline, like Claude Code
 			m.in.Insert([]rune{'\n'})
@@ -515,6 +563,16 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		line := strings.TrimSpace(m.in.Value())
 		if line == "" {
+			return m, nil
+		}
+		if m.busy {
+			if strings.HasPrefix(line, "/") {
+				return m, nil // slash commands stay blocked while an answer runs
+			}
+			m.in.SetValue("")
+			m.hist.Add(line)
+			m.queue = append(m.queue, line)
+			m.after()
 			return m, nil
 		}
 		m.in.SetValue("")
@@ -531,17 +589,42 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m.runSlash(line)
 		}
-		m.blocks = append(m.blocks, block{"user", line})
-		m.busy = true
-		m.vp.GotoBottom()
-		m.refresh()
-		m.submit <- line
+		m.sendPrompt(line)
 		return m, nil
 	}
 	m.sel = 0
 	m.edit(k)
 	m.after()
 	return m, nil
+}
+
+// sendPrompt shows the prompt in the transcript and hands it to the sender goroutine.
+func (m *tuiModel) sendPrompt(line string) {
+	m.blocks = append(m.blocks, block{"user", line})
+	m.busy = true
+	m.vp.GotoBottom()
+	m.refresh()
+	m.submit <- line
+}
+
+// queueLines renders waiting prompts (dim, "대기" prefix) shown right above the input box.
+func (m *tuiModel) queueLines() []string {
+	maxShow := 5
+	if m.h > 0 { // keep at least minViewRows for the transcript
+		maxShow = min(maxShow, m.h-m.inH-2-1-m.popH-minViewRows)
+	}
+	if maxShow <= 0 {
+		return nil
+	}
+	var out []string
+	for i, q := range m.queue {
+		if i == maxShow-1 && len(m.queue) > maxShow {
+			out = append(out, dimSt.Render(fmt.Sprintf("  … +%d 대기", len(m.queue)-i)))
+			break
+		}
+		out = append(out, ansiTrunc(dimSt.Render("  대기 "+strings.ReplaceAll(q, "\n", " ")), m.w))
+	}
+	return out
 }
 
 // edit applies a plain editing key to the input box.
@@ -610,13 +693,18 @@ func (m *tuiModel) syncCursor() {
 	}
 	m.in.View(maxInputRows, "", dimSt) // keeps m.in.top current
 	vis := row - m.in.top
-	m.curCol.Store(int32(1 + 2 + col + 1))    // border + prompt "> " + text; 1-based column
-	m.curUp.Store(int32(m.inH - 1 - vis + 2)) // rows below cursor in box + bottom border + status line
+	m.curCol.Store(int32(1 + 2 + col + 1))               // border + prompt "> " + text; 1-based column
+	m.curUp.Store(int32(m.inH - 1 - vis + 2 + m.panelH)) // rows below cursor in box + bottom border + status line
 }
 
 func (m *tuiModel) after() {
 	m.fit()
 	m.syncCursor()
+	if pn, bn, qn := len(m.panelLines()), len(m.bgLines()), len(m.queueLines()); pn != m.panelH || bn != m.bgH || qn != m.queueH {
+		m.panelH, m.bgH, m.queueH = pn, bn, qn
+		m.layout()
+		m.syncCursor()
+	}
 	if n := min(len(m.suggestions()), maxPop); n != m.popH || m.in.Height(maxInputRows) != m.inH {
 		m.popH = n
 		m.layout()
@@ -755,6 +843,31 @@ func (m *tuiModel) View() string {
 	if !m.ready {
 		return "starting…"
 	}
+	ql := m.queueLines()
+	prevQ := m.queueH
+	m.queueH = len(ql) // panels size themselves around the queue rows of this frame
+	pl := m.panelLines()
+	panel := ""
+	if len(pl) > 0 {
+		panel = strings.Join(pl, "\n") + "\n"
+	}
+	bl := m.bgLines()
+	bgPanel := ""
+	if len(bl) > 0 {
+		bgPanel = "\n" + strings.Join(bl, "\n")
+	}
+	changed := len(pl) != m.panelH || len(bl) != m.bgH || len(ql) != prevQ
+	m.panelH, m.bgH, m.queueH = len(pl), len(bl), len(ql) // computed in the frame it is drawn: layout height always matches
+	if vh := max(1, m.h-m.inH-2-1-m.popH-m.panelH-m.bgH-m.queueH); m.h > 0 && vh != m.vp.Height {
+		atBottom := m.vp.AtBottom()
+		m.vp.Height = vh
+		if atBottom {
+			m.vp.GotoBottom() // shrinking at the bottom must not cut off the last line
+		}
+	}
+	if changed {
+		m.syncCursor() // panel rows changed between Update and View: keep cursor row in step
+	}
 	bc := grey
 	if m.perm != nil {
 		bc = orange
@@ -824,7 +937,11 @@ func (m *tuiModel) View() string {
 		ls[len(ls)-1] = strings.Repeat(" ", max(0, m.w-lipgloss.Width(tag)-1)) + tag
 		vv = strings.Join(ls, "\n")
 	}
-	return vv + "\n" + pop + box + "\n" + m.statusLine()
+	qv := ""
+	if len(ql) > 0 {
+		qv = strings.Join(ql, "\n") + "\n"
+	}
+	return vv + bgPanel + "\n" + pop + qv + box + "\n" + panel + m.statusLine()
 }
 
 // runTUI is the interactive entry: same Repl, rendered with bubbletea in the alt screen.
@@ -883,3 +1000,48 @@ func (r *Repl) runTUI() int {
 }
 
 func ansiTrunc(s string, w int) string { return ansi.Truncate(s, w, "…") }
+
+const (
+	maxPanel    = 4
+	minViewRows = 3
+)
+
+// panelLines: one row per running foreground delegated session (below the input box).
+func (m *tuiModel) panelLines() []string { return m.rows(false, 0) }
+
+// bgLines: one row per running background agent, drawn directly under the transcript.
+func (m *tuiModel) bgLines() []string { return m.rows(true, len(m.panelLines())) }
+
+// rows: description and first prompt line of running agents of one kind; `used` rows are already
+// taken by the other panel. Finished agents drop out because the tracker marks them done.
+func (m *tuiModel) rows(bg bool, used int) []string {
+	var l []*agentRec
+	for _, a := range m.r.tracker.sortedRunning() {
+		if a.Background == bg {
+			l = append(l, a)
+		}
+	}
+	if len(l) == 0 || m.w < 10 {
+		return nil
+	}
+	limit := maxPanel
+	if m.h > 0 { // keep at least minViewRows for the transcript
+		limit = min(limit, m.h-m.inH-2-1-m.popH-m.queueH-minViewRows-used)
+	}
+	if limit <= 0 {
+		return nil
+	}
+	var out []string
+	for i, a := range l {
+		if i == limit-1 && len(l) > limit {
+			out = append(out, dimSt.Render(fmt.Sprintf("  … +%d more", len(l)-i)))
+			break
+		}
+		t := a.Task
+		if a.Prompt != "" {
+			t += " · " + a.Prompt
+		}
+		out = append(out, ansiTrunc(dimSt.Render("  ● "+strings.ReplaceAll(t, "\n", " ")), m.w))
+	}
+	return out
+}
