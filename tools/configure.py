@@ -18,14 +18,14 @@ if getattr(sys, "frozen", False):                  # Claude Lean.app / claude-le
 else:
     PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WIN = os.name == "nt"
-DEFAULTS = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 150000, "history_export": True,
+DEFAULTS = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 100000, "history_export": True,
             "nesting": True, "start_mode": "lean"}
 # (key, question, [(value, label), ...])
 CHOICES = [
     ("main", "메인 모델", [("opus", "Opus (기본: 판단이 많은 작업)"), ("sonnet", "Sonnet (지시가 명확한 작업, 더 저렴)")]),
     ("style", "답변 방식", [("explain", "설명형 (일반 Opus처럼 풀어서 설명)"), ("concise", "간결형 (5줄 이내 요약)")]),
     ("inbox", "정보 문장 메모 (모델 호출 없이 보관했다가 다음 지시와 함께 전달)", [(True, "켜기"), (False, "끄기")]),
-    ("reset_alert", "맥락이 커지면 /exit 후 다시 시작하라는 안내", [(150000, "150k에서 안내"), (250000, "250k에서 안내"), (0, "끄기")]),
+    ("reset_alert", "맥락이 커지면 /exit 후 다시 시작하라는 안내", [(100000, "100k에서 안내"), (120000, "120k에서 안내"), (0, "끄기")]),
     ("history_export", "대화 기록을 logs/history에 txt로 자동 저장", [(True, "켜기"), (False, "끄기")]),
     ("nesting", "Sonnet·Opus 에이전트가 단순 작업을 Haiku에게 직접 넘기기", [(True, "켜기"), (False, "끄기")]),
     ("start_mode", "설치 직후 모드", [("lean", "절약 모드"), ("normal", "일반 모드 (절약 규칙 꺼짐, 나중에 '절약모드' 입력)")]),

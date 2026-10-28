@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook: when the main context passes LEAN_RESET_AT tokens (default 150000), ask the main
+"""UserPromptSubmit hook: when the main context passes LEAN_RESET_AT tokens (default 100000), ask the main
 thread to add a one-line notice suggesting /exit → claude (no compaction; the terminal keeps the history).
 Reminds again only after every further 25k."""
 import json, os, sys
@@ -15,7 +15,7 @@ if lean_off():
     sys.exit(0)
 data = json.load(sys.stdin)
 path = data.get("transcript_path") or ""
-limit = int(os.environ.get("LEAN_RESET_AT", "150000"))
+limit = int(os.environ.get("LEAN_RESET_AT", "100000"))
 used = 0
 try:
     with open(path, "rb") as f:

@@ -163,7 +163,7 @@ if kept:
     done.append("같은 이름의 사용자 에이전트는 그대로 둠: " + ", ".join(kept))
 
 # 5b) Options chosen in the installer (tools/configure.py), else the ones saved by the last install.
-OPT_DEFAULTS = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 150000, "history_export": True,
+OPT_DEFAULTS = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 100000, "history_export": True,
                 "nesting": True, "start_mode": "lean"}
 CONCISE = "- Reply ≤5 lines: result · path · next step. No preamble, no recap, no apology. At most A/B + recommendation.\n"
 op = os.path.join(dst, ".claude", "claude-lean.options.json")
@@ -171,6 +171,8 @@ opt_src = os.environ.get("CLAUDE_LEAN_OPTIONS") or (op if os.path.exists(op) els
 if opt_src:
     opts = dict(OPT_DEFAULTS)
     opts.update(json.load(open(opt_src, encoding="utf-8")))
+    if opts["reset_alert"] == 150000:              # 0.4.13 default (150k): replaced by the 0.4.14 default (100k)
+        opts["reset_alert"] = 100000
     if main:
         opts["main"] = main
     s = json.load(open(sp, encoding="utf-8"))

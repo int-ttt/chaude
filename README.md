@@ -38,7 +38,7 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
 ## 모델별 역할과 한도
 | 모델 | 에이전트 | 생각 강도 | 맥락 한도 | 한도에 가까워지면 |
 |---|---|---|---|---|
-| Opus (메인) | 대화·판단·설명 | low (필요한 턴만 `ultrathink`) | 자동 압축 창 300k | 150k부터 리셋 안내(`/exit` 후 같은 터미널에서 `claude`: 압축 없이 가벼워지고 직전 대화가 이어짐). 300k 근처에서 자동 압축 |
+| Opus (메인) | 대화·판단·설명 | low (필요한 턴만 `ultrathink`) | 자동 압축 창 150k | 100k부터 리셋 안내(`/exit` 후 같은 터미널에서 `claude`: 압축 없이 가벼워지고 직전 대화가 이어짐). 150k 근처에서 자동 압축 |
 | Haiku | `haiku-scout` 탐색 · `haiku-checker` 확인 · `haiku-batch-worker` 일괄 작업 · `haiku-runner` 장시간 작업 · `haiku-researcher` 웹 조사 · `haiku-drafter` 글 · `haiku-coder` 코드 · `haiku-extractor` 기록 추출 | low~medium | 자동 압축 창 100k | 자동으로 압축하고 계속 진행. 100k 창이라 Haiku 단가가 5배가 되는 100k를 넘기 전에 압축됨 |
 | Sonnet | `sonnet-analyst` 판단이 필요한 작업 · `sonnet-reviewer` 제출 전 검토 | medium | 자동 압축 창 100k | 자동으로 압축하고 계속 진행 |
 | Opus (에이전트) | `opus-architect` Sonnet이 넘긴 일, `opus로`, 이미 실패한 일 | high | 자동 압축 창 100k | 자동으로 압축하고 계속 진행 |

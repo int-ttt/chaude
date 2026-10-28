@@ -38,7 +38,7 @@ ACT="$(choose "어떤 작업을 할까요?" "$A1" "$A1" "$A2")"; [ -n "$ACT" ] |
 FIRST="$(printf '%s\n' "$FOLDERS" | head -n 1)"
 eval "$(python3 - "$FIRST" <<'PY'
 import json, os, sys
-o = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 150000, "history_export": True, "nesting": True, "start_mode": "lean"}
+o = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 100000, "history_export": True, "nesting": True, "start_mode": "lean"}
 try:
     o.update(json.load(open(os.path.join(sys.argv[1], ".claude", "claude-lean.options.json"), encoding="utf-8")))
 except Exception:
@@ -60,7 +60,7 @@ if [ "$HOW" = "하나씩 고르기" ]; then
   pick O_main "메인 모델" '"opus"' "Opus (판단이 많은 작업)" '"sonnet"' "Sonnet (지시가 명확한 작업, 더 저렴)"
   pick O_style "답변 방식" '"explain"' "설명형 (일반 Opus처럼 풀어서)" '"concise"' "간결형 (5줄 이내)"
   pick O_inbox "정보 문장 메모 (모델 호출 없이 보관했다가 다음 지시와 함께 전달)" true "켜기" false "끄기"
-  pick O_reset_alert "맥락이 커지면 /exit 후 다시 시작하라는 안내" 150000 "150k에서 안내" 250000 "250k에서 안내" 0 "끄기"
+  pick O_reset_alert "맥락이 커지면 /exit 후 다시 시작하라는 안내" 100000 "100k에서 안내" 120000 "120k에서 안내" 0 "끄기"
   pick O_history_export "대화 기록을 logs/history에 txt로 자동 저장" true "켜기" false "끄기"
   pick O_nesting "Sonnet·Opus 에이전트가 단순 작업을 Haiku에게 직접 넘기기" true "켜기" false "끄기"
   pick O_start_mode "설치 직후 모드" '"lean"' "절약 모드" '"normal"' "일반 모드 (절약 규칙 꺼짐)"
