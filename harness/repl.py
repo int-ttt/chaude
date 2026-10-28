@@ -48,7 +48,7 @@ class Repl:
         self.out.flush()
 
     def start(self):
-        self.sess = Session(model=self.a.model, cwd=self.a.cwd)
+        self.sess = Session(model=self.a.model, cwd=self.a.cwd, compact_window=self.a.compact_window)
 
     def ask_permission(self, req):
         r = req["request"]
@@ -182,7 +182,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="harness")
     ap.add_argument("--model", default="haiku")
     ap.add_argument("--cwd", default=None)
-    ap.add_argument("--threshold", type=int, default=100_000, help="rotate when context tokens exceed this")
+    ap.add_argument("--threshold", type=int, default=200_000, help="rotate when context tokens exceed this")
+    ap.add_argument("--compact-window", type=int, default=250_000, help="child-only CLAUDE_CODE_AUTO_COMPACT_WINDOW (keep > threshold; 0=off)")
     ap.add_argument("--max-auto-rotations", type=int, default=None)
     ap.add_argument("--transcript", default=os.path.expanduser("~/.claude-harness/transcript.jsonl"))
     ap.add_argument("--tail-turns", type=int, default=4)

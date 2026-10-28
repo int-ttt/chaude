@@ -33,3 +33,6 @@ tag: OK=verified here, PARTIAL, N/A=not tested
 - snapshot quality only tested on a one-fact conversation.
 - python: default python3 is 3.9.6 on this Mac; code runs on 3.9 (tested) and 3.13 (probes).
 - permission prompt blocks the reader (readline on same stdin); fine for spike.
+
+## Auto-compact override (verified 2026-10-28)
+- default rotation threshold 200k; child env CLAUDE_CODE_AUTO_COMPACT_WINDOW=250000 (--compact-window, 0=off). spike/probe_autocompact.py: /context in sonnet showed window 1m -> 250k with env and also with CLI flag `--autocompact 250000`; autocompact buffer stays 33k, so compaction ~217k > 200k threshold. Note: it LOWERS the window for 1m models, raises for 150k (haiku). No settings files touched.

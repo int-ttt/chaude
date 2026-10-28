@@ -10,9 +10,12 @@ import time
 import uuid
 
 
-def clean_env():
+def clean_env(compact_window=None):
     # ANTHROPIC_API_KEY must be absent: with -p a key silently switches billing to API.
-    return {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    if compact_window:  # child-only; no settings file is touched
+        env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = str(compact_window)
+    return env
 
 
 def ctx_tokens(usage):
@@ -25,7 +28,7 @@ class Session:
     """One `claude -p` child. send() a user message, then iterate turn() until result."""
 
     def __init__(self, model="haiku", cwd=None, resume=None, extra=None, claude_bin="claude",
-                 permission_tool=True):
+                 permission_tool=True, compact_window=None):
         self.session_id = None
         cmd = [claude_bin, "-p", "--input-format", "stream-json", "--output-format", "stream-json",
                "--verbose", "--include-partial-messages", "--model", model]
@@ -36,7 +39,7 @@ class Session:
         cmd += list(extra or [])
         self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
-                                     env=clean_env(), cwd=cwd)
+                                     env=clean_env(compact_window), cwd=cwd)
         self.q = queue.Queue()
         threading.Thread(target=self._read, daemon=True).start()
 
