@@ -1,17 +1,15 @@
 package harness
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
-func TestConductorRule(t *testing.T) {
-	for _, w := range []string{"haiku-", "sonnet-analyst", "opus-architect", "Never write the answer", "pushback", "corrections"} {
-		if !strings.Contains(conductorRule, w) {
-			t.Errorf("conductorRule missing %q", w)
-		}
+func TestParseRoute(t *testing.T) {
+	m, task, ok := parseRoute("model: Haiku\ntask: count funcs in a.go\nreply: Korean 존댓말")
+	if !ok || m != "haiku" || task != "count funcs in a.go\nreply: Korean 존댓말" {
+		t.Fatal(m, task, ok)
 	}
-	if conductorModel != "sonnet" {
-		t.Fatal(conductorModel)
+	for _, bad := range []string{"", "model: gpt\ntask: x", "model: opus", "hello"} {
+		if _, _, ok := parseRoute(bad); ok {
+			t.Errorf("accepted %q", bad)
+		}
 	}
 }

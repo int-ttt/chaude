@@ -13,3 +13,9 @@ total: opus $0.4409 vs conductor $0.4769 (+8%); spend of this A/B ~$0.92
 conductor-only-delegates check: FAIL. It delegates to haiku-scout but (a) writes interim prose ("확인하는 중입니다...") and (b) after the agent result it composes the final Korean reply itself + [cat:] marker, i.e. answers. Opus main behaved the same shape (haiku-scout, 1 turn).
 conclusion: no cost win on tiny tasks (Sonnet main is not cheaper per turn here, extra relay turn); n=3, tiny, cache-dominated; tokens column in my driver was 0 (wrong keys), numbers from ctx lines.
 open: relay turn is inherent to design (agent result returns to conductor); to meet "never answers" the harness would have to display agent output directly instead of the conductor re-reply; needs user/opus decision.
+
+## classifier rework (v0.6.7 not yet tagged) + A/B rerun (same 3 tasks, driver keeps stdin open)
+impl: classifier.go (classify/parseRoute/Repl.route), handle() calls route() when --conductor; /mode conductor just toggles; conductorRule removed. test TestParseRoute. gofmt/vet/build/test -race ok.
+opus main: T0 $0.1192 / T1 $0.1147 / T2 $0.1153 (sum $0.349); answered itself from memory without rechecking (said "이번에 다시 열어보지 않았습니다")
+classifier -> haiku session: T0 $0.0852 (classifier $0.0775 cold cache + session $0.0077) / T1 $0.0157 (cls $0.0065, 2 turns: interim + background result) / T2 $0.0113 (cls $0.0065); routed haiku x3; sum $0.112 (-68%); correct answers 5 / 0.6.7 / 14, replies arrived 3/3
+caveats: n=3; T0 classifier cost inflated by cold cache (later calls ~$0.0065); opus did not re-verify so quality not equal; haiku replies add "추천:" blocks (verbose); T1 had an interim reply then final. Cost = metrics stage=turn + stage=classify cost_usd, A/B spend ~$0.46.
