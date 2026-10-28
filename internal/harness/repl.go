@@ -811,7 +811,7 @@ func Main(args []string) int {
 	fs.DurationVar(&a.Cooldown, "rotate-cooldown", 2*time.Minute, "min gap after a failed rotation")
 	fs.BoolVar(&a.NoCategoryRotate, "no-category-rotate", false, "disable category-based session rotation")
 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
-	fs.BoolVar(&a.Conductor, "conductor", false, "conductor mode: a one-shot Sonnet classifier picks haiku|sonnet|opus per prompt; that session answers")
+	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: a one-shot Sonnet classifier picks haiku|sonnet|opus per prompt; that session answers")
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
