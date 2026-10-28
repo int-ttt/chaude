@@ -13,26 +13,56 @@ from _lean import lean_off
 data = json.load(sys.stdin) if not sys.stdin.isatty() else {}
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 upd = ""
+_NOTE = ("CLAUDE.md·에이전트는 Claude Code를 새로 시작할 때 적용됩니다. 지금 세션 안에서 /resume으로 온 것이라면 "
+         "/exit 후 claude -c 로 다시 여세요.")
+
+
+def _session_start_ts(path):
+    """Epoch seconds of the first record in the session transcript (None if unknown)."""
+    import datetime
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                ts = json.loads(line).get("timestamp")
+                if ts:
+                    return datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        pass
+    return None
+
+
+def emit(text):
+    """Context for the model + systemMessage (shown to the user; plain stdout is not)."""
+    msg = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
+    if upd:
+        msg["systemMessage"] = upd
+    print(json.dumps(msg, ensure_ascii=False))
+
+
 if data.get("source", "startup") in ("startup", "resume"):   # compaction keeps the loaded CLAUDE.md: don't touch the record
     try:                                             # the version this session's CLAUDE.md/agents came from
-        _v = open(os.path.join(root, ".claude", "claude-lean.version"), encoding="utf-8").read().strip()
+        _vf = os.path.join(root, ".claude", "claude-lean.version")
+        _v = open(_vf, encoding="utf-8").read().strip()
         _sid = "".join(ch for ch in str(data.get("session_id") or "x") if ch.isalnum() or ch in "-_")
         _f = os.path.join(root, "logs", f".lean-ver-{_sid}")
         try:
             _old = open(_f).read().strip()
         except OSError:
             _old = ""
-        if data.get("source") == "resume" and _old and _old != _v:
-            upd = f"[update] claude-lean {_v}로 업데이트됨 (이전 {_old}). 이 대화에 새 규칙이 적용됐습니다."
+        if data.get("source") == "resume":
+            if _old and _old != _v:
+                upd = f"claude-lean {_v}로 업데이트됨 (이전 {_old}). {_NOTE}"
+            elif not _old:                           # session predates the version record (0.4.11 and older)
+                _t0 = _session_start_ts(data.get("transcript_path") or "")
+                if _t0 is not None and os.path.getmtime(_vf) > _t0:
+                    upd = f"claude-lean {_v}로 업데이트됨 (이 대화는 이전 버전에서 시작). {_NOTE}"
         os.makedirs(os.path.join(root, "logs"), exist_ok=True)
         open(_f, "w").write(_v)
     except OSError:
         pass
 if lean_off():
-    if upd:
-        print(upd)
-    print("[normal mode] The claude-lean policy in CLAUDE.md is OFF: work directly with tools, normal-length replies. "
-          "(The user types 절약모드 to turn it back on.)")
+    emit("[normal mode] The claude-lean policy in CLAUDE.md is OFF: work directly with tools, normal-length replies. "
+          "(The user types 절약모드 to turn it back on.)" + (f"\n[update] {upd}" if upd else ""))
     sys.exit(0)
 
 
@@ -62,7 +92,7 @@ if data.get("source", "startup") == "startup":       # storage: per-agent/sessio
         except OSError:
             pass
 
-out = ([upd] if upd else []) + [f"[session:{data.get('source', 'start')}] snapshot of notes/ (state lives in files; don't re-read them unless needed):"]
+out = [f"[session:{data.get('source', 'start')}] snapshot of notes/ (state lives in files; don't re-read them unless needed):"]
 open_items = head("notes/OPEN.md", 20)
 if open_items:
     out += ["OPEN:"] + open_items
@@ -105,8 +135,8 @@ if data.get("source", "startup") == "startup":
 inbox = tail("notes/INBOX.md", 50)
 if inbox:
     out.append(f"INBOX: {len(inbox)} queued user notes (delivered with the next instruction).")
-if len(out) > 1 + bool(upd):
-    print("\n".join(out)[:6000])
-elif upd:
-    print(upd)
+if upd:
+    out.append(f"[update] {upd} Mention nothing; the user was already told.")
+if len(out) > 1 or upd:
+    emit("\n".join(out)[:6000])
 sys.exit(0)
