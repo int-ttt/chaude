@@ -52,6 +52,7 @@ type Args struct {
 	Cooldown         time.Duration // min gap after a failed rotation
 	FromClaude       string        // import a plain Claude Code transcript: session id | path | latest
 	ImportDry        bool          // with FromClaude: print the handoff stats and exit
+	NoCategoryRotate bool          // disable category-based rotation (no marker rule, no switch rotation)
 	NoDelegationRule bool          // do not append the haiku delegation rule to the child's system prompt
 }
 
@@ -143,6 +144,7 @@ type Repl struct {
 	lastRotFail     time.Time
 	notices         []string
 	drainMu         sync.Mutex
+	cat             string       // current task category from the child's [cat: X] marker
 	delegs          int          // Agent/Task tool calls in the current turn
 	mode            atomic.Int32 // permMode, set from the UI goroutine
 	idle            idleTurn     // child-initiated turn being rendered (idle reader goroutine only)
@@ -154,8 +156,15 @@ func (r *Repl) p(s string, end string) {
 
 func (r *Repl) start() error {
 	opts := SessionOpts{Model: r.a.Model, Cwd: r.a.Cwd, CompactWindow: r.a.CompactWindow}
+	rule := ""
 	if !r.a.NoDelegationRule {
-		opts.Extra = []string{"--append-system-prompt", delegationRule}
+		rule = delegationRule
+	}
+	if !r.a.NoCategoryRotate {
+		rule = strings.TrimSpace(rule + " " + categoryRule)
+	}
+	if rule != "" {
+		opts.Extra = []string{"--append-system-prompt", rule}
 	}
 	s, err := NewSession(opts)
 	if err != nil {
@@ -652,6 +661,18 @@ func (r *Repl) handle(line string) {
 		fields["result_"+k] = v // summed over all API calls of the turn
 	}
 	_ = r.metrics.Log(fields)
+	newCat, catRot := categoryRotation(line, reply, r.cat, r.a.NoCategoryRotate)
+	if newCat != "" || catRot {
+		_ = r.metrics.Log(map[string]any{"stage": "category", "from": r.cat, "to": newCat, "switch": catRot, "session": r.sess.SessionID})
+	}
+	prevCat := r.cat
+	r.cat = newCat
+	cooledCat := r.lastRotFail.IsZero() || time.Since(r.lastRotFail) >= r.a.Cooldown
+	if catRot && cooledCat {
+		r.p(dim+"── category change: "+prevCat+" → "+newCat+" · starting a new session ──"+rst, "\n")
+		r.rotate("category " + prevCat + " -> " + newCat)
+		return
+	}
 	autoOK := r.a.MaxAutoRotations < 0 || r.rotations < r.a.MaxAutoRotations
 	cooled := r.lastRotFail.IsZero() || time.Since(r.lastRotFail) >= r.a.Cooldown
 	if autoOK && cooled && r.lastCtx >= r.a.Threshold {
@@ -768,6 +789,7 @@ func Main(args []string) int {
 	fs.IntVar(&a.MaxDrain, "max-drain", 3, "max concurrently draining old sessions (0=never drain)")
 	fs.DurationVar(&a.DrainTimeout, "drain-timeout", 60*time.Minute, "give up waiting for draining agents")
 	fs.DurationVar(&a.Cooldown, "rotate-cooldown", 2*time.Minute, "min gap after a failed rotation")
+	fs.BoolVar(&a.NoCategoryRotate, "no-category-rotate", false, "disable category-based session rotation")
 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
@@ -784,7 +806,7 @@ func Main(args []string) int {
 	r.tr = newTranscript(a.Transcript)
 	r.metrics = newMetrics(a.MetricsDir, map[string]any{"threshold": a.Threshold, "handoff_validate": !a.NoValidate,
 		"max_drain": a.MaxDrain, "drain_timeout_s": int(a.DrainTimeout.Seconds()), "compact_window": a.CompactWindow,
-		"delegation_rule": !a.NoDelegationRule})
+		"delegation_rule": !a.NoDelegationRule, "category_rotate": !a.NoCategoryRotate})
 	r.seenTools = map[string]bool{}
 	if a.FromClaude != "" {
 		if code, done := r.importFromClaude(); done {
