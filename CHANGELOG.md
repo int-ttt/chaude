@@ -2,19 +2,17 @@
 
 설치된 버전은 프로젝트의 `.claude/claude-lean.version`에서 확인할 수 있습니다. 업그레이드는 새 패키지로 설치를 다시 실행하면 됩니다 (`APPLY_GUIDE.md` 5-1).
 
-## 0.5.0 (계획, 미배포)
-- 서브에이전트 고정 오버헤드 줄이기: 정의 간소화, 병렬 읽기 안내, 5분 넘게 쉰 서브에이전트는 캐시가 식는다는 안내 (목표: 서브 첫 요청 중앙값을 종류별 기준 대비 10% 이상 감소, haiku 7.3k → 6.6k 이하·sonnet 9.9k → 8.9k 이하; 안내 문구는 에이전트·skill에만 추가)
+## 0.5.0
+- 서브에이전트 고정 오버헤드 줄이기: 정의 간소화, 병렬 읽기 안내, 5분 넘게 쉰 서브에이전트는 캐시가 식는다는 안내 (에이전트 정의 합계 20,981 → 15,979바이트)
 - 작업당 토큰 측정 스크립트 추가 (읽기 전용, 날짜·모델별, 개발용 `tools/`에 두며 사용자 프로젝트에는 설치되지 않음)
-- CLAUDE.md 크기 증가 억제 (6,894바이트 이하 유지, 중복 줄 삭제로 1,000바이트 이상 감소 목표)
+- CLAUDE.md 크기 증가 억제 (6,894 → 5,673바이트)
 - 내장 general-purpose·Explore·Plan 에이전트 생성 차단 (claude-code-guide는 허용)
 - 에이전트 공통 꼬리 중복 제거, 줄 수 제한 5줄로 통일
 - SessionStart 스냅샷 축소
-- haiku-context-guard: Claude Code가 READ_CAP(8000)을 직접 강제하는지 먼저 확인해, 강제하면 훅 제거·아니면 도달 불가 deny 경로 수정
+- haiku-context-guard: Claude Code가 Read 상한(8000)을 직접 적용하는 것을 확인해 크기 추정 코드와 `HAIKU_CALL_MAX`를 없애고, Haiku의 `allow_large` 차단만 남김 (Read에만 실행)
 - style-adapter [frag] 문구 단축, SessionStart LEDGER 5줄 상한
 - 메인 스레드를 커스텀 에이전트로 실행하는 안은 측정 후 결정 (구현 안 함)
 - 근거와 비교표: `PLAN_0.5.0.md`
-
-## 0.4.14
 - 정확한 문구가 정해진 수정(버전 올리기, 같은 문구 일괄 변경)만 Haiku가 맡고, 무엇을 고칠지 정해야 하는 여러 파일 수정은 Sonnet이 맡음. Sonnet은 원인 분석·설계 판단에도 씀
 - 근거: 같은 커밋을 Haiku(high·max)와 Sonnet(medium)에 재현한 시험에서 Sonnet이 실제 변경과 더 가깝고 빠르며 비용은 큰 차이 없었음 (표본 커밋별 1회; `notes/runs/261028-haiku-vs-sonnet.md`)
 - 메인 압축 창 300k → 150k (`autoCompactWindow`). 리셋 안내 기본값은 끄기로 바뀜 (`LEAN_RESET_AT` 0). 선택지는 끄기(기본)·100k·120k

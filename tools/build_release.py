@@ -12,7 +12,7 @@ import os, re, shutil, subprocess, sys, zipfile
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 OUT = os.path.abspath(args[0] if args else os.path.join(PKG, "dist"))
-EXCLUDE = {".git", ".github", "dist", "history", "logs", "notes", "__pycache__", "win", "mac", ".gitignore", "build"}
+EXCLUDE = {".git", ".github", "dist", "history", "logs", "notes", "__pycache__", "win", "mac", ".gitignore", "build", "usage_by_task.py"}
 ver = open(os.path.join(PKG, "VERSION"), encoding="utf-8").read().strip()
 tag = os.environ.get("GITHUB_REF_NAME", "")
 if tag.startswith("v") and tag != f"v{ver}":
@@ -21,7 +21,7 @@ if tag.startswith("v") and tag != f"v{ver}":
 shutil.rmtree(OUT, ignore_errors=True)
 stage = os.path.join(OUT, "stage")
 unix = os.path.join(stage, "pkg-unix")
-shutil.copytree(PKG, unix, ignore=lambda d, names: [n for n in names if n in EXCLUDE or n.endswith(".pyc")])
+shutil.copytree(PKG, unix, ignore=lambda d, names: [n for n in names if n in EXCLUDE or n.startswith("PLAN_") or n.endswith(".pyc")])
 subprocess.run([sys.executable, os.path.join(PKG, "win", "build_win.py"), os.path.join(stage, "pkg-win")], check=True)
 
 log = open(os.path.join(PKG, "CHANGELOG.md"), encoding="utf-8").read()

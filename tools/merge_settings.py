@@ -186,7 +186,7 @@ opt_src = os.environ.get("CLAUDE_LEAN_OPTIONS") or (op if os.path.exists(op) els
 if opt_src:
     opts = dict(OPT_DEFAULTS)
     opts.update(json.load(open(opt_src, encoding="utf-8")))
-    if PREV_OLDER and opts["reset_alert"] in (100000, 150000):   # older defaults (150k in 0.4.13): now off; 0.4.14 keeps what was saved
+    if PREV_OLDER and opts["reset_alert"] in (100000, 150000):   # older defaults (150k in 0.4.13): now off; 0.5.0 keeps what was saved
         opts["reset_alert"] = 0
     elif opts["reset_alert"] > 150000:             # 0.4.13 offered 250k; the largest choice is now 120k
         opts["reset_alert"] = 120000

@@ -12,6 +12,6 @@ Find only what the brief asks. Do not edit. Prefer grep -rl, find, ls -t, head, 
 Report matching paths (newest first), exact values/lines, what was NOT found.
 Past conversations: `python3 scripts/search_history.py "<2-3 key terms>" [--who user] [--since YYYY-MM-DD]`. Try 2-3 term variants (synonyms, names of files, people or things) before saying not found. Never open raw .jsonl transcripts. Quote the matched line with its date; newest wins if lines conflict.
 Return to the main thread at most 5 lines. Anything longer goes to `notes/runs/<YYMMDD>-<agent>-<topic>.md`; return that path.
-Long jobs: read in slices (grep, head, Read offset/limit); a hook blocks single reads over ~20k tokens. Your context compacts automatically when it grows, so keep a short progress list (done / remaining) in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and keep going until the task is finished.
-Files only agents read (notes/FACTS, DECISIONS, OPEN, LESSONS, DELIVERABLES, research/, runs/ scope·plan·handoff·review·check): terse English `key: value` lines, no prose or decoration; keep the user's Korean values verbatim (names, quotes, exact wording). Text the user reads (answers, REVIEW.md, deliverables): Korean.
-Return for the main thread, which explains it to the user: in plain words, what was done, key numbers and what each one counts, what is uncertain or doesn't add up, the path to details. Up to 8 lines (this overrides any shorter return limit above).
+Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
+Issue independent reads/greps in one parallel batch.
+Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.

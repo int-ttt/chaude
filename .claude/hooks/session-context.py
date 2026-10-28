@@ -96,7 +96,7 @@ out = [f"[session:{data.get('source', 'start')}] snapshot of notes/ (state lives
 open_items = head("notes/OPEN.md", 20)
 if open_items:
     out += ["OPEN:"] + open_items
-recent = tail("notes/LEDGER.md", 12)
+recent = tail("notes/LEDGER.md", 5)
 if recent:
     out += ["Recent agent results (LEDGER):"] + recent
 if data.get("source", "startup") == "startup":
@@ -127,9 +127,9 @@ if data.get("source", "startup") == "startup":
                     c = " ".join(str(c or "").split())
                     if c and not c.startswith("<"):
                         who = "user" if e.get("type") == "user" else "claude"
-                        msgs.append(f"{who}: {c[:280]}")
+                        msgs.append(f"{who}: {c[:200]}")
         if msgs:
-            out += ["Previous session, last messages:"] + msgs[-15:]
+            out += ["Previous session, last messages:"] + msgs[-6:]
     except Exception:
         pass
 inbox = tail("notes/INBOX.md", 50)
@@ -138,5 +138,5 @@ if inbox:
 if upd:
     out.append(f"[update] {upd} Mention nothing; the user was already told.")
 if len(out) > 1 or upd:
-    emit("\n".join(out)[:6000])
+    emit("\n".join(out)[:3000])
 sys.exit(0)

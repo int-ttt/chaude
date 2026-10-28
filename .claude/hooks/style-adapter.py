@@ -187,11 +187,11 @@ if len(prompt) > 1500 or prompt.count("\n") > 20 or "<pasted_content" in prompt:
 # 4. One-line routing tags for short prompts.
 p = prompt.rstrip(".!~ ")
 if re.fullmatch(r"ㅇㅇ|ㅇㅋ|응|어|그래|좋아|오케이?|ok|[AB12]|[AB](안)?(으로|로) ?(가자|가|해)?|그렇게 해|그대로 (가|해)|(전부 |다 )?맞아|진행해|진행|해|해봐|수행해|전부 수행해|넣어|일단 넣어|바꿔|계속해?|ㄱㄱ?", p, re.I):
-    tags.append("[ack] = approve the default in the `다음 할 일:` list of your last reply (first item; old forms: indented sentence, `▶ 기본:`). Execute it in one delegation round; reply ≤2 lines; no re-analysis.")
+    tags.append("[ack] = approve the default in the `다음 할 일:` list of your last reply (first item). Execute it in one delegation round; reply ≤2 lines; no re-analysis.")
 elif re.match(r"^(다시|재시도|재시작)", p):
     tags.append("[retry] re-run the last brief on the same agent; failed/unfinished items only.")
 elif len(p) < 30 and not re.search(QUESTION, prompt) and not re.match(CORRECTION, prompt) and not pending:
-    tags.append("[frag] short reply: if it answers your last question, use it; else relay verbatim to the active agent with the target named in the current `다음 할 일:` line. Don't re-plan.")
+    tags.append("[frag] answers your last question, else relay verbatim to the active agent.")
 
 if tags:
     print("\n".join(tags))

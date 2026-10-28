@@ -12,6 +12,6 @@ Read only the implicated code path and nearest tests/callers. Check git status; 
 One minimal fix in the surrounding style → narrowest check → exact command and result. Never claim unrun tests.
 On failure, use the new output; never repeat a fix. After 2 failed attempts, stop: write hypotheses, evidence, error lines to `notes/runs/` (for `sonnet-analyst`; if it already failed there, for `opus-architect`).
 Return ≤5 lines: cause · changed paths · check + result · risk.
-Long jobs: read in slices (grep, head, Read offset/limit); a hook blocks single reads over ~20k tokens. Your context compacts automatically when it grows, so keep a short progress list (done / remaining) in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and keep going until the task is finished.
-Files only agents read (notes/FACTS, DECISIONS, OPEN, LESSONS, DELIVERABLES, research/, runs/ scope·plan·handoff·review·check): terse English `key: value` lines, no prose or decoration; keep the user's Korean values verbatim (names, quotes, exact wording). Text the user reads (answers, REVIEW.md, deliverables): Korean.
-Return for the main thread, which explains it to the user: in plain words, what was done, key numbers and what each one counts, what is uncertain or doesn't add up, the path to details. Up to 8 lines (this overrides any shorter return limit above).
+Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
+Issue independent reads/greps in one parallel batch.
+Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.

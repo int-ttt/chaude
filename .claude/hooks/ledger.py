@@ -43,8 +43,8 @@ def model_of(path):
 
 data = json.load(sys.stdin)
 msg = (data.get("last_assistant_message") or "").strip()
-if not msg:
-    sys.exit(0)
+if len(msg) < 5 or re.fullmatch(r"(진행\s*상황|상황|뭐\s*해\??|끝났어\??|다 됐어\??|ㅇㅇ|ㅇㅋ|네|응|ok|yes)[\s?!.]*", msg, re.I):
+    sys.exit(0)                       # too short / status ping: nothing worth carrying over
 kind = data.get("agent_type") or "agent"
 model = ""
 for _ in range(4):                    # the last transcript line can land just after this hook starts

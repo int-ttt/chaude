@@ -9,11 +9,11 @@ import json, os, re, shutil, sys
 
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(os.path.dirname(PKG), "claude-opus-lean-win")
-SKIP = {"install.sh", "fresh_start.sh", "win", "logs", "notes", "__pycache__", ".git", ".github", "dist", "history", ".gitignore", "mac"}
+SKIP = {"install.sh", "fresh_start.sh", "win", "logs", "notes", "__pycache__", ".git", ".github", "dist", "history", ".gitignore", "mac", "usage_by_task.py"}
 
 if os.path.exists(OUT):
     shutil.rmtree(OUT)
-shutil.copytree(PKG, OUT, ignore=lambda d, names: [n for n in names if n in SKIP])
+shutil.copytree(PKG, OUT, ignore=lambda d, names: [n for n in names if n in SKIP or n.startswith("PLAN_")])
 
 # PowerShell files need a UTF-8 BOM so Windows PowerShell 5.1 reads the Korean text correctly.
 W = os.path.join(PKG, "win")
