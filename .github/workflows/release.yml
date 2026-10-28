@@ -1,0 +1,26 @@
+# Push a tag v<VERSION> (e.g. v2026.10.28-9) → builds the macOS and Windows zips and publishes a GitHub release
+# whose notes are that version's section of CHANGELOG.md.
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: python3 tools/build_release.py dist
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER=$(cat VERSION)
+          gh release create "v$VER" dist/*.zip --title "claude-lean $VER" --notes-file dist/NOTES.md \
+            || gh release upload "v$VER" dist/*.zip --clobber

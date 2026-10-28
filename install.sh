@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Install the Opus-lean setup into a project.
 # usage: ./install.sh <project-dir> [--main opus|sonnet]
+#        ./install.sh            (no arguments: settings window / questions to pick folders and options)
 # Safe to re-run: existing CLAUDE.md / settings.json are backed up and merged, not overwritten.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
+if [ $# -eq 0 ]; then exec python3 "$SRC/tools/configure.py"; fi
 DST="${1:?usage: ./install.sh <project-dir> [--main opus|sonnet]}"
 DST="$(cd "$DST" && pwd)"
 MAIN_MODEL=""

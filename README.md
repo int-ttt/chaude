@@ -1,6 +1,6 @@
 # Claude Code — Opus는 듣기만, 작업은 하위 에이전트, Opus 토큰 최소화
 
-**버전 2026.10.28-8** · 버전별 변경 사항은 `CHANGELOG.md`
+**버전 2026.10.28-9** · 버전별 변경 사항은 `CHANGELOG.md`
 
 메인 세션(Opus)은 **입력을 듣고 → 판단하고 → 에이전트에게 맡기고 → 결과를 이해하기 쉽게 설명**합니다. 파일·웹·명령 도구는 메인 세션에서 훅으로 차단됩니다.
 
@@ -87,7 +87,13 @@ Haiku 에이전트가 모델에 보내는 입력(대화 기록 + 도구 결과)�
 어떤 프로젝트에도 적용됩니다. 프로젝트 고유 내용은 각 프로젝트의 `notes/`에만 들어가고, 에이전트·훅·규칙은 공통입니다.
 `./install.sh <프로젝트 폴더> [--main sonnet]` 한 줄이면 됩니다. 기존 대화 정리까지 여러 프로젝트를 한 번에 하려면 `./fresh_start.sh <폴더> <폴더> ...`. 기존 `CLAUDE.md`·`settings.json`은 백업 후 병합됩니다. 단계별 안내와 확인 방법, 되돌리기는 `APPLY_GUIDE.md`, 이 패키지를 계속 다듬는 세션의 인계는 `DESIGN_HANDOFF.md`를 보세요.
 
+**설정 창:** 설치 스크립트를 프로젝트 폴더 없이 실행하면 설정 창이 열립니다. 폴더를 고르고(여러 개 가능) 작업(설치만 / 기존 대화 정리 후 새로 시작)과 선택사항을 정합니다: 메인 모델, 답변 방식(설명형/간결형), 정보 문장 메모, 리셋 안내, 대화 기록 저장, Haiku 상한, Sonnet·Opus → Haiku 연계, 설치 직후 모드. 창을 열 수 없으면 터미널에서 같은 내용을 묻습니다. 고른 값은 프로젝트의 `.claude/claude-lean.options.json`에 저장되어 업그레이드해도 유지됩니다.
+
+## 릴리스 (GitHub)
+`VERSION`, README 첫머리 버전, `CHANGELOG.md` 맨 위 항목을 같은 버전으로 고친 뒤 `git tag v<버전>` → `git push origin v<버전>`. GitHub Actions가 Mac·Windows zip을 만들어 그 버전의 변경 내역과 함께 릴리스에 올립니다. 버전 표기가 서로 다르면 실패합니다. 직접 만들려면 `python3 tools/build_release.py`.
+
 ## 기타 파일
+- `history/`: 이 패키지를 만든 설계 대화 기록 (텍스트, 사용자 메시지와 답변만)
 - `.claude/skills/correction`: "아니/근데/아" 정정 유형(A~G)별 처리
 - `FRESH_START.md`, `fresh_start.sh`, `/distill`, `haiku-extractor`, `scripts/extract_transcript.py`: 완전 초기화. 기존 대화 기록에서 중요 내용만 `notes/`로 추출 (권장)
 - `.claude/skills/migrate-session`, `MIGRATE_NOW_PROMPT.md`: 진행 중인 세션을 그대로 이어가는 경우

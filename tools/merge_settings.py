@@ -161,6 +161,58 @@ if moved:
 if kept:
     done.append("같은 이름의 사용자 에이전트는 그대로 둠: " + ", ".join(kept))
 
+# 5b) Options chosen in the installer (tools/configure.py), else the ones saved by the last install.
+OPT_DEFAULTS = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 150000, "history_export": True,
+                "haiku_cap": 80000, "nesting": True, "start_mode": "lean"}
+CONCISE = "- Reply ≤5 lines: result · path · next step. No preamble, no recap, no apology. At most A/B + recommendation.\n"
+op = os.path.join(dst, ".claude", "claude-lean.options.json")
+opt_src = os.environ.get("CLAUDE_LEAN_OPTIONS") or (op if os.path.exists(op) else "")
+if opt_src:
+    opts = dict(OPT_DEFAULTS)
+    opts.update(json.load(open(opt_src, encoding="utf-8")))
+    if main:
+        opts["main"] = main
+    s = json.load(open(sp, encoding="utf-8"))
+    s["model"] = opts["main"]
+    env = s.setdefault("env", {})
+    env["HAIKU_CONTEXT_CAP"] = str(int(opts["haiku_cap"]))
+    env["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] = "2" if opts["nesting"] else "1"
+    if opts["inbox"]:
+        env.pop("STYLE_INBOX", None)
+    else:
+        env["STYLE_INBOX"] = "0"
+    off = set()
+    if not opts["reset_alert"]:
+        off.add(".claude/hooks/context-alert.py")
+    else:
+        env["LEAN_RESET_AT"] = str(int(opts["reset_alert"]))
+    if not opts["history_export"]:
+        off.add(".claude/hooks/history-export.py")
+    for event in list(s.get("hooks", {})):
+        groups = [g for g in s["hooks"][event] if not any(hook_key(h) in off for h in g.get("hooks", []))]
+        if groups:
+            s["hooks"][event] = groups
+        else:
+            del s["hooks"][event]
+    with open(sp, "w", encoding="utf-8") as f:
+        json.dump(s, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    md = read(md_path)
+    lines = md.splitlines(keepends=True)
+    i = next((k for k, l in enumerate(lines) if l.startswith("- Answer the way you normally would") or l.startswith("- Reply ≤5 lines")), None)
+    if i is not None:
+        explain = next(l for l in read(os.path.join(src, "CLAUDE.md"), "utf-8").splitlines(keepends=True) if l.startswith("- Answer the way you normally would"))
+        lines[i] = CONCISE if opts["style"] == "concise" else explain
+        open(md_path, "w", encoding="utf-8").write("".join(lines))
+    flag = os.path.join(dst, ".claude", "lean-off")
+    if os.environ.get("CLAUDE_LEAN_OPTIONS"):        # only when chosen now; later 일반모드/절약모드 switches win
+        if opts["start_mode"] == "normal":
+            open(flag, "w").close()
+        elif os.path.exists(flag):
+            os.remove(flag)
+    json.dump(opts, open(op, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+    done.append("선택사항: " + ", ".join(f"{k}={v}" for k, v in opts.items()))
+
 # 6) Version stamp
 ver = read(os.path.join(src, "VERSION"), "utf-8").strip() or "unknown"
 vp = os.path.join(dst, ".claude", "claude-lean.version")

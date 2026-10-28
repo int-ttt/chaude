@@ -1,13 +1,21 @@
 # Install the Opus-lean setup into a project (Windows).
 # usage: powershell -ExecutionPolicy Bypass -File .\install.ps1 <project-dir> [-Main opus|sonnet]
+#        (no project-dir: opens the settings window to pick folders and options)
 # Safe to re-run: existing CLAUDE.md / settings.json are backed up and merged, not overwritten.
 param(
-    [Parameter(Mandatory = $true, Position = 0)][string]$Project,
+    [Parameter(Position = 0)][string]$Project = '',
     [ValidateSet('opus', 'sonnet')][string]$Main = ''
 )
 $ErrorActionPreference = 'Stop'
 $Src = $PSScriptRoot
 . (Join-Path $Src 'tools\common.ps1')
+
+if (-not $Project) {
+    $Py = Find-Python
+    if (-not $Py) { Write-Output "Python 3가 필요합니다. https://www.python.org/downloads/ (설치 시 'Add python.exe to PATH' 체크)"; exit 1 }
+    & $Py.Exe -X utf8 (Join-Path $Src 'tools\configure.py')
+    exit $LASTEXITCODE
+}
 
 $resolved = Resolve-Path -LiteralPath $Project -ErrorAction SilentlyContinue
 if (-not $resolved) { Write-Output "✗ 폴더 없음: $Project"; exit 1 }
