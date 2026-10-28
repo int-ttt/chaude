@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -142,7 +143,8 @@ type Repl struct {
 	lastRotFail     time.Time
 	notices         []string
 	drainMu         sync.Mutex
-	delegs          int // Agent/Task tool calls in the current turn
+	delegs          int          // Agent/Task tool calls in the current turn
+	mode            atomic.Int32 // permMode, set from the UI goroutine
 }
 
 func (r *Repl) p(s string, end string) {
@@ -168,6 +170,11 @@ func (r *Repl) askPermission(req event) {
 	input := asMap(rq["input"])
 	if input == nil {
 		input = map[string]any{}
+	}
+	if v, msg := decideMode(permMode(r.mode.Load()), str(rq["tool_name"])); v != "ask" {
+		r.tr.add("permission", kv{"tool", rq["tool_name"]}, kv{"allowed", v == "allow"}, kv{"mode", permMode(r.mode.Load()).String()})
+		_ = r.sess.RespondPermission(str(req["request_id"]), v == "allow", asMap(rq["input"]), msg)
+		return
 	}
 	if r.ui != nil {
 		allowed := r.a.AutoAllow || r.ui.ask(nilStr(rq["tool_name"]), toolSummary(input))
@@ -574,6 +581,10 @@ func (r *Repl) loop() int {
 			r.rotate("manual")
 			continue
 		}
+		if f := strings.Fields(line); f[0] == "/mode" {
+			r.modeLine(f[1:])
+			continue
+		}
 		if !r.interactive {
 			r.p("> "+line, "\n")
 		}
@@ -666,4 +677,23 @@ func (r *Repl) clear() {
 		return
 	}
 	r.p(dim+"── new session ──"+rst, "\n")
+}
+
+// modeLine handles "/mode [name]" on the plain path (no arg shows, "next" cycles).
+func (r *Repl) modeLine(args []string) {
+	cur := permMode(r.mode.Load())
+	if len(args) == 0 {
+		r.p("mode "+cur.String()+"  (default | acceptEdits | plan | auto)", "\n")
+		return
+	}
+	p, ok := cur.Next(), true
+	if args[0] != "next" {
+		p, ok = parseMode(args[0])
+	}
+	if !ok {
+		r.p("unknown mode "+args[0]+" (default | acceptEdits | plan | auto)", "\n")
+		return
+	}
+	r.mode.Store(int32(p))
+	r.p("mode: "+p.String(), "\n")
 }

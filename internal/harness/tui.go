@@ -110,6 +110,9 @@ type tuiModel struct {
 	unseen   bool
 	sig      int
 	mouse    bool
+	hist     inputHistory
+	rw       rewindState
+	lastEsc  time.Time
 }
 
 // slash commands (Claude Code style)
@@ -133,6 +136,7 @@ var slashCmds = []slashCmd{
 	{"/init", "analyze repo, propose CLAUDE.md (runs a turn)"},
 	{"/review", "review current changes (runs a turn)"},
 	{"/doctor", "check installation and config (runs a turn)"},
+	{"/mode", "permission mode: default|acceptEdits|plan|auto (shift+tab cycles)"},
 	{"/mouse", "toggle mouse wheel scroll (off = select text)"},
 	{"/version", "harness and claude versions"},
 	{"/exit", "exit"},
@@ -375,6 +379,26 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	}
+	if m.rw.open {
+		switch k.String() {
+		case "up", "k":
+			m.rw.Move(-1)
+		case "down", "j":
+			m.rw.Move(1)
+		case "esc", "ctrl+c", "q":
+			m.rw.Cancel()
+		case "enter":
+			if cut, text, ok := m.rw.Confirm(m.blocks); ok {
+				m.blocks = m.blocks[:cut]
+				m.in.SetValue(text)
+				m.blocks = append(m.blocks, block{"note", "rewound to this prompt (view + input only; the child session keeps its context. Use /clear or /rotate to reset it)"})
+				m.vp.GotoBottom()
+				m.refresh()
+				m.after()
+			}
+		}
+		return m, nil
+	}
 	if m.pick != nil {
 		n := len(m.pick)
 		switch k.String() {
@@ -411,7 +435,18 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		if m.busy {
 			m.interrupt()
+			return m, nil
 		}
+		// esc esc on an empty input opens the rewind picker
+		if m.in.Value() == "" && time.Since(m.lastEsc) < 600*time.Millisecond {
+			m.lastEsc = time.Time{}
+			if !m.rw.Open(m.blocks) {
+				m.blocks = append(m.blocks, block{"note", "nothing to rewind to"})
+				m.refresh()
+			}
+			return m, nil
+		}
+		m.lastEsc = time.Now()
 		return m, nil
 	case "tab":
 		if sg := m.suggestions(); len(sg) > 0 {
@@ -427,11 +462,20 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.sel = (m.sel + 1) % n
 			}
 		} else if k.String() == "up" {
-			m.in.MoveRow(-1)
-		} else {
-			m.in.MoveRow(1)
+			if !m.in.MoveRow(-1) {
+				if v, ok := m.hist.Prev(m.in.Value()); ok {
+					m.in.SetValue(v)
+				}
+			}
+		} else if !m.in.MoveRow(1) && m.hist.Browsing() {
+			if v, ok := m.hist.Next(); ok {
+				m.in.SetValue(v)
+			}
 		}
 		m.after()
+		return m, nil
+	case "shift+tab":
+		m.setMode(permMode(m.r.mode.Load()).Next())
 		return m, nil
 	case "alt+enter", "ctrl+j":
 		m.in.Insert([]rune{'\n'})
@@ -474,6 +518,7 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.in.SetValue("")
+		m.hist.Add(line)
 		if strings.HasPrefix(line, "/") {
 			if sg := m.suggestions(); len(sg) > 0 && sg[min(m.sel, len(sg)-1)].name != line {
 				c := sg[min(m.sel, len(sg)-1)].name
@@ -590,7 +635,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		for _, c := range slashCmds {
 			l = append(l, fmt.Sprintf("%-8s %s", c.name, c.desc))
 		}
-		note(strings.Join(l, "\n") + "\nesc interrupt · y/n permission · pgup/pgdn scroll · tab complete")
+		note(strings.Join(l, "\n") + "\nesc esc rewind · up/down history · esc interrupt · y/n permission · pgup/pgdn scroll · tab complete")
 	case "/mouse":
 		m.mouse = !m.mouse
 		if m.mouse {
@@ -631,6 +676,17 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.vp.GotoBottom()
 		m.refresh()
 		m.submit <- line
+	case "/mode":
+		if len(f) < 2 {
+			note("mode " + permMode(m.r.mode.Load()).String() + "  (default | acceptEdits | plan | auto; shift+tab cycles)")
+			break
+		}
+		p, ok := parseMode(f[1])
+		if !ok {
+			note("unknown mode " + f[1] + " (default | acceptEdits | plan | auto)")
+			break
+		}
+		m.setMode(p)
 	case "/version":
 		v, _ := exec.Command("claude", "--version").Output()
 		note("harness (Go REPL) · claude " + strings.TrimSpace(string(v)))
@@ -653,6 +709,12 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *tuiModel) setMode(p permMode) {
+	m.r.mode.Store(int32(p))
+	m.blocks = append(m.blocks, block{"note", "mode: " + p.String()})
+	m.refresh()
+}
+
 func (m *tuiModel) quit() (tea.Model, tea.Cmd) {
 	m.quitting = true
 	return m, tea.Quit
@@ -661,6 +723,15 @@ func (m *tuiModel) quit() (tea.Model, tea.Cmd) {
 func (m *tuiModel) statusLine() string {
 	ctx := m.r.lastCtx
 	left := fmt.Sprintf(" %s · ctx %s/%s · rot %d", m.r.a.Model, commas(ctx), commas(m.r.a.Threshold), m.r.rotations)
+	if pm := permMode(m.r.mode.Load()); pm != modeDefault {
+		left += " · mode " + pm.String()
+	}
+	if fg, bg := m.r.tracker.counts(); fg+bg > 0 {
+		left += fmt.Sprintf(" · agents %d running", fg+bg)
+		if bg > 0 {
+			left += fmt.Sprintf(" (bg %d)", bg)
+		}
+	}
 	right := "esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit "
 	if m.perm != nil {
 		right = "y allow · n deny "
@@ -700,6 +771,24 @@ func (m *tuiModel) View() string {
 		pop = strings.Join(l, "\n") + "\n"
 	}
 	vv := m.vp.View()
+	if m.rw.open {
+		hh := m.vp.Height
+		l := []string{lipgloss.NewStyle().Foreground(orange).Render("Rewind to a prompt  (↑/↓ select · enter rewind · esc cancel)")}
+		from := max(0, min(m.rw.sel-hh/2, len(m.rw.turns)-(hh-2)))
+		for i := from; i < len(m.rw.turns) && len(l) < hh-1; i++ {
+			t := fmt.Sprintf("%2d) %s", i+1, trunc(strings.ReplaceAll(m.blocks[m.rw.turns[i]].text, "\n", " "), 100))
+			if i == m.rw.sel {
+				t = lipgloss.NewStyle().Foreground(orange).Render("> " + t)
+			} else {
+				t = dimSt.Render("  " + t)
+			}
+			l = append(l, ansiTrunc(t, m.w))
+		}
+		for len(l) < hh {
+			l = append(l, "")
+		}
+		vv = strings.Join(l, "\n")
+	}
 	if m.pick != nil {
 		hh := m.vp.Height
 		from := max(0, min(m.pickSel-hh/2, len(m.pick)-(hh-2)))

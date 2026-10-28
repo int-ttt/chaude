@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"regexp"
+	"sync"
 	"time"
 )
 
@@ -19,11 +20,16 @@ type agentRec struct {
 }
 
 // agentTracker records delegations of one session.
-type agentTracker struct{ agents map[string]*agentRec }
+type agentTracker struct {
+	mu     sync.Mutex // turn goroutine writes, UI goroutine reads the status count
+	agents map[string]*agentRec
+}
 
 func newAgentTracker() *agentTracker { return &agentTracker{agents: map[string]*agentRec{}} }
 
 func (t *agentTracker) onToolUse(id, name string, input map[string]any, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if name != "Agent" && name != "Task" {
 		return
 	}
@@ -38,6 +44,8 @@ func (t *agentTracker) onToolUse(id, name string, input map[string]any, now time
 
 // onToolResult: foreground agents finish with their tool_result; background ones only "launch".
 func (t *agentTracker) onToolResult(id string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if a := t.agents[id]; a != nil && !a.Background {
 		a.Done = true
 	}
@@ -45,6 +53,8 @@ func (t *agentTracker) onToolResult(id string) {
 
 // pollFiles marks background agents done when the output file is non-empty and unchanged for quiet.
 func (t *agentTracker) pollFiles(now time.Time, quiet time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	for _, a := range t.agents {
 		if a.Done || a.OutPath == "" {
 			continue
@@ -60,6 +70,8 @@ func (t *agentTracker) pollFiles(now time.Time, quiet time.Duration) {
 }
 
 func (t *agentTracker) running() []*agentRec {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	var l []*agentRec
 	for _, a := range t.agents {
 		if !a.Done {
@@ -100,4 +112,16 @@ func (d *drain) consume(log func(kind string, ev event)) {
 		}
 		log("drain_event", ev)
 	}
+}
+
+// counts returns running foreground and background agents (for the status line).
+func (t *agentTracker) counts() (fg, bg int) {
+	for _, a := range t.running() {
+		if a.Background {
+			bg++
+		} else {
+			fg++
+		}
+	}
+	return
 }
