@@ -121,9 +121,7 @@ if data.get("source", "startup") in ("startup", "clear"):
     # On /clear the previous session is the transcript just cleared (a new session id, new transcript file).
     try:
         import glob as _g
-        sys.path.insert(0, os.path.join(root, "scripts"))
-        from claude_history import history_dir
-        from _lean import is_ping
+        from _lean import history_dir, is_ping
         hdir = history_dir(root)
         cur = os.path.basename(data.get("transcript_path") or "")
         prev = sorted((p for p in _g.glob(os.path.join(hdir, "*.jsonl")) if os.path.basename(p) != cur),

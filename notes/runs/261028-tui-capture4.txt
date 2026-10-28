@@ -1,0 +1,318 @@
+startup shown after 0.7s
+===== start (cursor row=27 col=3) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 300,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== typed / (popup, 8 visible) (cursor row=27 col=4) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 300,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+  /help     show commands and keys
+  /clear    start a fresh session (no handoff)
+  /status   model, context tokens, session
+  /model    show or switch model: /model <name>
+  /rotate   hand off to a fresh session
+  /usage    plan usage and limits (from claude)
+  /cost     usage / cost (from claude)
+  /context  context usage by category (from claude)
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> /                                                                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /usage (cursor row=27 col=3) =====
+> /usage
+● You are currently using your subscription to power your Claude Code usage
+  Current session: 53% used · resets Oct 29 at 12am (Asia/Seoul)
+  Current week (all models): 27% used · resets Nov 3 at 3pm (Asia/Seoul)
+  What's contributing to your usage?
+  Approximate · sessions on this machine only · shares overlap
+  Last 24h · 1902 requests · 59 sessions
+    97%  Give "sonnet-analyst" subagents a cheaper model
+    16%  Run fewer sessions at once · up to 14 at once
+    15%  See what fills your context · run /context
+    Top subagents: sonnet-analyst 34%, haiku-extractor 12%, opus-architect 10%, analyst 2%, doctor
+  2%, sonnet-reviewer 1%, haiku-drafter 1%
+  Last 7d · 2313 requests · 61 sessions
+    97%  Give "sonnet-analyst" subagents a cheaper model
+    16%  See what fills your context · run /context
+    14%  Run fewer sessions at once · up to 14 at once
+    Top subagents: sonnet-analyst 29%, haiku-extractor 10%, opus-architect 9%, analyst 7%, story-
+  writer 3%, doctor 1%, sonnet-reviewer 1%, haiku-drafter 1%
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /context (cursor row=27 col=3) =====
+  | code-review | Built-in | ~400 |
+  | simplify | Built-in | ~60 |
+  | fewer-permission-prompts | Built-in | ~60 |
+  | loop | Built-in | ~120 |
+  | schedule | Built-in | ~130 |
+  | claude-api | Built-in | ~360 |
+  | run | Built-in | ~120 |
+  | plugin-authoring | Built-in | ~90 |
+  | init | Built-in | ~20 |
+  | security-review | Built-in | ~30 |
+  | built-in-browser | claude.ai sync | ~290 |
+  | chrome-browser | claude.ai sync | ~260 |
+  | computer-use | claude.ai sync | ~320 |
+  | deep-research | claude.ai sync | ~200 |
+  | docs | claude.ai sync | ~340 |
+  | docx | claude.ai sync | ~320 |
+  | google-workspace | claude.ai sync | ~330 |
+  | import-memory | claude.ai sync | ~60 |
+  | morning | claude.ai sync | ~120 |
+  | pdf | claude.ai sync | ~150 |
+  | pptx | claude.ai sync | ~330 |
+  | skill-creator | claude.ai sync | ~120 |
+  | xlsx | claude.ai sync | ~320 |
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /cost (cursor row=27 col=3) =====
+> /cost
+● You are currently using your subscription to power your Claude Code usage
+  Current session: 53% used · resets Oct 29 at 12am (Asia/Seoul)
+  Current week (all models): 27% used · resets Nov 3 at 3pm (Asia/Seoul)
+  What's contributing to your usage?
+  Approximate · sessions on this machine only · shares overlap
+  Last 24h · 1902 requests · 59 sessions
+    97%  Give "sonnet-analyst" subagents a cheaper model
+    16%  Run fewer sessions at once · up to 14 at once
+    15%  See what fills your context · run /context
+    Top subagents: sonnet-analyst 34%, haiku-extractor 12%, opus-architect 10%, analyst 2%, doctor
+  2%, sonnet-reviewer 1%, haiku-drafter 1%
+  Last 7d · 2313 requests · 61 sessions
+    97%  Give "sonnet-analyst" subagents a cheaper model
+    16%  See what fills your context · run /context
+    14%  Run fewer sessions at once · up to 14 at once
+    Top subagents: sonnet-analyst 29%, haiku-extractor 10%, opus-architect 9%, analyst 7%, story-
+  writer 3%, doctor 1%, sonnet-reviewer 1%, haiku-drafter 1%
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /config (cursor row=27 col=3) =====
+    leftArrowOpensAgents=true|false
+    model=default|sonnet|opus|haiku|fable|best|sonnet[1m]|opus[1m]|fable[1m]|opusplan
+    notifChannel=auto|iterm2|terminal_bell|iterm2_with_bell|kitty|ghostty|notifications_disabled
+    outputStyle=default|Proactive|Concise|Explanatory|Learning
+    permissionMode=default|plan|acceptEdits|auto|dontAsk
+    prStatus=true|false
+    progressBar=true|false
+    promptSuggestionEnabled=true|false
+    recap=true|false
+    reduceMotion=true|false
+    remoteControl=true|false|default
+    switchModelsOnFlag=Switch automatically|Ask each time
+    theme=auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi
+    thinking=true|false
+    timeFormat=auto|12-hour|24-hour|24-hour-utc
+    tips=true|false
+    turnDuration=true|false
+    useAutoModeDuringPlan=true|false
+    verbose=true|false
+    workflowKeywordTriggerEnabled=true|false
+    workflowSizeGuideline=unrestricted|small|medium|large
+    workflows=true|false
+    worktreeBaseRef=fresh|head
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /mcp (cursor row=27 col=3) =====
+    progressBar=true|false
+    promptSuggestionEnabled=true|false
+    recap=true|false
+    reduceMotion=true|false
+    remoteControl=true|false|default
+    switchModelsOnFlag=Switch automatically|Ask each time
+    theme=auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi
+    thinking=true|false
+    timeFormat=auto|12-hour|24-hour|24-hour-utc
+    tips=true|false
+    turnDuration=true|false
+    useAutoModeDuringPlan=true|false
+    verbose=true|false
+    workflowKeywordTriggerEnabled=true|false
+    workflowSizeGuideline=unrestricted|small|medium|large
+    workflows=true|false
+    worktreeBaseRef=fresh|head
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /mcp
+● 5 MCP server(s): 4 connected, 1 not connected, 0 disabled. Use `/mcp` in the terminal for details.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /compact (cursor row=27 col=3) =====
+    theme=auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi
+    thinking=true|false
+    timeFormat=auto|12-hour|24-hour|24-hour-utc
+    tips=true|false
+    turnDuration=true|false
+    useAutoModeDuringPlan=true|false
+    verbose=true|false
+    workflowKeywordTriggerEnabled=true|false
+    workflowSizeGuideline=unrestricted|small|medium|large
+    workflows=true|false
+    worktreeBaseRef=fresh|head
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /mcp
+● 5 MCP server(s): 4 connected, 1 not connected, 0 disabled. Use `/mcp` in the terminal for details.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /compact
+● Not enough messages to compact.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /version (cursor row=27 col=3) =====
+    theme=auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi
+    thinking=true|false
+    timeFormat=auto|12-hour|24-hour|24-hour-utc
+    tips=true|false
+    turnDuration=true|false
+    useAutoModeDuringPlan=true|false
+    verbose=true|false
+    workflowKeywordTriggerEnabled=true|false
+    workflowSizeGuideline=unrestricted|small|medium|large
+    workflows=true|false
+    worktreeBaseRef=fresh|head
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /mcp
+● 5 MCP server(s): 4 connected, 1 not connected, 0 disabled. Use `/mcp` in the terminal for details.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /compact
+● Not enough messages to compact.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /memory (cursor row=27 col=3) =====
+    theme=auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi
+    thinking=true|false
+    timeFormat=auto|12-hour|24-hour|24-hour-utc
+    tips=true|false
+    turnDuration=true|false
+    useAutoModeDuringPlan=true|false
+    verbose=true|false
+    workflowKeywordTriggerEnabled=true|false
+    workflowSizeGuideline=unrestricted|small|medium|large
+    workflows=true|false
+    worktreeBaseRef=fresh|head
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /mcp
+● 5 MCP server(s): 4 connected, 1 not connected, 0 disabled. Use `/mcp` in the terminal for details.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /compact
+● Not enough messages to compact.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /permissions (cursor row=27 col=3) =====
+    theme=auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi
+    thinking=true|false
+    timeFormat=auto|12-hour|24-hour|24-hour-utc
+    tips=true|false
+    turnDuration=true|false
+    useAutoModeDuringPlan=true|false
+    verbose=true|false
+    workflowKeywordTriggerEnabled=true|false
+    workflowSizeGuideline=unrestricted|small|medium|large
+    workflows=true|false
+    worktreeBaseRef=fresh|head
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /mcp
+● 5 MCP server(s): 4 connected, 1 not connected, 0 disabled. Use `/mcp` in the terminal for details.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /compact
+● Not enough messages to compact.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /resume (cursor row=27 col=3) =====
+    theme=auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi
+    thinking=true|false
+    timeFormat=auto|12-hour|24-hour|24-hour-utc
+    tips=true|false
+    turnDuration=true|false
+    useAutoModeDuringPlan=true|false
+    verbose=true|false
+    workflowKeywordTriggerEnabled=true|false
+    workflowSizeGuideline=unrestricted|small|medium|large
+    workflows=true|false
+    worktreeBaseRef=fresh|head
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /mcp
+● 5 MCP server(s): 4 connected, 1 not connected, 0 disabled. Use `/mcp` in the terminal for details.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /compact
+● Not enough messages to compact.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== bracketed paste of 336 bytes (112 chars) (cursor row=27 col=39) =====
+    theme=auto|dark|light|light-daltonized|dark-daltonized|light-ansi|dark-ansi
+    thinking=true|false
+    timeFormat=auto|12-hour|24-hour|24-hour-utc
+    tips=true|false
+    turnDuration=true|false
+    useAutoModeDuringPlan=true|false
+    verbose=true|false
+    workflowKeywordTriggerEnabled=true|false
+    workflowSizeGuideline=unrestricted|small|medium|large
+    workflows=true|false
+    worktreeBaseRef=fresh|head
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /mcp
+● 5 MCP server(s): 4 connected, 1 not connected, 0 disabled. Use `/mcp` in the terminal for details.
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess e4dc4163 rot 0]
+> /compact
+● Not enough messages to compact.
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> 가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마  │
+│  바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차카타파하가나다라마바사아자차  │
+│  카타파하가나다라마바사아자차카타파하                                                            │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit

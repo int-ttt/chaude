@@ -1,0 +1,266 @@
+startup shown after 0.2s
+===== start (cursor row=27 col=3) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 300,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit
+
+===== after /context (should show bottom) (cursor row=27 col=3) =====
+  | code-review | Built-in | ~400 |
+  | simplify | Built-in | ~60 |
+  | fewer-permission-prompts | Built-in | ~60 |
+  | loop | Built-in | ~120 |
+  | schedule | Built-in | ~130 |
+  | claude-api | Built-in | ~360 |
+  | run | Built-in | ~120 |
+  | plugin-authoring | Built-in | ~90 |
+  | init | Built-in | ~20 |
+  | security-review | Built-in | ~30 |
+  | built-in-browser | claude.ai sync | ~290 |
+  | chrome-browser | claude.ai sync | ~260 |
+  | computer-use | claude.ai sync | ~320 |
+  | deep-research | claude.ai sync | ~200 |
+  | docs | claude.ai sync | ~340 |
+  | docx | claude.ai sync | ~320 |
+  | google-workspace | claude.ai sync | ~330 |
+  | import-memory | claude.ai sync | ~60 |
+  | morning | claude.ai sync | ~120 |
+  | pdf | claude.ai sync | ~150 |
+  | pptx | claude.ai sync | ~330 |
+  | skill-creator | claude.ai sync | ~120 |
+  | xlsx | claude.ai sync | ~320 |
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess 25a1d630 rot 0]
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit
+
+===== pgup (cursor row=27 col=3) =====
+  | haiku-scout | Project | 96 |
+  | opus-architect | Project | 128 |
+  | sonnet-analyst | Project | 121 |
+  | sonnet-reviewer | Project | 81 |
+  ### Memory Files
+  | Type | Path | Tokens |
+  |------|------|--------|
+  | Project | /Users/leekwangseok/PycharmProjects/claude-harness/CLAUDE.md | 2.1k |
+  ### Skills
+  | Skill | Source | Tokens |
+  |-------|--------|--------|
+  | check | Project | ~50 |
+  | correction | Project | ~80 |
+  | distill | Project | ~80 |
+  | fact | Project | ~50 |
+  | migrate-session | Project | ~80 |
+  | research | Project | ~50 |
+  | status | Project | ~30 |
+  | session-report:session-report | Plugin (session-report) | ~60 |
+  | dataviz | Built-in | ~480 |
+  | update-config | Built-in | ~240 |
+  | keybindings-help | Built-in | ~80 |
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit
+
+===== shift+up (cursor row=27 col=3) =====
+  | haiku-runner | Project | 90 |
+  | haiku-scout | Project | 96 |
+  | opus-architect | Project | 128 |
+  | sonnet-analyst | Project | 121 |
+  | sonnet-reviewer | Project | 81 |
+  ### Memory Files
+  | Type | Path | Tokens |
+  |------|------|--------|
+  | Project | /Users/leekwangseok/PycharmProjects/claude-harness/CLAUDE.md | 2.1k |
+  ### Skills
+  | Skill | Source | Tokens |
+  |-------|--------|--------|
+  | check | Project | ~50 |
+  | correction | Project | ~80 |
+  | distill | Project | ~80 |
+  | fact | Project | ~50 |
+  | migrate-session | Project | ~80 |
+  | research | Project | ~50 |
+  | status | Project | ~30 |
+  | session-report:session-report | Plugin (session-report) | ~60 |
+  | dataviz | Built-in | ~480 |
+  | update-config | Built-in | ~240 |
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit
+
+===== wheel up (SGR mouse) (cursor row=27 col=3) =====
+  | haiku-drafter | Project | 96 |
+  | haiku-extractor | Project | 90 |
+  | haiku-researcher | Project | 67 |
+  | haiku-runner | Project | 90 |
+  | haiku-scout | Project | 96 |
+  | opus-architect | Project | 128 |
+  | sonnet-analyst | Project | 121 |
+  | sonnet-reviewer | Project | 81 |
+  ### Memory Files
+  | Type | Path | Tokens |
+  |------|------|--------|
+  | Project | /Users/leekwangseok/PycharmProjects/claude-harness/CLAUDE.md | 2.1k |
+  ### Skills
+  | Skill | Source | Tokens |
+  |-------|--------|--------|
+  | check | Project | ~50 |
+  | correction | Project | ~80 |
+  | distill | Project | ~80 |
+  | fact | Project | ~50 |
+  | migrate-session | Project | ~80 |
+  | research | Project | ~50 |
+  | status | Project | ~30 |
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit
+
+===== /mouse note while scrolled up (expect indicator) (cursor row=27 col=3) =====
+  | haiku-drafter | Project | 96 |
+  | haiku-extractor | Project | 90 |
+  | haiku-researcher | Project | 67 |
+  | haiku-runner | Project | 90 |
+  | haiku-scout | Project | 96 |
+  | opus-architect | Project | 128 |
+  | sonnet-analyst | Project | 121 |
+  | sonnet-reviewer | Project | 81 |
+  ### Memory Files
+  | Type | Path | Tokens |
+  |------|------|--------|
+  | Project | /Users/leekwangseok/PycharmProjects/claude-harness/CLAUDE.md | 2.1k |
+  ### Skills
+  | Skill | Source | Tokens |
+  |-------|--------|--------|
+  | check | Project | ~50 |
+  | correction | Project | ~80 |
+  | distill | Project | ~80 |
+  | fact | Project | ~50 |
+  | migrate-session | Project | ~80 |
+  | research | Project | ~50 |
+                                                                       ↓ 새 메시지 (End: 맨 아래로)
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit
+
+===== End -> bottom, indicator gone (cursor row=27 col=3) =====
+  | fewer-permission-prompts | Built-in | ~60 |
+  | loop | Built-in | ~120 |
+  | schedule | Built-in | ~130 |
+  | claude-api | Built-in | ~360 |
+  | run | Built-in | ~120 |
+  | plugin-authoring | Built-in | ~90 |
+  | init | Built-in | ~20 |
+  | security-review | Built-in | ~30 |
+  | built-in-browser | claude.ai sync | ~290 |
+  | chrome-browser | claude.ai sync | ~260 |
+  | computer-use | claude.ai sync | ~320 |
+  | deep-research | claude.ai sync | ~200 |
+  | docs | claude.ai sync | ~340 |
+  | docx | claude.ai sync | ~320 |
+  | google-workspace | claude.ai sync | ~330 |
+  | import-memory | claude.ai sync | ~60 |
+  | morning | claude.ai sync | ~120 |
+  | pdf | claude.ai sync | ~150 |
+  | pptx | claude.ai sync | ~330 |
+  | skill-creator | claude.ai sync | ~120 |
+  | xlsx | claude.ai sync | ~320 |
+[ctx 0 | in 0 cr 0 cc 0 out 0 | $0.0000 | 5h ? | sess 25a1d630 rot 0]
+mouse OFF: text selection works; scroll with pgup/pgdn, shift+up/down
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit
+
+===== Home -> top (cursor row=27 col=3) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 300,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+> /context
+● ## Context Usage
+  **Model:** claude-haiku-5-5
+  **Tokens:** 17.5k / 400k (4%)
+  ### Estimated usage by category
+  | Category | Tokens | Percentage |
+  |----------|--------|------------|
+  | System prompt | 3.3k | 0.8% |
+  | System tools | 3.9k | 1.0% |
+  | MCP tools (deferred) | 17.4k | 4.4% |
+  | System tools (deferred) | 16.2k | 4.1% |
+  | Custom agents | 997 | 0.2% |
+  | Memory files | 2.1k | 0.5% |
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit
+
+===== wheel down (cursor row=27 col=3) =====
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 300,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+> /context
+● ## Context Usage
+  **Model:** claude-haiku-5-5
+  **Tokens:** 17.5k / 400k (4%)
+  ### Estimated usage by category
+  | Category | Tokens | Percentage |
+  |----------|--------|------------|
+  | System prompt | 3.3k | 0.8% |
+  | System tools | 3.9k | 1.0% |
+  | MCP tools (deferred) | 17.4k | 4.4% |
+  | System tools (deferred) | 16.2k | 4.1% |
+  | Custom agents | 997 | 0.2% |
+  | Memory files | 2.1k | 0.5% |
+  | Skills | 5.8k | 1.5% |
+  | Messages | 1.3k | 0.3% |
+  | Free space | 349.5k | 87.4% |
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit
+
+===== /mouse OFF note (cursor row=27 col=3) =====
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 300,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+> /context
+● ## Context Usage
+  **Model:** claude-haiku-5-5
+  **Tokens:** 17.5k / 400k (4%)
+  ### Estimated usage by category
+  | Category | Tokens | Percentage |
+  |----------|--------|------------|
+  | System prompt | 3.3k | 0.8% |
+  | System tools | 3.9k | 1.0% |
+  | MCP tools (deferred) | 17.4k | 4.4% |
+  | System tools (deferred) | 16.2k | 4.1% |
+  | Custom agents | 997 | 0.2% |
+  | Memory files | 2.1k | 0.5% |
+  | Skills | 5.8k | 1.5% |
+  | Messages | 1.3k | 0.3% |
+                                                                       ↓ 새 메시지 (End: 맨 아래로)
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│>  Try "how does <file> work?"                                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/300,000 · rot 0       esc interrupt · /rotate · wheel/pgup/pgdn scroll · ctrl+c quit

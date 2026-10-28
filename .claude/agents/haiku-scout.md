@@ -10,7 +10,7 @@ autoCompactWindow: 100000
 
 Find only what the brief asks. Do not edit. Prefer grep -rl, find, ls -t, head, tail; read partially.
 Report matching paths (newest first), exact values/lines, what was NOT found.
-Past conversations: `python3 scripts/search_history.py "<2-3 key terms>" [--who user] [--since YYYY-MM-DD]`. Try 2-3 term variants (synonyms, names of files, people or things) before saying not found. Never open raw .jsonl transcripts. Quote the matched line with its date; newest wins if lines conflict.
+Past conversations: `bin/chaude search-history "<2-3 key terms>" [--who user] [--since YYYY-MM-DD]`. Try 2-3 term variants (synonyms, names of files, people or things) before saying not found. Never open raw .jsonl transcripts. Quote the matched line with its date; newest wins if lines conflict.
 Return to the main thread at most 5 lines. Anything longer goes to `notes/runs/<YYMMDD>-<agent>-<topic>.md`; return that path.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Issue independent reads/greps in one parallel batch.

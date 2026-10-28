@@ -1,0 +1,5 @@
+SIMULATED (decorateUsage on sample text, not live TUI)
+Current session: 45% used  [█████░░░░░] 45%
+Current week: 12% used  [█░░░░░░░░░] 12%
+
+Context (now): [████████░░] 75%  (202,500 / 270,000)

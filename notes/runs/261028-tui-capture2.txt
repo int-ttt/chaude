@@ -1,0 +1,117 @@
+startup shown after 0.5s
+===== start (cursor row=27 col=4) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 200,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> Try "how does <file> work?"                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/200,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== typed /  (autocomplete) (cursor row=27 col=5) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 200,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+  /help     show commands and keys
+  /clear    start a fresh session (no handoff)
+  /status   model, context tokens, session
+  /model    show or switch model: /model <name>
+  /rotate   hand off to a fresh session
+  /exit     exit
+  /quit     exit
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> /                                                                                               │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/200,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== Korean typed (cursor row=27 col=46) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 200,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> 안녕하세요 한글 입력 테스트 가나다라마바사                                                      │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/200,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /mo + tab (cursor row=27 col=11) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 200,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> /model                                                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/200,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /status (cursor row=27 col=4) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 200,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+model haiku · ctx 0/200,000 · rotations 0 · session -
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> Try "how does <file> work?"                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/200,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /help (cursor row=27 col=4) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 200,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+model haiku · ctx 0/200,000 · rotations 0 · session -
+/help    show commands and keys
+/clear   start a fresh session (no handoff)
+/status  model, context tokens, session
+/model   show or switch model: /model <name>
+/rotate  hand off to a fresh session
+/exit    exit
+/quit    exit
+esc interrupt · y/n permission · pgup/pgdn scroll · tab complete
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> Try "how does <file> work?"                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/200,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
+
+===== /clear (cursor row=27 col=4) =====
+╭────────────────────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Harness!                                   │
+│                                                                │
+│   /help for help, /rotate to rotate session, /quit to exit     │
+│                                                                │
+│   cwd: /Users/leekwangseok/PycharmProjects/claude-harness      │
+│   model: haiku · rotate at 200,000 tokens                      │
+╰────────────────────────────────────────────────────────────────╯
+> /clear
+── new session ──
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│> Try "how does <file> work?"                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ haiku · ctx 0/200,000 · rot 0             esc interrupt · /rotate · pgup/pgdn scroll · ctrl+c quit
