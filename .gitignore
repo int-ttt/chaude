@@ -12,7 +12,6 @@ tests/e2e-rebuild/*
 .idea/
 notes/pastes/
 tests/e2e-rebuild/
-chaude
 *.exe
 *.tar.gz
 *.zip
