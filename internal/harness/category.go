@@ -13,7 +13,7 @@ const categoryRule = "Topic tracking: end EVERY reply with one last line, exactl
 	"Follow-ups, fixes, questions or small asides about the current work are NOT a switch. Short acknowledgements or replies " +
 	"(ㅇㅇ, ok, 응, 좋아, 계속, 네, thanks) NEVER switch. Decide quickly and briefly; do no extra analysis for this."
 
-var catRe = regexp.MustCompile("(?m)^[\\s*>`]*\\[(cat|cat-switch):\\s*([^\\]\\n]*?)\\s*\\][\\s*`]*$")
+var catRe = regexp.MustCompile("(?m)(?:^|[ \\t])[*>`]*\\[(cat|cat-switch):\\s*([^\\]\\n]*?)\\s*\\][\\s*`]*$")
 
 var ackWords = map[string]bool{"ㅇㅇ": true, "ㅇㅋ": true, "응": true, "네": true, "넵": true, "예": true, "좋아": true, "계속": true,
 	"ok": true, "okay": true, "yes": true, "y": true, "go": true, "thanks": true, "ㄱㄱ": true, "고": true}
@@ -51,7 +51,10 @@ var catLineRe = regexp.MustCompile("^[\\s*>`]*\\[(cat|cat-switch):[^\\]\\n]*\\][
 
 // markerFilter strips [cat: X] / [cat-switch: X] lines from streamed text. A trailing partial line that
 // starts with '[' is held back until it is complete.
-type markerFilter struct{ pend string }
+type markerFilter struct {
+	pend string
+	mid  bool // text already shown on the current line
+}
 
 // Feed returns the text that is safe to display after adding chunk.
 func (f *markerFilter) Feed(chunk string) string {
@@ -63,23 +66,71 @@ func (f *markerFilter) Feed(chunk string) string {
 		complete, f.pend = f.pend[:i+1], f.pend[i+1:]
 	}
 	for _, ln := range strings.SplitAfter(complete, "\n") {
-		if ln != "" && !catLineRe.MatchString(strings.TrimRight(ln, "\r\n")) {
-			out.WriteString(ln)
+		if ln == "" {
+			continue
 		}
+		if f.mid {
+			out.WriteString(stripInline(ln))
+		} else {
+			out.WriteString(stripMarker(ln))
+		}
+		f.mid = false
 	}
-	if !strings.HasPrefix(strings.TrimLeft(f.pend, " \t*>`"), "[") && strings.TrimSpace(f.pend) != "" {
+	// hold back a trailing fragment that may still become a marker
+	if j := strings.LastIndex(f.pend, "["); j >= 0 && (markerPrefix(f.pend[j:]) || catTailRe.MatchString(f.pend[j:])) {
+		for j > 0 && strings.ContainsRune(" \t*`", rune(f.pend[j-1])) {
+			j--
+		}
+		out.WriteString(f.pend[:j])
+		f.pend = f.pend[j:]
+	} else {
 		out.WriteString(f.pend)
 		f.pend = ""
 	}
+	if t := out.String(); t != "" {
+		f.mid = !strings.HasSuffix(t, "\n")
+	}
 	return out.String()
+}
+
+var catTailRe = regexp.MustCompile("^\\[(cat|cat-switch):[^\\]\\n]*\\][\\s*`]*$")
+
+var catInlineRe = regexp.MustCompile("[ \\t*`]*\\[(cat|cat-switch):[^\\]\\n]*\\][\\s*`]*$")
+
+// stripMarker removes a whole-line marker (line dropped) or a marker at the end of a line (rest kept).
+func stripMarker(ln string) string {
+	body := strings.TrimRight(ln, "\r\n")
+	if catLineRe.MatchString(body) {
+		return ""
+	}
+	return stripInline(ln)
+}
+
+func stripInline(ln string) string {
+	body := strings.TrimRight(ln, "\r\n")
+	nl := ln[len(body):]
+	return catInlineRe.ReplaceAllString(body, "") + nl
+}
+
+// markerPrefix reports whether t (starting at '[') is an unfinished [cat:..]/[cat-switch:..] marker.
+func markerPrefix(t string) bool {
+	if strings.ContainsAny(t, "]\n") {
+		return false
+	}
+	for _, m := range []string{"[cat:", "[cat-switch:"} {
+		if strings.HasPrefix(m, t) || strings.HasPrefix(t, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // Flush returns the held remainder (dropped when it is a marker line).
 func (f *markerFilter) Flush() string {
 	p := f.pend
 	f.pend = ""
-	if catLineRe.MatchString(strings.TrimSpace(p)) {
-		return ""
+	if f.mid {
+		return stripInline(p)
 	}
-	return p
+	return stripMarker(p)
 }

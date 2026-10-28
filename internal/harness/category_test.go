@@ -57,3 +57,23 @@ func TestMarkerFilter(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestMarkerFilterInline(t *testing.T) {
+	var f markerFilter
+	var raw, got string
+	for _, c := range []string{"14개입니다. [ca", "t: 테스트 수", " 확인]", "\n다음 줄 [cat-switch: x]"} {
+		raw += c
+		got += f.Feed(c)
+	}
+	got += f.Flush()
+	if got != "14개입니다.\n다음 줄" {
+		t.Fatalf("got %q", got)
+	}
+	if c, sw := parseCategory(raw); c != "x" || !sw {
+		t.Fatalf("parse %q %v", c, sw)
+	}
+	f = markerFilter{}
+	if g := f.Feed("a [b] c [d") + f.Flush(); g != "a [b] c [d" {
+		t.Fatalf("got %q", g)
+	}
+}
