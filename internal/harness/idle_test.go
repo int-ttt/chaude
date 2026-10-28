@@ -3,7 +3,9 @@ package harness
 import (
 	"bufio"
 	"io"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -93,4 +95,56 @@ func TestStrayLateResultSkipped(t *testing.T) {
 	if len(res) != 1 || res[0] != "mine" {
 		t.Fatal(res)
 	}
+}
+
+func TestIdleBackgroundFollowupRendered(t *testing.T) {
+	s, out, _ := fakeSession()
+	buf := &lockBuf{}
+	r := &Repl{out: buf, a: Args{}, tr: &Transcript{path: t.TempDir() + "/t.jsonl"}, tracker: newAgentTracker()}
+	r.sess = s
+	r.tracker.onToolUse("tu1", "Agent", map[string]any{"description": "d", "run_in_background": true}, time.Now())
+	if _, bg := r.tracker.counts(); bg != 1 {
+		t.Fatal("setup")
+	}
+	s.StartIdle(func(ev event) { r.idleEvent(s, r.tracker, ev) })
+	defer s.StopIdle()
+	out <- `{"type":"result","session_id":"x"}`
+	out <- `{"type":"user","message":{"content":"<task-notification><tool-use-id>tu1</tool-use-id></task-notification>"}}`
+	out <- `{"type":"assistant","message":{"content":[{"type":"text","text":"에이전트 완료"}],"usage":{"input_tokens":3}}}`
+	out <- `{"type":"result","session_id":"x","total_cost_usd":0.01}`
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(buf.String(), "[ctx") { // usage line is printed last
+		if time.Now().After(deadline) {
+			t.Fatal("no usage line")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if b, _ := os.ReadFile(r.tr.path); !strings.Contains(string(b), "background") {
+		t.Fatal("no transcript record")
+	}
+	if !strings.Contains(buf.String(), "에이전트 완료") {
+		t.Fatalf("not rendered: %q", buf.String())
+	}
+	if fg, bg := r.tracker.counts(); fg+bg != 0 {
+		t.Fatal("counter not cleared")
+	}
+	// a result with no preceding output is ignored (late-result guard stays quiet)
+	out <- `{"type":"result","session_id":"x"}`
+}
+
+type lockBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }

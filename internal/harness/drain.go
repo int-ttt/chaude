@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -48,6 +49,40 @@ func (t *agentTracker) onToolResult(id string) {
 	defer t.mu.Unlock()
 	if a := t.agents[id]; a != nil && !a.Background {
 		a.Done = true
+	}
+}
+
+var notifIDRe = regexp.MustCompile(`<tool-use-id>([^<]+)</tool-use-id>`)
+
+// onNotification marks the background agents named by a <task-notification> as done.
+func (t *agentTracker) onNotification(text string) bool {
+	if !strings.Contains(text, "<task-notification>") {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	found := false
+	for _, m := range notifIDRe.FindAllStringSubmatch(text, -1) {
+		if a := t.agents[m[1]]; a != nil {
+			a.Done, found = true, true
+		}
+	}
+	return found
+}
+
+// finishOldestBackground marks the longest-running background agent done (fallback when the
+// completion notice itself was not visible on stdout).
+func (t *agentTracker) finishOldestBackground() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var old *agentRec
+	for _, a := range t.agents {
+		if !a.Done && a.Background && (old == nil || a.Started.Before(old.Started)) {
+			old = a
+		}
+	}
+	if old != nil {
+		old.Done = true
 	}
 }
 

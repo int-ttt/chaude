@@ -145,6 +145,7 @@ type Repl struct {
 	drainMu         sync.Mutex
 	delegs          int          // Agent/Task tool calls in the current turn
 	mode            atomic.Int32 // permMode, set from the UI goroutine
+	idle            idleTurn     // child-initiated turn being rendered (idle reader goroutine only)
 }
 
 func (r *Repl) p(s string, end string) {
@@ -175,19 +176,123 @@ func (r *Repl) idleEvent(s *Session, tk *agentTracker, ev event) {
 		r.askPerm(s, ev, true)
 	case t == "rate_limit_event":
 		r.rate = asMap(ev["rate_limit_info"])
+	case t == "stream_event" && isMainEvent(ev):
+		e := asMap(ev["event"])
+		d := asMap(e["delta"])
+		if str(e["type"]) == "content_block_delta" && str(d["type"]) == "text_delta" {
+			r.idleText(str(d["text"]))
+			r.idle.streamed = true
+		}
 	case t == "assistant":
-		for _, bi := range asList(asMap(ev["message"])["content"]) {
-			if b := asMap(bi); str(b["type"]) == "tool_use" {
+		m := asMap(ev["message"])
+		main := isMainEvent(ev)
+		if u := asMap(m["usage"]); main && len(u) > 0 {
+			r.idle.usage = u
+		}
+		for _, bi := range asList(m["content"]) {
+			b := asMap(bi)
+			switch str(b["type"]) {
+			case "tool_use":
 				tk.onToolUse(str(b["id"]), str(b["name"]), asMap(b["input"]), time.Now())
+			case "text":
+				if main && !r.idle.streamed {
+					r.idleText(str(b["text"]))
+				}
 			}
+		}
+		if main {
+			r.idle.active = true
 		}
 	case t == "user":
+		if c, ok := asMap(ev["message"])["content"].(string); ok && tk.onNotification(c) {
+			r.idle.sawNotif = true
+		}
 		for _, bi := range asList(asMap(ev["message"])["content"]) {
-			if b := asMap(bi); str(b["type"]) == "tool_result" {
+			b := asMap(bi)
+			switch str(b["type"]) {
+			case "tool_result":
 				tk.onToolResult(str(b["tool_use_id"]))
+			case "text":
+				if tk.onNotification(str(b["text"])) {
+					r.idle.sawNotif = true
+				}
 			}
 		}
+	case t == "result":
+		r.idleFinish(s, tk, ev)
 	}
+}
+
+// idleTurn accumulates a child-initiated main-thread turn (e.g. the reply to a background
+// agent's completion notice) that arrives while no user turn is running.
+type idleTurn struct {
+	reply    strings.Builder
+	usage    map[string]any
+	t0       time.Time
+	active   bool
+	streamed bool
+	sawNotif bool
+}
+
+func isMainEvent(ev event) bool {
+	p, ok := ev["parent_tool_use_id"]
+	return !ok || p == nil || p == ""
+}
+
+func (r *Repl) idleText(txt string) {
+	if txt == "" {
+		return
+	}
+	if r.idle.reply.Len() == 0 {
+		r.idle.t0 = time.Now()
+		if r.ui == nil {
+			r.p("\n", "")
+		}
+	}
+	r.idle.reply.WriteString(txt)
+	if r.ui != nil {
+		r.ui.send(textMsg(txt))
+	} else {
+		r.p(txt, "")
+	}
+}
+
+// idleFinish ends a child-initiated turn: logs it like a normal turn and settles the agents counter.
+func (r *Repl) idleFinish(s *Session, tk *agentTracker, result event) {
+	st := r.idle
+	r.idle = idleTurn{}
+	reply := st.reply.String()
+	if reply == "" && !st.active {
+		return // late result of work already shown elsewhere
+	}
+	if !st.sawNotif {
+		tk.finishOldestBackground() // the child only speaks up by itself for a finished background agent
+	}
+	if reply != "" {
+		if r.ui != nil {
+			r.ui.send(textEndMsg{})
+		} else {
+			r.p("", "\n")
+		}
+	}
+	var sid, ru, cost any
+	if s.SessionID != "" {
+		sid = s.SessionID
+	}
+	ru, cost = result["usage"], result["total_cost_usd"]
+	r.tr.add("assistant", kv{"text", reply}, kv{"session", sid}, kv{"usage", ru},
+		kv{"ctx", ctxTokens(st.usage)}, kv{"cost", cost}, kv{"source", "background"})
+	r.usageLine(result, st.usage)
+	t0 := st.t0
+	if t0.IsZero() {
+		t0 = time.Now()
+	}
+	fields := map[string]any{"stage": "turn", "source": "background", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
+		"model": r.a.Model, "ctx": r.lastCtx, "session": s.SessionID, "cost_usd": cost, "rotations": r.rotations}
+	for k, v := range usageFields(asMap(ru)) {
+		fields["result_"+k] = v
+	}
+	_ = r.metrics.Log(fields)
 }
 
 func (r *Repl) askPermission(req event) { r.askPerm(r.sess, req, false) }
