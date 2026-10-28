@@ -36,3 +36,4 @@ tag: OK=verified here, PARTIAL, N/A=not tested
 
 ## Auto-compact override (verified 2026-10-28)
 - default rotation threshold 200k; child env CLAUDE_CODE_AUTO_COMPACT_WINDOW=250000 (--compact-window, 0=off). spike/probe_autocompact.py: /context in sonnet showed window 1m -> 250k with env and also with CLI flag `--autocompact 250000`; autocompact buffer stays 33k, so compaction ~217k > 200k threshold. Note: it LOWERS the window for 1m models, raises for 150k (haiku). No settings files touched.
+- update: user chose window 300000 (rotation threshold stays 200k). Compaction ~267k (300k-33k buffer).
