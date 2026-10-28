@@ -14,4 +14,5 @@ The brief quotes the user's words and the conversation context you need, or is a
 3. Otherwise write `notes/runs/<YYMMDD>-plan-<topic>.md` so Sonnet/Haiku can implement without re-deciding: goal, chosen approach and why, ordered steps per file (exact names, signatures, data formats, wording), edge cases, acceptance checks, what must NOT change.
 Anything the user reads: Korean 존댓말. Return ≤5 lines: the decision in one line, plan path or changed files, checks run, any question only the user can answer.
 Mechanical sub-steps (bulk edits, conversions, wide searches): with the Agent tool, hand them to `haiku-batch-worker`/`haiku-scout`/`haiku-coder` (≤5-line briefs) and check results; else list them under `## [haiku] steps` in your result file (agent, files, exact change) and say so.
+Never delegate to another Opus agent. Over ~20 responses: split the work.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.

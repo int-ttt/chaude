@@ -2,6 +2,13 @@
 
 설치된 버전은 프로젝트의 `.claude/claude-lean.version`에서 확인할 수 있습니다. 업그레이드는 새 패키지로 설치를 다시 실행하면 됩니다 (`APPLY_GUIDE.md` 5-1).
 
+## 0.5.2
+- 위임 비용 집계(`notes/runs/261028-analyst-delegation-cost.md`) 반영: Opus→Opus 위임 금지(`opus-architect`는 ESCALATE 경로일 때만), 20응답을 넘을 큰 작업은 처음부터 분할, 첫 브리프에 검증 기준 포함, 같은 파일을 다시 읽는 연속 작업은 한 위임으로 묶기
+- sonnet-analyst: 약 20응답을 넘으면 마일스톤에서 멈추고 보고 (계속 진행하지 않음)
+- sonnet-analyst: 연속 작업이 같은 파일을 다시 읽으면 위임 한 번으로 묶기
+- 답변 말미 라벨을 `다음 할 일:`에서 `추천:`으로 변경 (CLAUDE.md·README·APPLY_GUIDE·distill 스킬·style-adapter 훅). 훅은 구 라벨도 계속 인식.
+- 메인 차단 안내 문구의 `complexity 3+`를 `ESCALATE`로 변경 (main-thread-guard 훅)
+
 ## 0.5.1
 - LEDGER 훅: 입력 확인과 모델 확인의 재시도 루프를 하나로 합쳐 transcript가 없을 때 최악 지연을 약 3.3초에서 약 1.6초로 줄임 (훅 제한 5초 안에서 기록 유실 방지)
 - 업데이트 알림: 버전을 숫자로 비교해 새 버전으로 올라갔을 때만 표시 (다운그레이드나 다른 세션의 더 새로운 버전 기록으로는 표시 안 함)

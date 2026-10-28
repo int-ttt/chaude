@@ -34,7 +34,7 @@ def block(msg):
 
 
 def last_reply_asks():
-    """True if the main thread's last reply asked something or proposed a default (`다음 할 일:` line, or old ▶ form)."""
+    """True if the main thread's last reply asked something or proposed a default (`추천:` line, or old `다음 할 일:` / ▶ forms)."""
     try:
         with open(data.get("transcript_path") or "", "rb") as f:
             f.seek(0, 2)
@@ -53,7 +53,7 @@ def last_reply_asks():
         text = "".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
         if text.strip():
             end = text.strip()[-300:]
-            return "?" in end or "▶" in end or "다음 할 일:" in end
+            return "?" in end or "▶" in end or "추천:" in end or "다음 할 일:" in end
     return False
 
 
@@ -92,7 +92,7 @@ if now_off != was_off:
     except OSError:
         pass
 if now_off:
-    print("[normal] claude-lean is off: work directly with tools, normal-length replies, no `다음 할 일:` line.")
+    print("[normal] claude-lean is off: work directly with tools, normal-length replies, no `추천:` line.")
     sys.exit(0)
 
 # 1. Status fast path: zero model tokens.
@@ -187,7 +187,7 @@ if len(prompt) > 1500 or prompt.count("\n") > 20 or "<pasted_content" in prompt:
 # 4. One-line routing tags for short prompts.
 p = prompt.rstrip(".!~ ")
 if re.fullmatch(r"ㅇㅇ|ㅇㅋ|응|어|그래|좋아|오케이?|ok|[AB12]|[AB](안)?(으로|로) ?(가자|가|해)?|그렇게 해|그대로 (가|해)|(전부 |다 )?맞아|진행해|진행|해|해봐|수행해|전부 수행해|넣어|일단 넣어|바꿔|계속해?|ㄱㄱ?", p, re.I):
-    tags.append("[ack] = approve the default in the `다음 할 일:` list of your last reply (first item). Execute it in one delegation round; reply ≤2 lines; no re-analysis.")
+    tags.append("[ack] = approve the default in the `추천:` list of your last reply (first item). Execute it in one delegation round; reply ≤2 lines; no re-analysis.")
 elif re.match(r"^(다시|재시도|재시작)", p):
     tags.append("[retry] re-run the last brief on the same agent; failed/unfinished items only.")
 elif len(p) < 30 and not re.search(QUESTION, prompt) and not re.match(CORRECTION, prompt) and not pending:

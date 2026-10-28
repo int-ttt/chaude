@@ -20,7 +20,7 @@ Goal: notes good enough that the old transcripts are never needed again. Cost ta
    - Its final message is all the main thread sees: ≤3 lines, no item lists, no file contents.
 4. **Verify (`haiku-checker`).** Count the items (`- ` lines with text) in each of the 5 notes files and REVIEW.md, and check every path in DELIVERABLES.md exists. These counts are the official ones.
 5. **Reply** (≤5 lines): haiku-checker's counts, missing deliverables, REVIEW question count. Never relay item lists; point to the files.
-   `다음 할 일:` 줄 + 목록 `- `: `notes/*.md`의 REVIEW.md 질문에 번호별로 답하면 haiku-batch-worker가 반영합니다.
+   `추천:` 줄 + 목록 `- `: `notes/*.md`의 REVIEW.md 질문에 번호별로 답하면 haiku-batch-worker가 반영합니다.
 After step 4, `haiku-batch-worker` deletes `notes/distill/chunks/` (the originals stay, gzipped, in the claude-archive folder).
 Explanations of the items, if asked: one `sonnet-analyst` writes `notes/runs/distill-explain.md`; reply with the path only.
 6. After the user answers: `haiku-batch-worker` applies answers to notes/; if the user agrees, moves (old) deliverables to `archive/` and removes the old content below the policy section in CLAUDE.md (it now lives in notes/).

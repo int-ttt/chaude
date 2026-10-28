@@ -84,5 +84,22 @@ class Update(unittest.TestCase):
         self.assertEqual(open(os.path.join(d, "logs", ".lean_ver_last")).read(), "0.5.1")
 
 
+class AskLabel(unittest.TestCase):   # declarative reply after a 추천:/old 다음 할 일: tail is an answer, not an inbox note
+    def check(self, tail_text):
+        d = tempfile.mkdtemp(); os.makedirs(os.path.join(d, "notes"))
+        tp = os.path.join(d, "t.jsonl")
+        open(tp, "w").write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "끝났습니다.\n" + tail_text}]}}) + "\n")
+        return run("style-adapter.py", {"prompt": "그건 내가 이미 해둔 거야", "transcript_path": tp, "session_id": "s"}, d)
+
+    def test_new_label(self):
+        self.assertNotIn("메모", self.check("추천:\n- 배포한다"))
+
+    def test_old_label_still_recognized(self):
+        self.assertNotIn("메모", self.check("다음 할 일:\n- 배포한다"))
+
+    def test_no_label_is_inboxed(self):
+        self.assertIn("메모", self.check("끝."))
+
+
 if __name__ == "__main__":
     unittest.main()

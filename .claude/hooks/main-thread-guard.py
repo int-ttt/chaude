@@ -24,6 +24,6 @@ if tool in WORK_TOOLS:
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
-        "permissionDecisionReason": f"Main session does not use {tool}. Delegate: search->haiku-scout, web->haiku-researcher/`/research`, writing->haiku-drafter, verify->haiku-checker/`/check`, bulk/notes->haiku-batch-worker, jobs->haiku-runner/`/status`, code->haiku-coder, reasoning/synthesis->sonnet-analyst (complexity 3+ -> opus-architect), final review->sonnet-reviewer. If the user wants you to work directly, tell them to type 일반모드."
+        "permissionDecisionReason": f"Main session does not use {tool}. Delegate: search->haiku-scout, web->haiku-researcher/`/research`, writing->haiku-drafter, verify->haiku-checker/`/check`, bulk/notes->haiku-batch-worker, jobs->haiku-runner/`/status`, code->haiku-coder, reasoning/synthesis->sonnet-analyst (ESCALATE -> opus-architect), final review->sonnet-reviewer. If the user wants you to work directly, tell them to type 일반모드."
     }}))
 sys.exit(0)
