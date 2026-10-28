@@ -2,6 +2,9 @@
 
 설치된 버전은 프로젝트의 `.claude/claude-lean.version`에서 확인할 수 있습니다. 업그레이드는 새 패키지로 설치를 다시 실행하면 됩니다 (`APPLY_GUIDE.md` 5-1).
 
+## 0.5.3
+- SessionStart 훅: `/clear` 직후에도 notes 스냅샷과 지워진 직전 대화의 마지막 메시지를 주입 (session-context 훅, 테스트 추가)
+
 ## 0.5.2
 - 위임 비용 집계(`notes/runs/261028-analyst-delegation-cost.md`) 반영: Opus→Opus 위임 금지(`opus-architect`는 ESCALATE 경로일 때만), 20응답을 넘을 큰 작업은 처음부터 분할, 첫 브리프에 검증 기준 포함, 같은 파일을 다시 읽는 연속 작업은 한 위임으로 묶기
 - sonnet-analyst: 약 20응답을 넘으면 마일스톤에서 멈추고 보고 (계속 진행하지 않음)

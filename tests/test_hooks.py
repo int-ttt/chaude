@@ -101,5 +101,22 @@ class AskLabel(unittest.TestCase):   # declarative reply after a 추천:/old 다
         self.assertIn("메모", self.check("끝."))
 
 
+class ClearInjection(unittest.TestCase):   # /clear: snapshot + the just-cleared transcript's last messages
+    def test_clear_injects_previous_messages(self):
+        home = tempfile.mkdtemp(); d = tempfile.mkdtemp(); os.makedirs(os.path.join(d, "notes"))
+        open(os.path.join(d, "notes", "OPEN.md"), "w").write("- 열린 항목 하나\n")
+        os.symlink(os.path.join(H, "..", "..", "scripts"), os.path.join(d, "scripts"))
+        hd = os.path.join(home, ".claude", "projects", "".join(c if c.isalnum() else "-" for c in os.path.abspath(d)))
+        os.makedirs(hd)
+        open(os.path.join(hd, "old.jsonl"), "w").write(user("지워질 대화의 마지막 요청입니다"))
+        env = {**os.environ, "CLAUDE_PROJECT_DIR": d, "HOME": home, "USERPROFILE": home}
+        r = subprocess.run([sys.executable, os.path.join(H, "session-context.py")], text=True, capture_output=True, env=env,
+                           input=json.dumps({"source": "clear", "session_id": "new", "transcript_path": os.path.join(hd, "new.jsonl")}))
+        ctx = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("[session:clear]", ctx)
+        self.assertIn("열린 항목 하나", ctx)
+        self.assertIn("지워질 대화의 마지막 요청입니다", ctx)
+
+
 if __name__ == "__main__":
     unittest.main()

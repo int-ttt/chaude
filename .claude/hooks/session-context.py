@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SessionStart hook (startup / resume / compact): inject a small snapshot of notes/ so work
+"""SessionStart hook (startup / resume / compact / clear): inject a small snapshot of notes/ so work
 continues after auto-compaction or in a new session, without /clear or re-reading files."""
 import json, os, sys
 for _s in (sys.stdin, sys.stdout, sys.stderr):
@@ -116,8 +116,9 @@ if open_items:
 recent = tail("notes/LEDGER.md", 5)
 if recent:
     out += ["Recent agent results (LEDGER):"] + recent
-if data.get("source", "startup") == "startup":
+if data.get("source", "startup") in ("startup", "clear"):
     # Carry over the tail of the previous session (plain text, no model): the newest other transcript.
+    # On /clear the previous session is the transcript just cleared (a new session id, new transcript file).
     try:
         import glob as _g
         sys.path.insert(0, os.path.join(root, "scripts"))
