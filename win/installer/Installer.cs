@@ -53,7 +53,7 @@ class InstallerForm : Form
         new Choice("main", "메인 모델", new[] { "\"opus\"", "\"sonnet\"" }, new[] { "Opus (판단이 많은 작업)", "Sonnet (지시가 명확한 작업, 더 저렴)" }),
         new Choice("style", "답변 방식", new[] { "\"explain\"", "\"concise\"" }, new[] { "설명형 (일반 Opus처럼 풀어서)", "간결형 (5줄 이내)" }),
         new Choice("inbox", "정보 문장 메모", new[] { "true", "false" }, new[] { "켜기", "끄기" }),
-        new Choice("reset_alert", "맥락 리셋 안내 (/exit 후 다시 시작)", new[] { "100000", "120000", "0" }, new[] { "100k에서", "120k에서", "끄기" }),
+        new Choice("reset_alert", "맥락 리셋 안내 (/exit 후 다시 시작)", new[] { "0", "100000", "120000" }, new[] { "끄기 (기본)", "100k에서", "120k에서" }),
         new Choice("history_export", "대화 기록 txt 자동 저장", new[] { "true", "false" }, new[] { "켜기", "끄기" }),
         new Choice("nesting", "Sonnet·Opus → Haiku 연계", new[] { "true", "false" }, new[] { "켜기", "끄기" }),
         new Choice("start_mode", "설치 직후 모드", new[] { "\"lean\"", "\"normal\"" }, new[] { "절약 모드", "일반 모드 (절약 규칙 꺼짐)" }),

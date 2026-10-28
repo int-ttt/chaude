@@ -22,6 +22,7 @@ START, END = "<!-- claude-lean:start -->", "<!-- claude-lean:end -->"
 OLD_HEAD = "# Policy: Opus listens and routes; subagents do all work"
 DROPPED_ENV = {"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": ("70",),        # removed only if still at one of our old values
                "HAIKU_CONTEXT_CAP": ("50000", "80000", "95000")}
+OLD_ENV = {"LEAN_RESET_AT": ("100000", "150000")}                  # shipped values of earlier versions; replaced only if still equal
 OBSOLETE = [".claude/agents/senior.md", ".claude/agents/advisor.md",
             ".claude/skills/doc-revise", ".claude/skills/long-job", ".claude/skills/debug", ".claude/skills/verify"]
 # Agents renamed with their model as prefix (2026.10.28). Moved only if the file is ours (description starts with Haiku./Sonnet.).
@@ -84,7 +85,9 @@ for k in ("model", "effortLevel", "autoCompactWindow"):
 if main:
     cur["model"] = main
 env = cur.setdefault("env", {})
-env.update(ours["env"])
+for k, v in ours["env"].items():                  # a user's own value (e.g. HAIKU_CALL_MAX 15000) is kept
+    if k not in env or env[k] in OLD_ENV.get(k, ()):
+        env[k] = v
 removed = [k for k, v in DROPPED_ENV.items() if env.get(k) in v]
 for k in removed:
     del env[k]
@@ -163,7 +166,7 @@ if kept:
     done.append("같은 이름의 사용자 에이전트는 그대로 둠: " + ", ".join(kept))
 
 # 5b) Options chosen in the installer (tools/configure.py), else the ones saved by the last install.
-OPT_DEFAULTS = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 100000, "history_export": True,
+OPT_DEFAULTS = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 0, "history_export": True,
                 "nesting": True, "start_mode": "lean"}
 CONCISE = "- Reply ≤5 lines: result · path · next step. No preamble, no recap, no apology. At most A/B + recommendation.\n"
 op = os.path.join(dst, ".claude", "claude-lean.options.json")
@@ -171,8 +174,10 @@ opt_src = os.environ.get("CLAUDE_LEAN_OPTIONS") or (op if os.path.exists(op) els
 if opt_src:
     opts = dict(OPT_DEFAULTS)
     opts.update(json.load(open(opt_src, encoding="utf-8")))
-    if opts["reset_alert"] == 150000:              # 0.4.13 default (150k): replaced by the 0.4.14 default (100k)
-        opts["reset_alert"] = 100000
+    if opts["reset_alert"] in (100000, 150000):    # older defaults (150k in 0.4.13, 100k in 0.4.14 dev): now off
+        opts["reset_alert"] = 0
+    elif opts["reset_alert"] > 150000:             # 0.4.13 offered 250k; the largest choice is now 120k
+        opts["reset_alert"] = 120000
     if main:
         opts["main"] = main
     s = json.load(open(sp, encoding="utf-8"))
