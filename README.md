@@ -12,7 +12,7 @@ Hooks: `python3 .claude/hooks/<name>.py` (hook JSON on stdin) · scripts: `bin/c
 
 ## 설치 (macOS Apple Silicon 전용)
 
-`chaude`는 claude-lean(0.5.3)의 후속입니다. 이름이 바뀌었고 현재 버전은 0.6.1입니다. 변경 내역은 `CHANGELOG.md`.
+`chaude`는 claude-lean(0.5.3)의 후속입니다. 이름이 바뀌었고 현재 버전은 0.6.2입니다. 변경 내역은 `CHANGELOG.md`.
 비공개 저장소는 `gh auth login` 후 `gh release download`로 받습니다.
 
 터미널에서 한 줄로 설치합니다.
@@ -25,6 +25,6 @@ chaude --version
 
 - 최신 릴리즈를 받아 `/usr/local/bin`(쓰기 가능 시) 또는 `~/.local/bin`에 설치하고, PATH에 없으면 `~/.zshrc`에 추가합니다.
 - macOS 격리 속성(quarantine)을 제거하고 `chaude --version`으로 확인합니다.
-- 환경변수: `CHAUDE_VERSION=v0.6.1`(특정 버전), `CHAUDE_INSTALL_DIR=경로`.
+- 환경변수: `CHAUDE_VERSION=v0.6.2`(특정 버전), `CHAUDE_INSTALL_DIR=경로`.
 
-릴리즈: `git tag v0.6.1 && git push origin v0.6.1` 하면 GitHub Actions(`.github/workflows/release.yml`)가 darwin/arm64 바이너리를 빌드해 릴리즈를 만듭니다.
+릴리즈: `git tag v0.6.2 && git push origin v0.6.2` 하면 GitHub Actions(`.github/workflows/release.yml`)가 darwin/arm64 바이너리를 빌드해 릴리즈를 만듭니다.
