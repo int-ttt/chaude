@@ -516,7 +516,7 @@ var passthroughCmds = map[string]bool{"/usage": true, "/cost": true, "/context":
 	"/config": true, "/mcp": true, "/agents": true, "/init": true, "/review": true, "/doctor": true}
 
 // unsupportedCmds are interactive-only in the child (-p answers "isn't available in this environment").
-var unsupportedCmds = map[string]bool{"/memory": true, "/permissions": true, "/resume": true}
+var unsupportedCmds = map[string]bool{"/memory": true, "/permissions": true}
 
 // passthrough sends a slash command to the child as-is (no handoff snapshot) and shows its output.
 func (r *Repl) passthrough(line string) {
@@ -576,6 +576,17 @@ func (r *Repl) loop() int {
 		}
 		if !r.interactive {
 			r.p("> "+line, "\n")
+		}
+		if f := strings.Fields(line); f[0] == "/resume" {
+			r.resumeLine()
+			continue
+		} else if f[0] == "/import" {
+			a := "latest"
+			if len(f) > 1 {
+				a = f[1]
+			}
+			r.importSession(a)
+			continue
 		}
 		if f := strings.Fields(line); passthroughCmds[f[0]] {
 			r.passthrough(line)

@@ -135,6 +135,20 @@ func (r *Repl) importFromClaude() (int, bool) {
 		fmt.Fprintln(os.Stderr, "chaude: import failed:", err)
 		return 1, true
 	}
+	snap, preserved := r.applyImport(imp, path)
+	if r.a.ImportDry {
+		fmt.Printf("import dry-run: %s\nturns=%d files=%d snapshot_chars=%d snapshot_bytes=%d\nreco_found=%v reco_preserved=%v reco_bytes=%d\n",
+			path, len(imp.Turns), len(imp.Files), len([]rune(snap)), len(snap), imp.Reco != "", preserved, len(imp.Reco))
+		if !preserved {
+			return 1, true
+		}
+		return 0, true
+	}
+	return 0, false
+}
+
+// applyImport installs imp into r (turns, files, pending snapshot) and logs it.
+func (r *Repl) applyImport(imp *claudeImport, path string) (string, bool) {
 	r.tr.turns, r.files, r.lastReco = imp.Turns, imp.Files, imp.Reco
 	note := "(imported from a plain Claude Code session " + strings.TrimSuffix(filepath.Base(path), ".jsonl") +
 		"; no handoff note was written by it. Goal, Decisions, In-progress work, Open questions, User preferences " +
@@ -145,13 +159,5 @@ func (r *Repl) importFromClaude() (int, bool) {
 	preserved := recoPreserved(imp.Reco, snap)
 	_ = r.metrics.Log(map[string]any{"stage": "import", "source": path, "turns": len(imp.Turns), "files": len(imp.Files),
 		"snapshot_chars": len([]rune(snap)), "reco_found": imp.Reco != "", "reco_preserved": preserved, "dry_run": r.a.ImportDry})
-	if r.a.ImportDry {
-		fmt.Printf("import dry-run: %s\nturns=%d files=%d snapshot_chars=%d snapshot_bytes=%d\nreco_found=%v reco_preserved=%v reco_bytes=%d\n",
-			path, len(imp.Turns), len(imp.Files), len([]rune(snap)), len(snap), imp.Reco != "", preserved, len(imp.Reco))
-		if !preserved {
-			return 1, true
-		}
-		return 0, true
-	}
-	return 0, false
+	return snap, preserved
 }

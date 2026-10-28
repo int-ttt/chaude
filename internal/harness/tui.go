@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Claude Code-style screen: welcome box, scrolling conversation, bordered input, status line.
@@ -98,6 +99,8 @@ type tuiModel struct {
 	busy     bool
 	gotText  bool
 	perm     *permMsg
+	pick     []sessionInfo // non-nil while the /resume picker is open
+	pickSel  int
 	ready    bool
 	quitting bool
 	sel      int
@@ -117,6 +120,8 @@ var slashCmds = []slashCmd{
 	{"/clear", "start a fresh session (no handoff)"},
 	{"/status", "model, context tokens, session"},
 	{"/model", "show or switch model: /model <name>"},
+	{"/resume", "list Claude Code sessions and import one"},
+	{"/import", "import a session: /import [id|latest]"},
 	{"/rotate", "hand off to a fresh session"},
 	{"/usage", "plan usage and limits (from claude)"},
 	{"/cost", "usage / cost (from claude)"},
@@ -370,6 +375,30 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		return m, nil
 	}
+	if m.pick != nil {
+		n := len(m.pick)
+		switch k.String() {
+		case "up", "k":
+			m.pickSel = (m.pickSel + n - 1) % n
+		case "down", "j":
+			m.pickSel = (m.pickSel + 1) % n
+		case "esc", "ctrl+c", "q":
+			m.pick = nil
+		case "enter":
+			id := m.pick[m.pickSel].ID
+			m.pick = nil
+			m.busy = true
+			m.blocks = append(m.blocks, block{"user", "/import " + id})
+			m.vp.GotoBottom()
+			m.refresh()
+			m.submit <- "/import " + id
+		default:
+			if d := k.String(); len(d) == 1 && d[0] >= '1' && d[0] <= '9' && int(d[0]-'1') < n {
+				m.pickSel = int(d[0] - '1')
+			}
+		}
+		return m, nil
+	}
 	switch k.String() {
 	case "ctrl+c":
 		if m.busy {
@@ -586,6 +615,22 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.vp.GotoBottom()
 		m.refresh()
 		m.submit <- line
+	case "/resume":
+		l, msg := m.r.sessionList()
+		if msg != "" {
+			note(msg)
+			break
+		}
+		if len(l) > 30 {
+			l = l[:30]
+		}
+		m.pick, m.pickSel = l, 0
+	case "/import":
+		m.busy = true
+		m.blocks = append(m.blocks, block{"user", line})
+		m.vp.GotoBottom()
+		m.refresh()
+		m.submit <- line
 	case "/version":
 		v, _ := exec.Command("claude", "--version").Output()
 		note("harness (Go REPL) · claude " + strings.TrimSpace(string(v)))
@@ -655,6 +700,24 @@ func (m *tuiModel) View() string {
 		pop = strings.Join(l, "\n") + "\n"
 	}
 	vv := m.vp.View()
+	if m.pick != nil {
+		hh := m.vp.Height
+		from := max(0, min(m.pickSel-hh/2, len(m.pick)-(hh-2)))
+		l := []string{lipgloss.NewStyle().Foreground(orange).Render("Resume a session  (↑/↓ or 1-9 select · enter import · esc cancel)")}
+		for i := from; i < len(m.pick) && len(l) < hh-1; i++ {
+			t := fmt.Sprintf("%2d) %s", i+1, m.pick[i].label())
+			if i == m.pickSel {
+				t = lipgloss.NewStyle().Foreground(orange).Render("> " + t)
+			} else {
+				t = dimSt.Render("  " + t)
+			}
+			l = append(l, ansiTrunc(t, m.w))
+		}
+		for len(l) < hh {
+			l = append(l, "")
+		}
+		vv = strings.Join(l, "\n")
+	}
 	if m.unseen && m.vp.AtBottom() {
 		m.unseen = false
 	}
@@ -696,6 +759,12 @@ func (r *Repl) runTUI() int {
 				r.clear()
 			case passthroughCmds[f[0]]:
 				r.passthrough(line)
+			case f[0] == "/import":
+				a := "latest"
+				if len(f) > 1 {
+					a = f[1]
+				}
+				r.importSession(a)
 			case f[0] == "/model" && len(f) > 1:
 				r.a.Model = f[1]
 				r.rotate("model " + f[1])
@@ -713,3 +782,5 @@ func (r *Repl) runTUI() int {
 	}
 	return 0
 }
+
+func ansiTrunc(s string, w int) string { return ansi.Truncate(s, w, "…") }

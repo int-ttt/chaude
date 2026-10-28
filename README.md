@@ -1,6 +1,6 @@
 # chaude
 
-`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.6.2이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
+`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.6.3이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
 
 ## 설치 (macOS Apple Silicon 전용)
 
@@ -13,7 +13,7 @@ chaude --version
 ```
 
 - 최신 릴리즈를 받아 체크섬을 확인한 뒤 `/usr/local/bin`(쓰기 가능 시) 또는 `~/.local/bin`에 설치합니다. PATH에 없으면 `~/.zshrc`에 추가합니다.
-- 환경변수: `CHAUDE_VERSION=v0.6.2`(특정 버전), `CHAUDE_INSTALL_DIR=경로`, `CHAUDE_REPO=소유자/저장소`.
+- 환경변수: `CHAUDE_VERSION=v0.6.3`(특정 버전), `CHAUDE_INSTALL_DIR=경로`, `CHAUDE_REPO=소유자/저장소`.
 
 소스에서 빌드하려면 Go 1.22+가 필요하고 `go build -o bin/chaude ./cmd/chaude`로 됩니다. 다른 OS는 `platform_setup/install.sh`(mac/linux) 또는 `platform_setup\install.ps1`(windows)이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
 
@@ -91,6 +91,7 @@ chaude metrics --dir 폴더   # 다른 메트릭 폴더
 |---|---|
 | `chaude repl [옵션]` | REPL 시작 |
 | `chaude --from-claude ID\|latest\|경로 [--import-dry-run]` | 일반 Claude Code 세션 이어받기 |
+| REPL 안 `/resume`, `/import [ID\|latest]` | 현재 디렉터리의 Claude Code 세션을 최신순(날짜·턴 수·첫/마지막 프롬프트)으로 나열해 번호/↑↓로 골라 이어받기 |
 | `chaude metrics [--dir D] [--csv]` | 메트릭 요약/CSV |
 | `chaude gen-settings mac\|linux\|windows [--out 파일]` | OS별 `.claude/settings.json` 생성 |
 | `chaude search-history`, `charcount`, `export-history`, `extract-transcript`, `compress-archive`, `usage-report`, `claude-history` | 보조 스크립트(`-h`로 옵션 확인) |
