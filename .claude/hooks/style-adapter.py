@@ -131,7 +131,8 @@ if (os.environ.get("STYLE_INBOX", "1") != "0" and 8 <= len(prompt) <= 120 and "\
 tags = ["[lean] claude-lean is back on: delegate per policy."] if was_off else []
 pending = tail(inbox, 1000)
 
-# 0b. Upgraded while this session was open: CLAUDE.md was read at startup, so inject the new policy once.
+# 0b. Upgraded while this session was open: CLAUDE.md/agents/settings are read at launch, so don't inject the policy;
+# tell the user once to restart (the resumed session loads the new version and session-context.py reports it).
 def _session_version():
     p = os.path.join(root, "logs", f".lean-ver-{sid}")
     try:
@@ -154,18 +155,20 @@ except OSError:
     installed = ""
 loaded, ver_state = _session_version()
 if installed and loaded and loaded != installed:
-    md = open(os.path.join(root, "CLAUDE.md"), encoding="utf-8").read()
-    s, e = md.find("<!-- claude-lean:start -->"), md.find("<!-- claude-lean:end -->")
-    policy = md[s + 26:e].strip() if s != -1 and e != -1 else ""
-    tags.append(f"[update] claude-lean was upgraded to {installed} while this session was open. The policy below replaces the one "
-          "loaded at session start; follow it from now on. New agents and settings take effect only after a restart: add one line "
-          "telling the user that /exit then claude in the same terminal applies everything (the conversation continues).\n"
-          + policy)
+    notified = os.path.join(os.path.dirname(ver_state), f".lean-notified-{sid}")
     try:
-        os.makedirs(os.path.dirname(ver_state), exist_ok=True)
-        open(ver_state, "w").write(installed)
+        done = open(notified).read().strip() == installed
     except OSError:
-        pass
+        done = False
+    if not done:
+        tags.append(f"[update] claude-lean {installed} was installed while this session was open; this session still runs the old rules, agents and settings. "
+              "Add exactly one line to your reply telling the user: 새 버전이 설치됐습니다. /exit 후 claude -c (또는 claude --resume)로 이 대화를 이어가면 적용됩니다. "
+              "Do not apply or restate the new policy now.")
+        try:
+            os.makedirs(os.path.dirname(ver_state), exist_ok=True)
+            open(notified, "w").write(installed)
+        except OSError:
+            pass
 
 if pending:
     tags.append("[inbox] user notes since your last turn (apply them; facts → FACTS.md via agent):\n" + "\n".join(pending))

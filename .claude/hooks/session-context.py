@@ -12,14 +12,25 @@ from _lean import lean_off
 
 data = json.load(sys.stdin) if not sys.stdin.isatty() else {}
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
-try:                                                 # the version this session's CLAUDE.md/agents came from
-    _v = open(os.path.join(root, ".claude", "claude-lean.version"), encoding="utf-8").read().strip()
-    _sid = "".join(ch for ch in str(data.get("session_id") or "x") if ch.isalnum() or ch in "-_")
-    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
-    open(os.path.join(root, "logs", f".lean-ver-{_sid}"), "w").write(_v)
-except OSError:
-    pass
+upd = ""
+if data.get("source", "startup") in ("startup", "resume"):   # compaction keeps the loaded CLAUDE.md: don't touch the record
+    try:                                             # the version this session's CLAUDE.md/agents came from
+        _v = open(os.path.join(root, ".claude", "claude-lean.version"), encoding="utf-8").read().strip()
+        _sid = "".join(ch for ch in str(data.get("session_id") or "x") if ch.isalnum() or ch in "-_")
+        _f = os.path.join(root, "logs", f".lean-ver-{_sid}")
+        try:
+            _old = open(_f).read().strip()
+        except OSError:
+            _old = ""
+        if data.get("source") == "resume" and _old and _old != _v:
+            upd = f"[update] claude-lean {_v}로 업데이트됨 (이전 {_old}). 이 대화에 새 규칙이 적용됐습니다."
+        os.makedirs(os.path.join(root, "logs"), exist_ok=True)
+        open(_f, "w").write(_v)
+    except OSError:
+        pass
 if lean_off():
+    if upd:
+        print(upd)
     print("[normal mode] The claude-lean policy in CLAUDE.md is OFF: work directly with tools, normal-length replies. "
           "(The user types 절약모드 to turn it back on.)")
     sys.exit(0)
@@ -51,7 +62,7 @@ if data.get("source", "startup") == "startup":       # storage: per-agent/sessio
         except OSError:
             pass
 
-out = [f"[session:{data.get('source', 'start')}] snapshot of notes/ (state lives in files; don't re-read them unless needed):"]
+out = ([upd] if upd else []) + [f"[session:{data.get('source', 'start')}] snapshot of notes/ (state lives in files; don't re-read them unless needed):"]
 open_items = head("notes/OPEN.md", 20)
 if open_items:
     out += ["OPEN:"] + open_items
@@ -94,6 +105,8 @@ if data.get("source", "startup") == "startup":
 inbox = tail("notes/INBOX.md", 50)
 if inbox:
     out.append(f"INBOX: {len(inbox)} queued user notes (delivered with the next instruction).")
-if len(out) > 1:
+if len(out) > 1 + bool(upd):
     print("\n".join(out)[:6000])
+elif upd:
+    print(upd)
 sys.exit(0)
