@@ -20,7 +20,8 @@ for _s in (sys.stdout, sys.stderr):
 src, dst, py, main, bashpy, backup = sys.argv[1:7]
 START, END = "<!-- claude-lean:start -->", "<!-- claude-lean:end -->"
 OLD_HEAD = "# Policy: Opus listens and routes; subagents do all work"
-DROPPED_ENV = {"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "70"}          # removed only if still at our old value
+DROPPED_ENV = {"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": ("70",),        # removed only if still at one of our old values
+               "HAIKU_CONTEXT_CAP": ("50000", "80000", "95000")}
 OBSOLETE = [".claude/agents/senior.md", ".claude/agents/advisor.md",
             ".claude/skills/doc-revise", ".claude/skills/long-job", ".claude/skills/debug", ".claude/skills/verify"]
 # Agents renamed with their model as prefix (2026.10.28). Moved only if the file is ours (description starts with Haiku./Sonnet.).
@@ -84,7 +85,7 @@ if main:
     cur["model"] = main
 env = cur.setdefault("env", {})
 env.update(ours["env"])
-removed = [k for k, v in DROPPED_ENV.items() if env.get(k) == v]
+removed = [k for k, v in DROPPED_ENV.items() if env.get(k) in v]
 for k in removed:
     del env[k]
 allow = cur.setdefault("permissions", {}).setdefault("allow", [])
@@ -163,7 +164,7 @@ if kept:
 
 # 5b) Options chosen in the installer (tools/configure.py), else the ones saved by the last install.
 OPT_DEFAULTS = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 150000, "history_export": True,
-                "haiku_cap": 80000, "nesting": True, "start_mode": "lean"}
+                "nesting": True, "start_mode": "lean"}
 CONCISE = "- Reply ≤5 lines: result · path · next step. No preamble, no recap, no apology. At most A/B + recommendation.\n"
 op = os.path.join(dst, ".claude", "claude-lean.options.json")
 opt_src = os.environ.get("CLAUDE_LEAN_OPTIONS") or (op if os.path.exists(op) else "")
@@ -175,7 +176,6 @@ if opt_src:
     s = json.load(open(sp, encoding="utf-8"))
     s["model"] = opts["main"]
     env = s.setdefault("env", {})
-    env["HAIKU_CONTEXT_CAP"] = str(int(opts["haiku_cap"]))
     env["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] = "2" if opts["nesting"] else "1"
     if opts["inbox"]:
         env.pop("STYLE_INBOX", None)
@@ -210,6 +210,7 @@ if opt_src:
             open(flag, "w").close()
         elif os.path.exists(flag):
             os.remove(flag)
+    opts.pop("haiku_cap", None)                    # dropped in 0.4.10: agents compact instead
     json.dump(opts, open(op, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
     done.append("선택사항: " + ", ".join(f"{k}={v}" for k, v in opts.items()))
 

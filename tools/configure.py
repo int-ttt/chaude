@@ -19,7 +19,7 @@ else:
     PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WIN = os.name == "nt"
 DEFAULTS = {"main": "opus", "style": "explain", "inbox": True, "reset_alert": 150000, "history_export": True,
-            "haiku_cap": 80000, "nesting": True, "start_mode": "lean"}
+            "nesting": True, "start_mode": "lean"}
 # (key, question, [(value, label), ...])
 CHOICES = [
     ("main", "메인 모델", [("opus", "Opus (기본: 판단이 많은 작업)"), ("sonnet", "Sonnet (지시가 명확한 작업, 더 저렴)")]),
@@ -27,7 +27,6 @@ CHOICES = [
     ("inbox", "정보 문장 메모 (모델 호출 없이 보관했다가 다음 지시와 함께 전달)", [(True, "켜기"), (False, "끄기")]),
     ("reset_alert", "맥락이 커지면 /exit 후 다시 시작하라는 안내", [(150000, "150k에서 안내"), (250000, "250k에서 안내"), (0, "끄기")]),
     ("history_export", "대화 기록을 logs/history에 txt로 자동 저장", [(True, "켜기"), (False, "끄기")]),
-    ("haiku_cap", "Haiku 에이전트 맥락 상한 (넘기 전에 새 에이전트로 교대)", [(80000, "80k (기본)"), (50000, "50k (더 저렴, 교대 잦음)"), (95000, "95k (교대 적음)")]),
     ("nesting", "Sonnet·Opus 에이전트가 단순 작업을 Haiku에게 직접 넘기기", [(True, "켜기"), (False, "끄기")]),
     ("start_mode", "설치 직후 모드", [("lean", "절약 모드"), ("normal", "일반 모드 (절약 규칙 꺼짐, 나중에 '절약모드' 입력)")]),
 ]

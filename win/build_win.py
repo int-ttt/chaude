@@ -176,17 +176,10 @@ Move-Item $H "$HOME\\claude-archive\\$(Split-Path $P -Leaf)-$(Get-Date -Format y
 ])
 
 edit("README.md", [
-    ("# Claude Code — Opus는 듣기만, 작업은 하위 에이전트, Opus 토큰 최소화\n",
-     "# Claude Code — Opus는 듣기만, 작업은 하위 에이전트, Opus 토큰 최소화 (Windows)\n\n"
+    ("# Claude Lean\n",
+     "# Claude Lean (Windows)\n\n"
      "> **Windows 요구 사항:** Python 3 (python.org, 'Add python.exe to PATH' 체크), Git for Windows 권장(없으면 PowerShell 도구로 동작), 최신 Claude Code. "
-     "명령은 PowerShell 기준입니다. 훅은 설치 시 찾은 `python.exe` 경로로 직접 실행되므로 셸 종류와 무관합니다.\n"),
-    ("1. **Opus를 거치지 않는 확인:** 진행상황은 `!cat logs/*.status`처럼 `!`로 셸을 직접 실행하면 모델 호출이 없습니다.",
-     "1. **Opus를 거치지 않는 확인:** 진행상황은 `!cat logs/*.status`(Git Bash) 또는 `!Get-Content logs\\*.status`(PowerShell)처럼 `!`로 셸을 직접 실행하면 모델 호출이 없습니다."),
-    ("`./install.sh <프로젝트 폴더> [--main sonnet]` 한 줄이면 됩니다. 기존 대화 정리까지 여러 프로젝트를 한 번에 하려면 `./fresh_start.sh <폴더> <폴더> ...`.",
-     f"`{PS_INSTALL} \"<프로젝트 폴더>\" [-Main sonnet]` 한 줄이면 됩니다. 기존 대화 정리까지 여러 프로젝트를 한 번에 하려면 `{PS_FRESH} \"<폴더>\" \"<폴더>\" ...`."),
-    ("`FRESH_START.md`, `fresh_start.sh`,", "`FRESH_START.md`, `fresh_start.ps1`,"),
-    ("그 세션만 일반 모드로 시작하려면 `CLAUDE_LEAN=0 claude`.",
-     "그 세션만 일반 모드로 시작하려면 `$env:CLAUDE_LEAN=0; claude`(끝나면 `Remove-Item Env:CLAUDE_LEAN`)."),
+     "설치는 `claude-lean-<버전>.exe`를 실행하거나, 이 폴더에서 `install.ps1`을 실행하세요. 훅은 설치 시 찾은 `python.exe` 경로로 직접 실행되므로 셸 종류와 무관합니다.\n"),
 ])
 
 edit("MIGRATE_NOW_PROMPT.md", [

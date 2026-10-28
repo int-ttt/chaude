@@ -20,7 +20,7 @@
 | 메인 Opus는 작업 도구 없음 — PreToolUse 훅이 `agent_id` 없는 Read/Write/Edit/Bash/Grep/Glob/Web 차단 | 비용 = 맥락 크기 × 요청 수. 위임으로 요청 8→2회, 도구 결과가 메인에 안 쌓임 |
 | 기본 Haiku(`CLAUDE_CODE_SUBAGENT_MODEL=haiku`), Sonnet은 `sonnet-analyst`(종합·해석·복잡 코드·Haiku 2회 실패)·`sonnet-reviewer`(제출 전 검토)만 | 사용자 요청. Sonnet 캐시 읽기 단가 = Opus($0.20/M)라 메인 교체 이득 작음 |
 | Opus 직접 답: 5줄 이내 또는 대화 맥락 필요한 판단. 30줄+ 긴 답은 sonnet-analyst가 파일로, Opus는 경로만 | Sonnet 콜드스타트(약 4~6센트) 때문에 짧은 답 위임은 손해. 본문 옮겨 적기는 Opus 출력 재과금 |
-| Haiku 80k 교대 (`haiku-context-guard.py`, 75k부터 저장만, 80k 넘을 호출 차단, 이미지는 장당 1.7k로 추정, `CONTEXT-LIMIT` 인계 후 새 에이전트. 처음 50k였으나 사진 작업이 파일 크기 추정 때문에 멈춰서 상향) | 사용자 요청. Haiku는 100k 초과 시 단가 5배 |
+| 하위 에이전트 맥락: 자동 압축(에이전트 `autoCompactWindow: 100000`, Haiku 단가가 오르는 100k 전에 압축)으로 끝까지 진행. 처음엔 50k/80k에서 훅이 막고 `CONTEXT-LIMIT` 인계 후 새 에이전트로 교대했으나, 실사용에서 인계가 이어지지 않아 작업이 결과 없이 끝나서 0.4.10에 폐지. 훅은 한 번에 큰 읽기(`HAIKU_CALL_MAX` 20k, `allow_large`)만 차단 | 사용자: 진행 중 작업이 끝나서 결과가 안 나옴 |
 | 메인: `effortLevel: low`, `autoCompactWindow: 300000`(사용자 결정: 압축 횟수 최소화. 대신 턴당 읽기·캐시 만료 비용 증가. 70% 설정은 제거), Sonnet 에이전트는 frontmatter로 100k 유지, 답 5줄, 지시서 5줄, 에이전트 반환 5줄 + 상세는 `notes/runs/` | 70k 이하에선 출력·생각이 턴 비용의 절반 |
 | 입력 스타일 훅(`style-adapter.py`): 상태 질의 0토큰 표시, 정보 문장 INBOX 메모(0토큰), `[ack]/[retry]/[frag]/[paste]` 태그, 응답 끝 `▶ 기본:` 규칙 | 사용자 스타일 최적화 요청. 기록 재생 결과: 0토큰 16건, 태그 약 400건 |
 | 정정 훅(`correction-guard.py`): 유형 A~G 한 줄 태그, 오해 2연속 시 체크리스트 | 정정 207건 분석 |
@@ -64,7 +64,7 @@
 | `.claude/settings.json` | 모델·effort·압축·env·훅 10개 |
 | `.claude/agents/*.md` | `haiku-*` 8개(haiku-extractor 포함), `sonnet-*` 2개, `opus-architect` 1개. 이름 앞부분 = 모델 |
 | `.claude/hooks/main-thread-guard.py` | 메인 도구 차단 |
-| `.claude/hooks/haiku-context-guard.py` | Haiku 80k 교대 |
+| `.claude/hooks/haiku-context-guard.py` | Haiku 한 번에 큰 읽기 차단 |
 | `.claude/hooks/agent-model-pin.py` | 에이전트 모델 고정 (호출 시 덮어쓰기 제거, 기본 제공 에이전트는 Haiku) |
 | `.claude/hooks/_lean.py` | 일반 모드 판별 (훅 공용) |
 | `.claude/hooks/style-adapter.py` | 입력 스타일 최적화 |

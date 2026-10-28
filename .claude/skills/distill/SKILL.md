@@ -10,7 +10,7 @@ Goal: notes good enough that the old transcripts are never needed again. Cost ta
 
 1. **Chunks.** If `notes/distill/chunks/` already exists, use it. Otherwise `haiku-batch-worker`: run `python3 scripts/extract_transcript.py $ARGUMENTS --out notes/distill` and return the INDEX line.
 2. **Extract (parallel, one message).** Agents = ceil(chunks / 4), at most 20 at once; split the chunks into that many consecutive groups of near-equal size (5 chunks → 3+2, not 4+1). One `haiku-extractor` per group. Brief: the chunk file names only.
-   - Any `CONTEXT-LIMIT` → start a fresh `haiku-extractor` for the unread chunks.
+   - An extractor that stops before its last chunk → start a fresh `haiku-extractor` for the unread chunks.
 3. **Merge (one `sonnet-analyst`).** Brief:
    - Read every `notes/distill/cand/*.md` and, if present, the old project CLAUDE.md content below the policy section and the backup in `.claude-backup-*/CLAUDE.md`.
    - Apply CORRECTIONS and recency (newer wins). Deduplicate. Drop items that are done and no longer matter.

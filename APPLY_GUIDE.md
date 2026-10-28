@@ -114,7 +114,7 @@ notes/OPEN.md 기준으로 오늘 할 일부터 시작하자
 | `env.LEAN_RESET_AT` | `150000` | 리셋 안내를 띄우는 메인 맥락 크기 |
 | `autoCompactWindow` | `300000` | 비용을 더 줄이려면 `150000` (압축이 더 잦아짐). 최소 `100000` |
 | `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | `2` | 메인 → Sonnet/Opus → Haiku 연계 깊이. `1`이면 연계 끔 (메인이 `[haiku] steps`를 대신 배분) |
-| `env.HAIKU_CONTEXT_CAP` | `80000` | 교대가 잦아도 `100000` 미만으로 (넘으면 Haiku 단가 상승). 사진은 장당 약 1.7k로 계산 |
+| `env.HAIKU_CALL_MAX` | `20000` | Haiku가 한 번에 읽을 수 있는 최대 크기(토큰). 에이전트 맥락은 100k 창에서 자동 압축되므로 따로 상한 없음 |
 | `env.STYLE_INBOX` | (없음 = 켜짐) | 메모 기능이 불편하면 `"0"` |
 | `env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS` | `8000` | 큰 파일을 자주 다루면 `12000` |
 | 입력 `일반모드` / `절약모드` | 절약 | 절약 규칙을 끄고 켬. `.claude/lean-off` 파일로 상태 저장, 모델 호출 없음 |
@@ -151,7 +151,7 @@ diff ~/usage-before.txt ~/usage-after.txt
 | 증상 | 조치 |
 |---|---|
 | Opus가 "도구가 차단됐다"며 멈춤 | 정상 동작. 계속 그러면 CLAUDE.md가 적용됐는지 확인 (`/memory`) |
-| 에이전트가 `CONTEXT-LIMIT`를 자주 반환 | `HAIKU_CONTEXT_CAP` 상향, 또는 작업을 더 잘게 나누도록 지시 |
+| 에이전트 작업이 결과 없이 끝남 | 0.4.10부터 에이전트는 맥락이 차면 자동 압축 후 계속합니다. 예전 버전이면 업그레이드 |
 | 메모로 빠지면 안 되는 말이 메모됨 | 끝에 `!` 붙여 재전송, 반복되면 `STYLE_INBOX=0` |
 | 답이 너무 짧아 이해가 어려움 | "자세히" 요청 → `sonnet-analyst`가 `notes/runs/`에 작성 |
 | `notes/LEDGER.md`에 `⚠ 이름과 다름` | `/hooks`에서 `agent-model-pin.py` 등록 확인. 등록돼 있으면 사용량 한도 등으로 Claude Code가 모델을 바꾼 경우 |

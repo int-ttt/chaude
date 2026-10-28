@@ -19,6 +19,6 @@ Write `notes/distill/cand/<first-chunk>.md` with exactly these sections, one sho
 ## CORRECTIONS — "이전 → 정정" pairs the user made
 Mark uncertain items with (?). Never invent. Empty section → "- 없음".
 Return ≤3 lines: candidate file path, item counts per section. Never paste the extracted items into the reply.
-Context cap 80k: if a call is denied with CONTEXT-LIMIT, write what you have and return `CONTEXT-LIMIT: <path>` plus the chunk numbers not yet read.
+Long jobs: read in slices (grep, head, Read offset/limit); a hook blocks single reads over ~20k tokens. Your context compacts automatically when it grows, so keep a short progress list (done / remaining) in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and keep going until the task is finished.
 Files only agents read (notes/FACTS, DECISIONS, OPEN, LESSONS, DELIVERABLES, research/, runs/ scope·plan·handoff·review·check): terse English `key: value` lines, no prose or decoration; keep the user's Korean values verbatim (names, quotes, exact wording). Text the user reads (answers, REVIEW.md, deliverables): Korean.
 Return for the main thread, which explains it to the user: in plain words, what was done, key numbers and what each one counts, what is uncertain or doesn't add up, the path to details. Up to 8 lines (this overrides any shorter return limit above).
