@@ -136,7 +136,7 @@ var slashCmds = []slashCmd{
 	{"/init", "analyze repo, propose CLAUDE.md (runs a turn)"},
 	{"/review", "review current changes (runs a turn)"},
 	{"/doctor", "check installation and config (runs a turn)"},
-	{"/mode", "permission mode: default|acceptEdits|plan|auto (shift+tab cycles)"},
+	{"/mode", "permission mode: default|acceptEdits|plan|auto (shift+tab cycles); conductor|conductor-off = Sonnet conductor"},
 	{"/mouse", "toggle mouse wheel scroll (off = select text)"},
 	{"/version", "harness and claude versions"},
 	{"/exit", "exit"},
@@ -681,6 +681,14 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 			note("mode " + permMode(m.r.mode.Load()).String() + "  (default | acceptEdits | plan | auto; shift+tab cycles)")
 			break
 		}
+		if f[1] == "conductor" || f[1] == "conductor-off" {
+			m.busy = true
+			m.blocks = append(m.blocks, block{"user", line})
+			m.vp.GotoBottom()
+			m.refresh()
+			m.submit <- line
+			break
+		}
 		p, ok := parseMode(f[1])
 		if !ok {
 			note("unknown mode " + f[1] + " (default | acceptEdits | plan | auto)")
@@ -854,6 +862,8 @@ func (r *Repl) runTUI() int {
 					a = f[1]
 				}
 				r.importSession(a)
+			case f[0] == "/mode" && len(f) > 1 && (f[1] == "conductor" || f[1] == "conductor-off"):
+				r.setConductor(f[1] == "conductor")
 			case f[0] == "/model" && len(f) > 1:
 				r.a.Model = f[1]
 				r.rotate("model " + f[1])

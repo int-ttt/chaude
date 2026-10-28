@@ -28,6 +28,11 @@ const (
 		"User preferences/instructions; Any exact codes, names or numbers the user gave. Be exact and brief."
 	preamble = "[Context carried over from a previous session that was rotated to save tokens. " +
 		"Treat it as your memory of the conversation so far; do not mention the rotation.]"
+	conductorModel = "sonnet"
+	conductorRule  = "CONDUCTOR MODE: you are a Sonnet router, not an answerer. For every user message your ONLY output is a delegation: one Agent call whose prompt states the task (the user's request, verbatim, plus only the minimal context needed) and whose subagent_type is the target. " +
+		"Never write the answer, explanation, summary or user-facing reply yourself, and add no prose besides the Agent call and the required category marker line (the agent's result is the reply; it must be written in Korean 존댓말 - say so in the task). " +
+		"Targets: mechanical work (exact edits, conversions, search, run/monitor, web lookup) -> haiku-*; judgment work (multi-file edits needing decisions, diagnosis, synthesis, explanations, long documents) -> sonnet-analyst; " +
+		"judgment calls, pushback or disagreement, corrections ('아니', '틀렸'), strategy/priority prompts, sonnet-analyst ESCALATE, same item corrected twice, agent failure, or 'opus로' -> opus-architect."
 	delegationRule = "Default to delegating bounded code changes (implementation steps, small fixes, wiring, tests) to the haiku-coder agent with an exact spec; " +
 		"implement yourself only design-level or tightly coupled parts, then verify Haiku's diff. " +
 		"Log each delegation (agent, tokens, duration, outcome, retries)."
@@ -53,6 +58,8 @@ type Args struct {
 	FromClaude       string        // import a plain Claude Code transcript: session id | path | latest
 	ImportDry        bool          // with FromClaude: print the handoff stats and exit
 	NoCategoryRotate bool          // disable category-based rotation (no marker rule, no switch rotation)
+	Conductor        bool          // Sonnet main session routes work (haiku-*/sonnet-*/opus-architect) and escalates judgment to Opus
+	PrevModel        string        // model to restore when conductor mode is switched off
 	NoDelegationRule bool          // do not append the haiku delegation rule to the child's system prompt
 }
 
@@ -162,6 +169,9 @@ func (r *Repl) start() error {
 	}
 	if !r.a.NoCategoryRotate {
 		rule = strings.TrimSpace(rule + " " + categoryRule)
+	}
+	if r.a.Conductor {
+		rule = strings.TrimSpace(rule + " " + conductorRule)
 	}
 	if rule != "" {
 		opts.Extra = []string{"--append-system-prompt", rule}
@@ -297,7 +307,7 @@ func (r *Repl) idleFinish(s *Session, tk *agentTracker, result event) {
 		t0 = time.Now()
 	}
 	fields := map[string]any{"stage": "turn", "source": "background", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
-		"model": r.a.Model, "ctx": r.lastCtx, "session": s.SessionID, "cost_usd": cost, "rotations": r.rotations}
+		"model": r.a.Model, "conductor": r.a.Conductor, "ctx": r.lastCtx, "session": s.SessionID, "cost_usd": cost, "rotations": r.rotations}
 	for k, v := range usageFields(asMap(ru)) {
 		fields["result_"+k] = v
 	}
@@ -671,7 +681,7 @@ func (r *Repl) handle(line string) {
 		kv{"ctx", ctxTokens(usage)}, kv{"cost", cost})
 	r.usageLine(result, usage)
 	fields := map[string]any{"stage": "turn", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
-		"model": r.a.Model, "ctx": r.lastCtx, "session": r.sess.SessionID, "draining": len(r.draining),
+		"model": r.a.Model, "conductor": r.a.Conductor, "ctx": r.lastCtx, "session": r.sess.SessionID, "draining": len(r.draining),
 		"cost_usd": cost, "duration_ms": time.Since(t0).Milliseconds(), "rotations": r.rotations, "delegations": r.delegs}
 	for k, v := range usageFields(asMap(ru)) {
 		fields["result_"+k] = v // summed over all API calls of the turn
@@ -807,6 +817,7 @@ func Main(args []string) int {
 	fs.DurationVar(&a.Cooldown, "rotate-cooldown", 2*time.Minute, "min gap after a failed rotation")
 	fs.BoolVar(&a.NoCategoryRotate, "no-category-rotate", false, "disable category-based session rotation")
 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
+	fs.BoolVar(&a.Conductor, "conductor", false, "conductor mode: Sonnet main routes to haiku/sonnet/opus agents, judgment prompts escalate to Opus")
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
@@ -815,6 +826,10 @@ func Main(args []string) int {
 		}
 		return 2
 	}
+	if a.Conductor {
+		a.PrevModel = a.Model
+		a.Model = conductorModel
+	}
 	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1)}
 	if st, err := os.Stdin.Stat(); err == nil {
 		r.interactive = st.Mode()&os.ModeCharDevice != 0
@@ -822,7 +837,7 @@ func Main(args []string) int {
 	r.tr = newTranscript(a.Transcript)
 	r.metrics = newMetrics(a.MetricsDir, map[string]any{"threshold": a.Threshold, "handoff_validate": !a.NoValidate,
 		"max_drain": a.MaxDrain, "drain_timeout_s": int(a.DrainTimeout.Seconds()), "compact_window": a.CompactWindow,
-		"delegation_rule": !a.NoDelegationRule, "category_rotate": !a.NoCategoryRotate})
+		"delegation_rule": !a.NoDelegationRule, "category_rotate": !a.NoCategoryRotate, "conductor": a.Conductor})
 	r.seenTools = map[string]bool{}
 	if a.FromClaude != "" {
 		if code, done := r.importFromClaude(); done {
@@ -858,11 +873,33 @@ func (r *Repl) clear() {
 	r.p(dim+"── new session ──"+rst, "\n")
 }
 
+// setConductor switches conductor mode (Sonnet main + routing rule) on/off and rotates into a fresh session with a handoff.
+func (r *Repl) setConductor(on bool) {
+	if on == r.a.Conductor {
+		r.p(fmt.Sprintf("conductor already %v", on), "\n")
+		return
+	}
+	r.a.Conductor = on
+	if on {
+		r.a.PrevModel, r.a.Model = r.a.Model, conductorModel
+		r.rotate("conductor on")
+		return
+	}
+	if r.a.PrevModel != "" {
+		r.a.Model = r.a.PrevModel
+	}
+	r.rotate("conductor off")
+}
+
 // modeLine handles "/mode [name]" on the plain path (no arg shows, "next" cycles).
 func (r *Repl) modeLine(args []string) {
 	cur := permMode(r.mode.Load())
+	if len(args) > 0 && (args[0] == "conductor" || args[0] == "conductor-off") {
+		r.setConductor(args[0] == "conductor")
+		return
+	}
 	if len(args) == 0 {
-		r.p("mode "+cur.String()+"  (default | acceptEdits | plan | auto)", "\n")
+		r.p("mode "+cur.String()+"  (conductor="+fmt.Sprint(r.a.Conductor)+"; default | acceptEdits | plan | auto)", "\n")
 		return
 	}
 	p, ok := cur.Next(), true
