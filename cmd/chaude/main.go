@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"chaude/internal/harness"
 	"chaude/internal/scripts"
@@ -15,7 +16,7 @@ import (
 var version = "0.6.3"
 
 const usage = `usage: chaude <command> [args]
-  repl [flags]           terminal REPL over claude -p stream-json with session rotation
+  repl [flags]           terminal REPL over claude -p stream-json with session rotation (default with no command)
   metrics [--dir D] [--csv]   summarize per-turn metrics (notes/metrics)
   --from-claude ID|latest|PATH [--import-dry-run]   start a repl from a plain Claude Code session
   --version              print version
@@ -25,8 +26,7 @@ const usage = `usage: chaude <command> [args]
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprint(os.Stderr, usage)
-		os.Exit(2)
+		os.Exit(harness.Main(nil))
 	}
 	cmd, args := os.Args[1], os.Args[2:]
 	switch cmd {
@@ -43,6 +43,9 @@ func main() {
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
+		if strings.HasPrefix(cmd, "-") {
+			os.Exit(harness.Main(os.Args[1:]))
+		}
 		if scripts.Has(cmd) {
 			os.Exit(scripts.Run(cmd, args))
 		}

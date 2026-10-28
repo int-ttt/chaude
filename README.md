@@ -20,6 +20,7 @@ chaude --version
 ## 사용
 
 ```sh
+chaude                           # 인자 없이 실행하면 REPL 시작 (chaude repl과 동일)
 chaude repl                      # REPL 시작 (기본 모델 haiku, 임계값 270000 토큰)
 chaude repl --threshold 200000   # 임계값 변경
 ```
@@ -89,7 +90,7 @@ chaude metrics --dir 폴더   # 다른 메트릭 폴더
 
 | 명령 | 설명 |
 |---|---|
-| `chaude repl [옵션]` | REPL 시작 |
+| `chaude [repl] [옵션]` | REPL 시작 (명령 생략 시 기본) |
 | `chaude --from-claude ID\|latest\|경로 [--import-dry-run]` | 일반 Claude Code 세션 이어받기 |
 | REPL 안 `/resume`, `/import [ID\|latest]` | 현재 디렉터리의 Claude Code 세션을 최신순(날짜·턴 수·첫/마지막 프롬프트)으로 나열해 번호/↑↓로 골라 이어받기 |
 | `chaude metrics [--dir D] [--csv]` | 메트릭 요약/CSV |
