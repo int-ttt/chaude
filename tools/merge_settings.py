@@ -30,6 +30,18 @@ RENAMED_AGENTS = ["scout", "researcher", "drafter", "checker", "batch-worker", "
 done = []
 
 
+def ver_tuple(v):
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return ()
+
+
+_vp = os.path.join(dst, ".claude", "claude-lean.version")
+PREV = open(_vp, encoding="utf-8").read().strip() if os.path.exists(_vp) else ""   # version before this run
+PREV_OLDER = ver_tuple(PREV) < (0, 4, 14)                  # missing or unknown counts as older
+
+
 def read(p, enc="utf-8-sig"):
     return open(p, encoding=enc).read() if os.path.exists(p) else ""
 
@@ -86,7 +98,7 @@ if main:
     cur["model"] = main
 env = cur.setdefault("env", {})
 for k, v in ours["env"].items():                  # a user's own value (e.g. HAIKU_CALL_MAX 15000) is kept
-    if k not in env or env[k] in OLD_ENV.get(k, ()):
+    if k not in env or env[k] in (OLD_ENV.get(k, ()) if PREV_OLDER else ()):
         env[k] = v
 removed = [k for k, v in DROPPED_ENV.items() if env.get(k) in v]
 for k in removed:
@@ -174,7 +186,7 @@ opt_src = os.environ.get("CLAUDE_LEAN_OPTIONS") or (op if os.path.exists(op) els
 if opt_src:
     opts = dict(OPT_DEFAULTS)
     opts.update(json.load(open(opt_src, encoding="utf-8")))
-    if opts["reset_alert"] in (100000, 150000):    # older defaults (150k in 0.4.13, 100k in 0.4.14 dev): now off
+    if PREV_OLDER and opts["reset_alert"] in (100000, 150000):   # older defaults (150k in 0.4.13): now off; 0.4.14 keeps what was saved
         opts["reset_alert"] = 0
     elif opts["reset_alert"] > 150000:             # 0.4.13 offered 250k; the largest choice is now 120k
         opts["reset_alert"] = 120000
