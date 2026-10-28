@@ -19,3 +19,7 @@ impl: classifier.go (classify/parseRoute/Repl.route), handle() calls route() whe
 opus main: T0 $0.1192 / T1 $0.1147 / T2 $0.1153 (sum $0.349); answered itself from memory without rechecking (said "이번에 다시 열어보지 않았습니다")
 classifier -> haiku session: T0 $0.0852 (classifier $0.0775 cold cache + session $0.0077) / T1 $0.0157 (cls $0.0065, 2 turns: interim + background result) / T2 $0.0113 (cls $0.0065); routed haiku x3; sum $0.112 (-68%); correct answers 5 / 0.6.7 / 14, replies arrived 3/3
 caveats: n=3; T0 classifier cost inflated by cold cache (later calls ~$0.0065); opus did not re-verify so quality not equal; haiku replies add "추천:" blocks (verbose); T1 had an interim reply then final. Cost = metrics stage=turn + stage=classify cost_usd, A/B spend ~$0.46.
+
+## 0.6.8: classifier verification + reply cleanup
+classifier live (6 prompts, TestClassifierLive gated by CHAUDE_LIVE=1): trade-off/pushback/correction/strategy -> opus 4/4; 2 mechanical -> haiku 2/2; passed on first prompt revision (added explicit "any such element -> opus" wording).
+reply cleanup: routed task now ends "reply: Korean 존댓말, one final message only..., no interim status message, no 추천 block; foreground agents, wait for result". Rerun 3 tasks: 1 turn each, no 추천, no interim; cost $0.0131 / $0.0115 / $0.0115 (classifier ~$0.007 each). Before: T1/T2 had 2 turns. Residual: inline "[cat: ...]" can show when the marker is not on its own line (T2).

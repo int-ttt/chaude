@@ -12,9 +12,10 @@ import (
 const (
 	conductorModel = "sonnet" // classifier model
 	classifyPrompt = "You are a router, not an answerer. Never answer or explain. Output exactly two lines:\n" +
-		"model: haiku|sonnet|opus\ntask: <the user's request, terse, machine-style: no honorifics, greetings or filler; keep paths, names, numbers; end with 'reply: Korean 존댓말'>\n" +
+		"model: haiku|sonnet|opus\ntask: <the user's request, terse, machine-style: no honorifics, greetings or filler; keep paths, names, numbers; end with 'reply: Korean 존댓말, one final message only after the work is done, no interim status message, no 추천 block; if you delegate to an agent, run it in the foreground and wait for its result before replying'>\n" +
 		"haiku = mechanical (exact edits, conversion, search, count, lookup, run/monitor). sonnet = judgment work (multi-file edits needing decisions, diagnosis, synthesis, explanation, long documents). " +
-		"opus = judgment calls, pushback/disagreement, corrections ('아니', '틀렸'), strategy/priority questions, design/architecture, 'opus로', repeated failure."
+		"opus = ANY of: choosing between options or weighing trade-offs, a judgment call, pushback or disagreement with a previous answer ('아니 그게 아니라', '그건 틀린데'), a correction of earlier work, strategy/priority/roadmap questions, design/architecture, 'opus로', repeated failure. " +
+		"If the prompt contains any such element, choose opus even when it also mentions files or code."
 )
 
 // parseRoute extracts the model and task from the classifier output; ok=false when unusable.
