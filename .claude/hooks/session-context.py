@@ -39,9 +39,18 @@ def emit(text):
     print(json.dumps(msg, ensure_ascii=False))
 
 
+def _vt(v):                                          # "0.5.1" -> (0, 5, 1); unparseable -> ()
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return ()
+
+
 if data.get("source", "startup") in ("startup", "resume"):   # compaction keeps the loaded CLAUDE.md: don't touch the record
     try:                                             # the version this session's CLAUDE.md/agents came from
         _vf = os.path.join(root, ".claude", "claude-lean.version")
+        if not os.path.exists(_vf):                  # dev repo: no installed marker, use the root VERSION
+            _vf = os.path.join(root, "VERSION")
         _v = open(_vf, encoding="utf-8").read().strip()
         _sid = "".join(ch for ch in str(data.get("session_id") or "x") if ch.isalnum() or ch in "-_")
         _f = os.path.join(root, "logs", f".lean-ver-{_sid}")
@@ -49,8 +58,15 @@ if data.get("source", "startup") in ("startup", "resume"):   # compaction keeps 
             _old = open(_f).read().strip()
         except OSError:
             _old = ""
+        _lf = os.path.join(root, "logs", ".lean_ver_last")      # newest version any session here started with
+        try:
+            _last = open(_lf).read().strip()
+        except OSError:
+            _last = ""
         if data.get("source") == "resume":
-            if _old and _old != _v:
+            if not _old and _vt(_last) and _vt(_last) < _vt(_v):   # only a real upgrade, not a downgrade/other-session newer version; resumed under a new session id: no per-session record, use the project's last
+                upd = f"claude-lean {_v}로 업데이트됨 (이전 {_last}). {_NOTE}"
+            elif _vt(_old) and _vt(_old) < _vt(_v):
                 upd = f"claude-lean {_v}로 업데이트됨 (이전 {_old}). {_NOTE}"
             elif not _old:                           # session predates the version record (0.4.11 and older)
                 _t0 = _session_start_ts(data.get("transcript_path") or "")
@@ -58,6 +74,7 @@ if data.get("source", "startup") in ("startup", "resume"):   # compaction keeps 
                     upd = f"claude-lean {_v}로 업데이트됨 (이 대화는 이전 버전에서 시작). {_NOTE}"
         os.makedirs(os.path.join(root, "logs"), exist_ok=True)
         open(_f, "w").write(_v)
+        open(_lf, "w").write(_v)
     except OSError:
         pass
 if lean_off():

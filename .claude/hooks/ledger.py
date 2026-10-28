@@ -58,7 +58,7 @@ def first_input(path):
                 return " ".join(str(c or "").split())
     except OSError:
         pass
-    return "x" * 5                    # unknown: do not filter
+    return ""                         # unknown: caller falls back to the agent's own message
 
 
 data = json.load(sys.stdin)
@@ -68,14 +68,16 @@ if not msg:
 kind = data.get("agent_type") or "agent"
 sys.dont_write_bytecode = True
 from _lean import is_ping
-if is_ping(first_input(agent_transcript(data))):
-    sys.exit(0)                       # the input that started this run was a status ping ("진행상황", "ㅇㅇ"): skip
-model = ""
-for _ in range(4):                    # the last transcript line can land just after this hook starts
-    model = model_of(agent_transcript(data))
-    if model:
+_inp = model = ""
+for _ in range(4):                    # one retry loop (worst case ~1.6s < hook timeout 5s): SubagentStop can fire before the agent transcript is fully on disk
+    _tp = agent_transcript(data)
+    _inp = _inp or first_input(_tp)
+    model = model or model_of(_tp)
+    if _inp and model:
         break
     time.sleep(0.4)
+if is_ping(_inp or msg):
+    sys.exit(0)                       # the input that started this run was a status ping ("진행상황", "ㅇㅇ"): skip
 if not model:                         # fall back to the configured model in the agent file
     try:
         cfg = open(os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "agents", kind + ".md"), encoding="utf-8").read()
