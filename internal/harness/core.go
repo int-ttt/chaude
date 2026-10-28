@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"chaude/internal/osenv"
@@ -93,6 +94,15 @@ type Session struct {
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	lines     chan string // closed at process stdout EOF
+
+	// idle reader: consumes stdout while no turn is running (see StartIdle)
+	idleStop  chan struct{}
+	idlePause chan chan struct{}
+	idleDone  chan struct{}
+	mu        sync.Mutex    // guards bgTurn, skip
+	bgTurn    bool          // a child-initiated (background) main turn was seen and its result not yet
+	held      chan struct{} // pause token taken by Send, released by Events
+	skip      int           // results to discard in Events: stray results of background turns
 }
 
 func NewSession(o SessionOpts) (*Session, error) {
@@ -149,6 +159,15 @@ func (s *Session) write(obj any) error {
 }
 
 func (s *Session) Send(text string) error {
+	if s.held == nil {
+		s.held = s.pauseIdle() // idle reader stays off stdout until Events has consumed this turn
+	}
+	s.mu.Lock()
+	if s.bgTurn { // the child is mid background-turn: its `result` precedes ours
+		s.skip++
+		s.bgTurn = false
+	}
+	s.mu.Unlock()
 	return s.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}})
 }
 
@@ -177,6 +196,14 @@ func (s *Session) Interrupt() error {
 // Events calls fn for each parsed event until the turn's `result` (inclusive), process end or timeout.
 // If intr fires, returns true (interrupted) immediately.
 func (s *Session) Events(timeout time.Duration, intr <-chan struct{}, fn func(event)) (interrupted bool) {
+	rel := s.held
+	s.held = nil
+	if rel == nil {
+		rel = s.pauseIdle()
+	}
+	if rel != nil {
+		defer close(rel)
+	}
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for {
@@ -193,6 +220,17 @@ func (s *Session) Events(timeout time.Duration, intr <-chan struct{}, fn func(ev
 			if id := str(ev["session_id"]); id != "" {
 				s.SessionID = id
 			}
+			if ev["type"] == "result" {
+				s.mu.Lock()
+				stray := s.skip > 0
+				if stray {
+					s.skip--
+				}
+				s.mu.Unlock()
+				if stray { // late result of background work, not this turn's
+					continue
+				}
+			}
 			fn(ev)
 			if ev["type"] == "result" {
 				return false
@@ -201,7 +239,87 @@ func (s *Session) Events(timeout time.Duration, intr <-chan struct{}, fn func(ev
 	}
 }
 
+// StartIdle starts a goroutine that reads stdout whenever no Events call is active, so that
+// control_requests and events from background subagents arriving between turns are handled
+// (fn) instead of sitting unread. Events pauses it for the duration of a turn.
+func (s *Session) StartIdle(fn func(event)) {
+	if s.idleStop != nil {
+		return
+	}
+	stop, pause, done := make(chan struct{}), make(chan chan struct{}), make(chan struct{})
+	s.idleStop, s.idlePause, s.idleDone = stop, pause, done
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			case rel := <-pause:
+				select {
+				case <-rel:
+				case <-stop:
+					return
+				}
+			case line, ok := <-s.lines:
+				if !ok {
+					return
+				}
+				ev := parseEvent(line)
+				if id := str(ev["session_id"]); id != "" {
+					s.SessionID = id
+				}
+				s.noteIdle(ev)
+				fn(ev)
+			}
+		}
+	}()
+}
+
+// noteIdle tracks child-initiated main-thread turns: a stray `result` ends one, and a Send
+// while one is in flight must skip its result.
+func (s *Session) noteIdle(ev event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch str(ev["type"]) {
+	case "result":
+		s.bgTurn = false
+	case "assistant", "stream_event":
+		if p, ok := ev["parent_tool_use_id"]; !ok || p == nil || p == "" {
+			s.bgTurn = true
+		}
+	}
+}
+
+// StopIdle stops the idle reader (before the session is drained or closed). Waits briefly
+// if the reader is blocked in a handler.
+func (s *Session) StopIdle() {
+	if s.idleStop == nil {
+		return
+	}
+	close(s.idleStop)
+	select {
+	case <-s.idleDone:
+	case <-time.After(3 * time.Second):
+	}
+	s.idleStop = nil
+}
+
+// pauseIdle blocks the idle reader; the caller closes the returned channel to resume it.
+func (s *Session) pauseIdle() chan struct{} {
+	if s.idleStop == nil {
+		return nil
+	}
+	rel := make(chan struct{})
+	select {
+	case s.idlePause <- rel:
+		return rel
+	case <-s.idleDone:
+		return nil
+	}
+}
+
 func (s *Session) Close() {
+	s.StopIdle()
 	_ = s.stdin.Close()
 	done := make(chan struct{})
 	go func() { _ = s.cmd.Wait(); close(done) }()

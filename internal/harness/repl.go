@@ -162,10 +162,39 @@ func (r *Repl) start() error {
 	}
 	r.sess = s
 	r.tracker = newAgentTracker()
+	tk := r.tracker
+	s.StartIdle(func(ev event) { r.idleEvent(s, tk, ev) })
 	return nil
 }
 
-func (r *Repl) askPermission(req event) {
+// idleEvent handles stdout events that arrive while no turn is running (background subagents).
+func (r *Repl) idleEvent(s *Session, tk *agentTracker, ev event) {
+	switch t := str(ev["type"]); {
+	case t == "control_request" && str(asMap(ev["request"])["subtype"]) == "can_use_tool":
+		r.tr.add("permission_idle", kv{"tool", asMap(ev["request"])["tool_name"]})
+		r.askPerm(s, ev, true)
+	case t == "rate_limit_event":
+		r.rate = asMap(ev["rate_limit_info"])
+	case t == "assistant":
+		for _, bi := range asList(asMap(ev["message"])["content"]) {
+			if b := asMap(bi); str(b["type"]) == "tool_use" {
+				tk.onToolUse(str(b["id"]), str(b["name"]), asMap(b["input"]), time.Now())
+			}
+		}
+	case t == "user":
+		for _, bi := range asList(asMap(ev["message"])["content"]) {
+			if b := asMap(bi); str(b["type"]) == "tool_result" {
+				tk.onToolResult(str(b["tool_use_id"]))
+			}
+		}
+	}
+}
+
+func (r *Repl) askPermission(req event) { r.askPerm(r.sess, req, false) }
+
+// askPerm answers a can_use_tool request on s. idle = no turn running: on the plain path stdin
+// belongs to the prompt loop, so anything that needs asking is denied instead of hanging the child.
+func (r *Repl) askPerm(sess *Session, req event, idle bool) {
 	rq := asMap(req["request"])
 	input := asMap(rq["input"])
 	if input == nil {
@@ -173,13 +202,19 @@ func (r *Repl) askPermission(req event) {
 	}
 	if v, msg := decideMode(permMode(r.mode.Load()), str(rq["tool_name"])); v != "ask" {
 		r.tr.add("permission", kv{"tool", rq["tool_name"]}, kv{"allowed", v == "allow"}, kv{"mode", permMode(r.mode.Load()).String()})
-		_ = r.sess.RespondPermission(str(req["request_id"]), v == "allow", asMap(rq["input"]), msg)
+		_ = sess.RespondPermission(str(req["request_id"]), v == "allow", asMap(rq["input"]), msg)
 		return
 	}
 	if r.ui != nil {
 		allowed := r.a.AutoAllow || r.ui.ask(nilStr(rq["tool_name"]), toolSummary(input))
 		r.tr.add("permission", kv{"tool", rq["tool_name"]}, kv{"allowed", allowed})
-		_ = r.sess.RespondPermission(str(req["request_id"]), allowed, asMap(rq["input"]), "")
+		_ = sess.RespondPermission(str(req["request_id"]), allowed, asMap(rq["input"]), "")
+		return
+	}
+	if idle && !r.a.AutoAllow {
+		r.p(fmt.Sprintf("\n%s[permission denied while idle] %v %s (use /mode auto or acceptEdits)%s", dim, nilStr(rq["tool_name"]), trunc(jsonStr(input), 120), rst), "\n")
+		r.tr.add("permission", kv{"tool", rq["tool_name"]}, kv{"allowed", false}, kv{"idle", true})
+		_ = sess.RespondPermission(str(req["request_id"]), false, nil, "denied: no interactive prompt available between turns")
 		return
 	}
 	r.p(fmt.Sprintf("\n%s[permission] %v %s%s", dim, nilStr(rq["tool_name"]), trunc(jsonStr(input), 200), rst), "\n")
@@ -194,7 +229,7 @@ func (r *Repl) askPermission(req event) {
 	}
 	allowed := strings.HasPrefix(ans, "y")
 	r.tr.add("permission", kv{"tool", rq["tool_name"]}, kv{"allowed", allowed})
-	_ = r.sess.RespondPermission(str(req["request_id"]), allowed, asMap(rq["input"]), "")
+	_ = sess.RespondPermission(str(req["request_id"]), allowed, asMap(rq["input"]), "")
 }
 
 func nilStr(v any) string {
@@ -394,6 +429,7 @@ func (r *Repl) rotate(reason string) {
 	snap := withReco(r.lastReco, r.buildSnapshot(note))
 	drained := false
 	if r.agentsBusy() && r.a.MaxDrain > 0 {
+		r.sess.StopIdle()
 		r.draining = append(r.draining, &drain{sess: r.sess, tr: r.tracker, since: time.Now(), timeout: r.a.DrainTimeout})
 		for len(r.draining) > r.a.MaxDrain {
 			r.draining[0].sess.Close()
