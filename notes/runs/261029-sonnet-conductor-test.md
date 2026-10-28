@@ -1,6 +1,6 @@
-# sonnet conductor (v0.6.7) - PARTIAL
-done (1): markerFilter strips [cat:]/[cat-switch:] lines from displayed stream (category.go; reply text kept raw for parsing); test TestMarkerFilter
-live check (haiku, 2 prompts): markers emitted (stage=category from ""->"파이썬 리스트", then switch ->"김치찌개 레시피"), marker not displayed, rotate #1 fired with reason "category ..." (handoff_valid true, attempts 1). cost $0.0024 + $0.0034.
-not done: conductor mode (flag + /mode, Sonnet main, escalation to Opus, metrics tag of conductor model), live A/B, bump/tag v0.6.7, release, install.
-reason: scope exceeds response cap; plan notes/runs/261028-plan-sonnet-conductor.md is 52KB, not yet read past §3.
-next: read plan §1,§4,§7; design routing prompt (append-system-prompt) + --conductor flag + metrics field "conductor"; then A/B.
+# sonnet conductor (v0.6.7) - DONE
+impl: --conductor flag + "/mode conductor|conductor-off" (plain+TUI); Sonnet main + conductorRule (repl.go): conductor outputs ONLY Agent delegation (task+target), never answers; terse machine-style prompt; judgment/pushback/correction/strategy -> opus-architect; category rotation kept; metrics field "conductor". test conductor_test.go.
+decisions: notes/DECISIONS.md [conductor] x2 (user corrections 261029)
+A/B (1 run, tiny task "Test 함수 개수", no --auto-allow since classifier denied it): opus main $0.2517 (answered via haiku-scout, correct: 1) vs sonnet conductor $0.1230 main-only (delegated to haiku-scout; stdin closed before agent result, so subagent cost + final answer not captured => not comparable, n=1). Source: metrics stage=turn cost_usd.
+release: commit 3144c13, tag v0.6.7, Actions success, installed ~/.local/bin/chaude -> "chaude 0.6.7". master merged into main (ff-free merge, pushed).
+doubts: A/B incomplete; conductor deleg-only behavior verified only by one run.
