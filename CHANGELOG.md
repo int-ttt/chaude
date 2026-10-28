@@ -6,10 +6,11 @@
 - 서브에이전트 고정 오버헤드 줄이기: 정의 간소화, 병렬 읽기 안내, 5분 넘게 쉰 서브에이전트는 캐시가 식는다는 안내 (목표: 서브 첫 요청 중앙값을 종류별 기준 대비 10% 이상 감소, haiku 7.3k → 6.6k 이하·sonnet 9.9k → 8.9k 이하; 안내 문구는 에이전트·skill에만 추가)
 - 작업당 토큰 측정 스크립트 추가 (읽기 전용, 날짜·모델별, 개발용 `tools/`에 두며 사용자 프로젝트에는 설치되지 않음)
 - CLAUDE.md 크기 증가 억제 (6,894바이트 이하 유지, 중복 줄 삭제로 1,000바이트 이상 감소 목표)
-- 내장 general-purpose 에이전트 생성 차단 (claude-code-guide는 허용)
-- 에이전트 공통 꼬리 중복 제거, 줄 수 제한 하나로 통일
+- 내장 general-purpose·Explore·Plan 에이전트 생성 차단 (claude-code-guide는 허용)
+- 에이전트 공통 꼬리 중복 제거, 줄 수 제한 5줄로 통일
 - SessionStart 스냅샷 축소
-- haiku-context-guard의 도달 불가 deny 경로 수정
+- haiku-context-guard: Claude Code가 READ_CAP(8000)을 직접 강제하는지 먼저 확인해, 강제하면 훅 제거·아니면 도달 불가 deny 경로 수정
+- style-adapter [frag] 문구 단축, SessionStart LEDGER 5줄 상한
 - 메인 스레드를 커스텀 에이전트로 실행하는 안은 측정 후 결정 (구현 안 함)
 - 근거와 비교표: `PLAN_0.4.15.md`
 
