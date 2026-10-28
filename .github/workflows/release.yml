@@ -1,8 +1,8 @@
-# Push a tag v<VERSION> (e.g. v0.4.10), or run this workflow by hand, to build and publish a release:
-#   macOS   Claude-Lean-<ver>-mac.zip (Claude Lean.app)   — PyInstaller on macOS
-#   Windows claude-lean-<ver>.exe                         — PyInstaller on Windows
+# Push a tag v<VERSION> (e.g. v0.4.11), or run this workflow by hand, to build and publish a release:
+#   macOS    Claude-Lean-<ver>-mac.zip  (Claude Lean.app: native dialogs, built on Linux, no runtime bundled)
+#   Windows  claude-lean-<ver>.exe      (C# WinForms compiled with the csc.exe that ships with Windows)
 #   Terminal claude-lean-<ver>-terminal.zip (macOS/Linux: unzip, ./install.sh)
-# Release notes = that version's section of CHANGELOG.md.
+# Release notes = that version's section of CHANGELOG.md. The new release is marked Latest.
 name: release
 on:
   push:
@@ -23,45 +23,33 @@ jobs:
           name: unix
           path: |
             dist/*-terminal.zip
+            dist/*-mac.zip
             dist/NOTES.md
-
-  mac:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: python3 -m pip install pyinstaller
-      - run: python3 tools/build_release.py dist --stage-only
-      - name: Build Claude Lean.app
-        run: |
-          VER=$(cat VERSION)
-          pyinstaller --noconfirm --windowed --name "Claude Lean" --osx-bundle-identifier io.github.int-ttt.claude-lean \
-            --add-data "dist/stage/pkg-unix:pkg" tools/configure.py
-          ditto -c -k --keepParent "dist/Claude Lean.app" "Claude-Lean-$VER-mac.zip"
-      - uses: actions/upload-artifact@v4
-        with: { name: mac, path: "Claude-Lean-*-mac.zip" }
 
   windows:
     runs-on: windows-latest
-    defaults:
-      run: { shell: bash }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: python -m pip install pyinstaller
-      - run: python tools/build_release.py dist --stage-only
+      - run: python tools/build_release.py dist
       - name: Build claude-lean.exe
+        shell: pwsh
         run: |
-          VER=$(cat VERSION)
-          pyinstaller --noconfirm --onefile --windowed --name claude-lean --add-data "dist/stage/pkg-win;pkg" tools/configure.py
-          cp dist/claude-lean.exe "claude-lean-$VER.exe"
+          $ver = (Get-Content VERSION -Raw).Trim()
+          $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
+          & "$fw\csc.exe" /nologo /target:winexe /optimize "/out:claude-lean-$ver.exe" `
+            "/resource:dist\stage\pkg-win.zip,pkg.zip" `
+            /reference:System.Windows.Forms.dll /reference:System.Drawing.dll `
+            "/reference:$fw\System.IO.Compression.dll" "/reference:$fw\System.IO.Compression.FileSystem.dll" `
+            win\installer\Installer.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-Item "claude-lean-$ver.exe" | Select-Object Name, Length
       - uses: actions/upload-artifact@v4
         with: { name: windows, path: "claude-lean-*.exe" }
 
   release:
-    needs: [unix, mac, windows]
+    needs: [unix, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,6 +61,6 @@ jobs:
         run: |
           VER=$(cat VERSION)
           ls -la out
-          gh release create "v$VER" out/*.zip out/*.exe \
+          gh release create "v$VER" out/*.zip out/*.exe --latest \
             --target "$GITHUB_SHA" --title "Claude Lean $VER" --notes-file out/NOTES.md \
             || gh release upload "v$VER" out/*.zip out/*.exe --clobber

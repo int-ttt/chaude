@@ -1,6 +1,6 @@
 # Claude Lean
 
-**버전 0.4.10** · 버전별 변경 사항은 `CHANGELOG.md`
+**버전 0.4.11** · 버전별 변경 사항은 `CHANGELOG.md`
 
 Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 설정 묶음입니다. Opus는 대화를 듣고 판단하고 설명하는 일만 하고, 파일·웹·명령 작업은 하위 에이전트(Haiku, Sonnet, 필요할 때만 Opus)가 합니다. 프로젝트마다 설치하며, 프로젝트 고유 내용은 그 프로젝트의 `notes/`에만 쌓입니다.
 
@@ -15,11 +15,11 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
 ## 설치
 | 환경 | 받을 파일 | 실행 |
 |---|---|---|
-| macOS | `Claude-Lean-<버전>-mac.zip` | 풀어서 `Claude Lean.app` 실행 → 설정 창 (서명되지 않은 앱이라 처음엔 우클릭 → 열기) |
+| macOS (Apple 칩) | `Claude-Lean-<버전>-mac.zip` | 풀어서 `Claude Lean.app` 실행 → macOS 기본 대화상자로 폴더·작업·선택사항 선택 (서명되지 않은 앱이라 처음엔 우클릭 → 열기) |
 | Windows | `claude-lean-<버전>.exe` | 실행 → 설정 창 (SmartScreen이 막으면 추가 정보 → 실행) |
 | macOS·Linux 터미널 | `claude-lean-<버전>-terminal.zip` | 풀고 설치 스크립트 실행 → 색으로 구분된 질문 (폴더를 붙여 실행하면 질문 없이 설치) |
 
-모두 Python 3이 필요합니다. 설치 후 훅이 Python으로 동작하기 때문입니다.
+모두 Python 3이 필요합니다. 설치 후 훅이 Python으로 동작하기 때문입니다. 설치 프로그램 자체는 Python을 묶지 않고 OS 기본 기능으로 창을 띄워서 수백 KB 안팎입니다.
 
 설치할 때 고르는 것:
 - **프로젝트 폴더:** 여러 개 가능합니다.

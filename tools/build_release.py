@@ -12,7 +12,7 @@ import os, re, shutil, subprocess, sys, zipfile
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 OUT = os.path.abspath(args[0] if args else os.path.join(PKG, "dist"))
-EXCLUDE = {".git", ".github", "dist", "history", "logs", "notes", "__pycache__", "win", ".gitignore", "build"}
+EXCLUDE = {".git", ".github", "dist", "history", "logs", "notes", "__pycache__", "win", "mac", ".gitignore", "build"}
 ver = open(os.path.join(PKG, "VERSION"), encoding="utf-8").read().strip()
 tag = os.environ.get("GITHUB_REF_NAME", "")
 if tag.startswith("v") and tag != f"v{ver}":
@@ -39,12 +39,38 @@ if "--stage-only" in sys.argv:
     sys.exit(0)
 
 # macOS/Linux terminal package, the usual way: unzip, then ./install.sh
-zp = os.path.join(OUT, f"claude-lean-{ver}-terminal.zip")
-with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
-    for root, _, files in os.walk(unix):
-        for f in files:
-            full = os.path.join(root, f)
-            info = zipfile.ZipInfo.from_file(full, os.path.join("claude-lean", os.path.relpath(full, unix)))
-            info.compress_type = zipfile.ZIP_DEFLATED
-            z.writestr(info, open(full, "rb").read())          # from_file keeps the executable bits
+def zipdir(src, zp, top):
+    with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, _, files in os.walk(src):
+            for f in files:
+                full = os.path.join(root, f)
+                info = zipfile.ZipInfo.from_file(full, os.path.join(top, os.path.relpath(full, src)))
+                info.compress_type = zipfile.ZIP_DEFLATED
+                z.writestr(info, open(full, "rb").read())
+
+
+zipdir(unix, os.path.join(OUT, f"claude-lean-{ver}-terminal.zip"), "claude-lean")
+
+# macOS app: a plain bundle around mac/launcher.sh (native dialogs via osascript), no runtime bundled
+app = os.path.join(stage, "Claude Lean.app", "Contents")
+shutil.copytree(unix, os.path.join(app, "Resources", "pkg"))
+os.makedirs(os.path.join(app, "MacOS"))
+shutil.copy(os.path.join(PKG, "mac", "launcher.sh"), os.path.join(app, "MacOS", "claude-lean"))
+os.chmod(os.path.join(app, "MacOS", "claude-lean"), 0o755)
+open(os.path.join(app, "Info.plist"), "w", encoding="utf-8").write(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>claude-lean</string>
+  <key>CFBundleIdentifier</key><string>io.github.int-ttt.claude-lean</string>
+  <key>CFBundleName</key><string>Claude Lean</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>{ver}</string>
+  <key>CFBundleVersion</key><string>{ver}</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+</dict></plist>
+""")
+zipdir(os.path.dirname(app), os.path.join(OUT, f"Claude-Lean-{ver}-mac.zip"), "Claude Lean.app")
+
+# Windows: the package the exe embeds (compiled on Windows from win/installer/Installer.cs)
+zipdir(os.path.join(stage, "pkg-win"), os.path.join(stage, "pkg-win.zip"), "")
 print("built", ver, sorted(n for n in os.listdir(OUT) if n != "stage"))

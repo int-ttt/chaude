@@ -9,7 +9,7 @@ import json, os, re, shutil, sys
 
 PKG = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(os.path.dirname(PKG), "claude-opus-lean-win")
-SKIP = {"install.sh", "fresh_start.sh", "win", "logs", "notes", "__pycache__", ".git", ".github", "dist", "history", ".gitignore"}
+SKIP = {"install.sh", "fresh_start.sh", "win", "logs", "notes", "__pycache__", ".git", ".github", "dist", "history", ".gitignore", "mac"}
 
 if os.path.exists(OUT):
     shutil.rmtree(OUT)

@@ -2,6 +2,11 @@
 
 설치된 버전은 프로젝트의 `.claude/claude-lean.version`에서 확인할 수 있습니다. 업그레이드는 새 패키지로 설치를 다시 실행하면 됩니다 (`APPLY_GUIDE.md` 5-1).
 
+## 0.4.11
+- 설치 프로그램 용량 축소: Python을 묶지 않고 OS 기본 기능으로 창을 띄움. macOS 앱은 macOS 기본 대화상자(AppleScript), Windows exe는 Windows에 들어 있는 C# 컴파일러로 만든 작은 창 프로그램 (각각 수백 KB 안팎, 이전 수십 MB)
+- 인텔 Mac 빌드는 하지 않음
+- 새 릴리스를 "Latest"로 표시
+
 ## 0.4.10
 - 버전 체계를 0.4.10부터 시작 (태그 `v0.4.10` 형식). 이전 날짜 버전은 아래에 그대로 둠
 - 배포 형태: macOS `Claude Lean.app`, Windows `claude-lean.exe` (둘 다 더블클릭하면 설정 창), macOS/Linux 터미널용은 기존 방식 zip (풀고 설치 스크립트 실행)
