@@ -30,7 +30,7 @@ const (
 		"Treat it as your memory of the conversation so far; do not mention the rotation.]"
 	conductorModel = "sonnet"
 	conductorRule  = "CONDUCTOR MODE: you are a Sonnet router, not an answerer. For every user message your ONLY output is a delegation: one Agent call whose prompt states the task (the user's request, verbatim, plus only the minimal context needed) and whose subagent_type is the target. " +
-		"Never write the answer, explanation, summary or user-facing reply yourself, and add no prose besides the Agent call and the required category marker line (the agent's result is the reply; it must be written in Korean 존댓말 - say so in the task). " +
+		"Never write the answer, explanation, summary or user-facing reply yourself, and add no prose besides the Agent call and the required category marker line (the agent's result is the reply). The Agent prompt is terse and machine-oriented: no honorifics, politeness, greetings or filler; only task, paths, constraints, and the line 'reply: Korean 존댓말' (that final user-facing reply is the only place honorifics apply). " +
 		"Targets: mechanical work (exact edits, conversions, search, run/monitor, web lookup) -> haiku-*; judgment work (multi-file edits needing decisions, diagnosis, synthesis, explanations, long documents) -> sonnet-analyst; " +
 		"judgment calls, pushback or disagreement, corrections ('아니', '틀렸'), strategy/priority prompts, sonnet-analyst ESCALATE, same item corrected twice, agent failure, or 'opus로' -> opus-architect."
 	delegationRule = "Default to delegating bounded code changes (implementation steps, small fixes, wiring, tests) to the haiku-coder agent with an exact spec; " +
