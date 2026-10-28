@@ -361,6 +361,17 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	}
 	_ = r.sess.Send(text)
 	var reply strings.Builder
+	var mf markerFilter
+	emit := func(txt string) {
+		if txt == "" {
+			return
+		}
+		if r.ui != nil {
+			r.ui.send(textMsg(txt))
+		} else {
+			r.p(txt, "")
+		}
+	}
 	var lastUsage map[string]any
 	var result event
 	handle := func(ev event) {
@@ -374,10 +385,12 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 			if str(e["type"]) == "content_block_delta" && str(d["type"]) == "text_delta" {
 				txt := str(d["text"])
 				reply.WriteString(txt)
-				if show && r.ui != nil {
-					r.ui.send(textMsg(txt))
-				} else if show {
-					r.p(txt, "")
+				if show {
+					if r.a.NoCategoryRotate {
+						emit(txt)
+					} else {
+						emit(mf.Feed(txt))
+					}
 				}
 			}
 		case t == "assistant" && isMain:
@@ -441,6 +454,9 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 				result = ev
 			}
 		})
+	}
+	if show && !r.a.NoCategoryRotate {
+		emit(mf.Flush())
 	}
 	if show && r.ui != nil {
 		r.ui.send(textEndMsg{})

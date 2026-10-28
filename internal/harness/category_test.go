@@ -40,3 +40,20 @@ func TestCategoryRuleSize(t *testing.T) {
 		t.Fatalf("rule too long: %d bytes", n)
 	}
 }
+
+func TestMarkerFilter(t *testing.T) {
+	var f markerFilter
+	var got string
+	for _, c := range []string{"안녕", "하세요\n\n[ca", "t-switch: re", "sume]"} {
+		got += f.Feed(c)
+	}
+	got += f.Flush()
+	if got != "안녕하세요\n\n" {
+		t.Fatalf("got %q", got)
+	}
+	f = markerFilter{}
+	got = f.Feed("see [link] here\n[x] y") + f.Flush()
+	if got != "see [link] here\n[x] y" {
+		t.Fatalf("got %q", got)
+	}
+}

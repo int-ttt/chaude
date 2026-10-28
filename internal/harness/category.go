@@ -46,3 +46,40 @@ func categoryRotation(prompt, reply, cur string, disabled bool) (cat string, rot
 	}
 	return cat, true
 }
+
+var catLineRe = regexp.MustCompile("^[\\s*>`]*\\[(cat|cat-switch):[^\\]\\n]*\\][\\s*`]*$")
+
+// markerFilter strips [cat: X] / [cat-switch: X] lines from streamed text. A trailing partial line that
+// starts with '[' is held back until it is complete.
+type markerFilter struct{ pend string }
+
+// Feed returns the text that is safe to display after adding chunk.
+func (f *markerFilter) Feed(chunk string) string {
+	f.pend += chunk
+	i := strings.LastIndex(f.pend, "\n")
+	var out strings.Builder
+	complete := ""
+	if i >= 0 {
+		complete, f.pend = f.pend[:i+1], f.pend[i+1:]
+	}
+	for _, ln := range strings.SplitAfter(complete, "\n") {
+		if ln != "" && !catLineRe.MatchString(strings.TrimRight(ln, "\r\n")) {
+			out.WriteString(ln)
+		}
+	}
+	if !strings.HasPrefix(strings.TrimLeft(f.pend, " \t*>`"), "[") && strings.TrimSpace(f.pend) != "" {
+		out.WriteString(f.pend)
+		f.pend = ""
+	}
+	return out.String()
+}
+
+// Flush returns the held remainder (dropped when it is a marker line).
+func (f *markerFilter) Flush() string {
+	p := f.pend
+	f.pend = ""
+	if catLineRe.MatchString(strings.TrimSpace(p)) {
+		return ""
+	}
+	return p
+}
