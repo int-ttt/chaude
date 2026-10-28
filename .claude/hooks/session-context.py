@@ -105,6 +105,7 @@ if data.get("source", "startup") == "startup":
         import glob as _g
         sys.path.insert(0, os.path.join(root, "scripts"))
         from claude_history import history_dir
+        from _lean import is_ping
         hdir = history_dir(root)
         cur = os.path.basename(data.get("transcript_path") or "")
         prev = sorted((p for p in _g.glob(os.path.join(hdir, "*.jsonl")) if os.path.basename(p) != cur),
@@ -125,7 +126,7 @@ if data.get("source", "startup") == "startup":
                             continue
                         c = "\n".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
                     c = " ".join(str(c or "").split())
-                    if c and not c.startswith("<"):
+                    if c and not c.startswith("<") and not (e.get("type") == "user" and is_ping(c)):
                         who = "user" if e.get("type") == "user" else "claude"
                         msgs.append(f"{who}: {c[:200]}")
         if msgs:

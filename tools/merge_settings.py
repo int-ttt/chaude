@@ -97,7 +97,7 @@ for k in ("model", "effortLevel", "autoCompactWindow"):
 if main:
     cur["model"] = main
 env = cur.setdefault("env", {})
-for k, v in ours["env"].items():                  # a user's own value (e.g. HAIKU_CALL_MAX 15000) is kept
+for k, v in ours["env"].items():                  # a user's own value (e.g. a hand-edited LEAN_RESET_AT) is kept
     if k not in env or env[k] in (OLD_ENV.get(k, ()) if PREV_OLDER else ()):
         env[k] = v
 removed = [k for k, v in DROPPED_ENV.items() if env.get(k) in v]

@@ -41,11 +41,35 @@ def model_of(path):
     return ""
 
 
+def first_input(path):
+    """Text of the first user message (the request the run started from); "" if unreadable."""
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except Exception:
+                    continue
+                if e.get("type") != "user":
+                    continue
+                c = (e.get("message") or {}).get("content")
+                if isinstance(c, list):
+                    c = " ".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+                return " ".join(str(c or "").split())
+    except OSError:
+        pass
+    return "x" * 5                    # unknown: do not filter
+
+
 data = json.load(sys.stdin)
 msg = (data.get("last_assistant_message") or "").strip()
-if len(msg) < 5 or re.fullmatch(r"(진행\s*상황|상황|뭐\s*해\??|끝났어\??|다 됐어\??|ㅇㅇ|ㅇㅋ|네|응|ok|yes)[\s?!.]*", msg, re.I):
-    sys.exit(0)                       # too short / status ping: nothing worth carrying over
+if not msg:
+    sys.exit(0)
 kind = data.get("agent_type") or "agent"
+sys.dont_write_bytecode = True
+from _lean import is_ping
+if is_ping(first_input(agent_transcript(data))):
+    sys.exit(0)                       # the input that started this run was a status ping ("진행상황", "ㅇㅇ"): skip
 model = ""
 for _ in range(4):                    # the last transcript line can land just after this hook starts
     model = model_of(agent_transcript(data))

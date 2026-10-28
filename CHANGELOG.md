@@ -9,6 +9,7 @@
 - 내장 general-purpose·Explore·Plan 에이전트 생성 차단 (claude-code-guide는 허용)
 - 에이전트 공통 꼬리 중복 제거, 줄 수 제한 5줄로 통일
 - SessionStart 스냅샷 축소
+- LEDGER 기록 거름 기준을 결과문이 아니라 에이전트를 시작한 입력으로 변경 ("ㅇㅇ"·"진행상황" 같은 입력은 기록 안 함, 이전 세션 마지막 메시지에서도 제외)
 - haiku-context-guard: Claude Code가 Read 상한(8000)을 직접 적용하는 것을 확인해 크기 추정 코드와 `HAIKU_CALL_MAX`를 없애고, Haiku의 `allow_large` 차단만 남김 (Read에만 실행)
 - style-adapter [frag] 문구 단축, SessionStart LEDGER 5줄 상한
 - 메인 스레드를 커스텀 에이전트로 실행하는 안은 측정 후 결정 (구현 안 함)
