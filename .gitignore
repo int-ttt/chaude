@@ -1,0 +1,6 @@
+logs/
+notes/
+__pycache__/
+*.pyc
+.claude-backup-*/
+.claude/lean-off
