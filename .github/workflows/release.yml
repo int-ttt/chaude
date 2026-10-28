@@ -1,5 +1,5 @@
 # Push a tag v<VERSION> (e.g. v0.4.11), or run this workflow by hand, to build and publish a release:
-#   macOS    Claude-Lean-<ver>-mac.zip  (Claude Lean.app: native dialogs, built on Linux, no runtime bundled)
+#   macOS    Claude-Lean-<ver>-mac.zip  (Claude Lean.app: native dialogs, no runtime bundled; checked, ad-hoc signed and zipped on macOS)
 #   Windows  claude-lean-<ver>.exe      (C# WinForms compiled with the csc.exe that ships with Windows)
 #   Terminal claude-lean-<ver>-terminal.zip (macOS/Linux: unzip, ./install.sh)
 # Release notes = that version's section of CHANGELOG.md. The new release is marked Latest.
@@ -23,8 +23,29 @@ jobs:
           name: unix
           path: |
             dist/*-terminal.zip
-            dist/*-mac.zip
             dist/NOTES.md
+
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python3 tools/build_release.py dist
+      - name: Check, sign and zip Claude Lean.app
+        run: |
+          VER=$(cat VERSION)
+          APP="dist/stage/Claude Lean.app"
+          plutil -lint "$APP/Contents/Info.plist"
+          bash -n "$APP/Contents/MacOS/claude-lean"
+          osascript -e 'return "osascript ok"'
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --verbose=1 "$APP"
+          rm -f dist/*-mac.zip
+          ditto -c -k --keepParent "$APP" "Claude-Lean-$VER-mac.zip"
+          ls -la Claude-Lean-*-mac.zip
+      - uses: actions/upload-artifact@v4
+        with: { name: mac, path: "Claude-Lean-*-mac.zip" }
 
   windows:
     runs-on: windows-latest
@@ -49,7 +70,7 @@ jobs:
         with: { name: windows, path: "claude-lean-*.exe" }
 
   release:
-    needs: [unix, windows]
+    needs: [unix, mac, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
