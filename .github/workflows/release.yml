@@ -1,5 +1,8 @@
-# Push a tag v<VERSION> (e.g. v2026.10.28-9) → builds the macOS and Windows zips and publishes a GitHub release
-# whose notes are that version's section of CHANGELOG.md.
+# Push a tag v<VERSION> (e.g. v0.4.10), or run this workflow by hand, to build and publish a release:
+#   macOS   Claude-Lean-<ver>-mac.zip (Claude Lean.app)   — PyInstaller on macOS
+#   Windows claude-lean-<ver>.exe                         — PyInstaller on Windows
+#   Terminal claude-lean-<ver>-terminal.zip (macOS/Linux: unzip, ./install.sh)
+# Release notes = that version's section of CHANGELOG.md.
 name: release
 on:
   push:
@@ -8,19 +11,68 @@ on:
 permissions:
   contents: write
 jobs:
-  release:
+  unix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python3 tools/build_release.py dist
+      - uses: actions/upload-artifact@v4
         with:
-          python-version: "3.12"
-      - name: Build
-        run: python3 tools/build_release.py dist
+          name: unix
+          path: |
+            dist/*-terminal.zip
+            dist/NOTES.md
+
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python3 -m pip install pyinstaller
+      - run: python3 tools/build_release.py dist --stage-only
+      - name: Build Claude Lean.app
+        run: |
+          VER=$(cat VERSION)
+          pyinstaller --noconfirm --windowed --name "Claude Lean" --osx-bundle-identifier io.github.int-ttt.claude-lean \
+            --add-data "dist/stage/pkg-unix:pkg" tools/configure.py
+          ditto -c -k --keepParent "dist/Claude Lean.app" "Claude-Lean-$VER-mac.zip"
+      - uses: actions/upload-artifact@v4
+        with: { name: mac, path: "Claude-Lean-*-mac.zip" }
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run: { shell: bash }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m pip install pyinstaller
+      - run: python tools/build_release.py dist --stage-only
+      - name: Build claude-lean.exe
+        run: |
+          VER=$(cat VERSION)
+          pyinstaller --noconfirm --onefile --windowed --name claude-lean --add-data "dist/stage/pkg-win;pkg" tools/configure.py
+          cp dist/claude-lean.exe "claude-lean-$VER.exe"
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: "claude-lean-*.exe" }
+
+  release:
+    needs: [unix, mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VER=$(cat VERSION)
-          gh release create "v$VER" dist/*.zip --title "claude-lean $VER" --notes-file dist/NOTES.md \
-            || gh release upload "v$VER" dist/*.zip --clobber
+          ls -la out
+          gh release create "v$VER" out/*.zip out/*.exe \
+            --target "$GITHUB_SHA" --title "Claude Lean $VER" --notes-file out/NOTES.md \
+            || gh release upload "v$VER" out/*.zip out/*.exe --clobber

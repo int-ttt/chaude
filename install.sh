@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Install the Opus-lean setup into a project.
 # usage: ./install.sh <project-dir> [--main opus|sonnet]
-#        ./install.sh            (no arguments: settings window / questions to pick folders and options)
+#        ./install.sh            (no arguments: asks for folders, the task and options in the terminal)
 # Safe to re-run: existing CLAUDE.md / settings.json are backed up and merged, not overwritten.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
-if [ $# -eq 0 ]; then exec python3 "$SRC/tools/configure.py"; fi
+if [ $# -eq 0 ]; then exec python3 "$SRC/tools/configure.py" --tty; fi
 DST="${1:?usage: ./install.sh <project-dir> [--main opus|sonnet]}"
 DST="$(cd "$DST" && pwd)"
 MAIN_MODEL=""
@@ -16,7 +16,7 @@ if [ "${2:-}" = "--main" ]; then
 fi
 export MAIN_MODEL
 
-command -v python3 >/dev/null || { echo "python3가 필요합니다. 터미널에서 xcode-select --install 실행 후 다시 시도하세요."; exit 1; }
+command -v python3 >/dev/null || { echo "python3가 필요합니다. macOS: xcode-select --install, Linux: 패키지 관리자로 python3 설치 후 다시 시도하세요."; exit 1; }
 
 TS="$(date +%Y%m%d-%H%M%S)"
 BK="$DST/.claude-backup-$TS-$$"

@@ -1,6 +1,6 @@
 ---
 name: opus-architect
-description: Opus. Work the main thread judged complex (3+ complexity signals, or Sonnet already failed) - design, architecture, algorithms, hard diagnosis, strategy or document-structure decisions. Decides first; does small or inseparable implementation itself, otherwise writes a plan that Sonnet/Haiku implement.
+description: Opus. Work sonnet-analyst escalated (ESCALATE scope file), the user forced with opus로, or that already failed - design, architecture, algorithms, hard diagnosis, strategy or document-structure decisions. Decides first; does small or inseparable implementation itself, otherwise writes a plan that Sonnet/Haiku implement.
 tools: Read, Write, Edit, Bash, Grep, Glob, Agent
 model: opus
 effort: high

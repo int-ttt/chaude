@@ -1,6 +1,6 @@
 # Claude Code — Opus는 듣기만, 작업은 하위 에이전트, Opus 토큰 최소화
 
-**버전 2026.10.28-9** · 버전별 변경 사항은 `CHANGELOG.md`
+**버전 0.4.10** · 버전별 변경 사항은 `CHANGELOG.md`
 
 메인 세션(Opus)은 **입력을 듣고 → 판단하고 → 에이전트에게 맡기고 → 결과를 이해하기 쉽게 설명**합니다. 파일·웹·명령 도구는 메인 세션에서 훅으로 차단됩니다.
 
@@ -87,10 +87,15 @@ Haiku 에이전트가 모델에 보내는 입력(대화 기록 + 도구 결과)�
 어떤 프로젝트에도 적용됩니다. 프로젝트 고유 내용은 각 프로젝트의 `notes/`에만 들어가고, 에이전트·훅·규칙은 공통입니다.
 `./install.sh <프로젝트 폴더> [--main sonnet]` 한 줄이면 됩니다. 기존 대화 정리까지 여러 프로젝트를 한 번에 하려면 `./fresh_start.sh <폴더> <폴더> ...`. 기존 `CLAUDE.md`·`settings.json`은 백업 후 병합됩니다. 단계별 안내와 확인 방법, 되돌리기는 `APPLY_GUIDE.md`, 이 패키지를 계속 다듬는 세션의 인계는 `DESIGN_HANDOFF.md`를 보세요.
 
-**설정 창:** 설치 스크립트를 프로젝트 폴더 없이 실행하면 설정 창이 열립니다. 폴더를 고르고(여러 개 가능) 작업(설치만 / 기존 대화 정리 후 새로 시작)과 선택사항을 정합니다: 메인 모델, 답변 방식(설명형/간결형), 정보 문장 메모, 리셋 안내, 대화 기록 저장, Haiku 상한, Sonnet·Opus → Haiku 연계, 설치 직후 모드. 창을 열 수 없으면 터미널에서 같은 내용을 묻습니다. 고른 값은 프로젝트의 `.claude/claude-lean.options.json`에 저장되어 업그레이드해도 유지됩니다.
+**설치 방식:** macOS·Linux 터미널에서 설치 스크립트를 폴더 없이 실행하면 색으로 구분된 질문이 이어집니다: 프로젝트 폴더 입력(끌어다 놓기 가능, 여러 개) → 작업 선택(설치만 / 기존 대화 정리 후 새로 시작) → 선택사항(지금 값 그대로 / 하나씩 고르기) → 확인 → 설치. Mac 앱과 Windows exe, Windows 설치 스크립트는 같은 내용을 설정 창으로 보여 줍니다. 선택사항: 메인 모델, 답변 방식(설명형/간결형), 정보 문장 메모, 리셋 안내, 대화 기록 저장, Haiku 상한, Sonnet·Opus → Haiku 연계, 설치 직후 모드. 창을 열 수 없으면 터미널에서 같은 내용을 묻습니다. 고른 값은 프로젝트의 `.claude/claude-lean.options.json`에 저장되어 업그레이드해도 유지됩니다.
 
-## 릴리스 (GitHub)
-`VERSION`, README 첫머리 버전, `CHANGELOG.md` 맨 위 항목을 같은 버전으로 고친 뒤 `git tag v<버전>` → `git push origin v<버전>`. GitHub Actions가 Mac·Windows zip을 만들어 그 버전의 변경 내역과 함께 릴리스에 올립니다. 버전 표기가 서로 다르면 실패합니다. 직접 만들려면 `python3 tools/build_release.py`.
+## 내려받기와 릴리스 (GitHub)
+릴리스 페이지에 세 가지가 올라갑니다. 모두 Python 3이 필요합니다(설치 후 훅이 Python으로 동작).
+- macOS: `Claude-Lean-<버전>-mac.zip`을 풀고 `Claude Lean.app` 실행 (서명되지 않은 앱이라 처음엔 우클릭 → 열기)
+- Windows: `claude-lean-<버전>.exe` 실행 (SmartScreen이 막으면 추가 정보 → 실행)
+- macOS/Linux 터미널 (기존 방식): `claude-lean-<버전>-terminal.zip`을 풀고 설치 스크립트 실행
+
+새 릴리스: `VERSION`, README 첫머리 버전, `CHANGELOG.md` 맨 위 항목을 같은 버전(예: 0.4.11)으로 고치고 커밋 → `git tag v<버전>` → `git push origin v<버전>` (또는 GitHub Actions의 release → Run workflow). Mac·Windows·Linux에서 동시에 빌드해 릴리스 하나로 올립니다. 버전 표기가 서로 다르면 실패합니다. 로컬에서 터미널용 zip만 만들려면 `python3 tools/build_release.py`.
 
 ## 기타 파일
 - `history/`: 이 패키지를 만든 설계 대화 기록 (텍스트, 사용자 메시지와 답변만)
