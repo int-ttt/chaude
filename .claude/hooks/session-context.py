@@ -12,6 +12,13 @@ from _lean import lean_off
 
 data = json.load(sys.stdin) if not sys.stdin.isatty() else {}
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
+try:                                                 # the version this session's CLAUDE.md/agents came from
+    _v = open(os.path.join(root, ".claude", "claude-lean.version"), encoding="utf-8").read().strip()
+    _sid = "".join(ch for ch in str(data.get("session_id") or "x") if ch.isalnum() or ch in "-_")
+    os.makedirs(os.path.join(root, "logs"), exist_ok=True)
+    open(os.path.join(root, "logs", f".lean-ver-{_sid}"), "w").write(_v)
+except OSError:
+    pass
 if lean_off():
     print("[normal mode] The claude-lean policy in CLAUDE.md is OFF: work directly with tools, normal-length replies. "
           "(The user types 절약모드 to turn it back on.)")

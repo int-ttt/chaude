@@ -130,6 +130,43 @@ if (os.environ.get("STYLE_INBOX", "1") != "0" and 8 <= len(prompt) <= 120 and "\
 
 tags = ["[lean] claude-lean is back on: delegate per policy."] if was_off else []
 pending = tail(inbox, 1000)
+
+# 0b. Upgraded while this session was open: CLAUDE.md was read at startup, so inject the new policy once.
+def _session_version():
+    p = os.path.join(root, "logs", f".lean-ver-{sid}")
+    try:
+        return open(p).read().strip(), p
+    except OSError:
+        pass
+    try:                                       # sessions started before this check existed: compare times
+        with open(data.get("transcript_path") or "", encoding="utf-8", errors="ignore") as fh:
+            first = json.loads(fh.readline() or "{}").get("timestamp", "")
+        started = time.mktime(time.strptime(first[:19], "%Y-%m-%dT%H:%M:%S")) - time.timezone
+        vf = os.path.join(root, ".claude", "claude-lean.version")
+        return ("?" if os.path.getmtime(vf) > started else None), p
+    except Exception:
+        return None, p
+
+
+try:
+    installed = open(os.path.join(root, ".claude", "claude-lean.version"), encoding="utf-8").read().strip()
+except OSError:
+    installed = ""
+loaded, ver_state = _session_version()
+if installed and loaded and loaded != installed:
+    md = open(os.path.join(root, "CLAUDE.md"), encoding="utf-8").read()
+    s, e = md.find("<!-- claude-lean:start -->"), md.find("<!-- claude-lean:end -->")
+    policy = md[s + 26:e].strip() if s != -1 and e != -1 else ""
+    tags.append(f"[update] claude-lean was upgraded to {installed} while this session was open. The policy below replaces the one "
+          "loaded at session start; follow it from now on. New agents and settings take effect only after a restart: add one line "
+          "telling the user that /exit then claude in the same terminal applies everything (the conversation continues).\n"
+          + policy)
+    try:
+        os.makedirs(os.path.dirname(ver_state), exist_ok=True)
+        open(ver_state, "w").write(installed)
+    except OSError:
+        pass
+
 if pending:
     tags.append("[inbox] user notes since your last turn (apply them; facts → FACTS.md via agent):\n" + "\n".join(pending))
     os.remove(inbox)
