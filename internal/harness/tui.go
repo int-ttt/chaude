@@ -108,7 +108,7 @@ type tuiModel struct {
 	curUp    atomic.Int32
 	popH     int
 	panelH   int // foreground rows below the input box
-	bgH      int // background rows directly under the transcript
+	bgH      int // background rows below the input box, above the status line
 	lastRun  int // running agent count at the last refresh (idle tick redraw)
 	unseen   bool
 	sig      int
@@ -694,7 +694,7 @@ func (m *tuiModel) syncCursor() {
 	m.in.View(maxInputRows, "", dimSt) // keeps m.in.top current
 	vis := row - m.in.top
 	m.curCol.Store(int32(1 + 2 + col + 1))               // border + prompt "> " + text; 1-based column
-	m.curUp.Store(int32(m.inH - 1 - vis + 2 + m.panelH)) // rows below cursor in box + bottom border + status line
+	m.curUp.Store(int32(m.inH - 1 - vis + 2 + m.panelH + m.bgH)) // rows below cursor in box + bottom border + status line
 }
 
 func (m *tuiModel) after() {
@@ -854,7 +854,7 @@ func (m *tuiModel) View() string {
 	bl := m.bgLines()
 	bgPanel := ""
 	if len(bl) > 0 {
-		bgPanel = "\n" + strings.Join(bl, "\n")
+		bgPanel = strings.Join(bl, "\n") + "\n"
 	}
 	changed := len(pl) != m.panelH || len(bl) != m.bgH || len(ql) != prevQ
 	m.panelH, m.bgH, m.queueH = len(pl), len(bl), len(ql) // computed in the frame it is drawn: layout height always matches
@@ -941,7 +941,7 @@ func (m *tuiModel) View() string {
 	if len(ql) > 0 {
 		qv = strings.Join(ql, "\n") + "\n"
 	}
-	return vv + bgPanel + "\n" + pop + qv + box + "\n" + panel + m.statusLine()
+	return vv + "\n" + pop + qv + box + "\n" + panel + bgPanel + m.statusLine()
 }
 
 // runTUI is the interactive entry: same Repl, rendered with bubbletea in the alt screen.
@@ -1009,7 +1009,7 @@ const (
 // panelLines: one row per running foreground delegated session (below the input box).
 func (m *tuiModel) panelLines() []string { return m.rows(false, 0) }
 
-// bgLines: one row per running background agent, drawn directly under the transcript.
+// bgLines: one row per running background agent, drawn below the input box (`상태 - 이름`).
 func (m *tuiModel) bgLines() []string { return m.rows(true, len(m.panelLines())) }
 
 // rows: description and first prompt line of running agents of one kind; `used` rows are already
@@ -1041,7 +1041,11 @@ func (m *tuiModel) rows(bg bool, used int) []string {
 		if a.Prompt != "" {
 			t += " · " + a.Prompt
 		}
-		out = append(out, ansiTrunc(dimSt.Render("  ● "+strings.ReplaceAll(t, "\n", " ")), m.w))
+		line := "  ● " + t
+		if bg {
+			line = "  실행 중 - " + t
+		}
+		out = append(out, ansiTrunc(dimSt.Render(strings.ReplaceAll(line, "\n", " ")), m.w))
 	}
 	return out
 }

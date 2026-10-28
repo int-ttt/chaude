@@ -57,7 +57,9 @@ func TestIdleTickRefreshesWhenBackgroundFinishes(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 	r.tracker.onToolUse("b1", "Agent", map[string]any{"description": "bg", "run_in_background": true}, time.Now())
 	m.Update(spinner.TickMsg{})
-	if strings.Contains(m.vp.View(), "생각중...") || !strings.Contains(m.View(), "bg") {
+	if v := m.View(); strings.Contains(m.vp.View(), "생각중...") || !strings.Contains(v, "실행 중 - bg") ||
+		strings.Index(v, "실행 중 - bg") < strings.Index(v, "╰") {
+		t.Logf("%q", v)
 		t.Fatal("bg only: no indicator, bg row visible")
 	}
 	r.tracker.onNotification("<task-notification><tool-use-id>b1</tool-use-id></task-notification>")
@@ -68,7 +70,7 @@ func TestIdleTickRefreshesWhenBackgroundFinishes(t *testing.T) {
 	if m.bgH != 0 || m.vp.Height != 30-m.inH-3-m.popH {
 		t.Fatalf("tick must relayout: bgH=%d vp.Height=%d", m.bgH, m.vp.Height)
 	}
-	if strings.Contains(m.View(), "● bg") {
+	if strings.Contains(m.View(), "실행 중 - bg") {
 		t.Fatal("bg row must vanish on idle tick after bg agent finished")
 	}
 }
@@ -127,7 +129,7 @@ func TestThinkingOnlyForForeground(t *testing.T) {
 	}
 }
 
-func TestBackgroundRowsBelowViewport(t *testing.T) {
+func TestBackgroundRowsBelowInputBox(t *testing.T) {
 	r := &Repl{tracker: newAgentTracker()}
 	m := newTUIModel(r, make(chan string, 1))
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
@@ -135,15 +137,15 @@ func TestBackgroundRowsBelowViewport(t *testing.T) {
 	ls := strings.Split(m.View(), "\n")
 	bgi, boxi := -1, -1
 	for i, l := range ls {
-		if strings.Contains(l, "bgjob") {
+		if strings.Contains(l, "실행 중 - bgjob") {
 			bgi = i
 		}
 		if strings.Contains(l, "╭") {
 			boxi = i
 		}
 	}
-	if bgi != m.vp.Height || boxi <= bgi {
-		t.Fatalf("(c) bg row at %d, viewport height %d, input box at %d", bgi, m.vp.Height, boxi)
+	if boxi < 0 || bgi <= boxi || bgi != len(ls)-2 {
+		t.Fatalf("(c) bg row at %d must be below input box (%d) and above status line (%d lines)", bgi, boxi, len(ls))
 	}
 }
 
@@ -296,5 +298,18 @@ func TestQueueSmallHeightNoOverflow(t *testing.T) {
 		if got := lipgloss.Height(m.View()); got > h {
 			t.Fatalf("h=%d: view height %d overflows", h, got)
 		}
+	}
+}
+
+func TestCursorRowIncludesBackgroundRows(t *testing.T) {
+	r := &Repl{tracker: newAgentTracker()}
+	m := newTUIModel(r, make(chan string, 1))
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m.Update(spinner.TickMsg{})
+	base := m.curUp.Load()
+	r.tracker.onToolUse("b1", "Agent", map[string]any{"description": "bgjob", "run_in_background": true}, time.Now())
+	m.View()
+	if m.bgH <= 0 || m.curUp.Load() != base+int32(m.bgH+m.panelH) {
+		t.Fatalf("curUp=%d want %d (bgH=%d panelH=%d)", m.curUp.Load(), base+int32(m.bgH+m.panelH), m.bgH, m.panelH)
 	}
 }
