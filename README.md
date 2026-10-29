@@ -2,7 +2,7 @@
 
 Claude Code 사용량을 줄이는 하네스입니다. 메인 세션(Opus 또는 Fable)은 듣고·판단하고·설명만 하고, 파일·웹·명령 작업은 이름에 모델이 붙은 하위 에이전트(`haiku-*`, `sonnet-*`, `opus-architect`, `fable-architect`)가 합니다. 훅이 메인 세션의 작업 도구를 막기 때문에 규칙이 강제됩니다. 거기에 세션 회전·컨덕터 라우팅이 있는 터미널 REPL이 붙어 있습니다.
 
-버전 `0.7.1` · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
+버전 `0.8.0` (원본 int-ttt/chaude 0.7.1 병합 + 포크 기능) · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
 
 ## 필요한 것
 - Claude Code 2.1.296 이상 (`claude --version`)
@@ -50,7 +50,7 @@ chaude install <프로젝트 폴더> --lean-off      # 일반 모드로 시작 (
 - 한글 입력은 Windows Terminal 에서 하세요 (옛 콘솔은 IME 입력을 삼킵니다).
 
 ## REPL 옵션
-`chaude` 는 인자 없이 실행하면 REPL(`chaude repl`)입니다. 답변이 끝났을 때 컨텍스트 토큰이 `--threshold` 이상이면 핸드오프를 만들어 새 세션으로 넘어가고, 컨덕터(기본 켬)는 프롬프트마다 Sonnet 분류기가 haiku|sonnet|opus|fable 세션을 고릅니다 (`--conductor=false` 로 끔).
+`chaude` 는 인자 없이 실행하면 REPL(`chaude repl`)입니다. 답변이 끝났을 때 컨텍스트 토큰이 `--threshold` 이상이면 핸드오프를 만들어 새 세션으로 넘어갑니다. 컨덕터(기본 켬)는 **Haiku 고정 메인**입니다: 프롬프트마다 Sonnet 분류기가 작업 크기만 판정하고, 작은 일은 Haiku가 Haiku 에이전트로 바로 처리, 큰 일은 Haiku가 계획을 쓰고 `opus-architect`/`sonnet-analyst`가 계획을 검토한 뒤 Haiku가 실행합니다. 프롬프트에 `opus로`/`fable로`처럼 모델을 지목하면 분류기 없이 그 모델 세션이 직접 답합니다. 서브에이전트 상태는 `--agents-file`에 저장되어 재시작·`/resume` 뒤에도 복원됩니다 (`--conductor=false` 로 컨덕터 끔).
 - 주요 옵션(`chaude repl`):
 
 | 옵션 | 기본값 | 설명 |

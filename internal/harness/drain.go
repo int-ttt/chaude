@@ -13,21 +13,33 @@ var outPathRe = regexp.MustCompile(`notes/runs/[^\s"'` + "`" + `)]+\.md`)
 
 // agentRec is one delegated agent seen via tool_use (name Agent/Task).
 type agentRec struct {
-	ID         string
-	Task       string
-	Prompt     string // first line of the prompt handed to the agent
-	OutPath    string
-	Background bool
-	Started    time.Time
-	Done       bool
-	startMod   time.Time // output file mtime/size when the agent started
-	startSize  int64
+	ID          string
+	Task        string
+	Prompt      string // first line of the prompt handed to the agent
+	Model       string // `model` input of the Agent call (empty: inherits the session model)
+	Name        string // `name` input, else subagent_type: the session name shown in the panel
+	Failed      bool
+	Log         []string // live transcript lines of the sub-agent (text, tool calls, results)
+	OutPath     string
+	Background  bool
+	Started     time.Time
+	Done        bool
+	Interrupted bool      // child gone before the agent finished (restored from disk or harness exit)
+	Restored    bool      // loaded from the agent store, not started in this process
+	Dismissed   bool      // restored agent hidden from the panel (still in the agent view)
+	Summary     string    // last text line of the agent
+	startMod    time.Time // output file mtime/size when the agent started
+	startSize   int64
 }
 
 // agentTracker records delegations of one session.
 type agentTracker struct {
 	mu     sync.Mutex // turn goroutine writes, UI goroutine reads the status count
 	agents map[string]*agentRec
+
+	store      *agentStore
+	parent     func() string // session id of the child that owns this tracker
+	transcript func() string // that child's Claude Code transcript path
 }
 
 func newAgentTracker() *agentTracker { return &agentTracker{agents: map[string]*agentRec{}} }
@@ -43,12 +55,17 @@ func (t *agentTracker) onToolUse(id, name string, input map[string]any, now time
 	}
 	p := str(input["prompt"])
 	bg, _ := input["run_in_background"].(bool)
+	sess := str(input["name"])
+	if sess == "" {
+		sess = str(input["subagent_type"])
+	}
 	a := &agentRec{ID: id, Task: str(input["description"]), Prompt: firstLine(p), OutPath: outPathRe.FindString(p),
-		Background: bg, Started: now}
+		Model: str(input["model"]), Name: sess, Background: bg, Started: now}
 	if st, err := os.Stat(a.OutPath); a.OutPath != "" && err == nil {
 		a.startMod, a.startSize = st.ModTime(), st.Size()
 	}
 	t.agents[id] = a
+	t.persistLocked()
 }
 
 // onToolResult: foreground agents finish with their tool_result; background ones only "launch".
@@ -57,6 +74,7 @@ func (t *agentTracker) onToolResult(id string) {
 	defer t.mu.Unlock()
 	if a := t.agents[id]; a != nil && !a.Background {
 		a.Done = true
+		t.persistLocked()
 	}
 }
 
@@ -75,6 +93,9 @@ func (t *agentTracker) onNotification(text string) bool {
 			a.Done, found = true, true
 		}
 	}
+	if found {
+		t.persistLocked()
+	}
 	return found
 }
 
@@ -87,6 +108,7 @@ func (t *agentTracker) finishForeground() {
 			a.Done = true
 		}
 	}
+	t.persistLocked()
 }
 
 // finishOldestBackground marks the longest-running background agent done (fallback when the
@@ -102,6 +124,7 @@ func (t *agentTracker) finishOldestBackground() {
 	}
 	if old != nil {
 		old.Done = true
+		t.persistLocked()
 	}
 }
 

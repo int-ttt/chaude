@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+- 원본(int-ttt/chaude) 0.6.11 → 0.7.1 병합: 서브에이전트 상태 저장·재시작/`/resume` 복원·중단 표시, 컨덕터가 Haiku 고정 메인으로 바뀜(Sonnet 분류기는 크기만 판정, 큰 작업은 Haiku가 계획 → Opus/Sonnet이 계획 검토 → Haiku 실행), 기존 Haiku 편집 세션 재사용(worker pool), `/resume` claude 세션 필터, 생각 중 `/usage`, 에이전트 결과 요약 규칙, haiku-scout/researcher effort high, 서브에이전트가 sonnet-reviewer 호출 가능, 입력창 아래 백그라운드 패널.
+- 포크 쪽 유지: `opus로`/`fable로`처럼 모델을 지목한 프롬프트는 분류기 없이 그 모델 세션으로 직행(원본의 Haiku 고정 규칙보다 우선), Fable 에이전트, Windows 훅, `chaude install`/`open`/우클릭 메뉴. 버전은 원본의 0.7.x와 겹치지 않도록 0.8.0.
+- 아래 0.7.0·0.7.1은 이 포크의 번호이며 원본의 v0.7.0·v0.7.1과 내용이 다릅니다.
+
 ## 0.7.1
 - 접근성: `chaude open [폴더]`(설치 안 된 폴더면 설치 여부를 묻고 REPL 시작), Windows 폴더 우클릭 메뉴 "chaude로 열기"(`chaude context-menu install|remove|status`, HKCU만 사용·관리자 권한 불필요·Windows Terminal이 있으면 그 안에서 실행), `chaude install`이 프로젝트에 더블클릭 실행 파일 `chaude-start.bat`(mac `chaude-start.command`)을 만듦. `install.ps1`이 우클릭 메뉴를 자동 등록.
 

@@ -5,6 +5,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 	"os"
 	"path/filepath"
@@ -16,20 +17,20 @@ import (
 func TestSessionPanelAndThinking(t *testing.T) {
 	r := &Repl{tracker: newAgentTracker()}
 	m := &tuiModel{r: r, w: 80}
-	if len(m.panelLines()) != 0 || strings.Contains(m.render(), "생각중...") {
+	if len(m.panelLines()) != 0 || strings.Contains(m.render(), "생각중-") {
 		t.Fatal("idle: no panel, no indicator")
 	}
 	now := time.Now()
 	r.tracker.onToolUse("a1", "Agent", map[string]any{"description": "fix bug", "prompt": "\nFirst line\nsecond"}, now)
 	pl := m.panelLines()
-	if len(pl) != 1 || !strings.Contains(pl[0], "fix bug") || !strings.Contains(pl[0], "First line") || strings.Contains(pl[0], "second") {
+	if len(pl) != 1 || !strings.Contains(pl[0], "fix bug") || strings.Contains(pl[0], "second") {
 		t.Fatalf("panel: %q", pl)
 	}
-	if !strings.Contains(m.render(), "생각중...") {
+	if !strings.Contains(m.render(), "생각중-") {
 		t.Fatal("thinking indicator missing while agent runs")
 	}
 	r.tracker.onToolResult("a1")
-	if len(m.panelLines()) != 0 || strings.Contains(m.render(), "생각중...") {
+	if len(m.panelLines()) != 0 || strings.Contains(m.render(), "생각중-") {
 		t.Fatal("agent done: panel and indicator must disappear")
 	}
 }
@@ -57,7 +58,9 @@ func TestIdleTickRefreshesWhenBackgroundFinishes(t *testing.T) {
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 	r.tracker.onToolUse("b1", "Agent", map[string]any{"description": "bg", "run_in_background": true}, time.Now())
 	m.Update(spinner.TickMsg{})
-	if strings.Contains(m.vp.View(), "생각중...") || !strings.Contains(m.View(), "bg") {
+	if v := m.View(); strings.Contains(m.vp.View(), "생각중-") || !strings.Contains(v, "실행 중-") ||
+		strings.Index(v, "실행 중-") < strings.Index(v, "╰") {
+		t.Logf("%q", v)
 		t.Fatal("bg only: no indicator, bg row visible")
 	}
 	r.tracker.onNotification("<task-notification><tool-use-id>b1</tool-use-id></task-notification>")
@@ -68,7 +71,7 @@ func TestIdleTickRefreshesWhenBackgroundFinishes(t *testing.T) {
 	if m.bgH != 0 || m.vp.Height != 30-m.inH-3-m.popH {
 		t.Fatalf("tick must relayout: bgH=%d vp.Height=%d", m.bgH, m.vp.Height)
 	}
-	if strings.Contains(m.View(), "● bg") {
+	if strings.Contains(m.View(), "실행 중-") {
 		t.Fatal("bg row must vanish on idle tick after bg agent finished")
 	}
 }
@@ -118,16 +121,16 @@ func TestThinkingOnlyForForeground(t *testing.T) {
 	r := &Repl{tracker: newAgentTracker()}
 	m := &tuiModel{r: r, w: 80}
 	r.tracker.onToolUse("b1", "Agent", map[string]any{"description": "bg", "run_in_background": true}, time.Now())
-	if strings.Contains(m.render(), "생각중...") {
+	if strings.Contains(m.render(), "생각중-") {
 		t.Fatal("(a) background only: no thinking")
 	}
 	r.tracker.onToolUse("a1", "Agent", map[string]any{"description": "fg"}, time.Now())
-	if !strings.Contains(m.render(), "생각중...") {
+	if !strings.Contains(m.render(), "생각중-") {
 		t.Fatal("(b) foreground running: thinking expected")
 	}
 }
 
-func TestBackgroundRowsBelowViewport(t *testing.T) {
+func TestBackgroundRowsBelowInputBox(t *testing.T) {
 	r := &Repl{tracker: newAgentTracker()}
 	m := newTUIModel(r, make(chan string, 1))
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
@@ -135,15 +138,15 @@ func TestBackgroundRowsBelowViewport(t *testing.T) {
 	ls := strings.Split(m.View(), "\n")
 	bgi, boxi := -1, -1
 	for i, l := range ls {
-		if strings.Contains(l, "bgjob") {
+		if strings.Contains(l, "실행 중-") {
 			bgi = i
 		}
 		if strings.Contains(l, "╭") {
 			boxi = i
 		}
 	}
-	if bgi != m.vp.Height || boxi <= bgi {
-		t.Fatalf("(c) bg row at %d, viewport height %d, input box at %d", bgi, m.vp.Height, boxi)
+	if boxi < 0 || bgi <= boxi || bgi != len(ls)-2 {
+		t.Fatalf("(c) bg row at %d must be below input box (%d) and above status line (%d lines)", bgi, boxi, len(ls))
 	}
 }
 
@@ -181,7 +184,7 @@ func TestStalledOutputFileKeepsAgentRunningUntilDoneSignal(t *testing.T) {
 		t.Fatal("stalled file alone must not finish a running agent")
 	}
 	r.tracker.onToolUse("f1", "Agent", map[string]any{"description": "fg"}, time.Now())
-	if !strings.Contains(m.render(), "생각중...") {
+	if !strings.Contains(m.render(), "생각중-") {
 		t.Fatal("thinking indicator must stay while foreground agent runs")
 	}
 	os.WriteFile("notes/runs/x.md", []byte("result\n<!-- agent:done -->"), 0o644)
@@ -194,7 +197,7 @@ func TestStalledOutputFileKeepsAgentRunningUntilDoneSignal(t *testing.T) {
 		t.Fatal("done signal must remove the row")
 	}
 	r.tracker.onToolResult("f1")
-	if strings.Contains(m.render(), "생각중...") {
+	if strings.Contains(m.render(), "생각중-") {
 		t.Fatal("indicator must vanish after completion")
 	}
 }
@@ -239,12 +242,8 @@ func TestQueueSentOnDoneInOrder(t *testing.T) {
 		t.Fatalf("queue order: %q", m.queue)
 	}
 	m.Update(doneMsg{})
-	if got := <-sub; got != "second" || !m.busy || len(m.queue) != 1 {
+	if got := <-sub; got != "second\n\nthird" || !m.busy || len(m.queue) != 0 {
 		t.Fatalf("after 1st done: %q busy=%v q=%q", got, m.busy, m.queue)
-	}
-	m.Update(doneMsg{})
-	if got := <-sub; got != "third" || len(m.queue) != 0 {
-		t.Fatalf("after 2nd done: %q q=%q", got, m.queue)
 	}
 	m.Update(doneMsg{})
 	if m.busy || len(sub) != 0 {
@@ -298,3 +297,43 @@ func TestQueueSmallHeightNoOverflow(t *testing.T) {
 		}
 	}
 }
+
+func TestCursorRowIncludesBackgroundRows(t *testing.T) {
+	r := &Repl{tracker: newAgentTracker()}
+	m := newTUIModel(r, make(chan string, 1))
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m.Update(spinner.TickMsg{})
+	base := m.curUp.Load()
+	r.tracker.onToolUse("b1", "Agent", map[string]any{"description": "bgjob", "run_in_background": true}, time.Now())
+	m.View()
+	if m.bgH <= 0 || m.curUp.Load() != base+int32(m.bgH+m.panelH) {
+		t.Fatalf("curUp=%d want %d (bgH=%d panelH=%d)", m.curUp.Load(), base+int32(m.bgH+m.panelH), m.bgH, m.panelH)
+	}
+}
+
+func TestAgentStatusFormat(t *testing.T) {
+	r := &Repl{tracker: newAgentTracker(), a: Args{Model: "opus"}}
+	m := &tuiModel{r: r, w: 120}
+	r.tracker.onToolUse("a1", "Agent", map[string]any{"description": "버그 수정", "name": "fixer", "model": "haiku", "run_in_background": true}, time.Now())
+	pl := m.bgLines()
+	if len(pl) != 1 || !strings.Contains(pl[0], "●") || !strings.Contains(ansiStrip(pl[0]), "실행 중-haiku-fixer(버그 수정)") {
+		t.Fatalf("format: %q", pl)
+	}
+	a := &agentRec{Started: time.Now(), Task: "t"}
+	if got := agentStatusText(a, "opus"); got != "실행 중-opus-agent(t)" {
+		t.Fatal(got)
+	}
+	a.Done = true
+	if agentStatusText(a, "m")[:len("완료")] != "완료" {
+		t.Fatal("done")
+	}
+	a.Failed = true
+	if agentState(a) != stFailed || agentState(&agentRec{}) != stQueued {
+		t.Fatal("states")
+	}
+	if agentDot(stRunning) == agentDot(stDone) && lipgloss.ColorProfile() != termenv.Ascii {
+		t.Log("colors identical under profile", lipgloss.ColorProfile())
+	}
+}
+
+func ansiStrip(s string) string { return ansi.Strip(s) }

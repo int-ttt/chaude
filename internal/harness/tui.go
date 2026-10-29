@@ -1,11 +1,13 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -29,6 +31,7 @@ type (
 	toolResultMsg string
 	noteMsg       string
 	doneMsg       struct{}
+	importedMsg   struct{ turns [][2]string } // /import or /resume loaded a session: show its turns
 	permMsg       struct {
 		tool, arg string
 		reply     chan bool
@@ -90,36 +93,57 @@ func resultText(v any) string {
 type block struct{ kind, text string } // kind: user | asst | tool | result | note
 
 type tuiModel struct {
-	r        *Repl
-	submit   chan string
-	w, h     int
-	vp       viewport.Model
-	in       inputBox
-	inH      int
-	sp       spinner.Model
-	blocks   []block
-	busy     bool
-	gotText  bool
-	perm     *permMsg
-	pick     []sessionInfo // non-nil while the /resume picker is open
-	pickSel  int
-	ready    bool
-	quitting bool
-	sel      int
-	curCol   atomic.Int32
-	curUp    atomic.Int32
-	popH     int
-	panelH   int // foreground rows below the input box
-	bgH      int // background rows directly under the transcript
-	lastRun  int // running agent count at the last refresh (idle tick redraw)
-	unseen   bool
-	sig      int
-	mouse    bool
-	hist     inputHistory
-	rw       rewindState
-	lastEsc  time.Time
-	queue    []string // prompts typed while a foreground answer runs; sent one per finished answer
-	queueH   int
+	r         *Repl
+	submit    chan string
+	w, h      int
+	vp        viewport.Model
+	in        inputBox
+	inH       int
+	sp        spinner.Model
+	blocks    []block
+	busy      bool
+	gotText   bool
+	perm      *permMsg
+	pick      []sessionInfo // non-nil while the /resume picker is open
+	pickSel   int
+	ready     bool
+	quitting  bool
+	sel       int
+	curCol    atomic.Int32
+	curUp     atomic.Int32
+	popH      int
+	panelH    int // foreground rows below the input box
+	bgH       int // background rows below the input box, above the status line
+	lastRun   int // running agent count at the last refresh (idle tick redraw)
+	unseen    bool
+	held      bool // user scrolled the transcript away from the tail; refresh keeps the offset
+	sig       int
+	mouse     bool
+	hist      inputHistory
+	rw        rewindState
+	lastEsc   time.Time
+	queue     []string // prompts typed while a foreground answer runs; merged into one turn when it ends
+	curPrompt string   // prompt of the running turn (summary in the status row)
+	queueH    int
+	av        *agentView // non-nil while the read-only agent view is open
+	usage     string     // non-empty while the /usage popup is open
+	imeShift  int32      // column offset for terminals that draw IME preedit off the cursor (JediTerm: -1)
+}
+
+// imeColShift: JediTerm (JetBrains) draws uncommitted IME text at cursorX+1 cells
+// (TerminalPanel.drawInputMethodUncommitedChars), so a Hangul syllable being composed shows one cell
+// right of where it lands. Parking the real cursor one cell left puts the preedit on the right cell.
+// CHAUDE_IME_SHIFT=<int> overrides (e.g. 0 for terminals without the offset).
+func imeColShift() int32 {
+	if v := strings.TrimSpace(os.Getenv("CHAUDE_IME_SHIFT")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return int32(n)
+		}
+	}
+	if os.Getenv("TERMINAL_EMULATOR") == "JetBrains-JediTerm" {
+		return -1
+	}
+	return 0
 }
 
 // slash commands (Claude Code style)
@@ -130,7 +154,7 @@ var slashCmds = []slashCmd{
 	{"/clear", "start a fresh session (no handoff)"},
 	{"/status", "model, context tokens, session"},
 	{"/model", "show or switch model: /model <name>"},
-	{"/resume", "list Claude Code sessions and import one"},
+	{"/resume", "list Claude Code sessions and import one (/resume claude)"},
 	{"/import", "import a session: /import [id|latest]"},
 	{"/rotate", "hand off to a fresh session"},
 	{"/usage", "plan usage and limits (from claude)"},
@@ -192,7 +216,7 @@ func newTUIModel(r *Repl, submit chan string) *tuiModel {
 	sp := spinner.New()
 	sp.Spinner = spinner.Spinner{Frames: []string{"✻", "✽", "✶", "✳", "✢", "·"}, FPS: time.Second / 8}
 	sp.Style = lipgloss.NewStyle().Foreground(orange)
-	return &tuiModel{r: r, submit: submit, sp: sp, mouse: true}
+	return &tuiModel{r: r, submit: submit, sp: sp, mouse: true, imeShift: imeColShift()}
 }
 
 func (m *tuiModel) Init() tea.Cmd { return m.sp.Tick }
@@ -286,9 +310,9 @@ func (m *tuiModel) render() string {
 		}
 	}
 	if fg, _ := m.r.tracker.counts(); fg > 0 && !m.gotText && m.perm == nil {
-		out = append(out, m.sp.View()+dimSt.Render(" 생각중..."))
+		out = append(out, m.sp.View()+dimSt.Render(" "+m.mainStatusText()))
 	} else if m.busy && !m.gotText && m.perm == nil {
-		out = append(out, m.sp.View()+dimSt.Render(" Working… (esc to interrupt)"))
+		out = append(out, m.sp.View()+dimSt.Render(" "+m.mainStatusText()+" (esc to interrupt)"))
 	}
 	return strings.Join(out, "\n")
 }
@@ -304,11 +328,14 @@ func (m *tuiModel) refresh() {
 	}
 	m.lastRun = len(m.r.tracker.running())
 	m.vp.SetContent(m.render())
-	if atBottom {
-		m.vp.GotoBottom()
+	if m.held && !atBottom {
+		if sig != m.sig {
+			m.unseen = true
+		}
+	} else {
+		m.held = false
+		m.vp.GotoBottom() // follow the tail unless the user is scrolling
 		m.unseen = false
-	} else if sig != m.sig {
-		m.unseen = true
 	}
 	m.sig = sig
 }
@@ -378,23 +405,54 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.blocks = append(m.blocks, block{"note", string(v)})
 		m.refresh()
 	case permMsg:
-		m.perm = &v
+		m.perm, m.av, m.usage = &v, nil, ""
 		m.blocks = append(m.blocks, block{"note", fmt.Sprintf("Allow %s(%s)?  [y] yes  [n] no", v.tool, v.arg)})
 		m.refresh()
+	case importedMsg:
+		m.gotText = false
+		m.blocks = nil
+		turns := v.turns
+		if len(turns) > 100 {
+			m.blocks = append(m.blocks, block{"note", fmt.Sprintf("(%d earlier turns not shown)", len(turns)-100)})
+			turns = turns[len(turns)-100:]
+		}
+		for _, t := range turns {
+			m.blocks = append(m.blocks, block{"user", t[0]}, block{"asst", t[1]})
+		}
+		m.refresh()
+		m.vp.GotoBottom()
+	case usageMsg:
+		if !m.busy {
+			m.gotText = false
+		}
+		m.av, m.usage = nil, strings.TrimRight(string(v), "\n")
 	case doneMsg:
 		m.busy, m.gotText = false, false
 		m.r.tracker.finishForeground() // turn over: no foreground agent can still be running (esc/error)
 		if len(m.queue) > 0 {
-			next := m.queue[0]
-			m.queue = m.queue[1:]
+			next := mergePrompts(m.queue) // everything typed meanwhile goes out as ONE turn
+			m.queue = nil
 			m.sendPrompt(next)
 			m.after()
 			return m, nil
 		}
 		m.refresh()
 	case tea.MouseMsg:
+		if m.usage != "" {
+			break
+		}
+		m.click(v)
+		if m.av != nil {
+			if v.Button == tea.MouseButtonWheelUp {
+				m.av.off += 3
+			} else if v.Button == tea.MouseButtonWheelDown {
+				m.av.off = max(0, m.av.off-3)
+			}
+			break
+		}
 		var c tea.Cmd
 		m.vp, c = m.vp.Update(v)
+		m.held = !m.vp.AtBottom()
 		cmds = append(cmds, c)
 	case tea.KeyMsg:
 		return m.key(v)
@@ -430,6 +488,14 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.interrupt()
 		}
 		m.refresh()
+		return m, nil
+	}
+	if m.usage != "" {
+		m.usageKey(k)
+		return m, nil
+	}
+	if m.av != nil {
+		m.avKey(k)
 		return m, nil
 	}
 	if m.rw.open {
@@ -485,6 +551,9 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.quit()
 	case "ctrl+d":
 		return m.quit()
+	case "ctrl+t":
+		m.openAgentKey()
+		return m, nil
 	case "esc":
 		if m.busy {
 			m.interrupt()
@@ -537,12 +606,15 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "pgup", "pgdown", "ctrl+b", "ctrl+f":
 		var c tea.Cmd
 		m.vp, c = m.vp.Update(k)
+		m.held = !m.vp.AtBottom()
 		return m, c
 	case "shift+up":
 		m.vp.LineUp(1)
+		m.held = !m.vp.AtBottom()
 		return m, nil
 	case "shift+down":
 		m.vp.LineDown(1)
+		m.held = !m.vp.AtBottom()
 		return m, nil
 	case "home", "end":
 		if m.in.Value() == "" {
@@ -569,11 +641,21 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.busy {
 			if strings.HasPrefix(line, "/") {
-				return m, nil // slash commands stay blocked while an answer runs
+				if line == "/usage" { // allowed while thinking: separate one-shot claude call, popup
+					m.in.SetValue("")
+					m.hist.Add(line)
+					m.after()
+					go func() { usageSend(m.r, usageMsg(usageFetch(m.r.lastCtx))) }()
+					return m, nil
+				}
+				m.blocks = append(m.blocks, block{"note", busySlashMsg})
+				m.refresh()
+				return m, nil
 			}
 			m.in.SetValue("")
 			m.hist.Add(line)
 			m.queue = append(m.queue, line)
+			m.vp.GotoBottom()
 			m.after()
 			return m, nil
 		}
@@ -596,17 +678,73 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.sel = 0
 	m.edit(k)
+	m.held = false
+	m.vp.GotoBottom() // typing returns the transcript to the tail
 	m.after()
 	return m, nil
+}
+
+// busySlashMsg: shown when a slash command other than /usage is typed while an answer runs.
+const busySlashMsg = "생각 중에는 /usage 외의 명령을 사용할 수 없습니다. 답변이 끝난 뒤 다시 입력해 주세요."
+
+var usageSend = func(r *Repl, msg tea.Msg) { r.ui.send(msg) }
+
+// usageFetch runs /usage in a separate one-shot claude process so it never touches the busy session.
+var usageFetch = func(ctx int) string {
+	cmd := exec.Command("claude", "-p", "/usage", "--output-format", "json", "--no-session-persistence")
+	cmd.Dir = os.TempDir()
+	out, err := cmd.Output()
+	if err != nil {
+		return "/usage 조회에 실패했습니다: " + err.Error()
+	}
+	var j map[string]any
+	if json.Unmarshal(out, &j) != nil || strings.TrimSpace(str(j["result"])) == "" {
+		return "/usage 결과를 읽지 못했습니다."
+	}
+	return decorateUsage(str(j["result"]), ctx)
 }
 
 // sendPrompt shows the prompt in the transcript and hands it to the sender goroutine.
 func (m *tuiModel) sendPrompt(line string) {
 	m.blocks = append(m.blocks, block{"user", line})
+	m.curPrompt = line
 	m.busy = true
+	m.held = false
 	m.vp.GotoBottom()
 	m.refresh()
 	m.submit <- line
+}
+
+// mergePrompts joins prompts that arrived while busy into one message (blank line between).
+func mergePrompts(q []string) string { return strings.Join(q, "\n\n") }
+
+// placeholder: idle hint in the empty input box.
+func (m *tuiModel) placeholder() string {
+	if m.busy {
+		return "생각중 - 추가 입력은 한 번에 합쳐 처리"
+	}
+	return "대기 - 프롬프트 입력"
+}
+
+// mainStatusText: the main session's row in the same `상태-모델-세션이름(요약)` form as agents.
+func (m *tuiModel) mainStatusText() string {
+	sum := strings.TrimSpace(m.curPrompt)
+	if i := strings.IndexByte(sum, '\n'); i >= 0 {
+		sum = strings.TrimSpace(sum[:i])
+	}
+	if sum == "" {
+		return statusText("생각중", m.r.a.Model, "메인", "")
+	}
+	return statusText("생각중", m.r.a.Model, "메인", trunc(sum, 60))
+}
+
+// statusText formats `상태-모델-이름(요약)`; summary part omitted when empty.
+func statusText(state, model, name, sum string) string {
+	s := state + "-" + model + "-" + name
+	if sum != "" {
+		s += "(" + sum + ")"
+	}
+	return s
 }
 
 // queueLines renders waiting prompts (dim, "대기" prefix) shown right above the input box.
@@ -695,8 +833,8 @@ func (m *tuiModel) syncCursor() {
 	}
 	m.in.View(maxInputRows, "", dimSt) // keeps m.in.top current
 	vis := row - m.in.top
-	m.curCol.Store(int32(1 + 2 + col + 1))               // border + prompt "> " + text; 1-based column
-	m.curUp.Store(int32(m.inH - 1 - vis + 2 + m.panelH)) // rows below cursor in box + bottom border + status line
+	m.curCol.Store(max(1, int32(1+2+col+1)+m.imeShift))          // border + prompt "> " + text; 1-based column
+	m.curUp.Store(int32(m.inH - 1 - vis + 2 + m.panelH + m.bgH)) // rows below cursor in box + bottom border + status line
 }
 
 func (m *tuiModel) after() {
@@ -751,7 +889,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.submit <- line
 	case "/resume":
-		l, msg := m.r.sessionList()
+		l, msg := m.r.sessionList(f[1:]...)
 		if msg != "" {
 			note(msg)
 			break
@@ -856,7 +994,7 @@ func (m *tuiModel) View() string {
 	bl := m.bgLines()
 	bgPanel := ""
 	if len(bl) > 0 {
-		bgPanel = "\n" + strings.Join(bl, "\n")
+		bgPanel = strings.Join(bl, "\n") + "\n"
 	}
 	changed := len(pl) != m.panelH || len(bl) != m.bgH || len(ql) != prevQ
 	m.panelH, m.bgH, m.queueH = len(pl), len(bl), len(ql) // computed in the frame it is drawn: layout height always matches
@@ -874,7 +1012,7 @@ func (m *tuiModel) View() string {
 	if m.perm != nil {
 		bc = orange
 	}
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(bc).Width(m.w - 2).Render(m.in.View(maxInputRows, "Try \"how does <file> work?\"", dimSt))
+	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(bc).Width(m.w - 2).Render(m.in.View(maxInputRows, m.placeholder(), dimSt))
 	pop := ""
 	if sg := m.suggestions(); len(sg) > 0 {
 		var l []string
@@ -930,10 +1068,16 @@ func (m *tuiModel) View() string {
 		}
 		vv = strings.Join(l, "\n")
 	}
+	if m.av != nil {
+		vv = m.agentViewLines(m.vp.Height)
+	}
+	if m.usage != "" {
+		vv = m.usagePopup(m.vp.Height)
+	}
 	if m.unseen && m.vp.AtBottom() {
 		m.unseen = false
 	}
-	if m.unseen {
+	if m.unseen && m.av == nil && m.usage == "" {
 		ls := strings.Split(vv, "\n")
 		tag := lipgloss.NewStyle().Foreground(orange).Render("↓ 새 메시지 (End: 맨 아래로)")
 		ls[len(ls)-1] = strings.Repeat(" ", max(0, m.w-lipgloss.Width(tag)-1)) + tag
@@ -943,7 +1087,7 @@ func (m *tuiModel) View() string {
 	if len(ql) > 0 {
 		qv = strings.Join(ql, "\n") + "\n"
 	}
-	return vv + bgPanel + "\n" + pop + qv + box + "\n" + panel + m.statusLine()
+	return vv + "\n" + pop + qv + box + "\n" + panel + bgPanel + m.statusLine()
 }
 
 // runTUI is the interactive entry: same Repl, rendered with bubbletea in the alt screen.
@@ -1011,39 +1155,92 @@ const (
 // panelLines: one row per running foreground delegated session (below the input box).
 func (m *tuiModel) panelLines() []string { return m.rows(false, 0) }
 
-// bgLines: one row per running background agent, drawn directly under the transcript.
+// bgLines: one row per running background agent, drawn below the input box (`상태 - 이름`).
 func (m *tuiModel) bgLines() []string { return m.rows(true, len(m.panelLines())) }
 
 // rows: description and first prompt line of running agents of one kind; `used` rows are already
 // taken by the other panel. Finished agents drop out because the tracker marks them done.
-func (m *tuiModel) rows(bg bool, used int) []string {
+func (m *tuiModel) rows(bg bool, used int) []string { r, _ := m.rowsA(bg, used); return r }
+
+// rowsA also returns the agent behind each row (nil for the "+N more" row), for click mapping.
+func (m *tuiModel) rowsA(bg bool, used int) ([]string, []*agentRec) {
 	var l []*agentRec
 	for _, a := range m.r.tracker.sortedRunning() {
 		if a.Background == bg {
 			l = append(l, a)
 		}
 	}
+	for _, a := range m.r.tracker.sortedRestored() {
+		if a.Background == bg {
+			l = append(l, a)
+		}
+	}
 	if len(l) == 0 || m.w < 10 {
-		return nil
+		return nil, nil
 	}
 	limit := maxPanel
 	if m.h > 0 { // keep at least minViewRows for the transcript
 		limit = min(limit, m.h-m.inH-2-1-m.popH-m.queueH-minViewRows-used)
 	}
 	if limit <= 0 {
-		return nil
+		return nil, nil
 	}
 	var out []string
+	var ag []*agentRec
 	for i, a := range l {
 		if i == limit-1 && len(l) > limit {
 			out = append(out, dimSt.Render(fmt.Sprintf("  … +%d more", len(l)-i)))
+			ag = append(ag, nil)
 			break
 		}
-		t := a.Task
-		if a.Prompt != "" {
-			t += " · " + a.Prompt
-		}
-		out = append(out, ansiTrunc(dimSt.Render("  ● "+strings.ReplaceAll(t, "\n", " ")), m.w))
+		line := agentStatusText(a, m.r.a.Model)
+		out = append(out, ansiTrunc("  "+agentDot(agentState(a))+dimSt.Render(" "+strings.ReplaceAll(line, "\n", " ")), m.w))
+		ag = append(ag, a)
 	}
-	return out
+	return out, ag
+}
+
+// agent states shown in the status dot.
+const (
+	stRunning = "실행 중"
+	stDone    = "완료"
+	stFailed  = "실패"
+	stQueued  = "대기"
+	stInterr  = "중단"
+)
+
+func agentState(a *agentRec) string {
+	switch {
+	case a.Failed:
+		return stFailed
+	case a.Interrupted:
+		return stInterr
+	case a.Done:
+		return stDone
+	case a.Started.IsZero():
+		return stQueued
+	}
+	return stRunning
+}
+
+// agentDot: colored ● per state (running yellow, done green, failed red, queued gray).
+func agentDot(state string) string {
+	c := map[string]string{stRunning: "220", stDone: "42", stFailed: "196", stQueued: "245", stInterr: "208"}[state]
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("●")
+}
+
+// agentStatusText: `상태-모델-세션이름(작업 요약 1문장)`; summary = Agent call's description
+// (else the first prompt line), model falls back to the session model.
+func agentStatusText(a *agentRec, sessionModel string) string {
+	model, name, sum := a.Model, a.Name, a.Task
+	if model == "" {
+		model = sessionModel
+	}
+	if name == "" {
+		name = "agent"
+	}
+	if sum == "" {
+		sum = a.Prompt
+	}
+	return agentState(a) + "-" + model + "-" + name + "(" + sum + ")"
 }

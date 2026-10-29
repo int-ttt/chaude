@@ -218,7 +218,7 @@ func (s *Session) Events(timeout time.Duration, intr <-chan struct{}, fn func(ev
 			}
 			ev := parseEvent(line)
 			if id := str(ev["session_id"]); id != "" {
-				s.SessionID = id
+				s.setID(id)
 			}
 			if ev["type"] == "result" {
 				s.mu.Lock()
@@ -266,7 +266,7 @@ func (s *Session) StartIdle(fn func(event)) {
 				}
 				ev := parseEvent(line)
 				if id := str(ev["session_id"]); id != "" {
-					s.SessionID = id
+					s.setID(id)
 				}
 				s.noteIdle(ev)
 				fn(ev)
@@ -321,6 +321,9 @@ func (s *Session) pauseIdle() chan struct{} {
 func (s *Session) Close() {
 	s.StopIdle()
 	_ = s.stdin.Close()
+	if s.cmd == nil { // test fake
+		return
+	}
 	done := make(chan struct{})
 	go func() { _ = s.cmd.Wait(); close(done) }()
 	select {
@@ -337,4 +340,17 @@ func newUUID() string {
 	b[6] = b[6]&0x0f | 0x40
 	b[8] = b[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+func (s *Session) setID(id string) {
+	s.mu.Lock()
+	s.SessionID = id
+	s.mu.Unlock()
+}
+
+// ID is the session id, safe against the reader goroutines that learn it.
+func (s *Session) ID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SessionID
 }
