@@ -11,10 +11,49 @@ func TestParseRoute(t *testing.T) {
 	if !ok || m != "opus" || task != delegateHint+"count funcs in a.go\nreply: Korean 존댓말" { // forced opus main keeps delegation
 		t.Fatal(m, task, ok)
 	}
-	for _, bad := range []string{"", "model: gpt\ntask: x", "topic: same\ntask: x", "topic: new\nsize: small", "hello"} {
+	for _, bad := range []string{"", "model: gpt\ntask: x", "topic: new\nsize: small", "hello"} {
 		if _, _, ok := parseRoute(bad, "opus"); ok {
 			t.Errorf("accepted %q", bad)
 		}
+	}
+}
+
+// TestParseRouteSize: size is normalized; a missing or unknown size routes as large (ok), topic and task are still required.
+func TestParseRouteSize(t *testing.T) {
+	for _, c := range []struct {
+		name, in, size, kind string
+		defaulted            bool
+	}{
+		{"missing size -> large, kind other", "topic: new\ntask: x", "large", "other", true},
+		{"same topic, no size -> large", "topic: same\ntask: x", "large", "other", true},
+		{"Small. -> small", "topic: same\nsize: Small.\nkind: lookup\ntask: x", "small", "lookup", false},
+		{"medium -> large", "topic: same\nsize: medium\nkind: other\ntask: x", "large", "other", true},
+	} {
+		rr, ok := parseRouteFull(c.in, "haiku", nil)
+		if !ok || rr.Size != c.size || rr.SizeDefaulted != c.defaulted || rr.Kind != c.kind {
+			t.Errorf("%s: size=%q defaulted=%v kind=%q ok=%v", c.name, rr.Size, rr.SizeDefaulted, rr.Kind, ok)
+		}
+	}
+	for _, bad := range []string{"size: small\ntask: x", "topic: same\nsize: small"} {
+		if _, ok := parseRouteFull(bad, "haiku", nil); ok {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+	// forced opus main, topic new, size missing (large): stays opus and is not delegated
+	rr, ok := parseRouteFull("topic: new\ntask: x", "opus", nil)
+	if !ok || rr.Model != "opus" || strings.HasPrefix(rr.Task, delegateHint) {
+		t.Errorf("forced opus, missing size: model=%q delegated=%v ok=%v", rr.Model, strings.HasPrefix(rr.Task, delegateHint), ok)
+	}
+	// haiku main, size missing (large): plan workflow hint is attached
+	rr, ok = parseRouteFull("topic: same\ntask: x", "haiku", nil)
+	if !ok || !strings.HasPrefix(rr.Task, planHint) {
+		t.Errorf("haiku main, missing size: planHint missing, ok=%v", ok)
+	}
+}
+
+func TestClassifyPromptSizeRule(t *testing.T) {
+	if !strings.Contains(classifyPrompt, "size: small|large") || !strings.Contains(classifyPrompt, "when unsure between small and large, large") {
+		t.Error("classifier prompt must keep size: small|large and the unsure rule")
 	}
 }
 

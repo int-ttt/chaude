@@ -972,7 +972,11 @@ func (m *tuiModel) quit() (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) statusLine() string {
 	ctx := m.r.lastCtx
-	left := fmt.Sprintf(" %s · ctx %s/%s · rot %d", m.r.a.Model, commas(ctx), commas(m.r.effectiveThreshold()), m.r.rotations)
+	left := fmt.Sprintf(" %s · ctx %s/%s", m.r.a.Model, commas(ctx), commas(m.r.effectiveThreshold()))
+	if s, _ := m.r.rateStr.Load().(string); s != "" {
+		left += " · " + s
+	}
+	left += fmt.Sprintf(" · rot %d", m.r.rotations)
 	if pm := permMode(m.r.mode.Load()); pm != modeDefault {
 		left += " · mode " + pm.String()
 	}

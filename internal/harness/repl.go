@@ -139,6 +139,7 @@ type Repl struct {
 	files           []string
 	lastCtx         int
 	rate            map[string]any
+	rateStr         atomic.Value
 	ui              *tuiBridge // non-nil in TUI mode
 	seenTools       map[string]bool
 	metrics         *Metrics
@@ -162,6 +163,11 @@ type Repl struct {
 
 func (r *Repl) p(s string, end string) {
 	fmt.Fprint(r.out, s+end)
+}
+
+func (r *Repl) setRate(info map[string]any) {
+	r.rate = info
+	r.rateStr.Store(fmtRateStatus(info, time.Now()))
 }
 
 // newSessionFn is a test seam for start().
@@ -215,7 +221,7 @@ func (r *Repl) idleEvent(s *Session, tk *agentTracker, ev event) {
 		r.tr.add("permission_idle", kv{"tool", asMap(ev["request"])["tool_name"]})
 		r.askPerm(s, ev, true)
 	case t == "rate_limit_event":
-		r.rate = asMap(ev["rate_limit_info"])
+		r.setRate(asMap(ev["rate_limit_info"]))
 	case t == "stream_event" && isMainEvent(ev):
 		e := asMap(ev["event"])
 		d := asMap(e["delta"])
@@ -474,7 +480,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 		case t == "control_request" && str(asMap(ev["request"])["subtype"]) == "can_use_tool":
 			r.askPermission(ev)
 		case t == "rate_limit_event":
-			r.rate = asMap(ev["rate_limit_info"])
+			r.setRate(asMap(ev["rate_limit_info"]))
 		case t == "result":
 			result = ev
 		case t == "_unparsed":

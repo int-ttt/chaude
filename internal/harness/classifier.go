@@ -15,8 +15,9 @@ const (
 	classifyPrompt = "You are a router, not an answerer. Never answer or explain. Output exactly five lines:\n" +
 		"topic: same|new\nsize: small|large\nkind: lookup|edit|other\nworker: <id from the candidate list>|new\ntask: <the user's request, terse, machine-style: no honorifics, greetings or filler; keep paths, names, numbers; end with 'reply: Korean 존댓말, one final message only after the work is done, no interim status message, no 추천 block; if you delegate to an agent, run it in the foreground and wait for its result before replying'>\n" +
 		"topic: new when the prompt is unrelated to the current work (a different workstream, or a side task such as a simple test/lookup even if the subject is not new); follow-ups, corrections, pushback, questions about the same files or subject are same. When unsure, same. " +
-		"size: small = single-file or mechanical edits, lookup, search, count, run/monitor, short explanation, small fix. " +
-		"large = multi-file or multi-step changes, design/architecture, hard diagnosis, weighing trade-offs, judgment calls, strategy/priority/roadmap, 'opus로', repeated failure. " +
+		"size: small = only when single-file or one-step AND the scope is clear: single-file or mechanical edits, lookup, search, count, run/monitor, short explanation, small fix. " +
+		"large = multi-file change; multi-step plan or multi-step changes; design or architecture question; trade-offs, comparison or recommendation; judgment calls; strategy/priority/roadmap; new feature or refactor; release, deploy, version bump or merge; ambiguous or open-ended scope; diagnosis with unknown cause or hard diagnosis; 'opus로'; repeated failure. " +
+		"when unsure between small and large, large. " +
 		"kind: lookup = simple lookup/search/'find what this was'/count/read-only question; edit = simple edit of file content (replace text, rename a string, fix a typo, small mechanical change); other = anything else, and always other for judgment, strategy, trade-offs, corrections, pushback, design. " +
 		"A lookup or edit that is small is sent straight to a Haiku session. worker: only for kind edit; pick the candidate whose task or edited files fit this request's context, otherwise new; use new for lookup and other. " +
 		"Always output topic, size, kind and worker."
@@ -53,6 +54,8 @@ func pickTarget(cur, topic, size, kind string) (model string, delegate bool) {
 // route is a parsed classifier answer.
 type routeResult struct {
 	Model, Task, Kind, Worker string // Worker: a candidate session id when Model is haiku and kind is edit, else ""
+	Size                      string // "small" or "large"
+	SizeDefaulted             bool   // size tag missing or invalid; large was used
 }
 
 // parseRoute extracts the target model and task from the classifier output; ok=false when unusable.
@@ -71,7 +74,7 @@ func parseRouteFull(out, cur string, cands []haikuWorker) (rr routeResult, ok bo
 		case strings.HasPrefix(lo, "topic:"):
 			topic = strings.TrimSpace(lo[6:])
 		case strings.HasPrefix(lo, "size:"):
-			size = strings.TrimSpace(lo[5:])
+			size = strings.Trim(lo[5:], " .")
 		case strings.HasPrefix(lo, "kind:") && task == "":
 			kind = strings.TrimSpace(lo[5:])
 		case strings.HasPrefix(lo, "worker:") && task == "":
@@ -82,8 +85,12 @@ func parseRouteFull(out, cur string, cands []haikuWorker) (rr routeResult, ok bo
 			task += "\n" + l
 		}
 	}
-	if task == "" || topic != "same" && topic != "new" || size != "small" && size != "large" {
+	if task == "" || topic != "same" && topic != "new" {
 		return rr, false
+	}
+	sizeDefaulted := size != "small" && size != "large"
+	if sizeDefaulted {
+		size = "large" // missing or unknown size goes to the safe side
 	}
 	if kind != "lookup" && kind != "edit" {
 		kind = "other"
@@ -94,7 +101,7 @@ func parseRouteFull(out, cur string, cands []haikuWorker) (rr routeResult, ok bo
 	} else if model == "haiku" && size == "large" {
 		task = planHint + task
 	}
-	rr = routeResult{Model: model, Task: task, Kind: kind}
+	rr = routeResult{Model: model, Task: task, Kind: kind, Size: size, SizeDefaulted: sizeDefaulted}
 	if model == "haiku" && kind == "edit" {
 		for _, c := range cands {
 			if c.ID == worker {
@@ -157,6 +164,10 @@ func (r *Repl) route(line string) string {
 	}
 	f["routed_model"] = model
 	f["kind"] = rr.Kind
+	f["size"] = rr.Size
+	if rr.SizeDefaulted {
+		f["size_defaulted"] = true
+	}
 	if rr.Worker != "" {
 		f["worker"] = rr.Worker
 	}
