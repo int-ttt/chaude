@@ -54,7 +54,7 @@ type Args struct {
 	FromClaude       string        // import a plain Claude Code transcript: session id | path | latest
 	ImportDry        bool          // with FromClaude: print the handoff stats and exit
 	NoCategoryRotate bool          // disable category-based rotation (no marker rule, no switch rotation)
-	Conductor        bool          // Sonnet main session routes work (haiku-*/sonnet-*/opus-architect) and escalates judgment to Opus
+	Conductor        bool          // Haiku-fixed main orchestrates; large work: Haiku plans -> Opus/Sonnet review -> Haiku executes
 	NoDelegationRule bool          // do not append the haiku delegation rule to the child's system prompt
 }
 
@@ -147,10 +147,14 @@ type Repl struct {
 	lastRotFail     time.Time
 	notices         []string
 	drainMu         sync.Mutex
-	cat             string       // current task category from the child's [cat: X] marker
-	delegs          int          // Agent/Task tool calls in the current turn
-	mode            atomic.Int32 // permMode, set from the UI goroutine
-	idle            idleTurn     // child-initiated turn being rendered (idle reader goroutine only)
+	cat             string            // current task category from the child's [cat: X] marker
+	delegs          int               // Agent/Task tool calls in the current turn
+	pool            *workerPool       // Haiku sessions with edit history (direct routing candidates)
+	parked          map[string]string // model -> session id left by a direct Haiku switch
+	resumeID        string            // session id start() resumes once
+	curTask         string            // terse task of the current routed turn
+	mode            atomic.Int32      // permMode, set from the UI goroutine
+	idle            idleTurn          // child-initiated turn being rendered (idle reader goroutine only)
 }
 
 func (r *Repl) p(s string, end string) {
@@ -161,7 +165,8 @@ func (r *Repl) p(s string, end string) {
 var newSessionFn = NewSession
 
 func (r *Repl) start() error {
-	opts := SessionOpts{Model: r.a.Model, Cwd: r.a.Cwd, CompactWindow: r.a.CompactWindow}
+	opts := SessionOpts{Model: r.a.Model, Cwd: r.a.Cwd, CompactWindow: r.a.CompactWindow, Resume: r.resumeID}
+	r.resumeID = ""
 	rule := ""
 	if !r.a.NoDelegationRule {
 		rule = delegationRule
@@ -443,6 +448,9 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 					fp := str(asMap(b["input"])["file_path"])
 					if fp != "" && !contains(r.files, fp) {
 						r.files = append(r.files, fp)
+					}
+					if fp != "" && r.a.Model == "haiku" && r.sess != nil {
+						r.pool.noteEdit(r.sess.SessionID, r.curTask, fp)
 					}
 				}
 			}
@@ -812,7 +820,7 @@ func (r *Repl) loop() int {
 			r.p("> "+line, "\n")
 		}
 		if f := strings.Fields(line); f[0] == "/resume" {
-			r.resumeLine()
+			r.resumeLine(f[1:]...)
 			continue
 		} else if f[0] == "/import" {
 			a := "latest"
@@ -852,7 +860,7 @@ func Main(args []string) int {
 	fs.DurationVar(&a.Cooldown, "rotate-cooldown", 2*time.Minute, "min gap after a failed rotation")
 	fs.BoolVar(&a.NoCategoryRotate, "no-category-rotate", false, "disable category-based session rotation")
 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
-	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: a one-shot Sonnet classifier (always Sonnet) picks haiku|sonnet|opus per prompt; that session answers")
+	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: Haiku-fixed main; a one-shot Sonnet classifier tags size and adds the plan->review->execute hint to large tasks")
 	fs.StringVar(&a.AgentsFile, "agents-file", defaultAgentsFile(), "persisted sub-agent state, restored on restart and /resume (empty=off)")
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
@@ -868,6 +876,7 @@ func Main(args []string) int {
 	}
 	r.tr = newTranscript(a.Transcript)
 	r.agents = newAgentStore(a.AgentsFile)
+	r.pool = newWorkerPool()
 	r.agents.interruptRunning(false) // agents left 'running' by a crashed/killed harness
 	r.metrics = newMetrics(a.MetricsDir, map[string]any{"threshold": a.Threshold, "handoff_validate": !a.NoValidate,
 		"max_drain": a.MaxDrain, "drain_timeout_s": int(a.DrainTimeout.Seconds()), "compact_window": a.CompactWindow,

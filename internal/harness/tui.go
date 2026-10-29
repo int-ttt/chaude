@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -151,7 +152,7 @@ var slashCmds = []slashCmd{
 	{"/clear", "start a fresh session (no handoff)"},
 	{"/status", "model, context tokens, session"},
 	{"/model", "show or switch model: /model <name>"},
-	{"/resume", "list Claude Code sessions and import one"},
+	{"/resume", "list Claude Code sessions and import one (/resume claude)"},
 	{"/import", "import a session: /import [id|latest]"},
 	{"/rotate", "hand off to a fresh session"},
 	{"/usage", "plan usage and limits (from claude)"},
@@ -419,7 +420,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.vp.GotoBottom()
 	case usageMsg:
-		m.gotText = false
+		if !m.busy {
+			m.gotText = false
+		}
 		m.av, m.usage = nil, strings.TrimRight(string(v), "\n")
 	case doneMsg:
 		m.busy, m.gotText = false, false
@@ -636,7 +639,16 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.busy {
 			if strings.HasPrefix(line, "/") {
-				return m, nil // slash commands stay blocked while an answer runs
+				if line == "/usage" { // allowed while thinking: separate one-shot claude call, popup
+					m.in.SetValue("")
+					m.hist.Add(line)
+					m.after()
+					go func() { usageSend(m.r, usageMsg(usageFetch(m.r.lastCtx))) }()
+					return m, nil
+				}
+				m.blocks = append(m.blocks, block{"note", busySlashMsg})
+				m.refresh()
+				return m, nil
 			}
 			m.in.SetValue("")
 			m.hist.Add(line)
@@ -668,6 +680,26 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.vp.GotoBottom() // typing returns the transcript to the tail
 	m.after()
 	return m, nil
+}
+
+// busySlashMsg: shown when a slash command other than /usage is typed while an answer runs.
+const busySlashMsg = "생각 중에는 /usage 외의 명령을 사용할 수 없습니다. 답변이 끝난 뒤 다시 입력해 주세요."
+
+var usageSend = func(r *Repl, msg tea.Msg) { r.ui.send(msg) }
+
+// usageFetch runs /usage in a separate one-shot claude process so it never touches the busy session.
+var usageFetch = func(ctx int) string {
+	cmd := exec.Command("claude", "-p", "/usage", "--output-format", "json", "--no-session-persistence")
+	cmd.Dir = os.TempDir()
+	out, err := cmd.Output()
+	if err != nil {
+		return "/usage 조회에 실패했습니다: " + err.Error()
+	}
+	var j map[string]any
+	if json.Unmarshal(out, &j) != nil || strings.TrimSpace(str(j["result"])) == "" {
+		return "/usage 결과를 읽지 못했습니다."
+	}
+	return decorateUsage(str(j["result"]), ctx)
 }
 
 // sendPrompt shows the prompt in the transcript and hands it to the sender goroutine.
@@ -855,7 +887,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.submit <- line
 	case "/resume":
-		l, msg := m.r.sessionList()
+		l, msg := m.r.sessionList(f[1:]...)
 		if msg != "" {
 			note(msg)
 			break

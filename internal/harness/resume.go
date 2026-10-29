@@ -55,7 +55,18 @@ func (s sessionInfo) label() string {
 	return fmt.Sprintf("%s  %3d turns  %s … %s", s.Mod.Format("2006-01-02 15:04"), s.Turns, trunc(s.First, 40), trunc(s.Last, 40))
 }
 
-func (r *Repl) sessionList() ([]sessionInfo, string) {
+// resumeSourceMsg validates the /resume argument: none or "claude" = Claude Code conversations (the only source).
+func resumeSourceMsg(args []string) string {
+	if len(args) == 0 || (len(args) == 1 && strings.EqualFold(args[0], "claude")) {
+		return ""
+	}
+	return "usage: /resume [claude]  (lists Claude Code conversations only)"
+}
+
+func (r *Repl) sessionList(args ...string) ([]sessionInfo, string) {
+	if m := resumeSourceMsg(args); m != "" {
+		return nil, m
+	}
 	dir, err := claudeProjectDir(r.a.Cwd)
 	if err != nil {
 		return nil, err.Error()
@@ -88,8 +99,8 @@ func (r *Repl) importSession(arg string) {
 }
 
 // resumeLine handles "/resume" in the plain loop: list, read a number, import.
-func (r *Repl) resumeLine() {
-	l, msg := r.sessionList()
+func (r *Repl) resumeLine(args ...string) {
+	l, msg := r.sessionList(args...)
 	if msg != "" {
 		r.p(msg, "\n")
 		return

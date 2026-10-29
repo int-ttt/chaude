@@ -15,5 +15,6 @@ First read `notes/FACTS.md` and `notes/DECISIONS.md`. Use only facts from them o
 4. Relayed corrections: follow the user's words literally; lasting preferences → one line in DECISIONS.md.
 5. Self-check before returning: grep each target for the new text and absence of the old text.
 Return ≤5 lines: files changed · char counts (if limited) · self-check PASS/FAIL · "사용자 확인 필요". Changed sentences go to `notes/runs/` (path in the reply) unless the brief asks to show them.
+Final message = only a brief result summary (a few lines, Korean 존댓말: outcome · changed paths · PASS/FAIL) for the main session to post; full details go to `notes/runs/`, give only the path.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.
