@@ -128,6 +128,8 @@ type tuiModel struct {
 	av        *agentView // non-nil while the read-only agent view is open
 	usage     string     // non-empty while the /usage popup is open
 	imeShift  int32      // column offset for terminals that draw IME preedit off the cursor (JediTerm: -1)
+	dirty     bool       // async output arrived while typing: redraw deferred until the keyboard is quiet
+	lastKey   time.Time  // last key press: spinner-only redraws pause while typing so the IME preedit is not disturbed
 }
 
 // imeColShift: JediTerm (JetBrains) draws uncommitted IME text at cursorX+1 cells
@@ -147,63 +149,96 @@ func imeColShift() int32 {
 }
 
 // slash commands (Claude Code style)
-type slashCmd struct{ name, desc string }
+type slashCmd struct {
+	name, desc string
+	core       bool
+}
 
 var slashCmds = []slashCmd{
-	{"/help", "show commands and keys"},
-	{"/clear", "start a fresh session (no handoff)"},
-	{"/status", "model, context tokens, session"},
-	{"/model", "show or switch model: /model <name>"},
-	{"/resume", "list Claude Code sessions and import one (/resume claude)"},
-	{"/import", "import a session: /import [id|latest]"},
-	{"/rotate", "hand off to a fresh session"},
-	{"/usage", "plan usage and limits (from claude)"},
-	{"/cost", "usage / cost (from claude)"},
-	{"/context", "context usage by category (from claude)"},
-	{"/compact", "compact the child's context (from claude)"},
-	{"/config", "show/set config: /config key=value (from claude)"},
-	{"/mcp", "MCP server status (from claude)"},
-	{"/agents", "subagents info (from claude)"},
-	{"/init", "analyze repo, propose CLAUDE.md (runs a turn)"},
-	{"/review", "review current changes (runs a turn)"},
-	{"/doctor", "check installation and config (runs a turn)"},
-	{"/mode", "permission mode: default|acceptEdits|plan|auto (shift+tab cycles); conductor|conductor-off = Sonnet conductor"},
-	{"/mouse", "toggle mouse wheel scroll (off = select text)"},
-	{"/version", "harness and claude versions"},
-	{"/exit", "exit"},
-	{"/quit", "exit"},
+	{"/?", "핵심 명령 목록", true},
+	{"/??", "전체 명령 목록", true},
+	{"/help", "show commands and keys", true},
+	{"/clear", "start a fresh session (no handoff)", false},
+	{"/status", "model, context tokens, session", false},
+	{"/model", "show or switch model: /model <name>", false},
+	{"/resume", "list Claude Code sessions and import one (/resume claude)", false},
+	{"/import", "import a session: /import [id|latest]", false},
+	{"/rotate", "hand off to a fresh session", false},
+	{"/사용량", "구독 한도 사용량(세션·주간)과 컨텍스트, 모델 호출 없이 바로 표시", true},
+	{"/usage", "plan usage and limits (from claude)", true},
+	{"/cost", "usage / cost (from claude)", true},
+	{"/context", "context usage by category (from claude)", true},
+	{"/compact", "compact the child's context (from claude)", true},
+	{"/config", "show/set config: /config key=value (from claude)", false},
+	{"/mcp", "MCP server status (from claude)", false},
+	{"/agents", "subagents info (from claude)", false},
+	{"/init", "analyze repo, propose CLAUDE.md (runs a turn)", false},
+	{"/review", "review current changes (runs a turn)", false},
+	{"/doctor", "check installation and config (runs a turn)", false},
+	{"/mode", "permission mode: default|acceptEdits|plan|auto (shift+tab cycles); conductor|conductor-off = Sonnet conductor", false},
+	{"/mouse", "toggle mouse wheel scroll (off = select text)", false},
+	{"/version", "harness and claude versions", false},
+	{"/exit", "exit", false},
+	{"/quit", "exit", true},
 }
 
 // cursorWriter wraps the terminal output so the REAL terminal cursor (where the OS IME draws
 // Korean/CJK preedit text) sits in the input box instead of at the end of the bottom status line.
-// Each frame is followed by "cursor up N, column C"; before the next frame the cursor is moved back down.
+// Each frame is followed by "cursor up N, column C".
 type cursorWriter struct {
 	*os.File // satisfies term.File (Fd/Read/Close) so bubbletea still reads the window size
 	w        io.Writer
 	col      *atomic.Int32 // 1-based column in the input row; 0 = off
 	up       *atomic.Int32 // rows from the last view row up to the input row
-	moved    bool
-	upWas    int32
 }
 
+// Write sends a frame as ONE write. Terminals without synchronized output (JediTerm) repaint between
+// writes and mid-stream, and the OS IME preedit box follows the cursor at that instant, so the cursor
+// must never be seen anywhere but the input row. bubbletea's frame is "ESC[H", then one "\n" per
+// unchanged row (the cursor walks the whole screen), changed rows, and a final "ESC[<last>;H"; here the
+// walk is replaced by absolute row moves and the cursor is parked on the input row in the same write.
 func (c *cursorWriter) Write(p []byte) (int, error) {
-	var pre, post string
-	if c.moved {
-		pre = fmt.Sprintf("\x1b[%dB", c.upWas)
-		c.moved = false
+	col, up := c.col.Load(), c.up.Load()
+	out := p
+	if col > 0 && len(p) > 0 {
+		out = []byte(parkFrame(string(p), col, up))
 	}
-	if col, up := c.col.Load(), c.up.Load(); col > 0 && len(p) > 0 {
-		post = fmt.Sprintf("\x1b[%dA\x1b[%dG", up, col)
-		c.moved, c.upWas = true, up
+	vis := ""
+	if strings.HasPrefix(string(p), "\x1b[H") { // a frame: the real cursor is the IME anchor, shown only while parked in the input box
+		vis = "\x1b[?25l"
+		if col > 0 {
+			vis = "\x1b[?25h"
+		}
 	}
-	if _, err := io.WriteString(c.w, pre); err != nil {
+	if _, err := io.WriteString(c.w, "\x1b[?2026h"+string(out)+vis+"\x1b[?2026l"); err != nil {
 		return 0, err
 	}
-	n, err := c.w.Write(p)
-	if err == nil && post != "" {
-		_, err = io.WriteString(c.w, post)
+	return len(p), nil
+}
+
+// parkFrame rewrites a bubbletea alt-screen frame so the cursor only visits changed rows and ends at
+// (input row, col). Frames it does not recognise (first paint, shrink with ESC[J) get the old suffix.
+func parkFrame(s string, col, up int32) string {
+	if !strings.HasPrefix(s, "\x1b[H") {
+		return s // not a frame (mode toggles etc.): leave the cursor alone
 	}
-	return n, err
+	legacy := s + fmt.Sprintf("\x1b[%dA\x1b[%dG", up, col)
+	i := strings.LastIndex(s, "\x1b[")
+	if strings.Contains(s, "\x1b[J") || i < 3 || !strings.HasSuffix(s, "H") {
+		return legacy
+	}
+	last, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(s[i:], "\x1b["), ";H"))
+	if err != nil || last < 1 {
+		return legacy
+	}
+	var sb strings.Builder
+	for row, seg := range strings.Split(s[3:i], "\n") {
+		if seg = strings.TrimSuffix(seg, "\r"); seg != "" {
+			fmt.Fprintf(&sb, "\x1b[%d;1H%s", row+1, seg)
+		}
+	}
+	fmt.Fprintf(&sb, "\x1b[%d;%dH", max(1, int32(last)-up), col)
+	return sb.String()
 }
 
 var (
@@ -214,7 +249,7 @@ var (
 
 func newTUIModel(r *Repl, submit chan string) *tuiModel {
 	sp := spinner.New()
-	sp.Spinner = spinner.Spinner{Frames: []string{"✻", "✽", "✶", "✳", "✢", "·"}, FPS: time.Second / 8}
+	sp.Spinner = spinner.Spinner{Frames: []string{"✻", "✽", "✶", "✷", "✢", "·"}, FPS: time.Second / 8}
 	sp.Style = lipgloss.NewStyle().Foreground(orange)
 	return &tuiModel{r: r, submit: submit, sp: sp, mouse: true, imeShift: imeColShift()}
 }
@@ -317,10 +352,21 @@ func (m *tuiModel) render() string {
 	return strings.Join(out, "\n")
 }
 
+// softRefresh is refresh for async agent output: while the user is typing, every flush walks the real
+// cursor through the changed rows and the IME preedit box follows it, so redraw once typing pauses.
+func (m *tuiModel) softRefresh() {
+	if m.busy && time.Since(m.lastKey) < 1500*time.Millisecond {
+		m.dirty = true
+		return
+	}
+	m.refresh()
+}
+
 func (m *tuiModel) refresh() {
 	if !m.ready {
 		return
 	}
+	m.dirty = false
 	atBottom := m.vp.AtBottom()
 	sig := len(m.blocks)
 	if sig > 0 {
@@ -375,12 +421,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var c tea.Cmd
 		m.sp, c = m.sp.Update(v)
 		cmds = append(cmds, c)
-		if n := len(m.r.tracker.running()); m.busy || n != m.lastRun {
+		// spinner-only redraws move the real cursor off the input row every tick; skip them while the user types
+		quiet := time.Since(m.lastKey) > 1500*time.Millisecond
+		if n := len(m.r.tracker.running()); n != m.lastRun || m.dirty && quiet || (m.busy && quiet && m.in.Value() == "") {
 			m.refresh()
 		}
 	case textMsg:
 		m.appendAsst(string(v))
-		m.refresh()
+		m.softRefresh()
 	case textEndMsg:
 		m.gotText = false
 	case toolMsg:
@@ -390,7 +438,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t += "(" + v.arg + ")"
 		}
 		m.blocks = append(m.blocks, block{"tool", t})
-		m.refresh()
+		m.softRefresh()
 	case toolResultMsg:
 		s := strings.TrimSpace(string(v))
 		lines := strings.Split(s, "\n")
@@ -399,7 +447,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t += fmt.Sprintf(" … (+%d lines)", len(lines)-1)
 		}
 		m.blocks = append(m.blocks, block{"result", t})
-		m.refresh()
+		m.softRefresh()
 	case noteMsg:
 		m.gotText = false
 		m.blocks = append(m.blocks, block{"note", string(v)})
@@ -455,6 +503,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.held = !m.vp.AtBottom()
 		cmds = append(cmds, c)
 	case tea.KeyMsg:
+		m.lastKey = time.Now()
 		return m.key(v)
 	}
 	if !m.quitting {
@@ -641,6 +690,14 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.busy {
 			if strings.HasPrefix(line, "/") {
+				if line == "/사용량" { // local: no claude call, fine while thinking
+					m.in.SetValue("")
+					m.hist.Add(line)
+					m.blocks = append(m.blocks, block{"note", m.r.usageText()})
+					m.vp.GotoBottom()
+					m.after()
+					return m, nil
+				}
 				if line == "/usage" { // allowed while thinking: separate one-shot claude call, popup
 					m.in.SetValue("")
 					m.hist.Add(line)
@@ -685,7 +742,7 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // busySlashMsg: shown when a slash command other than /usage is typed while an answer runs.
-const busySlashMsg = "생각 중에는 /usage 외의 명령을 사용할 수 없습니다. 답변이 끝난 뒤 다시 입력해 주세요."
+const busySlashMsg = "생각 중에는 /usage, /사용량 외의 명령을 사용할 수 없습니다. 답변이 끝난 뒤 다시 입력해 주세요."
 
 var usageSend = func(r *Repl, msg tea.Msg) { r.ui.send(msg) }
 
@@ -858,6 +915,21 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 	switch f[0] {
 	case "/quit", "/exit":
 		return m.quit()
+	case "/사용량":
+		note(m.r.usageText())
+	case "/?", "/??":
+		head := "전체 명령 목록"
+		if f[0] == "/?" {
+			head = "핵심 명령 목록"
+		}
+		l := []string{head}
+		for _, c := range slashCmds {
+			if f[0] == "/?" && !c.core {
+				continue
+			}
+			l = append(l, fmt.Sprintf("%-8s — %s", c.name, c.desc))
+		}
+		note(strings.Join(l, "\n"))
 	case "/help":
 		var l []string
 		for _, c := range slashCmds {

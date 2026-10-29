@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -15,8 +16,19 @@ func TestUsageAllowedWhileBusy(t *testing.T) {
 	if len(m.blocks) == 0 || m.blocks[len(m.blocks)-1].text != busySlashMsg {
 		t.Fatalf("blocks=%v", m.blocks)
 	}
-	if busySlashMsg != "생각 중에는 /usage 외의 명령을 사용할 수 없습니다. 답변이 끝난 뒤 다시 입력해 주세요." {
+	if busySlashMsg != "생각 중에는 /usage, /사용량 외의 명령을 사용할 수 없습니다. 답변이 끝난 뒤 다시 입력해 주세요." {
 		t.Fatal("message text")
+	}
+	select {
+	case s := <-m.submit:
+		t.Fatalf("sent %q", s)
+	case <-time.After(10 * time.Millisecond):
+	}
+	// /사용량 is local (no claude call): answered inline even while busy, nothing sent to the child
+	m.in.SetValue("/사용량")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if last := m.blocks[len(m.blocks)-1]; last.kind != "note" || !strings.Contains(last.text, "사용량 (구독 한도") {
+		t.Fatalf("/사용량 while busy: %+v", last)
 	}
 	select {
 	case s := <-m.submit:

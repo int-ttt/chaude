@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -136,6 +137,9 @@ type Repl struct {
 	files           []string
 	lastCtx         int
 	rate            map[string]any
+	rate0           map[string]any // rate_limit_info at the start of the current task
+	rateSeq         int            // bumped per rate_limit_event; a task delta is shown only if one arrived
+	rateSeq0        int
 	ui              *tuiBridge // non-nil in TUI mode
 	seenTools       map[string]bool
 	metrics         *Metrics
@@ -212,7 +216,7 @@ func (r *Repl) idleEvent(s *Session, tk *agentTracker, ev event) {
 		r.tr.add("permission_idle", kv{"tool", asMap(ev["request"])["tool_name"]})
 		r.askPerm(s, ev, true)
 	case t == "rate_limit_event":
-		r.rate = asMap(ev["rate_limit_info"])
+		r.rate, r.rateSeq = asMap(ev["rate_limit_info"]), r.rateSeq+1
 	case t == "stream_event" && isMainEvent(ev):
 		e := asMap(ev["event"])
 		d := asMap(e["delta"])
@@ -471,7 +475,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 		case t == "control_request" && str(asMap(ev["request"])["subtype"]) == "can_use_tool":
 			r.askPermission(ev)
 		case t == "rate_limit_event":
-			r.rate = asMap(ev["rate_limit_info"])
+			r.rate, r.rateSeq = asMap(ev["rate_limit_info"]), r.rateSeq+1
 		case t == "result":
 			result = ev
 		case t == "_unparsed":
@@ -507,6 +511,40 @@ func contains(l []string, s string) bool {
 	return false
 }
 
+// rateUtil returns a rate-limit window's utilization in percent (the event gives 0-1). key "fable"
+// matches any window whose name contains "fable"; ok=false when the harness has no such data.
+func rateUtil(rate map[string]any, key string) (float64, bool) {
+	uw := asMap(rate["unifiedWindows"])
+	for k, v := range uw {
+		if k != key && !(key == "fable" && strings.Contains(strings.ToLower(k), "fable")) {
+			continue
+		}
+		if u, ok := asMap(v)["utilization"].(float64); ok {
+			return u * 100, true
+		}
+	}
+	return 0, false
+}
+
+func pctStr(rate map[string]any, key string) string {
+	if p, ok := rateUtil(rate, key); ok {
+		return fmt.Sprintf("%.0f%%", p)
+	}
+	return "?"
+}
+
+func pctDelta(a, b map[string]any, key string) string {
+	p0, ok0 := rateUtil(a, key)
+	p1, ok1 := rateUtil(b, key)
+	if !ok0 || !ok1 {
+		return "?"
+	}
+	if p1 < p0 {
+		return "reset"
+	}
+	return fmt.Sprintf("+%.1f%%", p1-p0)
+}
+
 func (r *Repl) usageLine(result event, usage map[string]any) {
 	if result == nil {
 		return
@@ -514,20 +552,92 @@ func (r *Repl) usageLine(result event, usage map[string]any) {
 	ctx := ctxTokens(usage)
 	r.lastCtx = ctx
 	ru := asMap(result["usage"])
-	five := "?"
-	if w := asMap(asMap(r.rate["unifiedWindows"])["five_hour"]); w != nil {
-		if u, ok := w["utilization"]; ok && u != nil {
-			five = fmt.Sprint(u)
-		}
-	}
 	cost, _ := result["total_cost_usd"].(float64)
 	sid := trunc(r.sess.SessionID, 8)
 	if r.sess.SessionID == "" {
 		sid = "None"
 	}
-	r.p(fmt.Sprintf("%s[ctx %s | in %d cr %s cc %s out %d | $%.4f | 5h %s | sess %s rot %d]%s",
+	fable := ""
+	if _, ok := rateUtil(r.rate, "fable"); ok {
+		fable = " | Fable " + pctStr(r.rate, "fable")
+	}
+	r.p(fmt.Sprintf("%s[ctx %s | in %d cr %s cc %s out %d | $%.4f | 세션 %s | 주간 %s%s | sess %s rot %d]%s",
 		dim, commas(ctx), num(ru["input_tokens"]), commas(num(ru["cache_read_input_tokens"])),
-		commas(num(ru["cache_creation_input_tokens"])), num(ru["output_tokens"]), cost, five, sid, r.rotations, rst), "\n")
+		commas(num(ru["cache_creation_input_tokens"])), num(ru["output_tokens"]), cost,
+		pctStr(r.rate, "five_hour"), pctStr(r.rate, "seven_day"), fable, sid, r.rotations, rst), "\n")
+}
+
+// taskLine: rate-limit consumption of the task that just ran (window utilization before vs after).
+// The event reports whole percents, so a short task shows +0.0%; Fable only when the plan reports such a window.
+func (r *Repl) taskLine() {
+	if r.rateSeq == r.rateSeq0 {
+		r.p(dim+"[이번 작업 소모: 세션 ? | 주간 ?  (사용량 이벤트 없음)]"+rst, "\n")
+		return
+	}
+	fable := ""
+	if _, ok := rateUtil(r.rate, "fable"); ok {
+		fable = " | Fable " + pctDelta(r.rate0, r.rate, "fable")
+	}
+	r.p(fmt.Sprintf("%s[이번 작업 소모: 세션 %s | 주간 %s%s]%s", dim, pctDelta(r.rate0, r.rate, "five_hour"),
+		pctDelta(r.rate0, r.rate, "seven_day"), fable, rst), "\n")
+}
+
+// windowName: Korean label for a rate-limit window key (five_hour, seven_day, seven_day_opus, ...).
+func windowName(k string) string {
+	switch k {
+	case "five_hour":
+		return "세션(5시간)"
+	case "seven_day":
+		return "주간(7일)"
+	}
+	k = strings.ReplaceAll(k, "seven_day_", "주간 ")
+	k = strings.ReplaceAll(k, "five_hour_", "세션 ")
+	return k
+}
+
+// resetText: "MM-DD HH:MM (N시간 M분 후)" for a window reset time.
+func resetText(t time.Time, now time.Time) string {
+	d := t.Sub(now)
+	s := t.Local().Format("01-02 15:04")
+	if d <= 0 {
+		return s + " (지남)"
+	}
+	h, m := int(d.Hours()), int(d.Minutes())%60
+	if h >= 24 {
+		return fmt.Sprintf("%s (%d일 %d시간 후)", s, h/24, h%24)
+	}
+	return fmt.Sprintf("%s (%d시간 %d분 후)", s, h, m)
+}
+
+// usageText is the `/사용량` answer: subscription windows from the last rate_limit_event the child sent
+// (no model call, instant, works while an answer runs) plus the current context size.
+func (r *Repl) usageText() string {
+	var b strings.Builder
+	b.WriteString("사용량 (구독 한도, 마지막 사용량 이벤트 기준)\n")
+	uw := asMap(r.rate["unifiedWindows"])
+	if len(uw) == 0 {
+		b.WriteString("  아직 사용량 이벤트가 없습니다. 한 턴을 보내면 채워집니다.\n")
+	}
+	keys := make([]string, 0, len(uw))
+	for k := range uw {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	now := time.Now()
+	for _, k := range keys {
+		w := asMap(uw[k])
+		u, _ := w["utilization"].(float64)
+		line := "  " + windowName(k) + "  " + renderBar(u*100)
+		if t, ok := w["resetsAt"].(float64); ok && t > 0 {
+			line += "  재설정 " + resetText(time.Unix(int64(t), 0), now)
+		}
+		if st := str(w["status"]); st != "" && st != "allowed" {
+			line += "  [" + st + "]"
+		}
+		b.WriteString(line + "\n")
+	}
+	b.WriteString(fmt.Sprintf("  컨텍스트  %s  (%s / %s)", renderBar(float64(r.lastCtx)/ctxBarMax*100), commas(r.lastCtx), commas(ctxBarMax)))
+	return b.String()
 }
 
 func (r *Repl) buildSnapshot(note string) string {
@@ -704,6 +814,7 @@ func (r *Repl) handle(line string) {
 		sid = r.sess.SessionID
 	}
 	r.tr.add("user", kv{"text", line}, kv{"session", sid})
+	r.rate0, r.rateSeq0 = r.rate, r.rateSeq
 	reply, result, usage := r.runTurn(text, true)
 	r.tr.turns = append(r.tr.turns, [2]string{line, reply})
 	r.lastReply = reply
@@ -721,6 +832,9 @@ func (r *Repl) handle(line string) {
 	r.tr.add("assistant", kv{"text", reply}, kv{"session", sid}, kv{"usage", ru},
 		kv{"ctx", ctxTokens(usage)}, kv{"cost", cost})
 	r.usageLine(result, usage)
+	if result != nil {
+		r.taskLine()
+	}
 	fields := map[string]any{"stage": "turn", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
 		"model": r.a.Model, "conductor": r.a.Conductor, "ctx": r.lastCtx, "session": r.sess.SessionID, "draining": len(r.draining),
 		"cost_usd": cost, "duration_ms": time.Since(t0).Milliseconds(), "rotations": r.rotations, "delegations": r.delegs}
@@ -814,6 +928,10 @@ func (r *Repl) loop() int {
 		}
 		if f := strings.Fields(line); f[0] == "/mode" {
 			r.modeLine(f[1:])
+			continue
+		}
+		if line == "/사용량" {
+			r.p(r.usageText(), "\n")
 			continue
 		}
 		if !r.interactive {

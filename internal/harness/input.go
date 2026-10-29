@@ -181,10 +181,10 @@ func (b *inputBox) Height(max int) int {
 	return n
 }
 
-// View renders up to max rows with a "> " prompt, a reverse-video cursor and a placeholder.
+// View renders up to max rows with a "> " prompt and a placeholder.
 func (b *inputBox) View(max int, placeholder string, ph lipgloss.Style) string {
 	if len(b.val) == 0 {
-		cur := lipgloss.NewStyle().Reverse(true).Render(" ")
+		cur := " "
 		return "> " + cur + ph.Render(placeholder)
 	}
 	rs := b.rows()
@@ -202,7 +202,6 @@ func (b *inputBox) View(max int, placeholder string, ph lipgloss.Style) string {
 	if b.top > len(rs)-h {
 		b.top = len(rs) - h
 	}
-	rev := lipgloss.NewStyle().Reverse(true)
 	var out []string
 	for i := b.top; i < b.top+h; i++ {
 		r := rs[i]
@@ -213,9 +212,9 @@ func (b *inputBox) View(max int, placeholder string, ph lipgloss.Style) string {
 		line := string(b.val[r.start:r.end])
 		if i == crow {
 			at := b.pos - r.start
-			rest, cur := "", rev.Render(" ")
+			rest, cur := "", " "
 			if b.pos < r.end {
-				cur, rest = rev.Render(string(b.val[b.pos])), string(b.val[b.pos+1:r.end])
+				cur, rest = string(b.val[b.pos]), string(b.val[b.pos+1:r.end])
 			}
 			line = string(b.val[r.start:r.start+at]) + cur + rest
 		}

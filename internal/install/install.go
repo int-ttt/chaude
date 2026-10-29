@@ -82,7 +82,7 @@ cd "$(dirname "$0")" && exec bin/chaude
 `
 
 // gitignoreLines are appended (once) to an existing .gitignore: runtime state that must not be committed.
-var gitignoreLines = []string{"logs/", "notes/pastes/", "notes/metrics/", "bin/chaude", "bin/chaude.exe", ".claude/lean-off", ".claude-backup-*/"}
+var gitignoreLines = []string{"logs/", "notes/pastes/", "notes/metrics/", "bin/chaude", "bin/chaude.exe", "bin/chaude.exe.old", ".claude/lean-off", ".claude-backup-*/"}
 
 // Run installs or upgrades the package in o.Dir.
 func Run(o Options) error {
@@ -223,12 +223,13 @@ func Run(o Options) error {
 			name += ".exe"
 		}
 		dst := filepath.Join(dir, "bin", name)
+		_ = os.Remove(dst + ".old") // left by an earlier upgrade while chaude was running there
 		if same, _ := sameFile(src, dst); !same {
 			b, err := os.ReadFile(src)
 			if err != nil {
 				return fmt.Errorf("copy binary: %w", err)
 			}
-			if err := writeFile(dst, b); err != nil {
+			if err := writeExe(dst, b); err != nil {
 				return err
 			}
 			_ = os.Chmod(dst, 0o755)
@@ -537,6 +538,24 @@ func writeFile(p string, b []byte) error {
 		return err
 	}
 	return os.WriteFile(p, b, 0o644)
+}
+
+// writeExe replaces the project's chaude binary. Windows locks a running executable against writes but
+// allows renaming it, so a REPL that is open in that project keeps running on the renamed file.
+func writeExe(dst string, b []byte) error {
+	err := writeFile(dst, b)
+	if err == nil {
+		return nil
+	}
+	if _, st := os.Stat(dst); st != nil {
+		return err
+	}
+	old := dst + ".old"
+	_ = os.Remove(old)
+	if rerr := os.Rename(dst, old); rerr != nil {
+		return fmt.Errorf("copy binary: %w (close the chaude REPL running in that project and retry)", err)
+	}
+	return writeFile(dst, b)
 }
 
 func sameFile(a, b string) (bool, error) {

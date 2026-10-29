@@ -2,7 +2,7 @@
 
 Claude Code 사용량을 줄이는 하네스입니다. 메인 세션(Opus 또는 Fable)은 듣고·판단하고·설명만 하고, 파일·웹·명령 작업은 이름에 모델이 붙은 하위 에이전트(`haiku-*`, `sonnet-*`, `opus-architect`, `fable-architect`)가 합니다. 훅이 메인 세션의 작업 도구를 막기 때문에 규칙이 강제됩니다. 거기에 세션 회전·컨덕터 라우팅이 있는 터미널 REPL이 붙어 있습니다.
 
-버전 `0.8.0` (원본 int-ttt/chaude 0.7.1 병합 + 포크 기능) · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
+버전 `0.8.1` (원본 int-ttt/chaude 0.7.1 병합 + 포크 기능) · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
 
 ## 필요한 것
 - Claude Code 2.1.296 이상 (`claude --version`)
@@ -43,6 +43,7 @@ chaude install <프로젝트 폴더> --lean-off      # 일반 모드로 시작 (
 | Fable | `fable로` → `fable-architect`. 가장 비싼 모델이라 사용자가 부르거나 Opus가 같은 일에 실패했을 때만 씁니다. 컨덕터도 `fable로` 가 있을 때만 Fable 세션으로 보냅니다 |
 | 메인이 직접 작업 | `일반모드` (되돌리기 `절약모드`) |
 | 진행상황 | `진행상황`, `끝났어?` → 모델 호출 없이 `logs/*.status` 표시 |
+| 구독 사용량 | REPL에서 `/사용량` (세션·주간 한도, 재설정 시각, 컨텍스트; 모델 호출 없음, 생각 중에도 됨). `/?` 핵심 명령, `/??` 전체 명령 |
 
 ## Windows에서 다른 점
 - 훅은 Claude Code가 Git Bash로 실행합니다. 저장소의 `settings.json`(공통 형태)은 `.claude/hooks/pyrun` 런처로 어느 OS에서나 동작하고, `chaude install`은 Windows에서 셸 없이 `py -3 <훅>`을 직접 실행하는 형태로 바꿔 씁니다 (`chaude gen-settings windows` 로 따로 뽑을 수도 있음).
