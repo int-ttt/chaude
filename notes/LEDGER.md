@@ -196,3 +196,6 @@
 - 10-29 09:06 [haiku-coder · haiku 5.5] - 설정된 값: `permissions.defaultMode = "auto"` (`/Users/leekwangseok/.claude/settings.json`) / - auto 유효 여부: 유효함. `claude --help` 의 `--permission-mode` choices 에 `"auto"` 가 포함됨 (CLI 2.1.312). 공식 docs 는 확인하지 않음. / - 보존 확인: 기존 키 8개 (`enabledPlugins`, `extraKnownMarketplaces`, `language`, `effortLevel`, `
 - 10-29 11:38 [sonnet-analyst · sonnet 5.5] 스카우트 결과를 기다리는 중입니다.
 - 10-29 12:31 [sonnet-analyst · sonnet 5.5] Scouts are running. I'm waiting for their summaries.
+- 10-29 13:02 [sonnet-analyst · sonnet 5.5] 상태줄에 사용량 표시를 넣었습니다. 사용량 문자열은 rate 이벤트가 들어올 때만 갱신됩니다. `go build ./...`와 `go test ./...`는 통과했고, `TestFmtRateStatus`를 새로 추가했습니다. 커밋은 하지 않았습니다. / - **/usage 퍼센트:** 기존 /usage 출력이 이미 줄마다 `N%`와 바를 표시하고 있어서, 이 부분은 바꾸지 않았습니다. / - **TUI 표시 형식:** ctx 바로 뒤에 ` · 14:20/15:50 · 37%` 형태로 붙고, 줄 전체는 `모델 · ctx A/B · 1
+- 10-29 13:18 [sonnet-reviewer · sonnet 5.5] PASS. No blocking issues, and `go test ./internal/harness` passes (cached). I did not edit anything or write a notes file. / Non-blocking: / - **Prompt:** the diff matches the plan's final spec items A to D. The new large signals and "when unsure between small and large, large" are in. The `topic: s
+- 10-29 15:26 [sonnet-analyst · sonnet 5.5] Haiku 집계 작업 2건이 진행 중입니다. 완료 알림을 받으면 요약 파일을 읽고 분석 문서를 작성하겠습니다.
