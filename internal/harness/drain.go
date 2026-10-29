@@ -69,9 +69,18 @@ func (t *agentTracker) onToolUse(id, name string, input map[string]any, now time
 }
 
 // onToolResult: foreground agents finish with their tool_result; background ones only "launch".
-func (t *agentTracker) onToolResult(id string) {
+func (t *agentTracker) onToolResult(id string) { t.onToolResultText(id, "") }
+
+// onToolResultText: an "Async agent launched" result means the agent runs in the background even
+// when run_in_background was absent from the input (agent-definition default); it stays running.
+func (t *agentTracker) onToolResultText(id, text string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if a := t.agents[id]; a != nil && !a.Background && strings.Contains(text, "Async agent launched") {
+		a.Background = true
+		t.persistLocked()
+		return
+	}
 	if a := t.agents[id]; a != nil && !a.Background {
 		a.Done = true
 		t.persistLocked()

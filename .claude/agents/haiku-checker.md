@@ -9,8 +9,8 @@ autoCompactWindow: 100000
 ---
 
 Do not edit. Run only the requested checks (grep new/old text per target; charcount --limit; facts vs FACTS.md; narrowest test command). Never claim an unrun check.
-Return ≤5 lines: FAIL items first with file:line; then "나머지 N개 PASS". Full table → `notes/runs/`.
-Final message = only a brief result summary (a few lines, Korean 존댓말: outcome · changed paths · PASS/FAIL) for the main session to post; full details go to `notes/runs/`, give only the path.
+Return content (the final message, ≤3 lines, ≤300 chars) covers: FAIL items first with file:line; then "나머지 N개 PASS". Full table → `notes/runs/`.
+Final message = at most 3 lines and at most 300 characters total (Korean 존댓말): first the outcome stating what was done (this replaces, not adds to, the outcome field), then changed paths · PASS/FAIL; details go to `notes/runs/`, give only the path.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Issue independent reads/greps in one parallel batch.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.

@@ -100,6 +100,8 @@ type tuiModel struct {
 	sp        spinner.Model
 	blocks    []block
 	busy      bool
+	turnStart time.Time // when the running turn started (busy status elapsed time)
+	lastTool  string    // last tool call of the running turn, truncated to 40 chars
 	gotText   bool
 	perm      *permMsg
 	pick      []sessionInfo // non-nil while the /resume picker is open
@@ -234,7 +236,7 @@ func (m *tuiModel) welcome() string {
 	body := lipgloss.NewStyle().Foreground(orange).Bold(true).Render("✻ Welcome to Claude Harness!") + "\n\n" +
 		dimSt.Render("  /help for help, /rotate to rotate session, /quit to exit") + "\n\n" +
 		dimSt.Render("  cwd: "+trunc(cwd, w-12)) + "\n" +
-		dimSt.Render(fmt.Sprintf("  model: %s · rotate at %s tokens", m.r.a.Model, commas(m.r.a.Threshold)))
+		dimSt.Render(fmt.Sprintf("  model: %s · rotate at %s tokens", m.r.a.Model, commas(m.r.effectiveThreshold())))
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(orange).Padding(0, 1).Width(w).Render(body)
 }
 
@@ -387,6 +389,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.arg != "" {
 			t += "(" + v.arg + ")"
 		}
+		m.lastTool = trunc(t, 40)
 		m.blocks = append(m.blocks, block{"tool", t})
 		m.refresh()
 	case toolResultMsg:
@@ -528,7 +531,7 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			id := m.pick[m.pickSel].ID
 			m.pick = nil
-			m.busy = true
+			m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
 			m.blocks = append(m.blocks, block{"user", "/import " + id})
 			m.vp.GotoBottom()
 			m.refresh()
@@ -706,7 +709,7 @@ var usageFetch = func(ctx int) string {
 func (m *tuiModel) sendPrompt(line string) {
 	m.blocks = append(m.blocks, block{"user", line})
 	m.curPrompt = line
-	m.busy = true
+	m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
 	m.held = false
 	m.vp.GotoBottom()
 	m.refresh()
@@ -724,8 +727,21 @@ func (m *tuiModel) placeholder() string {
 	return "대기 - 프롬프트 입력"
 }
 
-// mainStatusText: the main session's row in the same `상태-모델-세션이름(요약)` form as agents.
+// mainStatusText: the main session's row in the same `상태-모델-세션이름(요약)` form as agents,
+// plus ` · <elapsed> · <lastTool>` while a turn is running.
 func (m *tuiModel) mainStatusText() string {
+	s := m.mainStatusBase()
+	if m.busy && !m.turnStart.IsZero() {
+		d := time.Since(m.turnStart)
+		s += fmt.Sprintf(" · %dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+		if m.lastTool != "" {
+			s += " · " + m.lastTool
+		}
+	}
+	return s
+}
+
+func (m *tuiModel) mainStatusBase() string {
 	sum := strings.TrimSpace(m.curPrompt)
 	if i := strings.IndexByte(sum, '\n'); i >= 0 {
 		sum = strings.TrimSpace(sum[:i])
@@ -875,13 +891,13 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		if sid == "" {
 			sid = "-"
 		}
-		note(fmt.Sprintf("model %s · ctx %s/%s · rotations %d · session %s", m.r.a.Model, commas(m.r.lastCtx), commas(m.r.a.Threshold), m.r.rotations, trunc(sid, 8)))
+		note(fmt.Sprintf("model %s · ctx %s/%s · rotations %d · session %s", m.r.a.Model, commas(m.r.lastCtx), commas(m.r.effectiveThreshold()), m.r.rotations, trunc(sid, 8)))
 	case "/model":
 		if len(f) < 2 {
 			note("model " + m.r.a.Model + "  (switch: /model <name>, hands off context to the new session)")
 			break
 		}
-		m.busy = true
+		m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
 		m.blocks = append(m.blocks, block{"user", line})
 		m.vp.GotoBottom()
 		m.refresh()
@@ -897,7 +913,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		}
 		m.pick, m.pickSel = l, 0
 	case "/import":
-		m.busy = true
+		m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
 		m.blocks = append(m.blocks, block{"user", line})
 		m.vp.GotoBottom()
 		m.refresh()
@@ -908,7 +924,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 			break
 		}
 		if f[1] == "conductor" || f[1] == "conductor-off" {
-			m.busy = true
+			m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
 			m.blocks = append(m.blocks, block{"user", line})
 			m.vp.GotoBottom()
 			m.refresh()
@@ -928,7 +944,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		if f[0] == "/clear" {
 			m.blocks = nil
 		}
-		m.busy = true
+		m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
 		m.blocks = append(m.blocks, block{"user", line})
 		m.vp.GotoBottom()
 		m.refresh()
@@ -956,7 +972,7 @@ func (m *tuiModel) quit() (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) statusLine() string {
 	ctx := m.r.lastCtx
-	left := fmt.Sprintf(" %s · ctx %s/%s · rot %d", m.r.a.Model, commas(ctx), commas(m.r.a.Threshold), m.r.rotations)
+	left := fmt.Sprintf(" %s · ctx %s/%s · rot %d", m.r.a.Model, commas(ctx), commas(m.r.effectiveThreshold()), m.r.rotations)
 	if pm := permMode(m.r.mode.Load()); pm != modeDefault {
 		left += " · mode " + pm.String()
 	}

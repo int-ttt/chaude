@@ -78,3 +78,22 @@ func TestDrainConsumeDenies(t *testing.T) {
 		t.Fatalf("resp %q", w.String())
 	}
 }
+
+func TestBackgroundAgentShownRunning(t *testing.T) {
+	tr := newAgentTracker()
+	now := time.Now()
+	tr.onToolUse("a", "Agent", map[string]any{"description": "d"}, now)
+	tr.onToolResultText("a", "Async agent launched successfully. agentId: x")
+	if r := tr.running(); len(r) != 1 || r[0].ID != "a" {
+		t.Fatalf("running: %v", r)
+	}
+	tr.onToolUse("b", "Agent", map[string]any{"description": "fg"}, now)
+	tr.onToolResultText("b", "done")
+	if r := tr.running(); len(r) != 1 {
+		t.Fatalf("foreground must finish: %v", r)
+	}
+	tr.onNotification("<task-notification><tool-use-id>a</tool-use-id></task-notification>")
+	if r := tr.running(); len(r) != 0 {
+		t.Fatalf("notification must finish: %v", r)
+	}
+}

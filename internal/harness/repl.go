@@ -23,6 +23,9 @@ const (
 	dim = "\033[2m"
 	rst = "\033[0m"
 
+	// rotation threshold for opus/sonnet (haiku uses the -threshold flag, default 80000)
+	opusSonnetThreshold = 270_000
+
 	handoffPrompt = "Write a handoff note for a fresh session that will continue this work. No tools. " +
 		"Sections: Goal; Decisions; Files created/changed; In-progress work; Open questions; " +
 		"User preferences/instructions; Any exact codes, names or numbers the user gave. Be exact and brief."
@@ -248,7 +251,7 @@ func (r *Repl) idleEvent(s *Session, tk *agentTracker, ev event) {
 			b := asMap(bi)
 			switch str(b["type"]) {
 			case "tool_result":
-				tk.onToolResult(str(b["tool_use_id"]))
+				tk.onToolResultText(str(b["tool_use_id"]), resultText(b["content"]))
 			case "text":
 				if tk.onNotification(str(b["text"])) {
 					r.idle.sawNotif = true
@@ -457,7 +460,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 		case t == "user" && isMain:
 			for _, bi := range asList(asMap(ev["message"])["content"]) {
 				if b := asMap(bi); str(b["type"]) == "tool_result" {
-					r.tracker.onToolResult(str(b["tool_use_id"]))
+					r.tracker.onToolResultText(str(b["tool_use_id"]), resultText(b["content"]))
 				}
 			}
 			if r.ui == nil || !show {
@@ -682,6 +685,14 @@ func (r *Repl) pollDrains() {
 	r.draining = keep
 }
 
+// effectiveThreshold is the context-token count that triggers auto-rotation for the current model.
+func (r *Repl) effectiveThreshold() int {
+	if r.a.Model == "opus" || r.a.Model == "sonnet" {
+		return opusSonnetThreshold
+	}
+	return r.a.Threshold
+}
+
 func (r *Repl) handle(line string) {
 	r.pollDrains()
 	r.tracker.dismissRestored()
@@ -742,8 +753,9 @@ func (r *Repl) handle(line string) {
 	}
 	autoOK := r.a.MaxAutoRotations < 0 || r.rotations < r.a.MaxAutoRotations
 	cooled := r.lastRotFail.IsZero() || time.Since(r.lastRotFail) >= r.a.Cooldown
-	if autoOK && cooled && r.lastCtx >= r.a.Threshold {
-		r.rotate(fmt.Sprintf("ctx %s >= %s", commas(r.lastCtx), commas(r.a.Threshold)))
+	thr := r.effectiveThreshold()
+	if autoOK && cooled && r.lastCtx >= thr {
+		r.rotate(fmt.Sprintf("ctx %s >= %s", commas(r.lastCtx), commas(thr)))
 	}
 }
 
@@ -805,7 +817,7 @@ func (r *Repl) loop() int {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if line == "/quit" {
+		if line == "/quit" || line == "/exit" {
 			break
 		}
 		if line == "/rotate" {
@@ -818,6 +830,10 @@ func (r *Repl) loop() int {
 		}
 		if !r.interactive {
 			r.p("> "+line, "\n")
+		}
+		if txt, ok := localCmd(r, line); ok {
+			r.p(txt, "\n")
+			continue
 		}
 		if f := strings.Fields(line); f[0] == "/resume" {
 			r.resumeLine(f[1:]...)
@@ -845,7 +861,7 @@ func Main(args []string) int {
 	var a Args
 	fs.StringVar(&a.Model, "model", "haiku", "")
 	fs.StringVar(&a.Cwd, "cwd", "", "")
-	fs.IntVar(&a.Threshold, "threshold", 270_000, "rotate after an answer when context tokens >= this")
+	fs.IntVar(&a.Threshold, "threshold", 80_000, "rotate after an answer when context tokens >= this")
 	fs.IntVar(&a.CompactWindow, "compact-window", 400_000, "child-only CLAUDE_CODE_AUTO_COMPACT_WINDOW (keep > threshold; 0=off)")
 	fs.IntVar(&a.MaxAutoRotations, "max-auto-rotations", -1, "max automatic rotations (default unlimited)")
 	fs.StringVar(&a.Transcript, "transcript", filepath.Join(osenv.StateDir(), "transcript.jsonl"), "")

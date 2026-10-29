@@ -11,8 +11,8 @@ autoCompactWindow: 100000
 Find only what the brief asks. Do not edit. Prefer grep -rl, find, ls -t, head, tail; read partially.
 Report matching paths (newest first), exact values/lines, what was NOT found.
 Past conversations: `bin/chaude search-history "<2-3 key terms>" [--who user] [--since YYYY-MM-DD]`. Try 2-3 term variants (synonyms, names of files, people or things) before saying not found. Never open raw .jsonl transcripts. Quote the matched line with its date; newest wins if lines conflict.
-Return to the main thread at most 5 lines. Anything longer goes to `notes/runs/<YYMMDD>-<agent>-<topic>.md`; return that path.
-Final message = only a brief result summary (a few lines, Korean 존댓말: outcome · changed paths · PASS/FAIL) for the main session to post; full details go to `notes/runs/`, give only the path.
+Return to the main thread only the final message below (≤3 lines).
+Final message = at most 3 lines and at most 300 characters total (Korean 존댓말): first the outcome stating what was done (this replaces, not adds to, the outcome field), then changed paths · PASS/FAIL; details go to `notes/runs/`, give only the path.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Issue independent reads/greps in one parallel batch.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.

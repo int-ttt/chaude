@@ -11,8 +11,8 @@ autoCompactWindow: 100000
 Read only the implicated code path and nearest tests/callers. Check git status; preserve unrelated changes; never reset/stash.
 One minimal fix in the surrounding style → narrowest check → exact command and result. Never claim unrun tests.
 On failure, use the new output; never repeat a fix. After 2 failed attempts, stop: write hypotheses, evidence, error lines to `notes/runs/` (for `sonnet-analyst`; if it already failed there, for `opus-architect`).
-Return ≤5 lines: cause · changed paths · check + result · risk.
-Final message = only a brief result summary (a few lines, Korean 존댓말: outcome · changed paths · PASS/FAIL) for the main session to post; full details go to `notes/runs/`, give only the path.
+Return content (the final message, ≤3 lines, ≤300 chars) covers: cause · changed paths · check + result · risk.
+Final message = at most 3 lines and at most 300 characters total (Korean 존댓말): first the outcome stating what was done (this replaces, not adds to, the outcome field), then changed paths · PASS/FAIL; details go to `notes/runs/`, give only the path.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Issue independent reads/greps in one parallel batch.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.

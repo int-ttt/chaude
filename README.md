@@ -21,7 +21,7 @@ chaude --version
 
 ```sh
 chaude                           # 인자 없이 실행하면 REPL 시작 (chaude repl과 동일)
-chaude repl                      # REPL 시작 (기본 모델 haiku, 임계값 270000 토큰)
+chaude repl                      # REPL 시작 (기본 모델 haiku, haiku 임계값 80000 토큰, opus·sonnet 270000)
 chaude repl --threshold 200000   # 임계값 변경
 ```
 
@@ -32,7 +32,7 @@ chaude repl --threshold 200000   # 임계값 변경
 |---|---|---|
 | `--model` | haiku | 모델 |
 | `--cwd` | 현재 디렉터리 | 작업 디렉터리 |
-| `--threshold` | 270000 | 이 토큰 수 이상이면 회전 |
+| `--threshold` | 80000 (haiku; opus·sonnet 270000) | 이 토큰 수 이상이면 회전 |
 | `--compact-window` | 400000 | 자식 프로세스 전용 자동 compact 창(0이면 끔, threshold보다 커야 함) |
 | `--max-auto-rotations` | 무제한 | 자동 회전 횟수 상한 |
 | `--tail-turns` | 4 | 스냅샷에 넣는 최근 대화 턴 수 |

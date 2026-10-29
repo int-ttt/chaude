@@ -194,3 +194,5 @@
 - 10-29 09:04 [agent] <analysis> / Summary of the session after the previous compaction. / Steps taken:
 - 10-29 09:06 [opus-architect · opus 5.5] 두 버그 모두 원인을 찾아 고쳤고, 고치기 전 실패하던 회귀 테스트 3개가 고친 뒤 모두 통과합니다. 실제 JetBrains 화면에서는 아직 확인하지 못했습니다. / - **글자 밀림 원인**: JetBrains 터미널(JediTerm)이 조합 중인 한글을 실제 커서보다 한 칸 오른쪽에 그립니다. 터미널 소스 코드에서 확인했습니다. 0.6.11에서 고친 건 커서의 행이라 효과가 없었고, 실제 문제는 열이었습니다. 이제 JetBrains 터미널에서는 커서를 한 칸 왼쪽에 둡니다. `CHAUDE_IME_SHIFT` 환경변수로 이 값을 
 - 10-29 09:06 [haiku-coder · haiku 5.5] - 설정된 값: `permissions.defaultMode = "auto"` (`/Users/leekwangseok/.claude/settings.json`) / - auto 유효 여부: 유효함. `claude --help` 의 `--permission-mode` choices 에 `"auto"` 가 포함됨 (CLI 2.1.312). 공식 docs 는 확인하지 않음. / - 보존 확인: 기존 키 8개 (`enabledPlugins`, `extraKnownMarketplaces`, `language`, `effortLevel`, `
+- 10-29 11:38 [sonnet-analyst · sonnet 5.5] 스카우트 결과를 기다리는 중입니다.
+- 10-29 12:31 [sonnet-analyst · sonnet 5.5] Scouts are running. I'm waiting for their summaries.
