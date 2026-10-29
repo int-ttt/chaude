@@ -44,7 +44,7 @@ func TestDecideMode(t *testing.T) {
 
 func TestReplModeLine(t *testing.T) {
 	var sb strings.Builder
-	r := &Repl{out: &sb}
+	r := &Repl{out: &sb, a: Args{Cwd: t.TempDir()}} // the mode is saved per folder: keep it out of the source tree
 	r.modeLine([]string{"plan"})
 	if permMode(r.mode.Load()) != modePlan {
 		t.Fatal(sb.String())

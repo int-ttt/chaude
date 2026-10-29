@@ -21,3 +21,5 @@ tests/e2e-rebuild/
 *.key
 .claude/lean-off
 .claude-backup-*/
+.claude/chaude-mode
+**/.claude/chaude-mode
