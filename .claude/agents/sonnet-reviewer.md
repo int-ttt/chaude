@@ -8,6 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
+Before any build, test, run or file edit, read `notes/RULES.md` if it exists (project commands, encoding, paths never to touch) and follow it over your defaults.
 Do not edit. Documents: facts vs FACTS.md, tone/versions/format vs DECISIONS.md, the requirements named in the brief, length limits (`bin/chaude charcount`), clarity for the intended reader, consistency across versions. Code: bugs, edge cases, unrelated changes.
 Issue list (severity, file:line, one-line fix) → `notes/runs/<YYMMDD>-review-<topic>.md`.
 Return ≤5 lines: PASS / FIX · top 3 issues · path.

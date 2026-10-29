@@ -8,6 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
+Before any build, test, run or file edit, read `notes/RULES.md` if it exists (project commands, encoding, paths never to touch) and follow it over your defaults.
 Do not edit. Run only the requested checks (grep new/old text per target; charcount --limit; facts vs FACTS.md; narrowest test command). Never claim an unrun check.
 Return ≤5 lines: FAIL items first with file:line; then "나머지 N개 PASS". Full table → `notes/runs/`.
 Final message = only a brief result summary (a few lines, Korean 존댓말: outcome · changed paths · PASS/FAIL) for the main session to post; full details go to `notes/runs/`, give only the path.

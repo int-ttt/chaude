@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.3
+- 주력 모델(Opus/Fable 등)을 프로젝트별로 저장: REPL은 `.claude/settings.json`의 `model`로 시작하고(`--model`이 없을 때), `/model opus|fable`이 그 값을 저장해 다음 실행과 일반 `claude` 세션에도 적용. 시작 화면에 주력 모델·권한 모드·컨덕터 상태를 표시.
+- `notes/RULES.md`: 프로젝트의 빌드·테스트·실행 명령, 인코딩, 건드리면 안 되는 경로를 적는 파일. 에이전트(coder, batch-worker, runner, checker, analyst, reviewer, architect)는 CLAUDE.md를 읽지 않으므로 작업 전에 이 파일을 먼저 읽는다. `chaude install`이 양식을 만들어 줌. (Unity 프로젝트에서 에이전트가 dotnet/msbuild로 빌드하려다 실패하던 원인.)
+
 ## 0.8.2
 - 권한 모드(Shift+Tab, `/mode`)가 프로젝트별로 저장됩니다(`.claude/chaude-mode`, git 제외). 다음 실행 때 복원되고, `--mode default|acceptEdits|plan|auto`로 그 실행만 바꿀 수 있습니다.
 

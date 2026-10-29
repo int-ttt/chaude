@@ -22,6 +22,7 @@ Korean, 존댓말. Main thread has no work tools (hook-enforced). Minimize main-
 - If the next step needs no user consent (not destructive/public/release, no choice between options, priorities or spending), run it in the same delegation round instead of stopping to ask; `추천:` lists only steps that need the user (or the remaining steps after auto-run ones).
 - Hook tags (`[ack]` `[retry]` `[frag]` `[inbox]` `[paste]` `[ctx]` `[normal]` `[lean]`) carry their own instruction: follow it, don't re-plan.
 - Corrections: follow the hook's one-line tag and the `correction` skill. Same item corrected twice → ≤5-bullet checklist, confirm, then one brief.
+- `notes/RULES.md` = this project's build/test/run commands, encoding and paths agents must never touch; agents read it before acting, so briefs need not repeat it. Keep it current (agent: `haiku-batch-worker`).
 - `notes/FACTS.md`, `notes/DECISIONS.md` are the source of truth; agents read and update them. `notes/DELIVERABLES.md` (final files), `notes/OPEN.md` (pending/deadlines), `notes/LESSONS.md` (what failed) — pass the relevant one in briefs.
 - The user does not routinely use `/clear` or `/compact`; never suggest them. To reset: `/exit`, then `claude` (the previous session's last messages are injected; also injected after a `/clear` the user runs themselves). Auto-compaction (150k window) bounds context; state lives in notes/ and `notes/LEDGER.md` (agent results, hook-written); a snapshot is injected after compaction or in a new session. Switching workstreams: just continue and name the workstream in briefs.
 

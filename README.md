@@ -2,7 +2,7 @@
 
 Claude Code 사용량을 줄이는 하네스입니다. 메인 세션(Opus 또는 Fable)은 듣고·판단하고·설명만 하고, 파일·웹·명령 작업은 이름에 모델이 붙은 하위 에이전트(`haiku-*`, `sonnet-*`, `opus-architect`, `fable-architect`)가 합니다. 훅이 메인 세션의 작업 도구를 막기 때문에 규칙이 강제됩니다. 거기에 세션 회전·컨덕터 라우팅이 있는 터미널 REPL이 붙어 있습니다.
 
-버전 `0.8.2` (원본 int-ttt/chaude 0.7.1 병합 + 포크 기능) · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
+버전 `0.8.3` (원본 int-ttt/chaude 0.7.1 병합 + 포크 기능) · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
 
 ## 필요한 것
 - Claude Code 2.1.296 이상 (`claude --version`)
@@ -41,6 +41,8 @@ chaude install <프로젝트 폴더> --lean-off      # 일반 모드로 시작 (
 | REPL(세션 회전·컨덕터) | 프로젝트에서 `bin\chaude.exe` (mac: `bin/chaude`) · `--model fable` 로 메인 모델 지정 |
 | 맡길 모델 지정 | 프롬프트에 `haiku로` / `sonnet으로` / `opus로` / `fable로` (한글 `하이쿠로`·`소넷으로`·`오퍼스로`·`페이블로`도 됨). REPL 컨덕터는 이 지시가 있으면 분류기 호출 없이 바로 그 모델 세션으로 보냅니다 |
 | Fable | `fable로` → `fable-architect`. 가장 비싼 모델이라 사용자가 부르거나 Opus가 같은 일에 실패했을 때만 씁니다. 컨덕터도 `fable로` 가 있을 때만 Fable 세션으로 보냅니다 |
+| 주력 모델 바꾸기 | REPL에서 `/model opus` 또는 `/model fable` — 프로젝트의 `.claude/settings.json`에 저장되어 다음 실행과 일반 `claude` 세션에도 적용. 시작 화면에 현재 주력 모델이 보임 |
+| 에이전트가 지켜야 할 프로젝트 규칙 | `notes/RULES.md`에 빌드·테스트 명령, 인코딩, 금지 경로를 적어 두면 에이전트가 작업 전에 읽음 (설치 시 양식 생성) |
 | 메인이 직접 작업 | `일반모드` (되돌리기 `절약모드`) |
 | 진행상황 | `진행상황`, `끝났어?` → 모델 호출 없이 `logs/*.status` 표시 |
 | 구독 사용량 | REPL에서 `/사용량` (세션·주간 한도, 재설정 시각, 컨텍스트; 모델 호출 없음, 생각 중에도 됨). `/?` 핵심 명령, `/??` 전체 명령 |

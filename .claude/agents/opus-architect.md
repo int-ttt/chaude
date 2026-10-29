@@ -8,6 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
+Before any build, test, run or file edit, read `notes/RULES.md` if it exists (project commands, encoding, paths never to touch) and follow it over your defaults.
 The brief quotes the user's words and the conversation context you need, or is an `ESCALATE` scope file from sonnet-analyst: start from it, don't redo its reading. Read `notes/FACTS.md`, `notes/DECISIONS.md`, `notes/LESSONS.md` and only the files that bear on the decision (grep first, partial reads); never repeat approaches LESSONS.md marks as failed.
 1. Decide: problem and constraints, 2-3 options with trade-offs, the choice and why.
 2. Small implementation (about one file or ≤50 lines) or one that can't be separated from the reasoning: do it yourself, run the narrowest check, report the exact result.

@@ -53,6 +53,26 @@ var notesTemplates = map[string]string{
 
 var mkDirs = []string{"notes/runs", "notes/research", "notes/pastes", "logs"}
 
+// rulesTemplate is notes/RULES.md: what every agent reads before building, testing or editing.
+// Agents do not load CLAUDE.md (omitClaudeMd), so project-specific commands live here.
+const rulesTemplate = `# 에이전트 규칙 (notes/RULES.md)
+<!-- 에이전트는 빌드·테스트·실행·파일 수정 전에 이 파일을 먼저 읽습니다. 짧고 정확하게, 명령은 그대로 복사해 쓸 수 있게. -->
+
+## 빌드 / 테스트 / 실행 명령
+- 빌드: (예: ` + "`go build ./...`" + ` — 이 프로젝트의 실제 명령으로 바꾸세요)
+- 테스트: 
+- 실행: 
+
+## 인코딩 / 줄바꿈
+- (예: .cs 는 UTF-8 BOM + CRLF 유지)
+
+## 절대 건드리지 않는 경로
+- (예: Library/ Temp/ obj/ .vs/)
+
+## 검증 방법
+- (무엇을 보면 성공인지: 로그 파일, 결과 파일, 명령 종료 코드)
+`
+
 // launcherBat / launcherSh are written next to the project as chaude-start.bat / chaude-start.command.
 const launcherBat = `@echo off
 rem chaude launcher (written by "chaude install"): double-click to open this project's REPL.
@@ -192,6 +212,7 @@ func Run(o Options) error {
 			return err
 		}
 	}
+	notesTemplates["notes/RULES.md"] = rulesTemplate
 	for rel, body := range notesTemplates {
 		p := filepath.Join(dir, filepath.FromSlash(rel))
 		if _, err := os.Stat(p); err == nil {
@@ -201,7 +222,7 @@ func Run(o Options) error {
 			return err
 		}
 	}
-	say("notes   notes/ (FACTS, DECISIONS, runs, research, pastes) and logs/")
+	say("notes   notes/ (FACTS, DECISIONS, RULES, runs, research, pastes) and logs/")
 
 	// 6. version marker (session-context.py / style-adapter.py report upgrades from it)
 	if o.Version != "" {

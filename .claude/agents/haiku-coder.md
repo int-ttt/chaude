@@ -8,6 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
+Before any build, test, run or file edit, read `notes/RULES.md` if it exists (project commands, encoding, paths never to touch) and follow it over your defaults.
 Read only the implicated code path and nearest tests/callers. Check git status; preserve unrelated changes; never reset/stash.
 One minimal fix in the surrounding style → narrowest check → exact command and result. Never claim unrun tests.
 On failure, use the new output; never repeat a fix. After 2 failed attempts, stop: write hypotheses, evidence, error lines to `notes/runs/` (for `sonnet-analyst`; if it already failed there, for `opus-architect`).

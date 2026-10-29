@@ -268,10 +268,16 @@ func (m *tuiModel) welcome() string {
 	if w < 20 {
 		w = 20
 	}
+	conductor := "off"
+	if m.r.a.Conductor {
+		conductor = "on"
+	}
 	body := lipgloss.NewStyle().Foreground(orange).Bold(true).Render("✻ Welcome to Claude Harness!") + "\n\n" +
-		dimSt.Render("  /help for help, /rotate to rotate session, /quit to exit") + "\n\n" +
+		dimSt.Render("  /help 명령 · /? 핵심 명령 · /사용량 한도 · /quit 종료") + "\n\n" +
 		dimSt.Render("  cwd: "+trunc(cwd, w-12)) + "\n" +
-		dimSt.Render(fmt.Sprintf("  model: %s · rotate at %s tokens", m.r.a.Model, commas(m.r.a.Threshold)))
+		lipgloss.NewStyle().Foreground(orange).Render("  주력 모델: "+m.r.a.Model) +
+		dimSt.Render("  (/model opus | fable 로 변경, 프로젝트에 저장)") + "\n" +
+		dimSt.Render(fmt.Sprintf("  mode: %s · conductor: %s · rotate at %s tokens", permMode(m.r.mode.Load()).String(), conductor, commas(m.r.a.Threshold)))
 	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(orange).Padding(0, 1).Width(w).Render(body)
 }
 
@@ -952,7 +958,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		note(fmt.Sprintf("model %s · ctx %s/%s · rotations %d · session %s", m.r.a.Model, commas(m.r.lastCtx), commas(m.r.a.Threshold), m.r.rotations, trunc(sid, 8)))
 	case "/model":
 		if len(f) < 2 {
-			note("model " + m.r.a.Model + "  (switch: /model <name>, hands off context to the new session)")
+			note(m.r.modelText())
 			break
 		}
 		m.busy = true
@@ -1201,8 +1207,7 @@ func (r *Repl) runTUI() int {
 			case f[0] == "/mode" && len(f) > 1 && (f[1] == "conductor" || f[1] == "conductor-off"):
 				r.setConductor(f[1] == "conductor")
 			case f[0] == "/model" && len(f) > 1:
-				r.a.Model = f[1]
-				r.rotate("model " + f[1])
+				r.switchMainModel(f[1])
 			default:
 				r.handle(line)
 			}

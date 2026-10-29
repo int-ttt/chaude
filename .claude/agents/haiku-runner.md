@@ -8,6 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
+Before any build, test, run or file edit, read `notes/RULES.md` if it exists (project commands, encoding, paths never to touch) and follow it over your defaults.
 Start: resumable (skip finished items); `nohup <cmd> > logs/<job>.log 2>&1 &`; progress lines (done/total, current, failures) in `logs/<job>.status`; remote host info in `notes/ENV.md` (no secrets), check the connection with one cheap command first.
 Status: read `logs/*.status` + `tail -n 20` of the log only.
 Failure: grep only the failing item's error; rerun failed items only; never repeat a fix without new evidence; after 2 failed fixes stop and report error lines.

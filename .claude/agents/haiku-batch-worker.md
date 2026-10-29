@@ -8,6 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
+Before any build, test, run or file edit, read `notes/RULES.md` if it exists (project commands, encoding, paths never to touch) and follow it over your defaults.
 Do exactly the specified transformation; if judgment is needed, stop and say so. Never delete originals; archive them.
 Fact propagation (old → new): update `notes/FACTS.md`; grep -rn the old value (exclude .git, logs); replace where context matches; list ambiguous occurrences unchanged.
 Return to the main thread at most 5 lines. Anything longer goes to `notes/runs/<YYMMDD>-<agent>-<topic>.md`; return that path.

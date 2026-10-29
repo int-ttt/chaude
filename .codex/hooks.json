@@ -1,0 +1,110 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\agent-model-pin.py'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell|Grep|Glob|WebSearch|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\main-thread-guard.py'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\haiku-context-guard.py'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\history-export.py'",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\session-context.py'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\history-export.py'",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\correction-guard.py'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\style-adapter.py'",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\context-alert.py'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\pyrun' 'C:\\Users\\KMIT-SS\\Desktop\\chaude\\.codex\\hooks\\ledger.py'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

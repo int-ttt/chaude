@@ -241,6 +241,37 @@ func Windows(src []byte, py string) ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
+// Model returns the top-level `model` of a settings.json ("" when absent or unparsable).
+func Model(src []byte) string {
+	cfg, err := parse(src)
+	if err != nil || cfg.kind != 'o' {
+		return ""
+	}
+	return cfg.get("model").str()
+}
+
+// SetModel sets the top-level `model` (first key when new), keeping every other key, order and
+// formatting of the file as parse/write produce it.
+func SetModel(src []byte, model string) ([]byte, error) {
+	cfg, err := parse(src)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.kind != 'o' {
+		return nil, fmt.Errorf("settings.json is not a JSON object")
+	}
+	if cfg.get("model") == nil {
+		cfg.keys = append([]string{"model"}, cfg.keys...)
+		cfg.vals = append([]*node{scalar(model)}, cfg.vals...)
+	} else {
+		cfg.insertAfter("", "model", scalar(model))
+	}
+	var b strings.Builder
+	cfg.write(&b, "")
+	b.WriteString("\n")
+	return []byte(b.String()), nil
+}
+
 func hasStr(items []*node, s string) bool {
 	for _, it := range items {
 		if it.str() == s {

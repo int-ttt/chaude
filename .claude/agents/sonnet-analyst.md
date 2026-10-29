@@ -8,6 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
+Before any build, test, run or file edit, read `notes/RULES.md` if it exists (project commands, encoding, paths never to touch) and follow it over your defaults.
 Questions handed off by the main thread: the brief quotes the user's words and the needed context. Write the answer for the user (Korean 존댓말) to `notes/runs/<YYMMDD>-answer-<topic>.md`; return only the path + a 1-line gist.
 Read failure reports in the brief first; never repeat tried approaches. Documents: read FACTS.md / DECISIONS.md; never invent facts.
 Separate evidence from inference; mark uncertainty. Code: smallest complete change, narrow verification, exact results.

@@ -935,6 +935,14 @@ func (r *Repl) loop() int {
 			r.p(r.usageText(), "\n")
 			continue
 		}
+		if f := strings.Fields(line); f[0] == "/model" {
+			if len(f) < 2 {
+				r.p(r.modelText(), "\n")
+				continue
+			}
+			r.switchMainModel(f[1])
+			continue
+		}
 		if !r.interactive {
 			r.p("> "+line, "\n")
 		}
@@ -989,6 +997,15 @@ func Main(args []string) int {
 			return 0
 		}
 		return 2
+	}
+	modelFlag := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" {
+			modelFlag = true
+		}
+	})
+	if m := loadMainModel(a.Cwd); !modelFlag && m != "" {
+		a.Model = m // the project's 주력 모델 (.claude/settings.json), shared with plain claude sessions
 	}
 	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1)}
 	startMode := loadMode(a.Cwd)
@@ -1050,6 +1067,26 @@ func (r *Repl) clear() {
 func (r *Repl) setConductor(on bool) {
 	r.a.Conductor = on
 	r.p(fmt.Sprintf("conductor: %v (classifier routes each prompt to haiku|sonnet|opus|fable)", on), "\n")
+}
+
+// modelText describes the current 주력 모델 and how to change it.
+func (r *Repl) modelText() string {
+	return "주력 모델: " + r.a.Model + "  (바꾸기: /model " + strings.Join(mainModels, " | ") +
+		" — 대화는 핸드오프로 이어지고 .claude/settings.json에 저장되어 다음 실행과 일반 claude 세션에도 적용)"
+}
+
+// switchMainModel makes model the main session model from now on: saved for the project, then a
+// handoff rotation into a session on that model.
+func (r *Repl) switchMainModel(model string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return
+	}
+	if err := saveMainModel(r.a.Cwd, model); err != nil {
+		r.p(dim+"주력 모델 저장 실패: "+err.Error()+rst, "\n")
+	}
+	r.a.Model = model
+	r.rotate("model " + model)
 }
 
 // modeLine handles "/mode [name]" on the plain path (no arg shows, "next" cycles).
