@@ -383,6 +383,14 @@ func (s *Session) setID(id string) {
 }
 
 // ID is the session id, safe against the reader goroutines that learn it.
+// PID is the claude process id, or 0 when s is nil or has no process (test fake).
+func (s *Session) PID() int {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		return 0
+	}
+	return s.cmd.Process.Pid
+}
+
 func (s *Session) ID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

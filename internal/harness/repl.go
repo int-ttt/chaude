@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,6 +64,7 @@ type Args struct {
 	IdleRotate       time.Duration // idle time after which a child is treated as cold; 0 = off
 	ClientsFile      string        // per-(cwd,model) client registry; empty = off
 	MaxWorkers       int           // cap on concurrent live worker sessions (see resolveMaxWorkers)
+	TaskBudgetUSD    float64       // per-task USD cap (--task-budget-usd); 0 = off
 }
 
 type kv struct {
@@ -166,6 +168,7 @@ type Repl struct {
 	reg             *clientRegistry   // per-(cwd,model) client registry; nil = off (old routing)
 	children        *childSet         // live child processes kept per (cwd,model); nil = off
 	idleRotate      time.Duration     // idle deadline base (--idle-rotate); 0 = off
+	budget          *budget           // per-task USD ledger; nil = off
 	ttl             string            // prompt cache TTL requested (--cache-ttl)
 	lastAPI         time.Time         // single clock for the active child: last API message_start
 	ttlSeen         string            // cache TTL observed from usage ("" = unknown)
@@ -179,6 +182,9 @@ type Repl struct {
 // leaves both nil so routing keeps the pre-multiproc path.
 func (r *Repl) wireClients() {
 	r.idleRotate = r.a.IdleRotate
+	if r.a.TaskBudgetUSD > 0 {
+		r.budget = newBudget(r.a.TaskBudgetUSD)
+	}
 	r.ttl = r.a.CacheTTL
 	if r.a.ClientsFile == "" {
 		return
@@ -210,7 +216,10 @@ func (r *Repl) start() error {
 		rule = strings.TrimSpace(rule + " " + categoryRule)
 	}
 	if rule != "" {
-		opts.Extra = []string{"--append-system-prompt", rule}
+		opts.Extra = append(opts.Extra, "--append-system-prompt", rule)
+	}
+	if r.a.TaskBudgetUSD > 0 { // CLI backstop; the ledger is primary
+		opts.Extra = append(opts.Extra, "--max-budget-usd", strconv.FormatFloat(r.a.TaskBudgetUSD, 'f', -1, 64))
 	}
 	s, err := newSessionFn(opts)
 	if err != nil {
@@ -364,6 +373,9 @@ func (r *Repl) idleFinish(s *Session, tk *agentTracker, result event) {
 		sid = s.SessionID
 	}
 	ru, cost = result["usage"], result["total_cost_usd"]
+	if tc, ok := cost.(float64); ok {
+		r.budget.charge(s, tc)
+	}
 	r.tr.add("assistant", kv{"text", reply}, kv{"session", sid}, kv{"usage", ru},
 		kv{"ctx", ctxTokens(st.usage)}, kv{"cost", cost}, kv{"source", "background"})
 	r.usageLine(result, st.usage)
@@ -434,6 +446,10 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	case <-r.intr:
 	default:
 	}
+	if !r.budget.allow(r.estNext()) {
+		r.budgetStop()
+		return "", nil, nil
+	}
 	_ = r.sess.Send(text)
 	var reply strings.Builder
 	var mf markerFilter
@@ -449,6 +465,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	}
 	var lastUsage map[string]any
 	var result event
+	budgetHit := false
 	handle := func(ev event) {
 		t := str(ev["type"])
 		r.tracker.onSubEvent(ev)
@@ -474,6 +491,10 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 			m := asMap(ev["message"])
 			if u := asMap(m["usage"]); len(u) > 0 {
 				lastUsage = u
+				if r.budget.over(midTurnEstimate(r.a.Model, u)) && !budgetHit {
+					budgetHit = true
+					_ = r.sess.Interrupt()
+				}
 			}
 			blocks, _ := m["content"].([]any)
 			for _, bi := range blocks {
@@ -497,6 +518,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 					if fp != "" && !contains(r.files, fp) {
 						r.files = append(r.files, fp)
 					}
+					r.recordDesignPath(r.a.Model, fp)
 					if fp != "" && r.a.Model == "haiku" && r.sess != nil {
 						r.pool.noteEdit(r.sess.SessionID, r.curTask, fp)
 					}
@@ -543,7 +565,33 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	} else if show {
 		r.p("", "\n")
 	}
+	if result != nil {
+		if tc, ok := result["total_cost_usd"].(float64); ok {
+			r.budget.charge(r.sess, tc)
+		}
+	}
+	if budgetHit {
+		r.budgetStop()
+	}
 	return reply.String(), result, lastUsage
+}
+
+// estNext is the planned cost of the next call on the active child (0 when budget is off).
+func (r *Repl) estNext() float64 {
+	if r.budget == nil {
+		return 0
+	}
+	dl, ttl := r.warmDeadline(), r.effTTL()
+	r.clockMu.Lock()
+	warm := !r.lastAPI.IsZero() && time.Since(r.lastAPI) < dl
+	r.clockMu.Unlock()
+	return estimate(r.a.Model, r.lastCtx, warm, ttl)
+}
+
+// budgetStop reports that the task cap was reached.
+func (r *Repl) budgetStop() {
+	r.p(dim+fmt.Sprintf("[budget] $%.4f / $%.4f reached, task stopped", r.budget.Spent(), r.budget.cap)+rst, "\n")
+	_ = r.metrics.Log(map[string]any{"stage": "budget", "spent_usd": r.budget.Spent(), "cap_usd": r.budget.cap, "model": r.a.Model})
 }
 
 func contains(l []string, s string) bool {
@@ -769,6 +817,11 @@ func (r *Repl) thresholdFor(model string) int {
 func (r *Repl) handle(line string) {
 	r.pollDrains()
 	r.tracker.dismissRestored()
+	r.budget.reset()
+	if !r.budget.allow(0) {
+		r.budgetStop()
+		return
+	}
 	text := line
 	if r.a.Conductor {
 		text = r.route(line)
@@ -963,6 +1016,7 @@ func Main(args []string) int {
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
 	fs.StringVar(&a.CacheTTL, "cache-ttl", "1h", "prompt cache TTL requested from claude: auto, 1h or 5m")
+	fs.Float64Var(&a.TaskBudgetUSD, "task-budget-usd", 0, "per-task USD cap (0=off); also passed to claude as --max-budget-usd backstop")
 	fs.DurationVar(&a.IdleRotate, "idle-rotate", 3599*time.Second, "idle time after which a child is treated as cold (0=off); idle rotation runs in the TUI only")
 	fs.StringVar(&a.ClientsFile, "clients-file", defaultClientsFile(), "per-(cwd,model) client registry (empty=off)")
 	fs.IntVar(&a.MaxWorkers, "max-workers", DefaultMaxWorkers, "cap on concurrent live worker sessions (env CHAUDE_MAX_WORKERS when unset)")
@@ -997,6 +1051,7 @@ func Main(args []string) int {
 	r.wireClients()
 	r.pool = newWorkerPool()
 	r.agents.interruptRunning(false) // agents left 'running' by a crashed/killed harness
+	r.reconcileStart()
 	r.metrics = newMetrics(a.MetricsDir, map[string]any{"threshold": a.Threshold, "handoff_validate": !a.NoValidate,
 		"max_drain": a.MaxDrain, "drain_timeout_s": int(a.DrainTimeout.Seconds()), "compact_window": a.CompactWindow,
 		"delegation_rule": !a.NoDelegationRule, "category_rotate": !a.NoCategoryRotate, "conductor": a.Conductor})
@@ -1024,7 +1079,10 @@ func Main(args []string) int {
 
 // clear drops the conversation: new session, no handoff snapshot.
 func (r *Repl) clear() {
+	r.endAllParked("clear") // parked children and their pre-clear session ids must not come back
+	r.parked = map[string]string{}
 	r.sess.Close()
+	r.reg.MarkEnded(r.a.Cwd, r.a.Model, "clear", time.Now())
 	r.pendingSnapshot, r.files, r.lastCtx = "", nil, 0
 	r.tr.turns = nil
 	r.tr.add("clear")
@@ -1033,6 +1091,28 @@ func (r *Repl) clear() {
 		return
 	}
 	r.p(dim+"── new session ──"+rst, "\n")
+}
+
+// clearWithHandoff is /clear in the TUI: the next session gets a handoff snapshot of the conversation
+// that is dropped (taken before anything is closed). A held handoff leaves the new session empty.
+func (r *Repl) clearWithHandoff() {
+	snap := ""
+	if r.sess != nil && r.pendingSnapshot == "" && len(r.tr.turns) > 0 {
+		if s, st := r.makeSnapshot("clear"); st != snapHeld {
+			snap = s
+		}
+	}
+	r.clear()
+	if snap != "" {
+		r.pendingSnapshot = snap
+	}
+}
+
+// reconcileStart repairs registry rows left by killed harnesses and shows orphaned children (never kills them).
+func (r *Repl) reconcileStart() {
+	for _, o := range r.reg.reconcile(time.Now(), r.warmDeadline()) {
+		r.addNotice(fmt.Sprintf("[orphan] claude pid %d (%s, %s) still running after its harness died; left running", o.ChildPID, o.Model, o.Cwd))
+	}
 }
 
 // setConductor toggles classifier routing (a one-shot Sonnet call per prompt picks the model of the session that answers).

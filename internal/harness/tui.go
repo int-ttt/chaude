@@ -151,7 +151,7 @@ type slashCmd struct{ name, desc string }
 
 var slashCmds = []slashCmd{
 	{"/help", "show commands and keys"},
-	{"/clear", "start a fresh session (no handoff)"},
+	{"/clear", "start a fresh session (handoff note carried over)"},
 	{"/status", "model, context tokens, session"},
 	{"/model", "show or switch model: /model <name>"},
 	{"/resume", "list Claude Code sessions and import one (/resume claude)"},
@@ -1145,7 +1145,7 @@ func (r *Repl) runTUI() int {
 			case line == "/idle-rotate":
 				r.idleRotateNow()
 			case line == "/clear":
-				r.clear()
+				r.clearWithHandoff()
 			case passthroughCmds[f[0]]:
 				r.passthrough(line)
 			case f[0] == "/import":
@@ -1157,6 +1157,7 @@ func (r *Repl) runTUI() int {
 			case f[0] == "/mode" && len(f) > 1 && (f[1] == "conductor" || f[1] == "conductor-off"):
 				r.setConductor(f[1] == "conductor")
 			case f[0] == "/model" && len(f) > 1:
+				r.endParked(f[1], "model-switch") // rotate starts a fresh child under this key
 				r.a.Model = f[1]
 				r.rotate("model " + f[1])
 			default:

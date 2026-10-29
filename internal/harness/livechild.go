@@ -69,6 +69,11 @@ func (r *Repl) parkedIdleEvent(c *liveChild, ev event) {
 		c.reply.Reset()
 		c.stream = false
 		c.mu.Unlock()
+		if s, ok := c.Sess.(*Session); ok && s != nil {
+			if tc, ok := ev["total_cost_usd"].(float64); ok {
+				r.budget.charge(s, tc)
+			}
+		}
 		if txt != "" {
 			r.addNotice(fmt.Sprintf("[parked %s background reply] %s", c.Model, trunc(txt, 300)))
 		}

@@ -110,6 +110,9 @@ func (r *clientRegistry) Upsert(rec clientRec) {
 	l := r.readLocked()
 	for i := range l {
 		if l[i].Cwd == rec.Cwd && l[i].Model == rec.Model {
+			if rec.DesignPath == "" {
+				rec.DesignPath = l[i].DesignPath // a state change does not forget the design file
+			}
 			l = append(l[:i], l[i+1:]...)
 			break
 		}
@@ -161,12 +164,17 @@ func expiredZero(deadline time.Duration) bool {
 	return deadline > 0
 }
 
-// reconcile fixes rows whose owner harness died without ending them: live rows with a dead OwnerPID
-// become parked when they have a SessionID and last called the API within deadline, else expired.
+// reconcile fixes rows whose owner harness died without ending them. It covers live and parked rows
+// with a dead OwnerPID:
+//   - ChildPID alive: the child outlived its harness. The row is expired with "orphan-alive" (never
+//     parked, never resumed; the process is only displayed, never killed).
+//   - live row: parked when it has a SessionID and last called the API within deadline, else expired.
+//   - parked row (child dead): stays parked.
+//
 // Rows of live owners are left alone.
-func (r *clientRegistry) reconcile(now time.Time, deadline time.Duration) {
+func (r *clientRegistry) reconcile(now time.Time, deadline time.Duration) (orphans []clientRec) {
 	if r == nil || r.path == "" {
-		return
+		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -174,16 +182,26 @@ func (r *clientRegistry) reconcile(now time.Time, deadline time.Duration) {
 	changed := false
 	for i := range l {
 		c := &l[i]
-		if c.State != clientLive || pidAlive(c.OwnerPID) {
+		if (c.State != clientLive && c.State != clientParked) || pidAlive(c.OwnerPID) {
 			continue
 		}
-		c.State = clientExpired
-		if c.SessionID != "" && now.Sub(c.LastAPI) < deadline {
-			c.State = clientParked
+		switch {
+		case c.ChildPID != 0 && pidAlive(c.ChildPID):
+			c.State, c.EndedReason = clientExpired, "orphan-alive"
+			orphans = append(orphans, *c)
+		case c.State == clientLive:
+			c.State = clientExpired
+			if c.SessionID != "" && now.Sub(c.LastAPI) < deadline {
+				c.State = clientParked
+			}
+			c.EndedReason = "harness-killed"
+		default:
+			c.EndedReason = "harness-killed"
 		}
-		c.EndedReason, c.ChildPID, changed = "harness-killed", 0, true
+		c.ChildPID, changed = 0, true
 	}
 	if changed {
 		r.writeLocked(l)
 	}
+	return orphans
 }

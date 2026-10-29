@@ -219,6 +219,7 @@ func (r *Repl) route(line string) string {
 		last = r.tr.turns[n-1][0]
 	}
 	rr, cost, usage, err := classifyFn(line, r.a.Model, last, r.pool.candidates())
+	r.budget.chargeOneShot(cost)
 	model, task := rr.Model, rr.Task
 	f := map[string]any{"stage": "classify", "cost_usd": cost, "duration_ms": time.Since(t0).Milliseconds(), "from_model": r.a.Model, "conductor": true, "router_model": routerModel(), "router_prompt": routerModel()}
 	for k, v := range usageFields(usage) {

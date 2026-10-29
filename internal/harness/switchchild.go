@@ -3,6 +3,7 @@ package harness
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -43,6 +44,14 @@ func sessID(c closer) string {
 	return ""
 }
 
+// childPID is the claude process id of c (0 for fakes and nil).
+func childPID(c closer) int {
+	if s, ok := c.(*Session); ok && s != nil {
+		return s.PID()
+	}
+	return 0
+}
+
 // routeChildren is route()'s tail when the client registry and child set are on.
 func (r *Repl) routeChildren(model, task, worker string) string {
 	if model == "haiku" && r.a.Model == "haiku" && worker != "" {
@@ -80,7 +89,7 @@ func (r *Repl) parkOld() (*liveChild, bool) {
 	}
 	r.children.Park(key, old)
 	r.reg.Upsert(clientRec{Cwd: r.a.Cwd, Model: old.Model, Role: old.Role, SessionID: sessID(old.Sess), State: clientParked,
-		LastAPI: old.lastAPI(), LastCtx: old.LastCtx, OwnerPID: ownPID()})
+		LastAPI: old.lastAPI(), LastCtx: old.LastCtx, OwnerPID: ownPID(), ChildPID: childPID(old.Sess)})
 	return old, true
 }
 
@@ -99,6 +108,35 @@ func (r *Repl) retire(c *liveChild) {
 		return
 	}
 	c.Sess.Close()
+}
+
+// endParked ends the parked child under (cwd, model): retired (drained when agents run, else closed),
+// its registry row marked expired with reason. Reports whether a child was found.
+func (r *Repl) endParked(model, reason string) bool {
+	if r.children == nil {
+		return false
+	}
+	c, ok := r.children.Take(childKey(r.a.Cwd, model))
+	if !ok || c == nil {
+		return false
+	}
+	if c.Sess != nil {
+		r.retire(c)
+	}
+	r.reg.MarkEnded(r.a.Cwd, model, reason, time.Now())
+	return true
+}
+
+// endAllParked ends every parked child (see endParked).
+func (r *Repl) endAllParked(reason string) {
+	if r.children == nil {
+		return
+	}
+	for _, k := range r.children.Expired(time.Now(), 0) {
+		if i := strings.IndexByte(k, 0); i >= 0 {
+			r.endParked(k[i+1:], reason)
+		}
+	}
 }
 
 // switchChild moves the active slot to target. The child being left stays alive (parked-live) so a later
@@ -158,13 +196,16 @@ func (r *Repl) switchChild(target, resumeID string) error {
 			}
 		}
 	}
+	if snap != "" {
+		snap = r.withDesignPath(target, snap)
+	}
 	oldModel := r.a.Model
 	old, parked := r.parkOld()
 	var err error
 	if live != nil {
 		r.bindChild(live)
 		r.reg.Upsert(clientRec{Cwd: r.a.Cwd, Model: target, SessionID: sessID(live.Sess), State: clientLive,
-			LastAPI: live.lastAPI(), LastCtx: live.LastCtx, OwnerPID: ownPID()})
+			LastAPI: live.lastAPI(), LastCtx: live.LastCtx, OwnerPID: ownPID(), ChildPID: childPID(live.Sess)})
 		return nil
 	}
 	r.a.Model = target
@@ -180,7 +221,7 @@ func (r *Repl) switchChild(target, resumeID string) error {
 			if c, ok := r.children.Take(childKey(r.a.Cwd, old.Model)); ok {
 				r.bindChild(c)
 				r.reg.Upsert(clientRec{Cwd: r.a.Cwd, Model: old.Model, SessionID: sessID(c.Sess), State: clientLive,
-					LastAPI: c.lastAPI(), LastCtx: c.LastCtx, OwnerPID: ownPID()})
+					LastAPI: c.lastAPI(), LastCtx: c.LastCtx, OwnerPID: ownPID(), ChildPID: childPID(c.Sess)})
 			}
 		} else if old != nil {
 			r.pendingSnapshot = snap // old child was closed: start it again with the snapshot
@@ -189,6 +230,43 @@ func (r *Repl) switchChild(target, resumeID string) error {
 		r.p(dim+"chaude: cannot start claude: "+err.Error()+rst, "\n")
 		return err
 	}
-	r.reg.Upsert(clientRec{Cwd: r.a.Cwd, Model: target, SessionID: sessID(r.sess), State: clientLive, OwnerPID: ownPID()})
+	r.reg.Upsert(clientRec{Cwd: r.a.Cwd, Model: target, SessionID: sessID(r.sess), State: clientLive, OwnerPID: ownPID(), ChildPID: childPID(r.sess)})
 	return nil
+}
+
+// isDesignPlanPath matches an opus design file: .../notes/runs/*-plan-*.md, not a review.
+func isDesignPlanPath(fp string) bool {
+	if !strings.Contains(fp, "/notes/runs/") {
+		return false
+	}
+	b := fp[strings.LastIndexByte(fp, '/')+1:]
+	return strings.HasSuffix(b, ".md") && strings.Contains(b, "-plan-") && !strings.Contains(b, "-review")
+}
+
+// recordDesignPath remembers the last design file the opus client wrote (other models and other files are ignored).
+func (r *Repl) recordDesignPath(model, fp string) {
+	if r.reg == nil || model != "opus" || !isDesignPlanPath(fp) {
+		return
+	}
+	rec, ok := r.reg.Get(r.a.Cwd, model)
+	if !ok {
+		rec = clientRec{Cwd: r.a.Cwd, Model: model, State: clientLive, SessionID: sessID(r.sess), OwnerPID: ownPID(),
+			ChildPID: childPID(r.sess), LastAPI: time.Now()}
+	}
+	rec.DesignPath = fp
+	r.reg.Upsert(rec)
+}
+
+// withDesignPath appends the recorded design file of model to snap. A missing or empty file is skipped
+// (metrics only; no user error).
+func (r *Repl) withDesignPath(model, snap string) string {
+	rec, ok := r.reg.Get(r.a.Cwd, model)
+	if !ok || rec.DesignPath == "" {
+		return snap
+	}
+	if st, err := os.Stat(rec.DesignPath); err != nil || st.Size() == 0 {
+		_ = r.metrics.Log(map[string]any{"stage": "design_path", "missing": true, "path": rec.DesignPath})
+		return snap
+	}
+	return snap + "\n\n설계 파일: " + rec.DesignPath + " (먼저 읽고 이어서 진행)"
 }
