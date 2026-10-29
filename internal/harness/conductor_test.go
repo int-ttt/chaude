@@ -18,6 +18,26 @@ func TestParseRoute(t *testing.T) {
 	}
 }
 
+func TestForcedModel(t *testing.T) {
+	cases := map[string]string{
+		"fable로 세션 회전 설계를 다시 잡아줘": "fable",
+		"이건 opus로 해줘":             "opus",
+		"haiku로.":                 "haiku",
+		"Sonnet으로 정리해":            "sonnet",
+		"페이블로 해봐":                 "fable",
+		"오퍼스로 보내":                 "opus",
+		"haiku로 보고 어려우면 opus로 넘겨": "opus",
+		"README의 로그인 설명을 고쳐":      "",
+		"opus로그를 지워":              "",
+		"어느 쪽이 나을지 골라줘":           "",
+	}
+	for in, want := range cases {
+		if got := forcedModel(in); got != want {
+			t.Errorf("forcedModel(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
 // TestClassifierLive runs the real classifier (costs ~$0.007 per prompt): CHAUDE_LIVE=1 go test -run ClassifierLive ./internal/harness
 func TestClassifierLive(t *testing.T) {
 	if os.Getenv("CHAUDE_LIVE") == "" {
@@ -30,6 +50,8 @@ func TestClassifierLive(t *testing.T) {
 		{"앞으로 한 달 동안 하네스 개선 우선순위를 어떻게 잡는 게 좋을지 전략을 세워줘", "opus"},
 		{"cmd/chaude/main.go 의 version 값이 뭔지 알려줘", "haiku,sonnet"},
 		{"README.md 에서 'foo' 를 'bar' 로 전부 바꿔줘", "haiku,sonnet"},
+		{"fable로 세션 회전 설계를 다시 잡아줘. opus가 두 번 실패했어", "fable"},
+		{"세션 회전 설계를 다시 잡아줘. 어느 쪽이 나을지 골라줘", "opus"}, // never fable without being asked
 	}
 	for _, c := range cases {
 		m, task, _, _, err := classify(c.prompt, "haiku", "")

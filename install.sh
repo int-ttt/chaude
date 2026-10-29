@@ -6,10 +6,15 @@ VERSION="${CHAUDE_VERSION:-latest}"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
-if [ "$os" != darwin ] || [ "$arch" != arm64 ]; then
-  echo "error: chaude supports only Apple Silicon Macs (darwin/arm64). Detected: ${os}/${arch}" >&2
-  exit 1
-fi
+case "$arch" in
+  arm64|aarch64) arch=arm64 ;;
+  x86_64|amd64) arch=amd64 ;;
+  *) echo "error: unsupported architecture ${arch}" >&2; exit 1 ;;
+esac
+case "$os" in
+  darwin|linux) ;;
+  *) echo "error: this script is for macOS/Linux (detected ${os}). On Windows run install.ps1." >&2; exit 1 ;;
+esac
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -19,8 +24,8 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   tagarg=""; [ "$VERSION" = latest ] || tagarg="$VERSION"
   echo "downloading via gh from ${REPO}"
   # shellcheck disable=SC2086
-  gh release download $tagarg -R "$REPO" -p 'chaude_*_darwin_arm64.tar.gz' -p checksums.txt -D "$tmp" --clobber
-  name="$(cd "$tmp" && ls chaude_*_darwin_arm64.tar.gz | head -n1)"
+  gh release download $tagarg -R "$REPO" -p "chaude_*_${os}_${arch}.tar.gz" -p checksums.txt -D "$tmp" --clobber
+  name="$(cd "$tmp" && ls chaude_*_${os}_${arch}.tar.gz | head -n1)"
 else
   # public repos only
   if [ "$VERSION" = latest ]; then
@@ -28,7 +33,7 @@ else
       | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)"
     [ -n "$VERSION" ] || { echo "could not resolve latest release of ${REPO} (private repo? install and log in with gh: gh auth login)" >&2; exit 1; }
   fi
-  name="chaude_${VERSION#v}_darwin_arm64.tar.gz"
+  name="chaude_${VERSION#v}_${os}_${arch}.tar.gz"
   base="https://github.com/${REPO}/releases/download/${VERSION}"
   echo "downloading ${name}"
   curl -fsSL "${base}/${name}" -o "${tmp}/${name}"
@@ -37,7 +42,7 @@ fi
 [ -f "${tmp}/${name}" ] || { echo "download failed" >&2; exit 1; }
 if [ -f "${tmp}/checksums.txt" ]; then
   want="$(grep " ${name}\$" "${tmp}/checksums.txt" | awk '{print $1}')"
-  got="$(shasum -a 256 "${tmp}/${name}" | awk '{print $1}')"
+  if command -v sha256sum >/dev/null 2>&1; then got="$(sha256sum "${tmp}/${name}" | awk '{print $1}')"; else got="$(shasum -a 256 "${tmp}/${name}" | awk '{print $1}')"; fi
   [ -n "$want" ] && [ "$want" = "$got" ] || { echo "checksum mismatch" >&2; exit 1; }
 fi
 tar -xzf "${tmp}/${name}" -C "$tmp" chaude
@@ -62,3 +67,5 @@ esac
 
 echo "installed: ${dir}/chaude"
 "${dir}/chaude" --version
+command -v python3 >/dev/null 2>&1 || echo "[!] python3 not found: the hooks need Python 3"
+echo "next: chaude install <project folder>   (adds the agents, hooks and settings to that project)"

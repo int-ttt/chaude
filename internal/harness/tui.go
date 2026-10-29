@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"chaude/internal/osenv"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -784,7 +786,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		}
 		m.setMode(p)
 	case "/version":
-		v, _ := exec.Command("claude", "--version").Output()
+		v, _ := exec.Command(osenv.ResolveBin("claude"), "--version").Output()
 		note("harness (Go REPL) · claude " + strings.TrimSpace(string(v)))
 	case "/clear", "/rotate", "/usage", "/cost", "/context", "/compact", "/config", "/mcp", "/agents", "/init", "/review", "/doctor":
 		if f[0] == "/clear" {

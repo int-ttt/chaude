@@ -18,6 +18,10 @@ type inputBox struct {
 
 type vrow struct{ start, end int } // val[start:end], newline excluded
 
+// Ambiguous-width glyphs (bar blocks, box drawing) are one cell in every terminal we target;
+// go-runewidth would otherwise count them as two under an East Asian locale or code page (Korean Windows).
+func init() { runewidth.DefaultCondition.EastAsianWidth = false }
+
 func rw(r rune) int { return runewidth.RuneWidth(r) }
 
 func cells(rs []rune) int {

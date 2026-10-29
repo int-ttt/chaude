@@ -794,7 +794,7 @@ func (r *Repl) loop() int {
 func Main(args []string) int {
 	fs := flag.NewFlagSet("harness", flag.ContinueOnError)
 	var a Args
-	fs.StringVar(&a.Model, "model", "haiku", "")
+	fs.StringVar(&a.Model, "model", "haiku", "model of the main session: haiku|sonnet|opus|fable (or a full model id)")
 	fs.StringVar(&a.Cwd, "cwd", "", "")
 	fs.IntVar(&a.Threshold, "threshold", 270_000, "rotate after an answer when context tokens >= this")
 	fs.IntVar(&a.CompactWindow, "compact-window", 400_000, "child-only CLAUDE_CODE_AUTO_COMPACT_WINDOW (keep > threshold; 0=off)")
@@ -811,7 +811,7 @@ func Main(args []string) int {
 	fs.DurationVar(&a.Cooldown, "rotate-cooldown", 2*time.Minute, "min gap after a failed rotation")
 	fs.BoolVar(&a.NoCategoryRotate, "no-category-rotate", false, "disable category-based session rotation")
 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
-	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: a one-shot Sonnet classifier picks haiku|sonnet|opus per prompt; that session answers")
+	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: a one-shot Sonnet classifier picks haiku|sonnet|opus|fable per prompt; that session answers")
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
@@ -866,7 +866,7 @@ func (r *Repl) clear() {
 // setConductor toggles classifier routing (a one-shot Sonnet call per prompt picks the model of the session that answers).
 func (r *Repl) setConductor(on bool) {
 	r.a.Conductor = on
-	r.p(fmt.Sprintf("conductor: %v (classifier routes each prompt to haiku|sonnet|opus)", on), "\n")
+	r.p(fmt.Sprintf("conductor: %v (classifier routes each prompt to haiku|sonnet|opus|fable)", on), "\n")
 }
 
 // modeLine handles "/mode [name]" on the plain path (no arg shows, "next" cycles).

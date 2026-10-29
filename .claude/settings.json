@@ -21,7 +21,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/correction-guard.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/correction-guard.py\"",
             "timeout": 5
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/style-adapter.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/style-adapter.py\"",
             "timeout": 5
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/context-alert.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/context-alert.py\"",
             "timeout": 5
           }
         ]
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent-model-pin.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/agent-model-pin.py\"",
             "timeout": 5
           }
         ]
@@ -61,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/main-thread-guard.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/main-thread-guard.py\"",
             "timeout": 5
           }
         ]
@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/haiku-context-guard.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/haiku-context-guard.py\"",
             "timeout": 5
           }
         ]
@@ -82,7 +82,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/ledger.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/ledger.py\"",
             "timeout": 5
           }
         ]
@@ -94,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-context.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-context.py\"",
             "timeout": 5
           }
         ]
@@ -105,7 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/history-export.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/history-export.py\"",
             "timeout": 60
           }
         ]
@@ -116,7 +116,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/history-export.py\"",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun\" \"$CLAUDE_PROJECT_DIR/.claude/hooks/history-export.py\"",
             "timeout": 60
           }
         ]

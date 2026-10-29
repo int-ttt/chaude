@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse hook (Agent|Task): every subagent runs on the model its name says.
 
-- haiku-* / sonnet-* / opus-* agents: a `model` passed by the main thread is removed, so the agent file's
+- haiku-* / sonnet-* / opus-* / fable-* agents: a `model` passed by the main thread is removed, so the agent file's
   `model:` line always wins (per-call model would otherwise override it).
 - Built-in general-purpose / Explore / Plan from the main thread: denied (they carry a large default prompt);
   the reason names the haiku-*/sonnet-* agent to use. claude-code-guide is allowed and pinned to Haiku.
@@ -36,10 +36,10 @@ if kind in BLOCKED:
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                       "permissionDecisionReason": f"Built-in {kind} agent is blocked (large default prompt). Use haiku-scout "
                                                   "(search), haiku-coder / haiku-batch-worker (edits), sonnet-analyst (judgment), "
-                                                  "opus-architect (design)."}}))
+                                                  "opus-architect (design), fable-architect (only when asked for Fable)."}}))
     sys.exit(0)
 asked = inp.get("model")
-if kind.startswith(("haiku-", "sonnet-", "opus-")):
+if kind.startswith(("haiku-", "sonnet-", "opus-", "fable-")):
     if not asked:
         sys.exit(0)
     del inp["model"]

@@ -1,5 +1,6 @@
-// Single binary for the project: helper scripts, settings generator, REPL (Claude Code hooks stay Python in .claude/hooks/).
-// Built by platform_setup/install.sh (mac/linux) or install.ps1 (windows) into bin/chaude[.exe].
+// Single binary for the project: REPL, project installer, settings generator, helper scripts
+// (Claude Code hooks stay Python in .claude/hooks/ and are embedded for `chaude install`).
+// Build: go build -o bin/chaude ./cmd/chaude   (windows: -o bin/chaude.exe); releases: scripts/build-release.sh.
 package main
 
 import (
@@ -8,18 +9,21 @@ import (
 	"strings"
 
 	"chaude/internal/harness"
+	"chaude/internal/install"
 	"chaude/internal/scripts"
 	"chaude/internal/settings"
 )
 
 // version is set at release time: -ldflags "-X main.version=X.Y.Z".
-var version = "0.6.10"
+var version = "0.7.0"
 
 const usage = `usage: chaude <command> [args]
   repl [flags]           terminal REPL over claude -p stream-json with session rotation (default with no command)
   metrics [--dir D] [--csv]   summarize per-turn metrics (notes/metrics)
   --from-claude ID|latest|PATH [--import-dry-run]   start a repl from a plain Claude Code session
   --version              print version
+  install <project> [--main opus|sonnet|fable|haiku] [--python CMD] [--lean-off] [--os windows|mac|linux]
+                         install/upgrade the package (agents, hooks, skills, settings, CLAUDE.md policy, bin/chaude) in a project
   gen-settings <os>      print/write OS-specific .claude/settings.json (mac|linux|windows) [--out FILE]
   ` + scripts.Names + `   helper scripts (run with -h for flags)
 `
@@ -36,6 +40,8 @@ func main() {
 		os.Exit(harness.MetricsMain(args))
 	case "--from-claude", "--import-dry-run":
 		os.Exit(harness.Main(os.Args[1:]))
+	case "install":
+		os.Exit(install.Main(args, version))
 	case "gen-settings":
 		os.Exit(settings.Main(args))
 	case "--version", "-v", "version":

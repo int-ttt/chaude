@@ -1,0 +1,6 @@
+* text=auto
+# shell launchers and hooks must stay LF even on a Windows checkout (a CRLF shebang breaks Git Bash)
+*.sh text eol=lf
+*.py text eol=lf
+.claude/hooks/pyrun text eol=lf
+*.ps1 text eol=crlf

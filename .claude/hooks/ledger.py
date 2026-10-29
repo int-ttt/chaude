@@ -89,7 +89,7 @@ tag = kind
 if model:
     tag += " · " + model
     want = kind.split("-", 1)[0]
-    if want in ("haiku", "sonnet", "opus") and want not in model:
+    if want in ("haiku", "sonnet", "opus", "fable") and want not in model:
         tag += " ⚠ 이름과 다름"
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 path = os.path.join(root, "notes", "LEDGER.md")

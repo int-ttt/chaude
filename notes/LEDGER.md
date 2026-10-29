@@ -76,3 +76,4 @@
 - 10-29 00:33 [agent] 진행상황 어때?
 - 10-29 00:35 [agent] ㅇㅇ 푸시하고 태그 올려
 - 10-29 00:36 [agent] 릴리즈 끝났어?
+- 10-29 10:12 [sonnet-analyst · sonnet 5.5] CLAUDE.md 원본: 333,932 bytes / CLAUDE.md — 33,871 — 규칙, 구조, 색인, 현재 상태, MCP, 함정, 미결 / CLAUDE_Sandbox.md — 26,940 — Sandbox, 판정 표시, VFX 프리팹, 카드 스택

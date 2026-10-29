@@ -19,7 +19,7 @@ try:
 except Exception:
     sys.exit(0)
 kind = data.get("agent_type") or ""
-if lean_off() or not data.get("agent_id") or kind.startswith(("sonnet-", "opus-")) or kind in ("analyst", "reviewer"):
+if lean_off() or not data.get("agent_id") or kind.startswith(("sonnet-", "opus-", "fable-")) or kind in ("analyst", "reviewer"):
     sys.exit(0)
 if data.get("tool_name") == "Read" and (data.get("tool_input") or {}).get("allow_large"):
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",

@@ -1,5 +1,6 @@
-// Package settings derives OS-specific .claude/settings.json from the posix source (mac/linux form = source of truth).
-// windows: hooks use exec form (command=<exe>, args=[...]) -> no shell, no Git Bash/PowerShell dependency.
+// Package settings derives OS-specific .claude/settings.json from the posix source (shell form = source of truth;
+// it also works on Windows through Git Bash via .claude/hooks/pyrun). windows: hooks use the exec form
+// (command=<exe>, args=[...]) -> no shell at all, faster, and no dependency on the Store "python3" alias.
 package settings
 
 import (
@@ -158,16 +159,23 @@ func (n *node) write(b *strings.Builder, ind string) {
 }
 
 var (
-	posixHook = regexp.MustCompile(`^python3 "\$CLAUDE_PROJECT_DIR/([^"]+\.py)"$`)
+	// shell form: `python3 "$CLAUDE_PROJECT_DIR/x.py"` (old) or `"$CLAUDE_PROJECT_DIR/.claude/hooks/pyrun" "$CLAUDE_PROJECT_DIR/x.py"`
+	posixHook = regexp.MustCompile(`^(?:python3|"\$CLAUDE_PROJECT_DIR/\.claude/hooks/pyrun") "\$CLAUDE_PROJECT_DIR/([^"]+\.py)"$`)
 	winHook   = regexp.MustCompile(`^\$\{CLAUDE_PROJECT_DIR\}/([^"]+\.py)$`)
 )
 
-// WindowsPython picks the hook interpreter for windows: `py -3` when the launcher is on PATH
-// (only checked when running on windows), else `python` (python3.exe is usually absent there).
+// WindowsPython picks the hook interpreter for windows (only probed when running on windows): `py -3` when
+// the launcher is on PATH (verified: Claude Code spawns it directly in the exec form), else the first real
+// python.exe on PATH that is not the Microsoft Store alias stub (that stub only opens the Store), else `python`.
 func WindowsPython() string {
 	if osenv.IsWindows {
 		if _, err := exec.LookPath("py"); err == nil {
 			return "py -3"
+		}
+		for _, n := range []string{"python", "python3"} {
+			if p, err := exec.LookPath(n); err == nil && !strings.Contains(strings.ToLower(p), `\windowsapps\`) {
+				return p
+			}
 		}
 	}
 	return "python"
