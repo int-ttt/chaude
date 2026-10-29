@@ -114,6 +114,7 @@ type tuiModel struct {
 	popH      int
 	panelH    int // foreground rows below the input box
 	bgH       int // background rows below the input box, above the status line
+	panOff    int // first agent row shown in the (scrollable) agent panels below the input box
 	lastRun   int // running agent count at the last refresh (idle tick redraw)
 	unseen    bool
 	held      bool // user scrolled the transcript away from the tail; refresh keeps the offset
@@ -447,6 +448,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.click(v)
+		if m.av == nil && m.perm == nil && m.panelWheel(v) {
+			break
+		}
 		if m.av != nil {
 			if v.Button == tea.MouseButtonWheelUp {
 				m.av.off += 3
@@ -1217,15 +1221,21 @@ func (m *tuiModel) rowsA(bg bool, used int) ([]string, []*agentRec) {
 	}
 	var out []string
 	var ag []*agentRec
-	for i, a := range l {
-		if i == limit-1 && len(l) > limit {
-			out = append(out, dimSt.Render(fmt.Sprintf("  … +%d more", len(l)-i)))
-			ag = append(ag, nil)
-			break
-		}
+	win := l
+	off := 0
+	if len(l) > limit { // limit-1 agent rows + one scroll indicator row
+		n := limit - 1
+		off = max(0, min(m.panOff, len(l)-n))
+		win = l[off : off+n]
+	}
+	for _, a := range win {
 		line := agentStatusText(a, m.r.a.Model)
 		out = append(out, ansiTrunc("  "+agentDot(agentState(a))+dimSt.Render(" "+strings.ReplaceAll(line, "\n", " ")), m.w))
 		ag = append(ag, a)
+	}
+	if len(l) > limit {
+		out = append(out, dimSt.Render(fmt.Sprintf("  … %d-%d/%d (마우스 휠로 스크롤)", off+1, off+len(win), len(l))))
+		ag = append(ag, nil)
 	}
 	return out, ag
 }

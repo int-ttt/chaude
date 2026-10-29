@@ -307,3 +307,21 @@ func (t *agentTracker) dismissRestored() {
 		a.Dismissed = true
 	}
 }
+
+// panelWheel scrolls the agent panels below the input box when the wheel is over them; reports whether it handled v.
+func (m *tuiModel) panelWheel(v tea.MouseMsg) bool {
+	d := 0
+	switch v.Button {
+	case tea.MouseButtonWheelUp:
+		d = -1
+	case tea.MouseButtonWheelDown:
+		d = 1
+	default:
+		return false
+	}
+	if m.panelH+m.bgH == 0 || v.Y < m.vp.Height+m.popH+m.queueH+m.inH+2 {
+		return false
+	}
+	m.panOff = max(0, min(m.panOff+d, len(m.r.tracker.running())+len(m.r.tracker.sortedRestored())))
+	return true
+}

@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	routerModelDefault   = "sonnet" // classifier model when CHAUDE_ROUTER_MODEL is unset or invalid
-	routerModelEnv       = "CHAUDE_ROUTER_MODEL"
-	// Deprecated: the Sonnet router path is deprecated in favor of Haiku (pending user approval of the default flip).
+	routerModelDefault = "haiku" // classifier model when CHAUDE_ROUTER_MODEL is unset or invalid
+	routerModelEnv     = "CHAUDE_ROUTER_MODEL"
+	// Deprecated: the Sonnet router path is deprecated in favor of Haiku (user-approved default flip: Haiku is now the default).
 	// Behavior is unchanged and CHAUDE_ROUTER_MODEL=sonnet remains the rollback; keep this text byte-identical (sha256 test).
 	classifyPromptSonnet = "You are a router, not an answerer. Never answer or explain. Output exactly five lines:\n" +
 		"topic: same|new\ntier: haiku|sonnet|opus\nkind: lookup|edit|other\nworker: <id from the candidate list>|new\ntask: <the user's request, terse, machine-style: no honorifics, greetings or filler; keep paths, names, numbers; end with 'reply: Korean 존댓말, one final message only after the work is done, no interim status message, no 추천 block; if you delegate to an agent, run it in the foreground and wait for its result before replying'>\n" +
@@ -42,7 +42,7 @@ const (
 
 var routerModelWarn sync.Once
 
-// Deprecated: "sonnet" is a deprecated router model value (default until the Haiku flip is approved); it stays valid for rollback.
+// Deprecated: "sonnet" is a deprecated router model value (no longer the default; Haiku is); it stays valid for rollback via CHAUDE_ROUTER_MODEL=sonnet.
 // routerModel returns the classifier model from CHAUDE_ROUTER_MODEL (trimmed, lowercased): sonnet or haiku.
 // Unset or empty -> routerModelDefault; any other value -> routerModelDefault with a one-time stderr warning.
 func routerModel() string {

@@ -48,10 +48,11 @@ type liveChild struct {
 	TTLSeen         string
 	Cat             string
 
-	mu     sync.Mutex  // guards LastAPI and the parked reply buffer
-	parked atomic.Bool // true from unbindActive until bindChild; the idle callback branches on it
-	reply  strings.Builder
-	stream bool // the parked reply arrived as text_delta events
+	mu       sync.Mutex  // guards LastAPI and the parked reply buffer
+	parked   atomic.Bool // true from unbindActive until bindChild; the idle callback branches on it
+	reply    strings.Builder
+	stream   bool // the parked reply arrived as text_delta events
+	sawNotif bool // a <task-notification> was seen since the last result
 }
 
 func (c *liveChild) lastAPI() time.Time {

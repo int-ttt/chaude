@@ -53,13 +53,13 @@ func TestRouterModelEnvCases(t *testing.T) {
 		unset bool
 		want  string
 	}{
-		{name: "unset", unset: true, want: "sonnet"},
+		{name: "unset", unset: true, want: "haiku"},
 		{name: "sonnet", env: "sonnet", want: "sonnet"},
 		{name: "SONNET with space", env: "SONNET ", want: "sonnet"},
 		{name: "haiku", env: "haiku", want: "haiku"},
 		{name: "Haiku with leading space", env: " Haiku", want: "haiku"},
-		{name: "opus falls back", env: "opus", want: "sonnet"},
-		{name: "x falls back", env: "x", want: "sonnet"},
+		{name: "opus falls back", env: "opus", want: "haiku"},
+		{name: "x falls back", env: "x", want: "haiku"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

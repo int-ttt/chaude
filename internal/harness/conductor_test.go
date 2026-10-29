@@ -109,8 +109,8 @@ func TestMainRouteSwitchPolicy(t *testing.T) {
 			t.Errorf("%s: forced main must not get sonnet/plan hint", c.name)
 		}
 	}
-	if routerModelDefault != "sonnet" {
-		t.Error("classifier default model must be sonnet")
+	if routerModelDefault != "haiku" {
+		t.Error("classifier default model must be haiku")
 	}
 	if !strings.Contains(classifyPromptSonnet, "topic: same|new") || !strings.Contains(classifyPromptSonnet, "tier: haiku|sonnet|opus") {
 		t.Error("classifier prompt must ask topic and tier")

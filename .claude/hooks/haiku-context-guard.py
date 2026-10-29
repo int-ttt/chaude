@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (matcher: Read): Haiku subagents may not use Read's allow_large flag.
+"""PreToolUse hook (matcher: Read): Haiku subagents may not use Read's allow_large flag; sonnet-analyst may not Read/Grep/Glob directly (delegate to haiku-scout).
 
 Claude Code itself caps each Read at env CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS (8000; observed on a
 Read: "cap 8000"), so no size estimate is needed here. allow_large is the only way around that cap, and
@@ -19,6 +19,10 @@ try:
 except Exception:
     sys.exit(0)
 kind = data.get("agent_type") or ""
+if not lean_off() and data.get("agent_id") and kind == "sonnet-analyst" and data.get("tool_name") in ("Read", "Grep", "Glob"):
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                      "permissionDecisionReason": "sonnet-analyst may not read files directly; delegate to haiku-scout."}}))
+    sys.exit(0)
 if lean_off() or not data.get("agent_id") or kind.startswith(("sonnet-", "opus-")) or kind in ("analyst", "reviewer"):
     sys.exit(0)
 if data.get("tool_name") == "Read" and (data.get("tool_input") or {}).get("allow_large"):

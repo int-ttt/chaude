@@ -105,7 +105,7 @@ func TestPanelMoreRowAndSmallHeight(t *testing.T) {
 		r.tracker.onToolUse(fmt.Sprintf("a%d", i), "Agent", map[string]any{"description": fmt.Sprintf("t%d", i)}, now.Add(time.Duration(i)))
 	}
 	pl := m.panelLines()
-	if len(pl) != 4 || !strings.Contains(pl[3], "+2 more") || !strings.Contains(pl[2], "t2") {
+	if len(pl) != 4 || !strings.Contains(pl[3], "1-3/5") || !strings.Contains(pl[2], "t2") {
 		t.Fatalf("want 3 rows + '+2 more': %q", pl)
 	}
 	for _, h := range []int{8, 10, 12, 14, 20} {
@@ -337,3 +337,29 @@ func TestAgentStatusFormat(t *testing.T) {
 }
 
 func ansiStrip(s string) string { return ansi.Strip(s) }
+
+func TestPanelScrollWindow(t *testing.T) {
+	r := &Repl{tracker: newAgentTracker()}
+	m := &tuiModel{r: r, w: 80, panOff: 2}
+	now := time.Now()
+	for i := 0; i < 12; i++ {
+		r.tracker.onToolUse(fmt.Sprintf("a%02d", i), "Agent", map[string]any{"description": fmt.Sprintf("t%d", i)}, now.Add(time.Duration(i)))
+	}
+	pl := m.panelLines()
+	if len(pl) != 4 || !strings.Contains(pl[0], "t2)") || !strings.Contains(pl[3], "3-5/12") {
+		t.Fatalf("scroll window: %q", pl)
+	}
+	m.panOff = 99
+	if pl = m.panelLines(); !strings.Contains(pl[0], "t9)") || !strings.Contains(pl[3], "10-12/12") {
+		t.Fatalf("clamped window: %q", pl)
+	}
+}
+
+func TestUserEventNotificationFinishesBackground(t *testing.T) {
+	tk := newAgentTracker()
+	tk.onToolUse("x1", "Agent", map[string]any{"run_in_background": true}, time.Now())
+	ev := event{"type": "user", "message": map[string]any{"content": "<task-notification><tool-use-id>x1</tool-use-id></task-notification>"}}
+	if !tk.onUserEvent(ev) || len(tk.running()) != 0 {
+		t.Fatalf("background agent still running: %d", len(tk.running()))
+	}
+}

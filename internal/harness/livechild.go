@@ -63,12 +63,23 @@ func (r *Repl) parkedIdleEvent(c *liveChild, ev event) {
 			}
 		}
 		c.mu.Unlock()
+	case t == "user":
+		if c.Tracker != nil && c.Tracker.onUserEvent(ev) {
+			c.mu.Lock()
+			c.sawNotif = true
+			c.mu.Unlock()
+		}
 	case t == "result":
 		c.mu.Lock()
+		seen := c.sawNotif
+		c.sawNotif = false
 		txt := strings.TrimSpace(c.reply.String())
 		c.reply.Reset()
 		c.stream = false
 		c.mu.Unlock()
+		if !seen && txt != "" && c.Tracker != nil {
+			c.Tracker.finishOldestBackground() // same fallback as idleFinish: notice not visible on stdout
+		}
 		if s, ok := c.Sess.(*Session); ok && s != nil {
 			if tc, ok := ev["total_cost_usd"].(float64); ok {
 				r.budget.charge(s, tc)

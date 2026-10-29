@@ -108,6 +108,29 @@ func (t *agentTracker) onNotification(text string) bool {
 	return found
 }
 
+// onUserEvent applies a "user" stream event: tool_results finish foreground agents and any
+// <task-notification> (string content or text block) finishes the background agents it names.
+// Reports whether a notification was seen.
+func (t *agentTracker) onUserEvent(ev event) bool {
+	seen := false
+	msg := asMap(ev["message"])
+	if c, ok := msg["content"].(string); ok && t.onNotification(c) {
+		seen = true
+	}
+	for _, bi := range asList(msg["content"]) {
+		b := asMap(bi)
+		switch str(b["type"]) {
+		case "tool_result":
+			t.onToolResultText(str(b["tool_use_id"]), resultText(b["content"]))
+		case "text":
+			if t.onNotification(str(b["text"])) {
+				seen = true
+			}
+		}
+	}
+	return seen
+}
+
 // finishForeground marks every foreground agent done (turn ended without tool_result: esc, error).
 func (t *agentTracker) finishForeground() {
 	t.mu.Lock()

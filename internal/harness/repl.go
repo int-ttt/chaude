@@ -525,11 +525,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 				}
 			}
 		case t == "user" && isMain:
-			for _, bi := range asList(asMap(ev["message"])["content"]) {
-				if b := asMap(bi); str(b["type"]) == "tool_result" {
-					r.tracker.onToolResultText(str(b["tool_use_id"]), resultText(b["content"]))
-				}
-			}
+			r.tracker.onUserEvent(ev) // tool_results + <task-notification>s arriving mid-turn
 			if r.ui == nil || !show {
 				break
 			}
@@ -841,6 +837,12 @@ func (r *Repl) handle(line string) {
 	}
 	r.tr.add("user", kv{"text", line}, kv{"session", sid})
 	reply, result, usage := r.runTurn(text, true)
+	if strings.TrimSpace(reply) == "" && result != nil && r.ui != nil {
+		if t := str(result["result"]); t != "" {
+			r.ui.send(textMsg(t))
+			r.ui.send(textEndMsg{})
+		}
+	}
 	r.tr.turns = append(r.tr.turns, [2]string{line, reply})
 	r.lastReply = reply
 	if rc := extractReco(reply); rc != "" {
