@@ -1,6 +1,10 @@
 package harness
 
-import "strings"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+)
 
 // permMode is a harness-side permission mode applied to the child's permission prompts
 // (no child restart needed). default asks; acceptEdits auto-allows file edits; plan allows
@@ -54,4 +58,35 @@ func decideMode(m permMode, tool string) (verdict, msg string) {
 		return "deny", "plan mode: do not modify anything or run commands; research read-only and present a plan for the user to approve"
 	}
 	return "ask", ""
+}
+
+// modeFile is where the permission mode of a project is remembered (per folder, outside git):
+// Shift+Tab / "/mode" changes are restored on the next start.
+func modeFile(cwd string) string {
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	return filepath.Join(cwd, ".claude", "chaude-mode")
+}
+
+// loadMode returns the mode saved for cwd (default when none or unreadable).
+func loadMode(cwd string) permMode {
+	b, err := os.ReadFile(modeFile(cwd))
+	if err != nil {
+		return modeDefault
+	}
+	m, ok := parseMode(string(b))
+	if !ok {
+		return modeDefault
+	}
+	return m
+}
+
+// saveMode remembers m for cwd (best effort; the .claude folder is created when missing).
+func saveMode(cwd string, m permMode) {
+	p := modeFile(cwd)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(p, []byte(m.String()+"\n"), 0o644)
 }

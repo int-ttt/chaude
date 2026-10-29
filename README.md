@@ -2,7 +2,7 @@
 
 Claude Code 사용량을 줄이는 하네스입니다. 메인 세션(Opus 또는 Fable)은 듣고·판단하고·설명만 하고, 파일·웹·명령 작업은 이름에 모델이 붙은 하위 에이전트(`haiku-*`, `sonnet-*`, `opus-architect`, `fable-architect`)가 합니다. 훅이 메인 세션의 작업 도구를 막기 때문에 규칙이 강제됩니다. 거기에 세션 회전·컨덕터 라우팅이 있는 터미널 REPL이 붙어 있습니다.
 
-버전 `0.8.1` (원본 int-ttt/chaude 0.7.1 병합 + 포크 기능) · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
+버전 `0.8.2` (원본 int-ttt/chaude 0.7.1 병합 + 포크 기능) · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
 
 ## 필요한 것
 - Claude Code 2.1.296 이상 (`claude --version`)
@@ -63,6 +63,7 @@ chaude install <프로젝트 폴더> --lean-off      # 일반 모드로 시작 (
 | `--max-auto-rotations` | 무제한 | 자동 회전 횟수 상한 |
 | `--tail-turns` | 4 | 스냅샷에 넣는 최근 대화 턴 수 |
 | `--snapshot-chars` | 24000 | 스냅샷 최대 글자 수 |
+| `--mode` | 폴더에 저장된 값 | 시작 권한 모드 default\|acceptEdits\|plan\|auto (Shift+Tab·`/mode`로 바꾼 값은 `.claude/chaude-mode`에 저장되어 다음 실행에 복원) |
 | `--show-rotation` | 끔 | 회전 시 한 줄 표시 |
 | `--metrics-dir` | `notes/metrics` | 턴별 메트릭 폴더(빈 값이면 끔) |
 | `--no-handoff-validate` | 끔 | 핸드오프 검증 끄기 |

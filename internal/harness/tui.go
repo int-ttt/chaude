@@ -1019,6 +1019,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) setMode(p permMode) {
 	m.r.mode.Store(int32(p))
+	saveMode(m.r.a.Cwd, p)
 	m.blocks = append(m.blocks, block{"note", "mode: " + p.String()})
 	m.refresh()
 }

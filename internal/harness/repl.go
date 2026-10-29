@@ -57,6 +57,7 @@ type Args struct {
 	NoCategoryRotate bool          // disable category-based rotation (no marker rule, no switch rotation)
 	Conductor        bool          // Haiku-fixed main orchestrates; large work: Haiku plans -> Opus/Sonnet review -> Haiku executes
 	NoDelegationRule bool          // do not append the haiku delegation rule to the child's system prompt
+	ModeName         string        // --mode: permission mode to start in ("" = the one saved for this folder)
 }
 
 type kv struct {
@@ -980,6 +981,7 @@ func Main(args []string) int {
 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
 	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: Haiku-fixed main; a one-shot Sonnet classifier tags size and adds the plan->review->execute hint to large tasks; a prompt naming its model (opus로, fable로) goes to that model directly")
 	fs.StringVar(&a.AgentsFile, "agents-file", defaultAgentsFile(), "persisted sub-agent state, restored on restart and /resume (empty=off)")
+	fs.StringVar(&a.ModeName, "mode", "", "permission mode to start in: default|acceptEdits|plan|auto (default: the mode last used in this folder)")
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
@@ -989,6 +991,16 @@ func Main(args []string) int {
 		return 2
 	}
 	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1)}
+	startMode := loadMode(a.Cwd)
+	if a.ModeName != "" {
+		pm, ok := parseMode(a.ModeName)
+		if !ok {
+			fmt.Fprintln(os.Stderr, "chaude: unknown --mode", a.ModeName, "(default | acceptEdits | plan | auto)")
+			return 2
+		}
+		startMode = pm
+	}
+	r.mode.Store(int32(startMode))
 	if st, err := os.Stdin.Stat(); err == nil {
 		r.interactive = st.Mode()&os.ModeCharDevice != 0
 	}
@@ -1060,5 +1072,6 @@ func (r *Repl) modeLine(args []string) {
 		return
 	}
 	r.mode.Store(int32(p))
+	saveMode(r.a.Cwd, p)
 	r.p("mode: "+p.String(), "\n")
 }

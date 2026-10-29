@@ -82,7 +82,7 @@ cd "$(dirname "$0")" && exec bin/chaude
 `
 
 // gitignoreLines are appended (once) to an existing .gitignore: runtime state that must not be committed.
-var gitignoreLines = []string{"logs/", "notes/pastes/", "notes/metrics/", "bin/chaude", "bin/chaude.exe", "bin/chaude.exe.old", ".claude/lean-off", ".claude-backup-*/"}
+var gitignoreLines = []string{"logs/", "notes/pastes/", "notes/metrics/", "bin/chaude", "bin/chaude.exe", "bin/chaude.exe.old", ".claude/lean-off", ".claude/chaude-mode", ".claude-backup-*/"}
 
 // Run installs or upgrades the package in o.Dir.
 func Run(o Options) error {
