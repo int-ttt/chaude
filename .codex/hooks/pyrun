@@ -1,9 +1,0 @@
-#!/bin/sh
-# Hook launcher (shell form, every OS): run the hook with the first real Python 3.
-# Windows: the `py` launcher (the Store alias "python3" is not a Python); mac/linux: python3, then python.
-if command -v py >/dev/null 2>&1; then exec py -3 "$@"; fi
-for p in python3 python; do
-  if command -v "$p" >/dev/null 2>&1 && "$p" -c 'import sys; sys.exit(sys.version_info < (3, 8))' >/dev/null 2>&1; then exec "$p" "$@"; fi
-done
-echo "pyrun: no Python 3 found (install Python 3.8+; windows: with the py launcher)" >&2
-exit 1
