@@ -156,6 +156,7 @@ func (r *Repl) applyImport(imp *claudeImport, path string) (string, bool) {
 		"Re-read notes/ (FACTS.md, DECISIONS.md) for durable state.)"
 	snap := withReco(imp.Reco, r.buildSnapshot(note))
 	r.pendingSnapshot = snap
+	r.restoreAgents(strings.TrimSuffix(filepath.Base(path), ".jsonl"))
 	preserved := recoPreserved(imp.Reco, snap)
 	_ = r.metrics.Log(map[string]any{"stage": "import", "source": path, "turns": len(imp.Turns), "files": len(imp.Files),
 		"snapshot_chars": len([]rune(snap)), "reco_found": imp.Reco != "", "reco_preserved": preserved, "dry_run": r.a.ImportDry})
