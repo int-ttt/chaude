@@ -50,4 +50,5 @@ if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
   Write-Host "[!] Git for Windows was not found. Claude Code runs hooks through Git Bash:  winget install Git.Git"
 }
-Write-Host "next: chaude install <project folder>   (adds the agents, hooks and settings to that project)"
+try { & (Join-Path $dir 'chaude.exe') context-menu install | Out-Null; Write-Host "added 'chaude로 열기' to the folder right-click menu (undo: chaude context-menu remove)" } catch { }
+Write-Host "next: right-click a project folder -> 'chaude로 열기', or: chaude install <project folder>"

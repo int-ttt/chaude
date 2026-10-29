@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.7.1
+- 접근성: `chaude open [폴더]`(설치 안 된 폴더면 설치 여부를 묻고 REPL 시작), Windows 폴더 우클릭 메뉴 "chaude로 열기"(`chaude context-menu install|remove|status`, HKCU만 사용·관리자 권한 불필요·Windows Terminal이 있으면 그 안에서 실행), `chaude install`이 프로젝트에 더블클릭 실행 파일 `chaude-start.bat`(mac `chaude-start.command`)을 만듦. `install.ps1`이 우클릭 메뉴를 자동 등록.
+
 ## 0.7.0
 - Fable 지원: `fable-architect` 에이전트(`fable로`로만 호출, Opus가 실패한 일에 사용), 컨덕터 분류기가 `fable`도 라우팅(프롬프트에 `fable로`/`페이블로`가 있을 때만), `chaude --model fable`, `chaude install --main fable`. 훅(`agent-model-pin`, `haiku-context-guard`, `ledger`)이 `fable-*` 이름을 인식.
 - Windows: `chaude install`이 훅을 셸 없이 `py -3 <훅>`으로 실행하는 형태로 설치(검증: Claude Code는 Windows에서 훅을 Git Bash로 실행하고, exec 형태는 `py` 런처로 동작·Store `python` 별칭은 실패). 저장소 `settings.json`은 `.claude/hooks/pyrun` 런처로 어느 OS에서나 동작. `claude` 실행 파일을 PATH에서 찾음(classifier, `/version`). 한국어 Windows 코드페이지에서 사용량 바 폭이 2배로 계산되던 문제 수정. `.gitattributes`로 `.sh`/`.py`/`pyrun` LF 고정.

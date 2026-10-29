@@ -10,12 +10,13 @@ import (
 
 	"chaude/internal/harness"
 	"chaude/internal/install"
+	"chaude/internal/launch"
 	"chaude/internal/scripts"
 	"chaude/internal/settings"
 )
 
 // version is set at release time: -ldflags "-X main.version=X.Y.Z".
-var version = "0.7.0"
+var version = "0.7.1"
 
 const usage = `usage: chaude <command> [args]
   repl [flags]           terminal REPL over claude -p stream-json with session rotation (default with no command)
@@ -24,6 +25,8 @@ const usage = `usage: chaude <command> [args]
   --version              print version
   install <project> [--main opus|sonnet|fable|haiku] [--python CMD] [--lean-off] [--os windows|mac|linux]
                          install/upgrade the package (agents, hooks, skills, settings, CLAUDE.md policy, bin/chaude) in a project
+  open [project] [repl flags]   install there if needed (asks), then start the REPL in that folder
+  context-menu install|remove|status   windows: "chaude로 열기" in the folder right-click menu (HKCU)
   gen-settings <os>      print/write OS-specific .claude/settings.json (mac|linux|windows) [--out FILE]
   ` + scripts.Names + `   helper scripts (run with -h for flags)
 `
@@ -42,6 +45,10 @@ func main() {
 		os.Exit(harness.Main(os.Args[1:]))
 	case "install":
 		os.Exit(install.Main(args, version))
+	case "open":
+		os.Exit(launch.Open(args, version))
+	case "context-menu":
+		os.Exit(launch.ContextMenu(args))
 	case "gen-settings":
 		os.Exit(settings.Main(args))
 	case "--version", "-v", "version":

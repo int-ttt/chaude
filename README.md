@@ -2,7 +2,7 @@
 
 Claude Code 사용량을 줄이는 하네스입니다. 메인 세션(Opus 또는 Fable)은 듣고·판단하고·설명만 하고, 파일·웹·명령 작업은 이름에 모델이 붙은 하위 에이전트(`haiku-*`, `sonnet-*`, `opus-architect`, `fable-architect`)가 합니다. 훅이 메인 세션의 작업 도구를 막기 때문에 규칙이 강제됩니다. 거기에 세션 회전·컨덕터 라우팅이 있는 터미널 REPL이 붙어 있습니다.
 
-버전 `0.7.0` · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
+버전 `0.7.1` · 변경 내역 `CHANGELOG.md` · 상세 가이드 `docs/claude-lean/` (APPLY_GUIDE, FRESH_START)
 
 ## 필요한 것
 - Claude Code 2.1.296 이상 (`claude --version`)
@@ -26,6 +26,13 @@ chaude install <프로젝트 폴더> --lean-off      # 일반 모드로 시작 (
 ```
 하는 일: 기존 `CLAUDE.md`·`.claude/settings.json` 백업 → `.claude/agents` 12개, `.claude/hooks` 10개, `.claude/skills` 7개 복사 → `settings.json` **병합**(사용자 훅·설정값 유지, Windows는 셸 없이 `py -3`로 실행하는 형태) → `CLAUDE.md` 맨 위에 정책 블록 추가(BOM·CRLF 유지, 재실행 시 블록만 교체) → `notes/`, `logs/` → `bin/chaude[.exe]` 복사 → `.gitignore`에 런타임 파일 추가.
 같은 명령을 다시 실행하면 업그레이드입니다. 적용은 **새로 시작한 `claude` 세션**부터입니다.
+
+## 가장 쉬운 실행법
+| 방법 | 어떻게 |
+|---|---|
+| 폴더 우클릭 | 탐색기에서 프로젝트 폴더(또는 폴더 안 빈 곳)를 우클릭 → **chaude로 열기**. 설치 안 된 폴더면 설치할지 묻고 바로 REPL을 엽니다. 메뉴 등록: `chaude context-menu install` (해제 `remove`, 확인 `status`; `install.ps1`이 자동으로 등록) |
+| 더블클릭 | `chaude install`이 프로젝트에 만들어 두는 `chaude-start.bat`(mac: `chaude-start.command`) 더블클릭 → Windows Terminal에서 REPL 시작 |
+| 명령 한 줄 | `chaude open <폴더>` (설치 확인 + REPL). REPL 옵션을 뒤에 붙일 수 있음: `chaude open . --model fable` |
 
 ## 사용
 | 하고 싶은 것 | 입력 |
@@ -111,7 +118,9 @@ chaude metrics --dir 폴더   # 다른 메트릭 폴더
 | `chaude [repl] [옵션]` | REPL 시작 (명령 생략 시 기본) |
 | `chaude --from-claude ID\|latest\|경로 [--import-dry-run]` | 일반 Claude Code 세션 이어받기 |
 | REPL 안 `/resume`, `/import [ID\|latest]` | 현재 디렉터리의 Claude Code 세션을 최신순(날짜·턴 수·첫/마지막 프롬프트)으로 나열해 번호/↑↓로 골라 이어받기 |
-| `chaude install <프로젝트> [--main MODEL] [--lean-off]` | 프로젝트에 에이전트·훅·설정·정책 설치/업그레이드 |
+| `chaude install <프로젝트> [--main MODEL] [--lean-off]` | 프로젝트에 에이전트·훅·설정·정책·실행 파일 설치/업그레이드 |
+| `chaude open [프로젝트] [REPL 옵션]` | 설치 확인(없으면 설치 여부를 물음) 후 그 폴더에서 REPL |
+| `chaude context-menu install\|remove\|status` | Windows 폴더 우클릭 메뉴 "chaude로 열기" |
 | `chaude metrics [--dir D] [--csv]` | 메트릭 요약/CSV |
 | `chaude gen-settings mac\|linux\|windows [--out 파일]` | OS별 `.claude/settings.json` 생성 |
 | `chaude search-history`, `charcount`, `export-history`, `extract-transcript`, `compress-archive`, `usage-report`, `claude-history` | 보조 스크립트(`-h`로 옵션 확인) |

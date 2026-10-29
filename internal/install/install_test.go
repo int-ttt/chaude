@@ -123,13 +123,16 @@ func TestRunWindowsFreshAndUpgrade(t *testing.T) {
 	}
 	for _, rel := range []string{".claude/agents/haiku-scout.md", ".claude/agents/fable-architect.md", ".claude/hooks/_lean.py",
 		".claude/hooks/style-adapter.py", ".claude/skills/check/SKILL.md", ".claude/settings.json", ".claude/claude-lean.version",
-		"notes/FACTS.md", "notes/DECISIONS.md", "notes/runs", "logs", "bin/chaude.exe"} {
+		"notes/FACTS.md", "notes/DECISIONS.md", "notes/runs", "logs", "bin/chaude.exe", "chaude-start.bat"} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); err != nil {
 			t.Errorf("missing %s", rel)
 		}
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "bin", "chaude.exe")); string(b) != "binary" {
 		t.Error("binary not copied")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "chaude-start.bat")); !strings.HasPrefix(string(b), "@echo off\r\n") || !strings.Contains(string(b), `start "" wt -d "%PROJDIR%" cmd /k "bin\chaude.exe"`) {
+		t.Errorf("launcher bat: %q", b)
 	}
 	set, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
 	var m map[string]any
@@ -207,6 +210,12 @@ func TestRunPosix(t *testing.T) {
 	}
 	if st, err := os.Stat(filepath.Join(dir, ".claude", "hooks", "pyrun")); err != nil || (runtime.GOOS != "windows" && st.Mode()&0o111 == 0) {
 		t.Errorf("pyrun missing or not executable: %v", err)
+	}
+	if st, err := os.Stat(filepath.Join(dir, "chaude-start.command")); err != nil || (runtime.GOOS != "windows" && st.Mode()&0o111 == 0) {
+		t.Errorf("launcher .command missing or not executable: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "chaude-start.bat")); err == nil {
+		t.Error("posix install must not write the .bat launcher")
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); err == nil {
 		t.Error(".gitignore must not be created")

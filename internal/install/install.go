@@ -53,6 +53,34 @@ var notesTemplates = map[string]string{
 
 var mkDirs = []string{"notes/runs", "notes/research", "notes/pastes", "logs"}
 
+// launcherBat / launcherSh are written next to the project as chaude-start.bat / chaude-start.command.
+const launcherBat = `@echo off
+rem chaude launcher (written by "chaude install"): double-click to open this project's REPL.
+setlocal
+set "PROJDIR=%~dp0"
+if "%PROJDIR:~-1%"=="\" set "PROJDIR=%PROJDIR:~0,-1%"
+cd /d "%PROJDIR%"
+if not exist "bin\chaude.exe" (
+  echo [!] bin\chaude.exe not found. Run: chaude install "%PROJDIR%"
+  pause
+  exit /b 1
+)
+where wt >nul 2>nul
+if not errorlevel 1 (
+  start "" wt -d "%PROJDIR%" cmd /k "bin\chaude.exe"
+  exit /b 0
+)
+echo [i] Windows Terminal not found: Korean input may not work in this window.
+echo     Install it:  winget install Microsoft.WindowsTerminal
+bin\chaude.exe
+pause
+`
+
+const launcherSh = `#!/bin/sh
+# chaude launcher (written by "chaude install"): double-click in Finder to open this project's REPL.
+cd "$(dirname "$0")" && exec bin/chaude
+`
+
 // gitignoreLines are appended (once) to an existing .gitignore: runtime state that must not be committed.
 var gitignoreLines = []string{"logs/", "notes/pastes/", "notes/metrics/", "bin/chaude", "bin/chaude.exe", ".claude/lean-off", ".claude-backup-*/"}
 
@@ -206,6 +234,21 @@ func Run(o Options) error {
 			_ = os.Chmod(dst, 0o755)
 		}
 		say("binary  bin/%s", name)
+	}
+
+	// 7b. double-click launcher: opens the project's REPL (Windows Terminal when present: Korean IME needs it)
+	if o.Windows {
+		if err := writeFile(filepath.Join(dir, "chaude-start.bat"), []byte(strings.ReplaceAll(launcherBat, "\n", "\r\n"))); err != nil {
+			return err
+		}
+		say("launch  chaude-start.bat (double-click)  ·  right-click menu: chaude context-menu install")
+	} else {
+		p := filepath.Join(dir, "chaude-start.command")
+		if err := writeFile(p, []byte(launcherSh)); err != nil {
+			return err
+		}
+		_ = os.Chmod(p, 0o755)
+		say("launch  chaude-start.command (double-click in Finder)")
 	}
 
 	// 8. .gitignore (only when the project has one): runtime state stays out of git
