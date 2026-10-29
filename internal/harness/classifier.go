@@ -174,6 +174,9 @@ func parseRouteFull(out, cur string, cands []haikuWorker) (rr routeResult, ok bo
 	return rr, true
 }
 
+// classifyFn is a test seam for classify.
+var classifyFn = classify
+
 // classify makes one short Sonnet call; returns model, terse task, cost and token usage.
 func classify(line, cur, lastUser string, cands []haikuWorker) (rr routeResult, cost float64, usage map[string]any, err error) {
 	in := "current session model: " + cur + " (keep it unless topic is new)\nprevious user prompt: " + trunc(lastUser, 200) + "\n"
@@ -215,7 +218,7 @@ func (r *Repl) route(line string) string {
 	if n := len(r.tr.turns); n > 0 {
 		last = r.tr.turns[n-1][0]
 	}
-	rr, cost, usage, err := classify(line, r.a.Model, last, r.pool.candidates())
+	rr, cost, usage, err := classifyFn(line, r.a.Model, last, r.pool.candidates())
 	model, task := rr.Model, rr.Task
 	f := map[string]any{"stage": "classify", "cost_usd": cost, "duration_ms": time.Since(t0).Milliseconds(), "from_model": r.a.Model, "conductor": true, "router_model": routerModel(), "router_prompt": routerModel()}
 	for k, v := range usageFields(usage) {
@@ -238,6 +241,9 @@ func (r *Repl) route(line string) string {
 	}
 	_ = r.metrics.Log(f)
 	r.curTask = task
+	if r.reg != nil && r.children != nil {
+		return r.routeChildren(model, task, rr.Worker)
+	}
 	if model == "haiku" && (r.a.Model != "haiku" || rr.Worker != "") {
 		r.p(dim+"[route → haiku"+map[bool]string{true: " (기존 세션 " + trunc(rr.Worker, 8) + ")", false: ""}[rr.Worker != ""]+"]"+rst, "\n")
 		r.switchSession("haiku", rr.Worker)

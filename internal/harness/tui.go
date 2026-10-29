@@ -378,6 +378,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if n := len(m.r.tracker.running()); m.busy || n != m.lastRun {
 			m.refresh()
 		}
+		if !m.busy && m.perm == nil && m.r.sweepIdle(time.Now()) {
+			m.busy, m.turnStart = true, time.Now()
+			m.submit <- "/idle-rotate" // rotate on the sender goroutine, like a user prompt
+		}
 	case textMsg:
 		m.appendAsst(string(v))
 		m.refresh()
@@ -888,7 +892,10 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		note("mouse OFF: text selection works; scroll with pgup/pgdn, shift+up/down")
 		return m, tea.DisableMouse
 	case "/status":
-		sid := m.r.sess.SessionID
+		sid := ""
+		if m.r.sess != nil {
+			sid = m.r.sess.SessionID
+		}
 		if sid == "" {
 			sid = "-"
 		}
@@ -1120,6 +1127,7 @@ func (r *Repl) runTUI() int {
 			r.closeDrains()
 			r.sess.Close()
 		}
+		r.closeAllChildren()
 	}()
 	submit := make(chan string)
 	m := newTUIModel(r, submit)
@@ -1134,6 +1142,8 @@ func (r *Repl) runTUI() int {
 			switch {
 			case line == "/rotate":
 				r.rotate("manual")
+			case line == "/idle-rotate":
+				r.idleRotateNow()
 			case line == "/clear":
 				r.clear()
 			case passthroughCmds[f[0]]:

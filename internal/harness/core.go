@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"chaude/internal/osenv"
@@ -131,6 +132,7 @@ type Session struct {
 	bgTurn    bool          // a child-initiated (background) main turn was seen and its result not yet
 	held      chan struct{} // pause token taken by Send, released by Events
 	skip      int           // results to discard in Events: stray results of background turns
+	dead      atomic.Bool   // stdout reached EOF: the child process is gone
 }
 
 func NewSession(o SessionOpts) (*Session, error) {
@@ -167,6 +169,7 @@ func NewSession(o SessionOpts) (*Session, error) {
 	s := &Session{cmd: cmd, stdin: in, lines: make(chan string, 256)}
 	go func() {
 		defer close(s.lines)
+		defer s.dead.Store(true)
 		r := bufio.NewReaderSize(out, 1<<20)
 		for {
 			line, err := r.ReadString('\n')
@@ -345,6 +348,9 @@ func (s *Session) pauseIdle() chan struct{} {
 		return nil
 	}
 }
+
+// Dead reports whether the child's stdout has ended (the process exited).
+func (s *Session) Dead() bool { return s.dead.Load() }
 
 func (s *Session) Close() {
 	s.StopIdle()

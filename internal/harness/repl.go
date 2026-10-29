@@ -163,6 +163,28 @@ type Repl struct {
 	curTask         string            // terse task of the current routed turn
 	mode            atomic.Int32      // permMode, set from the UI goroutine
 	idle            idleTurn          // child-initiated turn being rendered (idle reader goroutine only)
+	reg             *clientRegistry   // per-(cwd,model) client registry; nil = off (old routing)
+	children        *childSet         // live child processes kept per (cwd,model); nil = off
+	idleRotate      time.Duration     // idle deadline base (--idle-rotate); 0 = off
+	ttl             string            // prompt cache TTL requested (--cache-ttl)
+	lastAPI         time.Time         // single clock for the active child: last API message_start
+	ttlSeen         string            // cache TTL observed from usage ("" = unknown)
+	idleFiredFor    time.Time         // lastAPI value an idle rotate already fired for
+	cur             *liveChild        // record of the active child (idle callback identity; set by start/bindChild)
+	clockMu         sync.Mutex        // guards lastAPI, ttlSeen, idleFiredFor (idle goroutine writes, UI reads)
+	noticeMu        sync.Mutex        // guards notices
+}
+
+// wireClients sets the registry and child set from Args. Empty ClientsFile
+// leaves both nil so routing keeps the pre-multiproc path.
+func (r *Repl) wireClients() {
+	r.idleRotate = r.a.IdleRotate
+	r.ttl = r.a.CacheTTL
+	if r.a.ClientsFile == "" {
+		return
+	}
+	r.reg = newClientRegistry(r.a.ClientsFile)
+	r.children = newChildSet()
 }
 
 func (r *Repl) p(s string, end string) {
@@ -195,6 +217,9 @@ func (r *Repl) start() error {
 		return err
 	}
 	r.sess = s
+	r.clockMu.Lock()
+	r.lastAPI = time.Time{} // new child: no API call yet (idleDue needs a turn)
+	r.clockMu.Unlock()
 	prev := r.tracker
 	r.tracker = newAgentTracker()
 	tk := r.tracker
@@ -213,13 +238,22 @@ func (r *Repl) start() error {
 			tk.restore(a.saved("", ""))
 		}
 	}
-	s.StartIdle(func(ev event) { r.idleEvent(s, tk, ev) })
+	self := &liveChild{Sess: s, Tracker: tk, Model: r.a.Model}
+	r.cur = self
+	s.StartIdle(func(ev event) {
+		if self.parked.Load() {
+			r.parkedIdleEvent(self, ev)
+			return
+		}
+		r.idleEvent(s, tk, ev)
+	})
 	return nil
 }
 
 // idleEvent handles stdout events that arrive while no turn is running (background subagents).
 func (r *Repl) idleEvent(s *Session, tk *agentTracker, ev event) {
 	tk.onSubEvent(ev)
+	r.touchMain(ev, time.Now())
 	switch t := str(ev["type"]); {
 	case t == "control_request" && str(asMap(ev["request"])["subtype"]) == "can_use_tool":
 		r.tr.add("permission_idle", kv{"tool", asMap(ev["request"])["tool_name"]})
@@ -418,6 +452,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	handle := func(ev event) {
 		t := str(ev["type"])
 		r.tracker.onSubEvent(ev)
+		r.touchMain(ev, time.Now())
 		_, hasParent := ev["parent_tool_use_id"]
 		isMain := !hasParent || ev["parent_tool_use_id"] == nil || ev["parent_tool_use_id"] == ""
 		switch {
@@ -572,6 +607,51 @@ func (r *Repl) buildSnapshot(note string) string {
 // agentsBusy: delegated agents of the current session that have not finished.
 func (r *Repl) agentsBusy() bool { return len(r.tracker.running()) > 0 }
 
+// snapState is the outcome of makeSnapshot.
+type snapState int
+
+const (
+	snapOK      snapState = iota // handoff note written and valid
+	snapHeld                     // handoff failed and there is nothing to carry: hold the rotation
+	snapInvalid                  // handoff failed validation; the snapshot carries a failure note and recent turns
+)
+
+// makeSnapshot builds the handoff snapshot from the active child (handoff turn, validation, recommendation).
+// It neither closes nor starts anything.
+func (r *Repl) makeSnapshot(reason string) (string, snapState) {
+	snap, st, _ := r.makeSnapshotN(reason)
+	return snap, st
+}
+
+// makeSnapshotN is makeSnapshot plus the number of handoff attempts (for rotate's log).
+func (r *Repl) makeSnapshotN(reason string) (snap string, st snapState, attempts int) {
+	_ = reason
+	var note string
+	var problems []string
+	for attempts < 2 {
+		attempts++
+		note, _, _ = r.runTurn(handoffPrompt, false)
+		if r.a.NoValidate {
+			break
+		}
+		if problems = validateHandoff(note, r.lastReco, r.files); len(problems) == 0 {
+			break
+		}
+	}
+	valid := len(problems) == 0
+	if !valid && strings.TrimSpace(note) == "" && len(r.tr.turns) == 0 {
+		return "", snapHeld, attempts // deterministic snapshot only (recent turns); nothing to carry
+	}
+	if !valid {
+		note = "(handoff note failed validation: " + strings.Join(problems, "; ") + "; recent turns follow)"
+	}
+	snap = withReco(r.lastReco, r.buildSnapshot(note))
+	if valid {
+		return snap, snapOK, attempts
+	}
+	return snap, snapInvalid, attempts
+}
+
 func (r *Repl) rotate(reason string) {
 	old := r.sess.SessionID
 	t0 := time.Now()
@@ -587,33 +667,14 @@ func (r *Repl) rotate(reason string) {
 		}
 		return
 	}
-	var note string
-	var problems []string
-	attempts := 0
-	for attempts < 2 {
-		attempts++
-		note, _, _ = r.runTurn(handoffPrompt, false)
-		if r.a.NoValidate {
-			break
-		}
-		if problems = validateHandoff(note, r.lastReco, r.files); len(problems) == 0 {
-			break
-		}
+	snap, st, attempts := r.makeSnapshotN(reason)
+	if st == snapHeld {
+		r.lastRotFail = time.Now()
+		r.logRotate(reason, old, false, false, attempts, "held", t0, 0)
+		r.p(dim+"── rotation held: handoff failed ──"+rst, "\n")
+		return
 	}
-	valid := len(problems) == 0
-	if !valid && strings.TrimSpace(note) == "" {
-		// deterministic snapshot only (recent turns); if there is nothing to carry, hold the rotation
-		if len(r.tr.turns) == 0 {
-			r.lastRotFail = time.Now()
-			r.logRotate(reason, old, valid, false, attempts, "held", t0, 0)
-			r.p(dim+"── rotation held: handoff failed ──"+rst, "\n")
-			return
-		}
-	}
-	if !valid {
-		note = "(handoff note failed validation: " + strings.Join(problems, "; ") + "; recent turns follow)"
-	}
-	snap := withReco(r.lastReco, r.buildSnapshot(note))
+	valid := st == snapOK
 	drained := false
 	if r.agentsBusy() && r.a.MaxDrain > 0 {
 		r.sess.StopIdle()
@@ -687,7 +748,7 @@ func (r *Repl) pollDrains() {
 			if !a.Done || to {
 				st = "타임아웃"
 			}
-			r.notices = append(r.notices, fmt.Sprintf("[agent done] %s · %s · %s · %s", a.ID, a.Task, a.OutPath, st))
+			r.addNotice(fmt.Sprintf("[agent done] %s · %s · %s · %s", a.ID, a.Task, a.OutPath, st))
 		}
 		d.sess.Close()
 		r.tr.add("drain", kv{"session", d.sess.SessionID}, kv{"timed_out", to})
@@ -696,8 +757,10 @@ func (r *Repl) pollDrains() {
 }
 
 // effectiveThreshold is the context-token count that triggers auto-rotation for the current model.
-func (r *Repl) effectiveThreshold() int {
-	if r.a.Model == "opus" || r.a.Model == "sonnet" {
+func (r *Repl) effectiveThreshold() int { return r.thresholdFor(r.a.Model) }
+
+func (r *Repl) thresholdFor(model string) int {
+	if model == "opus" || model == "sonnet" {
 		return opusSonnetThreshold
 	}
 	return r.a.Threshold
@@ -710,9 +773,8 @@ func (r *Repl) handle(line string) {
 	if r.a.Conductor {
 		text = r.route(line)
 	}
-	if len(r.notices) > 0 {
-		text = strings.Join(r.notices, "\n") + "\n\n" + text
-		r.notices = nil
+	if ns := r.takeNotices(); len(ns) > 0 {
+		text = strings.Join(ns, "\n") + "\n\n" + text
 	}
 	if r.pendingSnapshot != "" {
 		text = r.pendingSnapshot + "\n\n## Current user message\n" + text
@@ -814,6 +876,7 @@ func (r *Repl) loop() int {
 		if r.sess != nil {
 			r.sess.Close()
 		}
+		r.closeAllChildren()
 	}()
 	for {
 		if r.interactive {
@@ -900,7 +963,7 @@ func Main(args []string) int {
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
 	fs.StringVar(&a.CacheTTL, "cache-ttl", "1h", "prompt cache TTL requested from claude: auto, 1h or 5m")
-	fs.DurationVar(&a.IdleRotate, "idle-rotate", 3599*time.Second, "idle time after which a child is treated as cold (0=off)")
+	fs.DurationVar(&a.IdleRotate, "idle-rotate", 3599*time.Second, "idle time after which a child is treated as cold (0=off); idle rotation runs in the TUI only")
 	fs.StringVar(&a.ClientsFile, "clients-file", defaultClientsFile(), "per-(cwd,model) client registry (empty=off)")
 	fs.IntVar(&a.MaxWorkers, "max-workers", DefaultMaxWorkers, "cap on concurrent live worker sessions (env CHAUDE_MAX_WORKERS when unset)")
 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
@@ -931,6 +994,7 @@ func Main(args []string) int {
 	}
 	r.tr = newTranscript(a.Transcript)
 	r.agents = newAgentStore(a.AgentsFile)
+	r.wireClients()
 	r.pool = newWorkerPool()
 	r.agents.interruptRunning(false) // agents left 'running' by a crashed/killed harness
 	r.metrics = newMetrics(a.MetricsDir, map[string]any{"threshold": a.Threshold, "handoff_validate": !a.NoValidate,

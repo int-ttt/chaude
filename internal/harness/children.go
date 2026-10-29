@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -39,6 +41,29 @@ type liveChild struct {
 	LastCtx  int
 	Files    []string
 	TurnFrom int
+
+	// Repl state with no other home while the child is parked (saved by unbindActive, restored by bindChild).
+	PendingSnapshot string
+	LastRotFail     time.Time
+	TTLSeen         string
+	Cat             string
+
+	mu     sync.Mutex  // guards LastAPI and the parked reply buffer
+	parked atomic.Bool // true from unbindActive until bindChild; the idle callback branches on it
+	reply  strings.Builder
+	stream bool // the parked reply arrived as text_delta events
+}
+
+func (c *liveChild) lastAPI() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.LastAPI
+}
+
+func (c *liveChild) setLastAPI(t time.Time) {
+	c.mu.Lock()
+	c.LastAPI = t
+	c.mu.Unlock()
 }
 
 // childSet holds the parked-live children of one harness process, keyed by childKey.
@@ -80,7 +105,7 @@ func (s *childSet) Expired(now time.Time, deadline time.Duration) []string {
 	defer s.mu.Unlock()
 	var keys []string
 	for k, c := range s.m {
-		if now.Sub(c.LastAPI) >= deadline {
+		if now.Sub(c.lastAPI()) >= deadline {
 			keys = append(keys, k)
 		}
 	}

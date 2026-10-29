@@ -63,7 +63,7 @@ func pickChild(set *childSet, reg *clientRegistry, key, cwd, model string, limit
 		set.mu.Lock()
 		c, ok := set.m[key]
 		set.mu.Unlock()
-		if ok && isWarm(clientRec{State: clientLive, LastAPI: c.LastAPI, LastCtx: c.LastCtx}, limit, now, deadline) {
+		if ok && isWarm(clientRec{State: clientLive, LastAPI: c.lastAPI(), LastCtx: c.LastCtx}, limit, now, deadline) {
 			return actUseLive
 		}
 	}
