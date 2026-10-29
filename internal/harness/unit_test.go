@@ -52,6 +52,20 @@ func TestCtxTokens(t *testing.T) {
 	}
 }
 
+func TestObservedTTL(t *testing.T) {
+	u1h := map[string]any{"cache_creation": map[string]any{"ephemeral_1h_input_tokens": 7581.0, "ephemeral_5m_input_tokens": 0.0}}
+	u5m := map[string]any{"cache_creation": map[string]any{"ephemeral_1h_input_tokens": 0.0, "ephemeral_5m_input_tokens": 120.0}}
+	if got := observedTTL(u1h, "5m"); got != "1h" {
+		t.Errorf("1h usage: got %q", got)
+	}
+	if got := observedTTL(u5m, "1h"); got != "5m" {
+		t.Errorf("5m usage: got %q", got)
+	}
+	if got := observedTTL(map[string]any{"input_tokens": 2.0}, "auto"); got != "auto" {
+		t.Errorf("no cache_creation: got %q", got)
+	}
+}
+
 func TestSnapshot(t *testing.T) {
 	r := &Repl{a: Args{TailTurns: 2, SnapshotChars: 24000}, tr: &Transcript{}}
 	r.files = []string{"/a/b.go"}
@@ -90,5 +104,28 @@ func TestCleanEnv(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("window")
+	}
+}
+
+func TestWithCacheTTL(t *testing.T) {
+	base := []string{"A=1", "CLAUDE_CODE_PROMPT_CACHE_TTL=5m"}
+	cases := map[string]string{"1h": "CLAUDE_CODE_PROMPT_CACHE_TTL=1h", "5m": "CLAUDE_CODE_PROMPT_CACHE_TTL=5m"}
+	for ttl, want := range cases {
+		got := withCacheTTL(base, ttl)
+		n := 0
+		for _, kv := range got {
+			if strings.HasPrefix(kv, "CLAUDE_CODE_PROMPT_CACHE_TTL=") {
+				n++
+			}
+		}
+		if n != 1 || got[len(got)-1] != want {
+			t.Fatalf("withCacheTTL(%q) = %v; want single %q at end", ttl, got, want)
+		}
+	}
+	for _, ttl := range []string{"", "auto"} {
+		got := withCacheTTL(base, ttl)
+		if strings.Join(got, "|") != strings.Join(base, "|") {
+			t.Fatalf("withCacheTTL(%q) changed env: %v", ttl, got)
+		}
 	}
 }

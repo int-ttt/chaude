@@ -37,6 +37,21 @@ func cleanEnv(compactWindow int) []string {
 	return env
 }
 
+// withCacheTTL: "1h"/"5m" pin the child's main-conversation prompt cache TTL; "" or "auto" leave env as is.
+func withCacheTTL(env []string, ttl string) []string {
+	if ttl != "1h" && ttl != "5m" {
+		return env
+	}
+	var out []string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CLAUDE_CODE_PROMPT_CACHE_TTL=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, "CLAUDE_CODE_PROMPT_CACHE_TTL="+ttl)
+}
+
 func num(v any) int {
 	if f, ok := v.(float64); ok {
 		return int(f)
@@ -57,6 +72,18 @@ func str(v any) string {
 // ctxTokens: context-size proxy = input + cache_read + cache_creation of one API call.
 func ctxTokens(usage map[string]any) int {
 	return num(usage["input_tokens"]) + num(usage["cache_read_input_tokens"]) + num(usage["cache_creation_input_tokens"])
+}
+
+// observedTTL: cache TTL seen in one API call's usage.cache_creation; prev when neither is written.
+func observedTTL(usage map[string]any, prev string) string {
+	cc := asMap(usage["cache_creation"])
+	if num(cc["ephemeral_1h_input_tokens"]) > 0 {
+		return "1h"
+	}
+	if num(cc["ephemeral_5m_input_tokens"]) > 0 {
+		return "5m"
+	}
+	return prev
 }
 
 // jsonStr is json.dumps(ensure_ascii=False) without trailing newline.
@@ -86,6 +113,7 @@ type SessionOpts struct {
 	ClaudeBin     string
 	NoPermission  bool
 	CompactWindow int
+	CacheTTL      string // "auto" (default, env untouched), "1h", or "5m"
 }
 
 // Session is one `claude -p` child. Send() a user message, then Events() until result.
@@ -122,7 +150,7 @@ func NewSession(o SessionOpts) (*Session, error) {
 	}
 	args = append(args, o.Extra...)
 	cmd := exec.Command(osenv.ResolveBin(o.ClaudeBin), args...)
-	cmd.Env = cleanEnv(o.CompactWindow)
+	cmd.Env = withCacheTTL(cleanEnv(o.CompactWindow), o.CacheTTL)
 	cmd.Dir = o.Cwd
 	cmd.Stderr = nil
 	in, err := cmd.StdinPipe()

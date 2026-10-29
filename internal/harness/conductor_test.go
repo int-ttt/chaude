@@ -18,20 +18,28 @@ func TestParseRoute(t *testing.T) {
 	}
 }
 
-// TestParseRouteSize: size is normalized; a missing or unknown size routes as large (ok), topic and task are still required.
+// TestParseRouteSize: tier is normalized; a missing or unknown tier routes as sonnet (ok), topic and task are still required.
+// A legacy size-only line maps small -> haiku, large -> sonnet and is marked defaulted. Size is derived from tier.
 func TestParseRouteSize(t *testing.T) {
 	for _, c := range []struct {
-		name, in, size, kind string
+		name, in, tier, kind string
 		defaulted            bool
 	}{
-		{"missing size -> large, kind other", "topic: new\ntask: x", "large", "other", true},
-		{"same topic, no size -> large", "topic: same\ntask: x", "large", "other", true},
-		{"Small. -> small", "topic: same\nsize: Small.\nkind: lookup\ntask: x", "small", "lookup", false},
-		{"medium -> large", "topic: same\nsize: medium\nkind: other\ntask: x", "large", "other", true},
+		{"missing tier -> sonnet, kind other", "topic: new\ntask: x", "sonnet", "other", true},
+		{"same topic, no tier -> sonnet", "topic: same\ntask: x", "sonnet", "other", true},
+		{"legacy Small. size -> haiku", "topic: same\nsize: Small.\nkind: lookup\ntask: x", "haiku", "lookup", true},
+		{"tier Haiku. -> haiku", "topic: same\ntier: Haiku.\nkind: lookup\ntask: x", "haiku", "lookup", false},
+		{"tier medium -> sonnet", "topic: same\ntier: medium\nkind: other\ntask: x", "sonnet", "other", true},
+		{"tier opus", "topic: same\ntier: opus\nkind: other\ntask: x", "opus", "other", false},
+		{"tier wins over legacy size", "topic: same\ntier: sonnet\nsize: small\ntask: x", "sonnet", "other", false},
 	} {
 		rr, ok := parseRouteFull(c.in, "haiku", nil)
-		if !ok || rr.Size != c.size || rr.SizeDefaulted != c.defaulted || rr.Kind != c.kind {
-			t.Errorf("%s: size=%q defaulted=%v kind=%q ok=%v", c.name, rr.Size, rr.SizeDefaulted, rr.Kind, ok)
+		wantSize := "large"
+		if c.tier == "haiku" {
+			wantSize = "small"
+		}
+		if !ok || rr.Tier != c.tier || rr.Size != wantSize || rr.SizeDefaulted != c.defaulted || rr.Kind != c.kind {
+			t.Errorf("%s: tier=%q size=%q defaulted=%v kind=%q ok=%v", c.name, rr.Tier, rr.Size, rr.SizeDefaulted, rr.Kind, ok)
 		}
 	}
 	for _, bad := range []string{"size: small\ntask: x", "topic: same\nsize: small"} {
@@ -39,21 +47,21 @@ func TestParseRouteSize(t *testing.T) {
 			t.Errorf("accepted %q", bad)
 		}
 	}
-	// forced opus main, topic new, size missing (large): stays opus and is not delegated
+	// forced opus main, topic new, tier missing (sonnet): stays opus and is not delegated
 	rr, ok := parseRouteFull("topic: new\ntask: x", "opus", nil)
 	if !ok || rr.Model != "opus" || strings.HasPrefix(rr.Task, delegateHint) {
-		t.Errorf("forced opus, missing size: model=%q delegated=%v ok=%v", rr.Model, strings.HasPrefix(rr.Task, delegateHint), ok)
+		t.Errorf("forced opus, missing tier: model=%q delegated=%v ok=%v", rr.Model, strings.HasPrefix(rr.Task, delegateHint), ok)
 	}
-	// haiku main, size missing (large): plan workflow hint is attached
+	// haiku main, tier missing (sonnet): sonnet hint is attached, no plan workflow
 	rr, ok = parseRouteFull("topic: same\ntask: x", "haiku", nil)
-	if !ok || !strings.HasPrefix(rr.Task, planHint) {
-		t.Errorf("haiku main, missing size: planHint missing, ok=%v", ok)
+	if !ok || !strings.HasPrefix(rr.Task, sonnetHint) || strings.HasPrefix(rr.Task, planHint) {
+		t.Errorf("haiku main, missing tier: sonnetHint missing or planHint present, ok=%v", ok)
 	}
 }
 
 func TestClassifyPromptSizeRule(t *testing.T) {
-	if !strings.Contains(classifyPrompt, "size: small|large") || !strings.Contains(classifyPrompt, "when unsure between small and large, large") {
-		t.Error("classifier prompt must keep size: small|large and the unsure rule")
+	if !strings.Contains(classifyPromptSonnet, "tier: haiku|sonnet|opus") || !strings.Contains(classifyPromptSonnet, "when unsure between haiku and sonnet, or sonnet and opus, sonnet") {
+		t.Error("classifier prompt must keep tier: haiku|sonnet|opus and the unsure rule")
 	}
 }
 
@@ -85,41 +93,46 @@ func TestMainRouteSwitchPolicy(t *testing.T) {
 		name, in, cur, want string
 		hint                bool
 	}{
-		{"same small -> haiku", "topic: same\nsize: small\ntask: fix typo", "haiku", "haiku", false},
-		{"empty cur -> haiku", "topic: same\nsize: small\ntask: x", "", "haiku", false},
-		{"unrelated small on haiku -> haiku, no hint", "topic: new\nsize: small\ntask: run tests", "haiku", "haiku", false},
-		{"forced opus unrelated small -> delegate", "topic: new\nsize: small\ntask: run tests", "opus", "opus", true},
-		{"forced opus same large stays", "topic: same\nsize: large\ntask: x", "opus", "opus", false},
-		{"forced sonnet stays", "topic: new\nsize: large\ntask: redesign", "sonnet", "sonnet", false},
+		{"same haiku -> haiku", "topic: same\ntier: haiku\ntask: fix typo", "haiku", "haiku", false},
+		{"empty cur -> haiku", "topic: same\ntier: haiku\ntask: x", "", "haiku", false},
+		{"unrelated haiku on haiku -> haiku, no hint", "topic: new\ntier: haiku\ntask: run tests", "haiku", "haiku", false},
+		{"forced opus unrelated haiku -> delegate", "topic: new\ntier: haiku\ntask: run tests", "opus", "opus", true},
+		{"forced opus same opus tier stays", "topic: same\ntier: opus\ntask: x", "opus", "opus", false},
+		{"forced opus same sonnet tier stays, no hint", "topic: same\ntier: sonnet\ntask: analyze", "opus", "opus", false},
+		{"forced sonnet stays", "topic: new\ntier: opus\ntask: redesign", "sonnet", "sonnet", false},
 	} {
 		m, task, ok := parseRoute(c.in, c.cur)
 		if !ok || m != c.want || strings.HasPrefix(task, delegateHint) != c.hint {
 			t.Errorf("%s: got %q hint=%v ok=%v", c.name, m, strings.HasPrefix(task, delegateHint), ok)
 		}
+		if c.want != "haiku" && (strings.HasPrefix(task, sonnetHint) || strings.HasPrefix(task, planHint)) {
+			t.Errorf("%s: forced main must not get sonnet/plan hint", c.name)
+		}
 	}
-	if conductorModel != "sonnet" {
-		t.Error("classifier model must be fixed to sonnet")
+	if routerModelDefault != "sonnet" {
+		t.Error("classifier default model must be sonnet")
 	}
-	if !strings.Contains(classifyPrompt, "topic: same|new") || !strings.Contains(classifyPrompt, "size: small|large") {
-		t.Error("classifier prompt must ask topic and size")
+	if !strings.Contains(classifyPromptSonnet, "topic: same|new") || !strings.Contains(classifyPromptSonnet, "tier: haiku|sonnet|opus") {
+		t.Error("classifier prompt must ask topic and tier")
 	}
 }
 
-// TestHaikuPlanWorkflow: the main session is Haiku for every prompt; large/judgment tasks carry the
-// plan -> Opus/Sonnet review -> Haiku execute workflow hint, small ones do not.
+// TestHaikuPlanWorkflow: the main session is Haiku for every prompt; opus-tier tasks carry the
+// plan -> Opus review -> Haiku execute workflow hint, sonnet-tier tasks carry the sonnet-analyst hint, haiku-tier neither.
 func TestHaikuPlanWorkflow(t *testing.T) {
 	cands := []haikuWorker{{ID: "w-readme", Task: "README foo->bar", Files: []string{"README.md"}}}
 	for _, c := range []struct {
 		name, in, cur, worker string
-		plan                  bool
+		plan, sonnet          bool
 	}{
-		{"lookup", "topic: new\nsize: small\nkind: lookup\nworker: new\ntask: find X", "haiku", "", false},
-		{"edit matching worker", "topic: new\nsize: small\nkind: edit\nworker: w-readme\ntask: replace b", "haiku", "w-readme", false},
-		{"unknown worker -> fresh", "topic: new\nsize: small\nkind: edit\nworker: w-ghost\ntask: replace b", "haiku", "", false},
-		{"judgment large -> haiku + plan workflow", "topic: same\nsize: large\nkind: other\nworker: new\ntask: weigh A vs B", "haiku", "", true},
-		{"strategy from stale opus cur stays opus (forced)", "topic: new\nsize: large\nkind: lookup\ntask: roadmap", "opus", "", false},
-		{"large from empty cur -> haiku + plan", "topic: new\nsize: large\nkind: other\ntask: design", "", "", true},
-		{"small other -> haiku, no plan", "topic: same\nsize: small\nkind: other\ntask: pushback", "haiku", "", false},
+		{"lookup", "topic: new\ntier: haiku\nkind: lookup\nworker: new\ntask: find X", "haiku", "", false, false},
+		{"edit matching worker", "topic: new\ntier: haiku\nkind: edit\nworker: w-readme\ntask: replace b", "haiku", "w-readme", false, false},
+		{"unknown worker -> fresh", "topic: new\ntier: haiku\nkind: edit\nworker: w-ghost\ntask: replace b", "haiku", "", false, false},
+		{"opus tier -> haiku + plan workflow", "topic: same\ntier: opus\nkind: other\nworker: new\ntask: weigh A vs B", "haiku", "", true, false},
+		{"sonnet tier -> haiku + sonnet hint, no plan", "topic: same\ntier: sonnet\nkind: other\nworker: new\ntask: review diff", "haiku", "", false, true},
+		{"opus tier from stale opus cur stays opus (forced)", "topic: new\ntier: opus\nkind: lookup\ntask: roadmap", "opus", "", false, false},
+		{"opus tier from empty cur -> haiku + plan", "topic: new\ntier: opus\nkind: other\ntask: design", "", "", true, false},
+		{"haiku other -> haiku, no plan", "topic: same\ntier: haiku\nkind: other\ntask: pushback", "haiku", "", false, false},
 	} {
 		rr, ok := parseRouteFull(c.in, c.cur, cands)
 		want := "haiku"
@@ -132,10 +145,48 @@ func TestHaikuPlanWorkflow(t *testing.T) {
 		if has := strings.HasPrefix(rr.Task, planHint); has != c.plan {
 			t.Errorf("%s: planHint=%v want %v", c.name, has, c.plan)
 		}
+		if has := strings.HasPrefix(rr.Task, sonnetHint); has != c.sonnet {
+			t.Errorf("%s: sonnetHint=%v want %v", c.name, has, c.sonnet)
+		}
 	}
-	for _, w := range []string{"opus-architect", "sonnet-analyst", "notes/runs/", "Haiku agents"} {
+	for _, w := range []string{"opus-architect", "notes/runs/", "Haiku agents"} {
 		if !strings.Contains(planHint, w) {
 			t.Errorf("planHint missing %q", w)
+		}
+	}
+}
+
+// TestSonnetTierHint: a sonnet tier on a Haiku main gets only the sonnet-analyst hint (no plan step);
+// forced opus/sonnet mains and haiku tier get no hint.
+func TestSonnetTierHint(t *testing.T) {
+	for _, w := range []string{"sonnet-analyst", "ESCALATE", "opus-architect"} {
+		if !strings.Contains(sonnetHint, w) {
+			t.Errorf("sonnetHint missing %q", w)
+		}
+	}
+	for _, w := range []string{"plan-<topic>", "write the full design"} {
+		if strings.Contains(sonnetHint, w) {
+			t.Errorf("sonnetHint must not contain %q", w)
+		}
+	}
+	for _, c := range []struct {
+		name, in, cur, want string
+		sonnet, plan        bool
+	}{
+		{"sonnet tier on haiku main", "topic: same\ntier: sonnet\ntask: analyze X", "haiku", "haiku", true, false},
+		{"sonnet tier on forced opus main", "topic: same\ntier: sonnet\ntask: analyze X", "opus", "opus", false, false},
+		{"sonnet tier on forced sonnet main", "topic: same\ntier: sonnet\ntask: analyze X", "sonnet", "sonnet", false, false},
+		{"haiku tier on haiku main", "topic: same\ntier: haiku\ntask: analyze X", "haiku", "haiku", false, false},
+	} {
+		rr, ok := parseRouteFull(c.in, c.cur, nil)
+		if !ok || rr.Model != c.want {
+			t.Errorf("%s: model=%q ok=%v", c.name, rr.Model, ok)
+		}
+		if has := strings.HasPrefix(rr.Task, sonnetHint); has != c.sonnet {
+			t.Errorf("%s: sonnetHint=%v want %v", c.name, has, c.sonnet)
+		}
+		if has := strings.HasPrefix(rr.Task, planHint); has != c.plan {
+			t.Errorf("%s: planHint=%v want %v", c.name, has, c.plan)
 		}
 	}
 }

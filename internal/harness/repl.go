@@ -57,8 +57,12 @@ type Args struct {
 	FromClaude       string        // import a plain Claude Code transcript: session id | path | latest
 	ImportDry        bool          // with FromClaude: print the handoff stats and exit
 	NoCategoryRotate bool          // disable category-based rotation (no marker rule, no switch rotation)
-	Conductor        bool          // Haiku-fixed main orchestrates; large work: Haiku plans -> Opus/Sonnet review -> Haiku executes
+	Conductor        bool          // Haiku-fixed main orchestrates; opus-tier work: Haiku plans -> opus-architect review -> Haiku executes
 	NoDelegationRule bool          // do not append the haiku delegation rule to the child's system prompt
+	CacheTTL         string        // prompt cache TTL requested from claude: auto|1h|5m (see withCacheTTL)
+	IdleRotate       time.Duration // idle time after which a child is treated as cold; 0 = off
+	ClientsFile      string        // per-(cwd,model) client registry; empty = off
+	MaxWorkers       int           // cap on concurrent live worker sessions (see resolveMaxWorkers)
 }
 
 type kv struct {
@@ -174,7 +178,7 @@ func (r *Repl) setRate(info map[string]any) {
 var newSessionFn = NewSession
 
 func (r *Repl) start() error {
-	opts := SessionOpts{Model: r.a.Model, Cwd: r.a.Cwd, CompactWindow: r.a.CompactWindow, Resume: r.resumeID}
+	opts := SessionOpts{Model: r.a.Model, Cwd: r.a.Cwd, CompactWindow: r.a.CompactWindow, Resume: r.resumeID, CacheTTL: r.a.CacheTTL}
 	r.resumeID = ""
 	rule := ""
 	if !r.a.NoDelegationRule {
@@ -861,6 +865,15 @@ func (r *Repl) loop() int {
 	return 0
 }
 
+// parseCacheTTL validates the --cache-ttl value: auto, 1h or 5m.
+func parseCacheTTL(s string) (string, error) {
+	switch s {
+	case "auto", "1h", "5m":
+		return s, nil
+	}
+	return "", fmt.Errorf("--cache-ttl must be auto, 1h or 5m (got %q)", s)
+}
+
 // Main runs the REPL with argparse-equivalent flags (args exclude the "repl" word); returns the exit code.
 func Main(args []string) int {
 	fs := flag.NewFlagSet("harness", flag.ContinueOnError)
@@ -882,16 +895,36 @@ func Main(args []string) int {
 	fs.DurationVar(&a.Cooldown, "rotate-cooldown", 2*time.Minute, "min gap after a failed rotation")
 	fs.BoolVar(&a.NoCategoryRotate, "no-category-rotate", false, "disable category-based session rotation")
 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
-	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: Haiku-fixed main; a one-shot Sonnet classifier tags size and adds the plan->review->execute hint to large tasks")
+	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: Haiku-fixed main; a one-shot Sonnet classifier tags tier (haiku|sonnet|opus); sonnet tier -> sonnet-analyst hint, opus tier -> plan->review->execute hint")
 	fs.StringVar(&a.AgentsFile, "agents-file", defaultAgentsFile(), "persisted sub-agent state, restored on restart and /resume (empty=off)")
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
+	fs.StringVar(&a.CacheTTL, "cache-ttl", "1h", "prompt cache TTL requested from claude: auto, 1h or 5m")
+	fs.DurationVar(&a.IdleRotate, "idle-rotate", 3599*time.Second, "idle time after which a child is treated as cold (0=off)")
+	fs.StringVar(&a.ClientsFile, "clients-file", defaultClientsFile(), "per-(cwd,model) client registry (empty=off)")
+	fs.IntVar(&a.MaxWorkers, "max-workers", DefaultMaxWorkers, "cap on concurrent live worker sessions (env CHAUDE_MAX_WORKERS when unset)")
 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
 		}
 		return 2
 	}
+	if _, err := parseCacheTTL(a.CacheTTL); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	maxWorkersSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "max-workers" {
+			maxWorkersSet = true
+		}
+	})
+	mw, err := resolveMaxWorkers(maxWorkersSet, a.MaxWorkers, os.Getenv("CHAUDE_MAX_WORKERS"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	a.MaxWorkers = mw
 	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1)}
 	if st, err := os.Stdin.Stat(); err == nil {
 		r.interactive = st.Mode()&os.ModeCharDevice != 0
