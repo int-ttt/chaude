@@ -1,6 +1,6 @@
 # caveman 기반 새 구조 설계 계획서
 
-status: 설계안 v3 (구현 코드·측정 절차 미포함)
+status: 설계안 v4 (구현 코드·측정 절차 미포함)
 date: 2026-10-31
 scope: 하네스 내부 메시지 경로를 "caveman 채널(형식 고정 축약)"과 "사용자 채널(한국어 존댓말)"로 분리하는 구조 설계
 not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 재실행
@@ -38,7 +38,7 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 | L2 작업 채널 | opus·sonnet <-> haiku-* | caveman 브리프(B형식) / 읽기·쓰기 반환(R-read, R-write) |
 
 - rule_1: caveman은 L1·L2 전용. L0으로 나가는 문장은 그 문장을 쓰는 마지막 작성자가 처음부터 한국어로 씀
-- rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둘 수 있음. 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음. summary_ko는 현 에이전트 파일의 "최종 메시지 = Korean 존댓말 요약" 규칙 자리를 그대로 씀 (C11). 바뀌는 것은 최종 메시지가 "한국어 요약만"에서 "caveman 본문 + summary_ko"로 바뀌는 것뿐
+- rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둠 (필수 조건은 rule_4). 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음. summary_ko는 현 에이전트 파일의 "최종 메시지 = Korean 존댓말 요약" 규칙 자리를 그대로 씀 (C11). 바뀌는 것은 최종 메시지가 "한국어 요약만"에서 "caveman 본문 + summary_ko"로 바뀌는 것뿐
 - rule_3: 중계 단계 수는 현 구조보다 늘리지 않음 (C4)
 - rule_4: summary_ko는 메인 직속 반환에만 씀. 브리프가 lang: ko이면 summary_ko 필수, lang: caveman이면 생략 (L2 반환은 상위 에이전트가 읽으므로 한국어 불필요). 메인은 항상 lang: ko, opus·sonnet은 haiku 브리프에 lang: caveman
 - rule_5: 중첩 hop에서 상위 에이전트는 하위 반환을 자기 반환에 E<n> 근거 행으로 다시 씀. 하위 반환 전문을 그대로 붙여 올리지 않음
@@ -103,7 +103,7 @@ summary_ko: <lang: ko일 때 필수, 1~5줄, L0 전달용>
 - 금지: 한정어 삭제(C3), 수치의 단위·대상 생략, 경로·행 생략, 확실도 표시 삭제, not_found/not_checked 병합, 한국어 값 번역·축약
 - 빈 필드는 키를 지우지 않고 "-"로 둠 (필드 누락과 "해당 없음" 구분)
 
-### 3.6 공통 상태 필드 (모든 반환의 첫 줄)
+### 3.6 공통 상태 필드 (3.2~3.4 각 블록 맨 앞에 붙는 공통 머리 2줄)
 
 ```
 status: done | partial | fail | blocked
@@ -184,6 +184,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 - CLAUDE.md·에이전트 파일 간 언어 규칙 충돌 0건 (S5 전에는 O2 예외 2파일만 허용)
 - 훅 기본값 log, 모든 모드에서 차단 경로 없음
 - haiku-drafter 산출물·L0 경로는 한국어 유지
+- 모든 반환 템플릿(3.2~3.4) 맨 앞에 3.6의 status·reason 2줄 존재
 
 ## 11. 위험
 
