@@ -19,3 +19,5 @@ tests/e2e-rebuild/
 .env.*
 *.pem
 *.key
+.DS_Store
+**/.DS_Store

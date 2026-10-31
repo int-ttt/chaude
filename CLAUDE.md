@@ -1,12 +1,21 @@
-<!-- claude-lean:start -->
-# Policy: the main thread listens and routes (Haiku in chaude; Opus only if forced); subagents do all work
+# Policy: Haiku main listens and routes; Opus (opus-architect) decides; Haiku agents do all work
 
+## Language
 Korean, 존댓말 for user-visible text only (haiku-tui output incl. L0); agent-to-agent briefs/returns use caveman format (docs/claude-lean/CAVEMAN_FORMAT.md). Main thread has no work tools (hook-enforced). Minimize main-thread tokens.
+
+## Routing
+- Routing: Haiku main receives user input and forwards design/judgment (synthesis, design, multi-file code, long answers, diagnosis) to `opus-architect` (Opus, high effort, separate context; don't re-brief). Haiku agents execute: simple lookup/questions - "이거 뭐였는지 찾아" style search/query prompts → `haiku-scout` (effort high; `haiku-researcher` for web); bounded/mechanical edits → `haiku-coder`/`haiku-batch-worker`; long runs → `haiku-runner`. No router and no Sonnet tier. The user can force `haiku로` / `opus로`. Start every delegating reply with the route, e.g. `[haiku-scout]`, `[opus-architect]`. `haiku-checker` before anything is submitted or printed.
+
+## Conductor
+- main = Haiku (`--model haiku`); user prompt -> `opus-architect` (R-decide) -> Haiku relays summary_ko via `haiku-tui`. Small tasks: Haiku agents directly. Forced `opus로` keeps an Opus main; Opus-main rules apply only then.
+
+## Rotation and state
+- The user does not routinely use `/clear` or `/compact`; never suggest them. To reset: `/exit`, then `claude` (the previous session's last messages are injected; also injected after a `/clear` the user runs themselves). Auto-compaction bounds context; rotation threshold: Haiku main 80k (new session handoff), Opus main 200k; state lives in notes/ and `notes/LEDGER.md` (agent results, hook-written); a snapshot is injected after compaction or in a new session. Switching workstreams: just continue and name the workstream in briefs.
+
+## Other rules
 - Flow = 대기 → 프롬프트: stay idle (no output) until a user prompt arrives; then one delegation round (all agent calls in one message, foreground, wait for results), then exactly one final reply, then idle again. No interim status text, no narration between calls, no second round unless the user prompts again. Main-thread reply ≤ a few sentences; the user's final answer is printed in full in the reply (TUI output pane, 기본값), never only as a file path or written to a file (결과는 파일 경로만 전달 금지; 파일로 출력하지 말고 TUI에 내용을 직접 출력); `notes/runs/` is for agent-to-agent hand-off only. Tests, builds, verification, reviews and file edits belong to Haiku agents, never to Opus.
 - Scroll rule (chaude TUI): output pane jumps to bottom on prompt input and on any output update (notes/runs/scroll-bottom.md); keep it.
-
 - Delegate all file/web work; agent descriptions say who does what. Agent names carry their model (`haiku-*`, `opus-*`); never pass `model` when calling them (a hook strips it).
-- Routing: Haiku main receives user input and forwards design/judgment (synthesis, design, multi-file code, long answers, diagnosis) to `opus-architect` (Opus, high effort, separate context; don't re-brief). Haiku agents execute: simple lookup/questions - "이거 뭐였는지 찾아" style search/query prompts → `haiku-scout` (effort high; `haiku-researcher` for web); bounded/mechanical edits → `haiku-coder`/`haiku-batch-worker`; long runs → `haiku-runner`. No router and no Sonnet tier. The user can force `haiku로` / `opus로`. Start every delegating reply with the route, e.g. `[haiku-scout]`, `[opus-architect]`. `haiku-checker` before anything is submitted or printed.
 - opus 에이전트 파일 직접 접근 전면 금지 (Read·Write·Edit·Grep·Glob 및 Bash/PowerShell 포함, 훅 강제): 파일 읽기는 haiku-scout(RETURN: verbatim <=4000 chars), 쓰기는 haiku-batch-worker/haiku-coder, 웹은 haiku-researcher가 수행. 유사 파일끼리 최대 3개 파일/묶음 단위로 Haiku에게 요청하고 요약만 받아 분석 (토큰 절약 목적).
 - Opus agents hand mechanical sub-steps to Haiku agents themselves when they can, and hand work only to `haiku-*` agents (D11); a result listing `## [haiku] steps` → give that path to the matching Haiku agents in one parallel round.
 - Opus never reads or writes files directly (`opus-architect` has only the Agent tool): reads are delegated to `haiku-scout`, writes to `haiku-coder`/`haiku-batch-worker` (notes/runs documents: verbatim → `haiku-batch-worker`; user-voice prose only → `haiku-drafter`). Opus (main or architect) decides and delegates only.
@@ -25,9 +34,4 @@ Korean, 존댓말 for user-visible text only (haiku-tui output incl. L0); agent-
 - Hook tags (`[ack]` `[retry]` `[frag]` `[inbox]` `[paste]` `[ctx]` `[normal]` `[lean]`) carry their own instruction: follow it, don't re-plan.
 - Corrections: follow the hook's one-line tag and the `correction` skill. Same item corrected twice → ≤5-bullet checklist, confirm, then one brief.
 - `notes/FACTS.md`, `notes/DECISIONS.md` are the source of truth; agents read and update them. `notes/DELIVERABLES.md` (final files), `notes/OPEN.md` (pending/deadlines), `notes/LESSONS.md` (what failed) — pass the relevant one in briefs.
-- The user does not routinely use `/clear` or `/compact`; never suggest them. To reset: `/exit`, then `claude` (the previous session's last messages are injected; also injected after a `/clear` the user runs themselves). Auto-compaction (150k window) bounds context; rotation threshold: Haiku main 80k (new session handoff), Opus main 200k; state lives in notes/ and `notes/LEDGER.md` (agent results, hook-written); a snapshot is injected after compaction or in a new session. Switching workstreams: just continue and name the workstream in briefs.
-
-# Compact instructions
-Keep only: open workstreams with goal and next action, the pending `추천:` default, active agent IDs and what each holds, paths of final files, unresolved user requests. Drop agent outputs, resolved corrections, and anything already in notes/.
-<!-- claude-lean:end -->
-- Chaude conductor (Haiku-fixed main): the main session is always Haiku (`--model haiku`) and receives user input. Opus is for design only, never main. Large/judgment/design task → workflow: (1) Haiku writes the full design/orchestration plan to `notes/runs/<YYMMDD>-plan-<topic>.md`; (2) in one foreground round Haiku hands that path to `opus-architect` (design review) and asks for improvements only (written to `...-plan-<topic>-review.md`, no execution); (3) Haiku merges the improvements into the plan; (4) Haiku executes the improved plan via Haiku agents (`haiku-coder`/`haiku-batch-worker`/`haiku-scout`/`haiku-runner`), then `haiku-checker`. Small tasks: Haiku does them via Haiku agents directly. Forced `opus로` (`--model`) is kept as is. The Opus-main rules above apply only to a forced Opus main.
+- Compact instructions: keep only: open workstreams with goal and next action, the pending `추천:` default, active agent IDs and what each holds, paths of final files, unresolved user requests. Drop agent outputs, resolved corrections, and anything already in notes/.
