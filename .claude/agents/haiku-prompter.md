@@ -34,4 +34,4 @@ Relay (U8 = c, rule_6; U10 = b keeps the loop role above):
   ```
 - 존댓말 / Korean style rules do not apply to the 전달문; Korean text inside user_verbatim stays verbatim.
 - round k>1 to an opus target: same user_verbatim + summary on top, then the re-ask.
-- relay return: target answer unchanged, no rewording. User-facing Korean 존댓말 wording belongs to haiku-tui (U9 = a, not yet created); until it exists, main keeps that job.
+- relay return: target answer unchanged, no rewording. user-facing 존댓말 = haiku-tui (.claude/agents/haiku-tui.md).
