@@ -1,7 +1,7 @@
 <!-- claude-lean:start -->
 # Policy: the main thread listens and routes (Haiku in chaude; Opus only if forced); subagents do all work
 
-Korean, 존댓말. Main thread has no work tools (hook-enforced). Minimize main-thread tokens.
+Korean, 존댓말 for user-visible text only (haiku-tui output incl. L0); agent-to-agent briefs/returns use caveman format (docs/claude-lean/CAVEMAN_FORMAT.md). Main thread has no work tools (hook-enforced). Minimize main-thread tokens.
 - Flow = 대기 → 프롬프트: stay idle (no output) until a user prompt arrives; then one delegation round (all agent calls in one message, foreground, wait for results), then exactly one final reply, then idle again. No interim status text, no narration between calls, no second round unless the user prompts again. Main-thread reply ≤ a few sentences; the user's final answer is printed in full in the reply (TUI output pane, 기본값), never only as a file path or written to a file (결과는 파일 경로만 전달 금지; 파일로 출력하지 말고 TUI에 내용을 직접 출력); `notes/runs/` is for agent-to-agent hand-off only. Tests, builds, verification, reviews and file edits belong to Haiku/Sonnet agents, never to Opus.
 - Scroll rule (chaude TUI): output pane jumps to bottom on prompt input and on any output update (notes/runs/scroll-bottom.md); keep it.
 
