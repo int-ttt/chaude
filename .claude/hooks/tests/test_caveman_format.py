@@ -72,7 +72,7 @@ class HookTest(unittest.TestCase):
         self.assertEqual(self.rows(), [])
 
     def test_e_non_target_agent_no_row(self):
-        self.run_hook(payload(agent="haiku-coder", response="status: done\n"))
+        self.run_hook(payload(agent="general-purpose", response="status: done\n"))
         self.assertEqual(self.rows(), [])
 
     def test_e2_non_agent_tool_no_row(self):
