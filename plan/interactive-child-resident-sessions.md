@@ -1,6 +1,6 @@
 # 계획서: 상시 세션 구성과 interactive child 사용 타당성
 
-status: 계획만 작성됨. 구현·측정 미실행. 버전: v1
+status: 계획만 작성됨. 구현·측정 미실행. 버전: v2 (v1 대비: 비용 근거·측정 선행순서·가설 H1~H4 추가)
 근거 파일(notes/runs/): 261031-plan-interactive-child(+review), 261031-plan-resident-sessions(+review), 261030-plan-live-sessions(+review), 261031-plan-live-session-composition-review
 표기: [근거] 근거 파일에 있는 내용 / [추정] 해석 / 수치가 없으면 "미확인"
 
@@ -17,6 +17,16 @@ status: 계획만 작성됨. 구현·측정 미실행. 버전: v1
 - /clear 경로는 endAllParked("clear")를 호출함 (repl.go:1168). 사용자 규칙은 /clear 금지. [근거]
 - 유휴 회전: --idle-rotate 3599s, TTL 1h이면 3599s, 5m 또는 미관측이면 290s (clients.go:148-160); ws 자식 wsMaxIdle 270s. [근거]
 - 실측 동시 자식 수 데이터 없음. [근거]
+- 단가(FACTS.md:8,10, 입력/5m쓰기/1h쓰기/읽기/출력, $/MTok): Opus 4/5/8/0.20/20, Haiku 0.10/0.125/0.20/0.01/0.50. 150k 컨텍스트를 1h 캐시로 다시 쓰는 비용 Opus $1.20, Haiku $0.03 → 비용 위험은 Opus 슬롯에 집중. 유휴 RSS는 미측정. [근거] composition-review:9,13
+- tui haiku가 곧 chaude 메인(라우터)이라 상시 main opus와 함께 두면 메인이 2개가 됨. [근거] composition-review:16
+- 유휴 세션은 턴을 보내지 않으면 토큰을 쓰지 않는 것으로 보이나 미확인(13). 캐시는 TTL 경과 후 사라지므로 coder 여유 세션의 이점은 기동 지연 절감뿐. keepalive 핑은 비용이 생기므로 기본 끔. [근거/추정] resident-sessions:32
+
+## 2-1. 사용량 증가 가설 (검증 대상, 모두 미확정)
+- H1. 분류기·usagepoll 등 부가 호출이 -p 사용량으로 잡힘 (대응: 로컬 규칙 우선, usagepoll 주기 증가)
+- H2. -p 자식 캐시 TTL이 5m이라 5분 넘게 쉬면 매 턴 재작성 (1h는 2배 단가)
+- H3. 유휴 회전 시 캐시 갱신 비용 (대응: metrics에 별도 기록)
+- H4. 자식 env에 ANTHROPIC_API_KEY가 상속되어 구독이 아닌 API 과금 (대응: env 제거)
+출처: interactive-child-review.md. H1~H4는 모드 자체(서버 측) 차이 가설보다 먼저 배제한다.
 
 ## 3. 방법 후보
 ### 3-1. 자식 실행 방식
@@ -62,6 +72,7 @@ B 채택 시에만 필요:
 
 ## 5. 측정 설계
 순서: M0 → M1 → M2 → C 보완 → M3. B는 M3 기준을 넘을 때만. (M0~M2 세부는 interactive-child-review.md 16~18행, 본 계획서는 미확인으로 둠)
+선행 게이트: 미확인 1(계정 단위 집계 여부)을 가장 먼저 답한다. 이 답이 동시 실행 허용 여부와 측정 단위를 결정한다. 5h %는 정밀도가 낮아 프롬프트당 3회 반복하고 판정은 토큰 우선, %는 보조. [근거] resident-sessions-review:7-8
 M3 (A/B, 소량 지출):
 - 조건: 다른 세션이 없는 시간대, 같은 모델·cwd·고정 프롬프트 5턴 스크립트. (a) interactive claude vs (b) claude -p --input-format stream-json. 각 3회, 턴 간격 0초와 6분 두 조건. 분류기·usagepoll은 끈 상태. [근거]
 - 실행 위치: 하네스 밖 별도 쉘, 메인 세션은 대기(메인 사용량이 측정 구간을 오염). 운영 풀 설정 변경은 측정 이후 별도 계획. [근거]
@@ -75,7 +86,7 @@ M3 (A/B, 소량 지출):
 ## 6. 수용 기준
 - AC1. 미확인 1~5에 대해 각각 "확인됨/아님/미확인 유지"와 근거 출처가 기록된 결과 표가 있다.
 - AC2. M3 결과 표(턴별 토큰, 가중합, 5h %)와 결정 규칙 적용 결과가 있다.
-- AC3. B 시제품 기준: 동일 토큰 조건에서 5h % 차이 15% 이상, 3회 모두 같은 방향 [근거: interactive-child-review.md:24]. 이 외에는 C 유지. 보조 제안(토큰 합계 10% 차이)은 두 임계값 중 사용자 확정 필요(7절).
+- AC3. B 시제품 기준: 동일 토큰 조건에서 5h % 차이 15% 이상, 3회 모두 같은 방향 [근거: interactive-child-review.md:24]. 이 외에는 C 유지. 별도 제안 임계값(-p 토큰 합계가 interactive 대비 10% 이상 많고 3회 방향 일치)이 있어 둘 중 하나를 사용자가 확정해야 함(D4). 확정 전에는 B 진행 금지.
 - AC4. 상시 구성은 상한이 코드로 강제되고(초과 요청은 대기열), 키 충돌·parked 덮어쓰기가 해소된 뒤에만 채택.
 - AC5. 사용자 확인 선행: B로 가면 실시간 스트리밍, 권한 대화(can_use_tool), cost 표시가 줄어드는 점을 사용자에게 먼저 확인받는다.
 
