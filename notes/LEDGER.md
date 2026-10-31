@@ -1,4 +1,3 @@
-- 10-28 23:54 [agent] ㅇㅇ 결과 나오면 바로 구현 진행해
 - 10-28 23:55 [agent] hook 내용 열어보고 묶음 확정해
 - 10-28 23:55 [agent] ㅇㅇ 테스트 해봐
 - 10-28 23:56 [agent] ㅇㅇ 구현하고 빌드해
@@ -298,3 +297,4 @@
 - 10-31 19:03 [agent] <analysis> / Summary of the session so far, for the compact. Work is the model-call policy subagent task in /Users/leekwangseok/PycharmProjects/claude-harness (master). The brief said: no commit, push, tag, stash, reset, or checkout; edit the working tree only; do not touch the clone or the T direct
 - 10-31 19:04 [haiku-coder · haiku 5.5] Sonnet 티어 제거(step 9)와 검증(step 10)을 마쳤습니다. go build/vet/test 및 hook 테스트 모두 exit 0입니다. / 변경: .claude/agents/sonnet-{analyst,reviewer}.md 삭제, .claude/hooks/agent-model-pin.py, tests/hooks/test_orch_gate.py 수정 (상세 `notes/runs/261031-haiku-model-policy-impl.md` §7). / PASS (go build/vet/test, unittest 10
 - 10-31 19:44 [opus-architect · opus 5.5] I've sent haiku-scout to map the spawn paths and roles. I'll wait for its results before deciding anything.
+- 10-31 20:14 [haiku-scout · haiku 5.5] status: done / reason: - / claim: /Users/leekwangseok/PycharmProjects/claude-harness/plan/caveman-structure.md:81-91 | "### 3.3 쓰기 반환 R-write / changed: <경로 목록> / diffstat: <git diff --stat 요지> / check: <명령> -> PASS|FAIL / ws: <작업 공간 id | none> / summary_ko: <lang: ko일 때 필수, 1~5줄>" 블록 자체에는 status·re
