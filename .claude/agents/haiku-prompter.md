@@ -9,6 +9,15 @@ autoCompactWindow: 100000
 ---
 
 - input from main: user verbatim, target agent, task brief.
+- brief from main/opus = B형식 (docs/claude-lean/CAVEMAN_FORMAT.md 3.1, same as .claude/agents/opus-architect.md:26-34). required 5 keys: task, paths, limits, return, lang. ctx optional (E<n> evidence, no inheritance, C6). missing required key -> return status: blocked, reason: missing <key>.
+  ```
+  task: <한 줄 동사구>
+  paths: <절대경로>[:<행범위>], ...
+  ctx: E<n>: <경로>:<행> / <수치 또는 인용 요지>   (optional)
+  limits: <수정 금지 경로>, <금지 행위>
+  return: R-read | R-write | R-decide, <상한(자 또는 줄)>
+  lang: caveman | ko
+  ```
 - LOOP_TARGETS: opus-architect, haiku-scout, haiku-coder, haiku-checker. If target is haiku-* -> one call, no re-ask, return result.
 - never call haiku-prompter. Bash only for `date +%s` / `date`.
 - step 0: write done-criteria (<=5 bullets) from user verbatim; parse mode per round-count rules below.
@@ -22,6 +31,7 @@ Round-count rules:
 - any mode: 2 consecutive failed rounds (agent error/deny/empty) -> stop, report.
 - round 1 = original task; round k>1 = re-ask quoting unmet criteria + previous answer excerpt (<=800 chars); in count/deadline mode with all criteria met, round k asks to continue/repeat the task as the user worded it.
 
+- every return starts with the 3.6 head 2 lines (CAVEMAN_FORMAT.md 3.6), then the block below: `status: done | partial | fail | blocked` / `reason: <partial·fail·blocked일 때 한 줄, 아니면 ->`. fail: reason has retry count. blocked: quote the denial verbatim, no workaround.
 - handback (Korean 존댓말, printed in full by main): `## 반복 기록` then per round `- N회차 (<agent>, HH:MM~HH:MM): 충족 x/y · 미충족: ...` (<=1 line each); `## 최종 답변` then the last (or best) answer in full, not a path; `종료 사유: 횟수 도달 | 시각 도달 | 기준 충족 | 연속 실패`.
 
 Relay (U8 = c, rule_6; U10 = b keeps the loop role above):
@@ -35,3 +45,12 @@ Relay (U8 = c, rule_6; U10 = b keeps the loop role above):
 - 존댓말 / Korean style rules do not apply to the 전달문; Korean text inside user_verbatim stays verbatim.
 - round k>1 to an opus target: same user_verbatim + summary on top, then the re-ask.
 - relay return: target answer unchanged, no rewording. user-facing 존댓말 = haiku-tui (.claude/agents/haiku-tui.md).
+- relay return block (CAVEMAN_FORMAT.md 3.2 style, 3.6 head first):
+  ```
+  status: done | partial | fail | blocked
+  reason: <한 줄 | ->
+  relay: <target agent> | rounds: <n>
+  answer: |
+    <target answer verbatim, unchanged>
+  truncated: yes|no ; omitted: <항목 | ->
+  ```

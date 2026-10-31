@@ -130,7 +130,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 | haiku-checker | B형식 | R-write (check 필드 중심) | |
 | haiku-drafter | B형식 | R-write | 산출 문서 자체는 한국어 유지 (L0 산출물) |
 | haiku-extractor | 기존 | 기존 | 파일 출력 전용, 변경 없음 |
-| haiku-prompter | 사용자 원문 | 원문 verbatim + 요약 (U8 = c) | 존댓말 검사 제외. 사용자 프롬프트를 opus 세션에 전달, 한국어 존댓말 비적용 (Q2 결정). 현행 반복 루프 역할 유지 + 전달 역할 추가 (U10 = b, 결정됨) |
+| haiku-prompter | 사용자 원문 | 원문 verbatim + 요약 (U8 = c) | 존댓말 검사 제외. 사용자 프롬프트를 opus 세션에 전달, 한국어 존댓말 비적용 (Q2 결정). 현행 반복 루프 역할 유지 + 전달 역할 추가 (U10 = b, 결정됨). B형식 브리프 필수 5키(task, paths, limits, return, lang), ctx 선택 (A2) |
 | haiku-tui | B형식 또는 R-* 반환 | L0 한국어 존댓말 자연문 | 사용자에게 답변하는 에이전트. 한국어 존댓말은 이 출력에만 적용 (Q2 결정). 에이전트 파일은 구현 단계에 신설 (U9 = a, 결정됨) |
 
 ## 5. 규칙 충돌 해소 (CLAUDE.md:4, C7)
@@ -161,7 +161,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 
 ## 7. 라우팅·작업 공간 경계
 
-- [ws:<id>] 표기와 세션 재개는 메인/하네스 책임 (C5). 하네스는 internal/harness/orchws.go:78-101에서 ws 줄을 parseWS로 파싱해 haiku로 보내고 저장된 세션을 재개함
+- [ws:<id>] 표기와 세션 재개는 메인/하네스 책임 (C5). parseWS(internal/harness/orchws.go)는 입력 줄의 [ws:<id>] 태그용이며 routeOrch는 현재 호출되지 않음(b4855b7). R-write의 ws 필드(ws: <id> | none)는 하네스가 파싱하지 않음
 - 상위 에이전트는 R-write의 ws 값을 다음 브리프에 "ws: <id> 이어서"로 적기만 함
 - mode f는 기본 실행에서 live 자식을 둠 (repl.go:1090, :204-208; --clients-file=""일 때만 꺼짐) -> ws 필드는 none 허용
 
@@ -251,3 +251,29 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
   - 선택지: (a) 구현 단계에 신설 (b) 기존 에이전트로 대체 (c) 별도 계획서로 분리
 - U10 (13장 신규): 현행 haiku-prompter(반복 루프 소유자)는 어떻게 하시겠습니까? [결정됨: (b)]
   - 선택지: (a) 새 정의로 대체 (b) 루프 역할 유지 + 전달 역할 추가 (c) 별도 에이전트로 분리
+
+## 구현 점검 (실제 소스 기준)
+
+| 항목 | 상태 | 근거(file:line) | 비고 |
+|---|---|---|---|
+| I1 | DONE | docs/claude-lean/CAVEMAN_FORMAT.md:5,19,33,45,57,63 | 3.2~3.4 블록 안에 3.6 머리 2줄 없음 |
+| I2 | PARTIAL | opus-architect.md:28-33 | haiku-prompter 블록 6키 없음; §4 표 예외 여부 확인 필요 |
+| I3 | DONE | haiku-scout.md:25-32, haiku-researcher.md:22-29 | - |
+| I4 | DONE | haiku-coder.md:24-30, haiku-batch-worker.md:23-29, haiku-runner.md:24-30, haiku-checker.md:22-28, haiku-drafter.md:26-32 | - |
+| I5 | DONE | opus-architect.md:37-45 | - |
+| I6 | MISSING | haiku-prompter.md | 머리 2줄·R-블록 없음 (I2와 같은 원인) |
+| I7 | DONE | haiku-tui.md:1-16, haiku-prompter.md:27-36 | - |
+| I8 | DONE | CLAUDE.md:4 | - |
+| I9 | PARTIAL | haiku-scout.md:16, haiku-researcher.md:15 | 일반 존댓말 문구가 R-read 절과 충돌 잔존 |
+| I10 | DONE | .claude/hooks/caveman-format.py:105-131 | log/warn/off만, exit 2 경로 없음 |
+| I11 | DONE | caveman-format.py:13-64, :89 | 주의: claim 검사는 R-read만 |
+| I12 | DONE | .claude/settings.json:80-88 | PostToolUse Agent|Task |
+| I13 | MISSING | internal/harness/orchws.go:11,14-20 | parseWS에 none 분기 없음; [ws:none]은 id "none"으로 통과 |
+| I14 | PARTIAL | main-thread-guard.py:32, agent-model-pin.py | 마지막 변경 b4855b7; §9 "동작 안 바꿈"과 충돌, 사용자 확인 필요 |
+| I15 | DONE | haiku-scout.md:25-32 == CAVEMAN_FORMAT.md:22-27, :66-67 | diff 0 |
+| I16 | DONE | tests/hooks | python3.10 -m pytest 33 passed; 기본 python3(3.9)에는 pytest 없음 |
+| I17 | DONE | master: ef90cf9, 2f2685b, d4e4b32, 401e5a1, bcc9f8e, ae2cbf0, 39db4ad, 0ee3501, 27c60e2 | 잔존 worktree 3개, 브랜치 6개 미삭제 |
+
+요약: 점검 결과 DONE 12, PARTIAL 3, MISSING 2입니다 (항목 수 17).
+MISSING은 I6(haiku-prompter 머리·R-블록 없음)과 I13(orchws none 분기 없음), PARTIAL은 I2, I9, I14입니다.
+I6과 I2는 같은 원인(haiku-prompter 블록 6키 및 머리 2줄 누락)에서 비롯되어 한 가지 수정으로 함께 해결됩니다.
