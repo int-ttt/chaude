@@ -45,7 +45,7 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 - rule_1: caveman은 L1·L2 전용. L0으로 나가는 문장은 그 문장을 쓰는 마지막 작성자가 처음부터 한국어로 씀
 - rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둠 (필수 조건은 rule_4). 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음. summary_ko는 현 에이전트 파일의 "최종 메시지 = Korean 존댓말 요약" 규칙 자리를 그대로 씀 (C11). 바뀌는 것은 최종 메시지가 "한국어 요약만"에서 "caveman 본문 + summary_ko"로 바뀌는 것뿐
 - rule_3: 중계 단계 수는 현 구조보다 늘리지 않음 (C4)
-- rule_4: summary_ko는 메인 직속 반환에만 씀. 브리프가 lang: ko이면 summary_ko 필수, lang: caveman이면 생략 (L2 반환은 상위 에이전트가 읽으므로 한국어 불필요). 메인은 항상 lang: ko, opus·sonnet은 haiku 브리프에 lang: caveman (summary_ko 필수 검사 가능 여부 미정, U7 보류)
+- rule_4: summary_ko는 메인 직속 반환에만 씀. 브리프가 lang: ko이면 summary_ko 필수, lang: caveman이면 생략 (L2 반환은 상위 에이전트가 읽으므로 한국어 불필요). 메인은 항상 lang: ko, opus·sonnet은 haiku 브리프에 lang: caveman (U7 결정됨(구현 조사, tool_input.prompt로 lang: ko 확인))
 - rule_5: 중첩 hop에서 상위 에이전트는 하위 반환을 자기 반환에 E<n> 근거 행으로 다시 씀. 하위 반환 전문을 그대로 붙여 올리지 않음
 
 ## 3. 메시지 형식 정의
@@ -215,8 +215,8 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 
 - 본 구조의 토큰·비용 절감량 (U1 = a: 목표 수치 없이 구현 후 측정해 판단)
 - 모델별 단가 (billing.md 미기재) (U2 = b: 공식 문서 조사를 의뢰하는 것으로 기록, 조사 자체는 본 계획에서 하지 않음)
-- 반환 검사용 PostToolUse matcher 이름 (U3 보류)
-- mode f 기본 활성 여부 (U4 보류)
+- 반환 검사용 PostToolUse matcher 이름 (U3 결정됨: Agent|Task)
+- mode f 기본 활성 여부 (U4 결정됨: 기본 활성)
 - 서브에이전트 캐시 공유: 결정: 공유하지 않음 (U5, 결정됨)
 - haiku-tui 에이전트 파일이 현재 존재하지 않음 (현 에이전트 목록에 없음) -> 구현 단계에 신설 (U9 = a, 결정됨)
 - 현행 haiku-prompter 정의는 반복·재귀 요청의 루프 소유자로, Q2 새 정의(프롬프트 전달)와 다름 -> 반복 루프 역할 유지 + 전달 역할 추가 (U10 = b, 결정됨)
