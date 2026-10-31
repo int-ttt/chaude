@@ -20,7 +20,7 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 - C10: 현 구조는 이미 "메인 -> opus-architect(Agent만) -> haiku-*" 패턴 (structure-review.md:22). 새 구조는 이 골격을 유지하고 메시지 형식만 바꿈
 - C11: 현 에이전트 파일 11개에는 이미 "Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean." 규칙이 있고, 최종 반환 메시지는 "Korean 존댓말"로 정해져 있음 (.claude/agents/*.md 약 14-25행, 행 번호는 파일마다 다름). CLAUDE.md:4는 범위 한정 없이 "Korean, 존댓말.". 즉 파일 출력은 이미 축약형이고, 새 구조가 바꾸는 대상은 에이전트 간 브리프와 반환 메시지임
 - C12: 4000자 반환 상한 때문에 scout가 문맥을 생략하고 Doubts에만 적은 관측 있음 (read-review.md:16). 잘림은 필드로 드러나야 함
-- C13: sonnet/opus 서브에이전트는 haiku-* 에이전트만 호출 가능 (PreToolUse:Agent 훅 오류 "sonnet/opus 서브에이전트는 haiku-* 에이전트만 호출할 수 있습니다 (v0.8.2)", 2026-10-31 본 계획 작성 중 관측). 따라서 L1 에이전트끼리 직접 호출 없음, sonnet-reviewer 검토는 메인이 호출
+- C13: opus 서브에이전트는 haiku-* 에이전트만 호출 가능 (PreToolUse:Agent 훅 오류 "sonnet/opus 서브에이전트는 haiku-* 에이전트만 호출할 수 있습니다 (v0.8.2)", 2026-10-31 본 계획 작성 중 관측). 따라서 L1 에이전트끼리 직접 호출 없음 [확실]
 
 ## 1. 목표
 
@@ -36,8 +36,8 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 | 층 | 경로 | 언어·형식 |
 |---|---|---|
 | L0 사용자 채널 | 입력: 사용자 -> haiku-prompter -> opus 세션 / 출력: haiku-tui -> 사용자 | haiku-tui 출력만 한국어 존댓말 자연문. haiku-prompter는 사용자 프롬프트를 opus 세션에 전달(사용자 원문 verbatim, 존댓말 규칙 비적용, 전달문 = 원문 + 요약, U8 = c 결정됨) |
-| L1 지휘 채널 | 메인 <-> opus-architect / sonnet-analyst / sonnet-reviewer | caveman 브리프(B형식) / 결정 반환(R-decide) |
-| L2 작업 채널 | opus·sonnet <-> haiku-* | caveman 브리프(B형식) / 읽기·쓰기 반환(R-read, R-write) |
+| L1 지휘 채널 | 메인 <-> opus-architect | caveman 브리프(B형식) / 결정 반환(R-decide) |
+| L2 작업 채널 | opus <-> haiku-* | caveman 브리프(B형식) / 읽기·쓰기 반환(R-read, R-write) |
 
 - rule_6 (Q2 결정): haiku-prompter = 사용자 프롬프트를 opus 세션에 전달하는 역할. haiku-prompter 전달문 형식 = (c) 사용자 원문 + 요약: 원문 verbatim 그대로 + 요약 줄을 함께 전달 (U8 = c, 결정됨). haiku-tui = 사용자에게 답변하는 에이전트. 한국어 존댓말 표기는 haiku-tui 출력에만 적용. 아래 표·절의 "메인 세션" 중 사용자 대면 출력은 haiku-tui가 맡는 것으로 해석함 (해석 확인됨: 261031 사용자 "u8 confirmed correct")
 - rule_7 (U10 = b, 결정됨): 현행 haiku-prompter의 반복·재귀 루프 소유 역할은 유지하고 사용자 프롬프트 전달 역할을 추가함
@@ -45,7 +45,7 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 - rule_1: caveman은 L1·L2 전용. L0으로 나가는 문장은 그 문장을 쓰는 마지막 작성자가 처음부터 한국어로 씀
 - rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둠 (필수 조건은 rule_4). 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음. summary_ko는 현 에이전트 파일의 "최종 메시지 = Korean 존댓말 요약" 규칙 자리를 그대로 씀 (C11). 바뀌는 것은 최종 메시지가 "한국어 요약만"에서 "caveman 본문 + summary_ko"로 바뀌는 것뿐
 - rule_3: 중계 단계 수는 현 구조보다 늘리지 않음 (C4)
-- rule_4: summary_ko는 메인 직속 반환에만 씀. 브리프가 lang: ko이면 summary_ko 필수, lang: caveman이면 생략 (L2 반환은 상위 에이전트가 읽으므로 한국어 불필요). 메인은 항상 lang: ko, opus·sonnet은 haiku 브리프에 lang: caveman (U7 결정됨(구현 조사, tool_input.prompt로 lang: ko 확인))
+- rule_4: summary_ko는 메인 직속 반환에만 씀. 브리프가 lang: ko이면 summary_ko 필수, lang: caveman이면 생략 (L2 반환은 상위 에이전트가 읽으므로 한국어 불필요). 메인은 항상 lang: ko, opus는 haiku 브리프에 lang: caveman (U7 결정됨(구현 조사, tool_input.prompt로 lang: ko 확인))
 - rule_5: 중첩 hop에서 상위 에이전트는 하위 반환을 자기 반환에 E<n> 근거 행으로 다시 씀. 하위 반환 전문을 그대로 붙여 올리지 않음
 
 ## 3. 메시지 형식 정의
@@ -125,8 +125,6 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 |---|---|---|---|
 | 메인 세션 | L0 한국어 | L1 B형식 | 사용자에게는 summary_ko만 전달 (사용자 대면 출력은 haiku-tui 정의 따름) |
 | opus-architect | B형식 | R-decide | 계획 파일 본문은 노트 규칙(영어 key: value) 따름 |
-| sonnet-analyst | B형식 | R-decide 또는 R-write | |
-| sonnet-reviewer | B형식 | R-decide (decision=verdict) | 메인만 호출 (C13) |
 | haiku-scout, haiku-researcher | B형식 | R-read | 1단계 적용 대상 |
 | haiku-coder, haiku-batch-worker, haiku-runner | B형식 | R-write | |
 | haiku-checker | B형식 | R-write (check 필드 중심) | |
@@ -172,7 +170,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 - S0 정본: 형식 정의 정본 1개(3.1~3.6)를 docs/claude-lean/CAVEMAN_FORMAT.md에 둠. 각 에이전트 파일에는 자기 반환 템플릿 블록만 복사 (상속 없음 C6, 매번 파일 읽기 비용 회피)
 - S1 읽기 경로: haiku-scout, haiku-researcher에 R-read 템플릿 + O2 예외줄. 같은 단계에서 감시 훅(6절)을 log 모드로 등록하고 검사 대상은 S1 에이전트만
 - S2 쓰기 경로: haiku-coder, haiku-batch-worker, haiku-runner, haiku-checker, haiku-drafter에 R-write 템플릿
-- S3 지휘 경로: opus-architect, sonnet-*에 B형식 작성 규칙과 R-decide 템플릿
+- S3 지휘 경로: opus-architect에 B형식 작성 규칙과 R-decide 템플릿
 - S4 감시 확대: 감시 훅 검사 대상 목록에 S2·S3 에이전트 추가 (목록은 훅 설정 1곳에서 관리)
 - S5 통합 (Q1 승인 반영): CLAUDE.md:4 범위를 사용자 노출 텍스트로 한정(O1), O2 예외줄 제거. 전역 CLAUDE.md는 이번 계획 갱신에서 수정하지 않음
 - 공통: 단계마다 별도 worktree 브랜치·별도 커밋, 되돌리기는 해당 단계 커밋 revert. master 작업 트리에서 직접 적용 금지 (C8)
