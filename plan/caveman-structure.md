@@ -1,6 +1,6 @@
 # caveman 기반 새 구조 설계 계획서
 
-status: 설계안 v1 (구현 코드·측정 절차 미포함)
+status: 설계안 v2 (구현 코드·측정 절차 미포함)
 date: 2026-10-31
 scope: 하네스 내부 메시지 경로를 "caveman 채널(형식 고정 축약)"과 "사용자 채널(한국어 존댓말)"로 분리하는 구조 설계
 not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 재실행
@@ -17,6 +17,8 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 - C8: 차단형 훅은 실행 중 세션·코딩 작업을 막을 수 있음. allowlist 밖 전부 차단 금지, 구현은 별도 worktree에서만, stash 금지 (impl-review.md:5, :10, :15, :38)
 - C9: 비용 근거는 조건 A 1회뿐 (total_cost_usd=0.5437, output=6196; notes/deprecated/261030-run-caveman-relay.md:5). B·C 미실행, 모델 단가는 billing.md에 없음 (같은 파일 :9). 따라서 본 구조의 절감량은 미확인
 - C10: 현 구조는 이미 "메인 -> opus-architect(Agent만) -> haiku-*" 패턴 (structure-review.md:22). 새 구조는 이 골격을 유지하고 메시지 형식만 바꿈
+- C11: 현 에이전트 파일 11개에는 이미 "Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean." 규칙이 있고, 최종 반환 메시지는 "Korean 존댓말"로 정해져 있음 (.claude/agents/*.md 약 14-25행, 행 번호는 파일마다 다름). CLAUDE.md:4는 범위 한정 없이 "Korean, 존댓말.". 즉 파일 출력은 이미 축약형이고, 새 구조가 바꾸는 대상은 에이전트 간 브리프와 반환 메시지임
+- C12: 4000자 반환 상한 때문에 scout가 문맥을 생략하고 Doubts에만 적은 관측 있음 (read-review.md:16). 잘림은 필드로 드러나야 함
 
 ## 1. 목표
 
@@ -35,7 +37,7 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 | L2 작업 채널 | opus·sonnet <-> haiku-* | caveman 브리프(B형식) / 읽기·쓰기 반환(R-read, R-write) |
 
 - rule_1: caveman은 L1·L2 전용. L0으로 나가는 문장은 그 문장을 쓰는 마지막 작성자가 처음부터 한국어로 씀
-- rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둘 수 있음. 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음
+- rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둘 수 있음. 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음. summary_ko는 현 에이전트 파일의 "최종 메시지 = Korean 존댓말 요약" 규칙 자리를 그대로 씀 (C11). 바뀌는 것은 최종 메시지가 "한국어 요약만"에서 "caveman 본문 + summary_ko"로 바뀌는 것뿐
 - rule_3: 중계 단계 수는 현 구조보다 늘리지 않음 (C4)
 
 ## 3. 메시지 형식 정의
@@ -66,6 +68,7 @@ summary_ko: <선택, 1~5줄>
 ```
 
 - not_found와 not_checked는 합치지 않음 ("없음"과 "안 봄" 구분, read-review.md:15)
+- 반환 상한에 걸리면 truncated: yes와 omitted 목록을 반드시 씀 (C12)
 
 ### 3.3 쓰기 반환 R-write
 
@@ -114,10 +117,10 @@ summary_ko: <1~5줄, L0 전달용>
 
 ## 5. 규칙 충돌 해소 (CLAUDE.md:4, C7)
 
-- O1: CLAUDE.md 4행 범위를 "사용자에게 보이는 텍스트"로 한정하고 에이전트 간 반환은 caveman 형식이라고 명시
+- O1: CLAUDE.md 4행 범위를 "사용자에게 보이는 텍스트"로 한정하고 에이전트 간 반환은 caveman 형식이라고 명시 (현 에이전트 파일의 agent-read/user-read 구분과 같은 방식, C11)
   - 장점: 단일 출처, 모든 에이전트 일관
   - 단점: 전역 규칙 변경, 사용자 승인 필요
-- O2: haiku-scout.md, haiku-researcher.md에만 예외 1줄 추가, 나머지 불변 (read.md:69)
+- O2: haiku-scout.md, haiku-researcher.md의 최종 메시지 규칙("Korean 존댓말" 줄)을 "R-read 본문(caveman) + summary_ko(Korean 존댓말)"로 바꾸는 예외 1줄 추가, 나머지 불변 (read.md:69)
   - 장점: 변경 범위 최소, 되돌리기 쉬움
   - 단점: CLAUDE.md와 충돌 상태 유지, L2 읽기 경로에만 적용
 - O3: 브리프 lang 필드로 호출마다 지정, 파일 변경 없음
@@ -130,7 +133,7 @@ summary_ko: <1~5줄, L0 전달용>
 
 - component: 신규 훅 .claude/hooks/caveman-format.py (이름 제안)
 - 위치: Agent 호출 반환 직후 검사 (PostToolUse 대상 도구 matcher 이름은 미확인)
-- mode: 환경변수 CAVEMAN_GUARD=log|warn|off, 기본 log (impl.md:80의 log 기본값 원칙 재사용)
+- mode: 환경변수 CAVEMAN_GUARD=log|warn|off, 기본 log. impl.md:80 원안은 log|enforce|off였으나 enforce는 차단이므로 C8에 따라 제외하고 비차단 warn으로 대체. 원안 log는 "차단했을 호출" 기록, 여기서 log는 "필수 필드 누락" 기록으로 의미가 다름
   - log: 누락 필드를 notes/metrics/<날짜>.jsonl에 1행 기록
   - warn: 호출자 맥락에 "필수 필드 누락: <키>, 재요청" 1줄 주입
   - 어느 모드에서도 도구 실행 차단·종료 코드 차단 없음 (C8)
@@ -139,7 +142,7 @@ summary_ko: <1~5줄, L0 전달용>
 
 ## 7. 라우팅·작업 공간 경계
 
-- [ws:<id>] 표기와 세션 재개는 메인/하네스 책임 (C5, internal/harness/orchws.go:78-101)
+- [ws:<id>] 표기와 세션 재개는 메인/하네스 책임 (C5). 하네스는 internal/harness/orchws.go:78-101에서 ws 줄을 parseWS로 파싱해 haiku로 보내고 저장된 세션을 재개함
 - 상위 에이전트는 R-write의 ws 값을 다음 브리프에 "ws: <id> 이어서"로 적기만 함
 - mode f는 --clients-file 설정 시에만 live 자식을 둠 (repl.go:204-208). 기본 실행 활성 여부 미확인 -> ws 필드는 none 허용
 
