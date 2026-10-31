@@ -1,0 +1,7 @@
+{
+  "claude_version": "2.1.314 (Claude Code)",
+  "expected": "hosts=156 shells=11",
+  "spec": "/tmp/abv2/specC.json",
+  "order": "A,B,B,A,A,B,B,A,A,B",
+  "ts": "2026-10-30T02:55:26.335482+00:00"
+}

@@ -1,0 +1,5 @@
+> usagepoll.go와 ratestatus.go 관계 설명
+조사가 아직 진행 중입니다. 결과가 오는 대로 두 파일의 관계를 설명드리겠습니다.
+
+
+[2m[ctx 37,617 | in 4 cr 43,593 cc 24,833 out 428 | $0.2160 | 5h 0.6 | sess 3aa6cae2 rot 0][0m

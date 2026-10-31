@@ -54,7 +54,7 @@ cd <프로젝트 폴더> && claude
 /distill
 ```
 1. Haiku `haiku-extractor`들이 조각 4개씩 나눠 동시에 읽고 후보를 `notes/distill/cand/`에 저장합니다.
-2. Sonnet `sonnet-analyst`가 합칩니다. 정정과 최신 내용을 우선하고, 중복과 끝난 일은 버립니다. 결과는 `notes/*.md` 5개입니다.
+2. Sonnet `sonnet-analyst`가 합칩니다. 정정과 최신 내용을 우선하고, 중복과 끝난 일은 버립니다. `haiku-batch-worker`가 결과를 `notes/*.md` 5개로 저장합니다.
 3. Haiku `haiku-checker`가 산출물 경로가 실제로 있는지 확인합니다.
 4. 애매하거나 충돌하는 항목은 `notes/distill/REVIEW.md`에 번호 질문으로 정리됩니다.
 

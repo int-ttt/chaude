@@ -5,7 +5,9 @@ from the model its name says. Gives continuity across auto-compaction and new se
 import glob, json, os, re, sys, time
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
-        _s.reconfigure(encoding="utf-8")
+        _reconf = getattr(_s, "reconfigure", None)
+        if _reconf:
+            _reconf(encoding="utf-8")
     except Exception:
         pass
 

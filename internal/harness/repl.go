@@ -24,8 +24,8 @@ const (
 	dim = "\033[2m"
 	rst = "\033[0m"
 
-	// rotation threshold for opus/sonnet (haiku uses the -threshold flag, default 80000)
-	opusSonnetThreshold = 270_000
+	// rotation threshold for opus/sonnet (haiku uses the -threshold flag, default 150000)
+	opusSonnetThreshold = 150_000
 
 	handoffPrompt = "Write a handoff note for a fresh session that will continue this work. No tools. " +
 		"Sections: Goal; Decisions; Files created/changed; In-progress work; Open questions; " +
@@ -65,6 +65,7 @@ type Args struct {
 	ClientsFile      string        // per-(cwd,model) client registry; empty = off
 	MaxWorkers       int           // cap on concurrent live worker sessions (see resolveMaxWorkers)
 	TaskBudgetUSD    float64       // per-task USD cap (--task-budget-usd); 0 = off
+	Orch             string        // orchestration mode m0|b|c|d|e|f (A/B test)
 }
 
 type kv struct {
@@ -145,9 +146,20 @@ type Repl struct {
 	files           []string
 	lastCtx         int
 	rate            map[string]any
+	rateMu          sync.Mutex // guards rate, lastFiveHour, fiveHourSeen, rawRateLogged
 	rateStr         atomic.Value
+	lastFiveHour    float64    // last five_hour utilization logged by setRate
+	fiveHourSeen    bool       // lastFiveHour is valid
+	rawRateLogged   bool       // rate_raw diagnostic row already written
+	usageMu         sync.Mutex // guards usagePollAt, usagePolling
+	usagePollAt     time.Time  // last /usage poll start (pollUsage)
+	usagePolling    bool       // a /usage poll is in flight
+	costMu          sync.Mutex // guards lastCostSess, lastCost
+	lastCostSess    string     // session of the last turn cost (turnCostUSD)
+	lastCost        float64    // cumulative total_cost_usd of lastCostSess
 	ui              *tuiBridge // non-nil in TUI mode
 	seenTools       map[string]bool
+	spend           *turnSpend // subagent usage and spawns of the current turn
 	metrics         *Metrics
 	tracker         *agentTracker
 	agents          *agentStore // on-disk agent state (nil/empty path = off)
@@ -157,25 +169,28 @@ type Repl struct {
 	lastRotFail     time.Time
 	notices         []string
 	drainMu         sync.Mutex
-	cat             string            // current task category from the child's [cat: X] marker
-	delegs          int               // Agent/Task tool calls in the current turn
-	pool            *workerPool       // Haiku sessions with edit history (direct routing candidates)
-	parked          map[string]string // model -> session id left by a direct Haiku switch
-	resumeID        string            // session id start() resumes once
-	curTask         string            // terse task of the current routed turn
-	mode            atomic.Int32      // permMode, set from the UI goroutine
-	idle            idleTurn          // child-initiated turn being rendered (idle reader goroutine only)
-	reg             *clientRegistry   // per-(cwd,model) client registry; nil = off (old routing)
-	children        *childSet         // live child processes kept per (cwd,model); nil = off
-	idleRotate      time.Duration     // idle deadline base (--idle-rotate); 0 = off
-	budget          *budget           // per-task USD ledger; nil = off
-	ttl             string            // prompt cache TTL requested (--cache-ttl)
-	lastAPI         time.Time         // single clock for the active child: last API message_start
-	ttlSeen         string            // cache TTL observed from usage ("" = unknown)
-	idleFiredFor    time.Time         // lastAPI value an idle rotate already fired for
-	cur             *liveChild        // record of the active child (idle callback identity; set by start/bindChild)
-	clockMu         sync.Mutex        // guards lastAPI, ttlSeen, idleFiredFor (idle goroutine writes, UI reads)
-	noticeMu        sync.Mutex        // guards notices
+	cat             string              // current task category from the child's [cat: X] marker
+	delegs          int                 // Agent/Task tool calls in the current turn
+	pool            *workerPool         // Haiku sessions with edit history (direct routing candidates)
+	parked          map[string]string   // model -> session id left by a direct Haiku switch
+	resumeID        string              // session id start() resumes once
+	curTask         string              // terse task of the current routed turn
+	mode            atomic.Int32        // permMode, set from the UI goroutine
+	idle            idleTurn            // child-initiated turn being rendered (idle reader goroutine only)
+	reg             *clientRegistry     // per-(cwd,model) client registry; nil = off (old routing)
+	children        *childSet           // live child processes kept per (cwd,model); nil = off
+	idleRotate      time.Duration       // idle deadline base (--idle-rotate); 0 = off
+	budget          *budget             // per-task USD ledger; nil = off
+	ttl             string              // prompt cache TTL requested (--cache-ttl)
+	lastAPI         time.Time           // single clock for the active child: last API message_start
+	ttlSeen         string              // cache TTL observed from usage ("" = unknown)
+	idleFiredFor    time.Time           // lastAPI value an idle rotate already fired for
+	cur             *liveChild          // record of the active child (idle callback identity; set by start/bindChild)
+	clockMu         sync.Mutex          // guards lastAPI, ttlSeen, idleFiredFor (idle goroutine writes, UI reads)
+	noticeMu        sync.Mutex          // guards notices
+	ws              map[string]*wsState // mode f: per-workspace Haiku sessions
+	curWS           string              // mode f: workspace id of the current routed turn ("" = main)
+	orchMain        string              // mode f: main model for untagged lines
 }
 
 // wireClients sets the registry and child set from Args. Empty ClientsFile
@@ -198,8 +213,23 @@ func (r *Repl) p(s string, end string) {
 }
 
 func (r *Repl) setRate(info map[string]any) {
-	r.rate = info
 	r.rateStr.Store(fmtRateStatus(info, time.Now()))
+	r.rateMu.Lock()
+	r.rate = info
+	raw := info != nil && !r.rawRateLogged
+	r.rawRateLogged = r.rawRateLogged || raw
+	v, ok := fiveHourUtil(info)
+	changed := ok && (!r.fiveHourSeen || v != r.lastFiveHour)
+	if changed {
+		r.lastFiveHour, r.fiveHourSeen = v, true
+	}
+	r.rateMu.Unlock()
+	if raw { // diagnostic: key names only, never values
+		_ = r.metrics.Log(rateRawRow(info))
+	}
+	if changed {
+		_ = r.metrics.Log(map[string]any{"stage": "rate", "five_hour": v})
+	}
 }
 
 // newSessionFn is a test seam for start().
@@ -214,6 +244,9 @@ func (r *Repl) start() error {
 	}
 	if !r.a.NoCategoryRotate {
 		rule = strings.TrimSpace(rule + " " + categoryRule)
+	}
+	if orr := orchRule(r.a.Orch); orr != "" {
+		rule = strings.TrimSpace(rule + " " + orr)
 	}
 	if rule != "" {
 		opts.Extra = append(opts.Extra, "--append-system-prompt", rule)
@@ -232,6 +265,7 @@ func (r *Repl) start() error {
 	prev := r.tracker
 	r.tracker = newAgentTracker()
 	tk := r.tracker
+	tk.notify = r.agentNotice
 	tk.store = r.agents
 	tk.parent = s.ID
 	tk.transcript = func() string {
@@ -261,6 +295,10 @@ func (r *Repl) start() error {
 
 // idleEvent handles stdout events that arrive while no turn is running (background subagents).
 func (r *Repl) idleEvent(s *Session, tk *agentTracker, ev event) {
+	if r.idle.spend == nil {
+		r.idle.spend = newTurnSpend()
+	}
+	r.idle.spend.onEvent(ev)
 	tk.onSubEvent(ev)
 	r.touchMain(ev, time.Now())
 	switch t := str(ev["type"]); {
@@ -325,6 +363,7 @@ type idleTurn struct {
 	active   bool
 	streamed bool
 	sawNotif bool
+	spend    *turnSpend // subagent usage and spawns seen while this turn runs
 }
 
 func isMainEvent(ev event) bool {
@@ -385,10 +424,22 @@ func (r *Repl) idleFinish(s *Session, tk *agentTracker, result event) {
 	}
 	fields := map[string]any{"stage": "turn", "source": "background", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
 		"model": r.a.Model, "conductor": r.a.Conductor, "ctx": r.lastCtx, "session": s.SessionID, "cost_usd": cost, "rotations": r.rotations}
+	if d, ok := r.turnCostUSD(s.SessionID, cost); ok {
+		fields["cost_turn_usd"] = d
+	}
 	for k, v := range usageFields(asMap(ru)) {
 		fields["result_"+k] = v
 	}
+	if mu, ok := asMap(result)["modelUsage"].(map[string]any); ok && len(mu) > 0 {
+		fields["result_model_usage"] = mu
+	}
+	if st.spend != nil {
+		for k, v := range st.spend.fields() {
+			fields[k] = v
+		}
+	}
 	_ = r.metrics.Log(fields)
+	r.pollUsage()
 }
 
 func (r *Repl) askPermission(req event) { r.askPerm(r.sess, req, false) }
@@ -450,6 +501,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 		r.budgetStop()
 		return "", nil, nil
 	}
+	r.spend = newTurnSpend()
 	_ = r.sess.Send(text)
 	var reply strings.Builder
 	var mf markerFilter
@@ -467,6 +519,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	var result event
 	budgetHit := false
 	handle := func(ev event) {
+		r.spend.onEvent(ev)
 		t := str(ev["type"])
 		r.tracker.onSubEvent(ev)
 		r.touchMain(ev, time.Now())
@@ -607,7 +660,10 @@ func (r *Repl) usageLine(result event, usage map[string]any) {
 	r.lastCtx = ctx
 	ru := asMap(result["usage"])
 	five := "?"
-	if w := asMap(asMap(r.rate["unifiedWindows"])["five_hour"]); w != nil {
+	r.rateMu.Lock()
+	rate := r.rate
+	r.rateMu.Unlock()
+	if w := asMap(asMap(rate["unifiedWindows"])["five_hour"]); w != nil {
 		if u, ok := w["utilization"]; ok && u != nil {
 			five = fmt.Sprint(u)
 		}
@@ -859,11 +915,22 @@ func (r *Repl) handle(line string) {
 	r.tr.add("assistant", kv{"text", reply}, kv{"session", sid}, kv{"usage", ru},
 		kv{"ctx", ctxTokens(usage)}, kv{"cost", cost})
 	r.usageLine(result, usage)
+	r.wsRecord(reply)
+	r.pollUsage()
 	fields := map[string]any{"stage": "turn", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
 		"model": r.a.Model, "conductor": r.a.Conductor, "ctx": r.lastCtx, "session": r.sess.SessionID, "draining": len(r.draining),
 		"cost_usd": cost, "duration_ms": time.Since(t0).Milliseconds(), "rotations": r.rotations, "delegations": r.delegs}
+	if d, ok := r.turnCostUSD(r.sess.SessionID, cost); ok {
+		fields["cost_turn_usd"] = d // cost_usd is cumulative per session; this is the turn's own share
+	}
 	for k, v := range usageFields(asMap(ru)) {
 		fields["result_"+k] = v // summed over all API calls of the turn
+	}
+	if mu, ok := asMap(result)["modelUsage"].(map[string]any); ok && len(mu) > 0 {
+		fields["result_model_usage"] = mu
+	}
+	for k, v := range r.spend.fields() {
+		fields[k] = v
 	}
 	_ = r.metrics.Log(fields)
 	newCat, catRot := categoryRotation(line, reply, r.cat, r.a.NoCategoryRotate)
@@ -998,7 +1065,7 @@ func Main(args []string) int {
 	var a Args
 	fs.StringVar(&a.Model, "model", "haiku", "")
 	fs.StringVar(&a.Cwd, "cwd", "", "")
-	fs.IntVar(&a.Threshold, "threshold", 80_000, "rotate after an answer when context tokens >= this")
+	fs.IntVar(&a.Threshold, "threshold", 150_000, "rotate after an answer when context tokens >= this")
 	fs.IntVar(&a.CompactWindow, "compact-window", 400_000, "child-only CLAUDE_CODE_AUTO_COMPACT_WINDOW (keep > threshold; 0=off)")
 	fs.IntVar(&a.MaxAutoRotations, "max-auto-rotations", -1, "max automatic rotations (default unlimited)")
 	fs.StringVar(&a.Transcript, "transcript", filepath.Join(osenv.StateDir(), "transcript.jsonl"), "")
@@ -1022,12 +1089,29 @@ func Main(args []string) int {
 	fs.DurationVar(&a.IdleRotate, "idle-rotate", 3599*time.Second, "idle time after which a child is treated as cold (0=off); idle rotation runs in the TUI only")
 	fs.StringVar(&a.ClientsFile, "clients-file", defaultClientsFile(), "per-(cwd,model) client registry (empty=off)")
 	fs.IntVar(&a.MaxWorkers, "max-workers", DefaultMaxWorkers, "cap on concurrent live worker sessions (env CHAUDE_MAX_WORKERS when unset)")
+	fs.StringVar(&a.Orch, "orch", "m0", "orchestration mode m0|b|c|d|e|f (A/B test)")
 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
 		}
 		return 2
 	}
+	mode, err := parseOrch(a.Orch)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	a.Orch = mode
+	modelSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" {
+			modelSet = true
+		}
+	})
+	if dm := orchDefaultModel(mode); dm != "" && !modelSet {
+		a.Model = dm
+	}
+	applyOrchEnv(mode)
 	if _, err := parseCacheTTL(a.CacheTTL); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2

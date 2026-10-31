@@ -1,0 +1,40 @@
+task: read-only release/version/branch state (A harness, B impl, C notes grep)
+date: 2026-10-31
+
+A claude-harness (master)
+A.status: head -60 cap hit; many M and ?? (see brief); includes M CHANGELOG.md, M cmd? no (cmd/chaude not listed in first 60)
+A.remote: origin https://github.com/int-ttt/chaude.git
+A.branches: caveman-impl, caveman-relay-impl, caveman-u8 (worktrees), main, master (current), origin/HEAD->origin/main, origin/interactive-child-compare, origin/main, origin/master
+A.tags(newest): v0.8.1 v0.8.0 v0.7.2 v0.7.1 v0.7.0
+A.origin/main: 9522bc4 0.7.2 ... | b6e057f metrics | 18f85d2 0.7.1 ...
+A.origin/master: 1af0f16 0.8.1 ... | d9165a5 0.8.0 ... | 5e415b5 0.8.0 ...
+A.main.go: line16 var version = "0.8.1"
+A.CHANGELOG(working tree, uncommitted M): top "## 0.8.2" (harness-only, says cmd/chaude version 0.8.1 kept); then 0.8.1, 0.8.0
+A.gitignore: __pycache__/ *.pyc logs/ bin/ dist/ .tools/ tests/e2e-rebuild/* (keep .gitkeep) /chaude .idea/ notes/pastes/ tests/e2e-rebuild/ *.exe *.tar.gz *.zip .env .env.* *.pem *.key
+A.imports/: claude-usage-DESKTOP-PFNDFTU-20261030 (1)  claude-usage-soo-macmini.local-20261030.zip
+A.notes/deprecated/: 261030-plan-caveman-relay-review.md 261030-plan-caveman-relay.md 261030-run-caveman-relay.md
+A.gh release: v0.8.1 Latest 2026-10-29T14:26:42Z; v0.8.0 2026-10-29T13:39:41Z; v0.7.2 03:49:03Z; v0.7.1 02:01:39Z; v0.7.0 01:03:33Z
+A.gh default branch: main
+
+B claude-harness-impl (caveman-impl)
+B.status: clean (no output)
+B.branch: * caveman-impl 27c60e2 "release: v0.9.0 (caveman S0~S5)"; + caveman-relay-impl 1af0f16; + caveman-u8 39db4ad; main 9522bc4 [origin/main]; + master 529da82
+B.log -12: 27c60e2 release v0.9.0; e1f3924; 72ebf07; ae2cbf0; bcc9f8e; ccf2b9b; 401e5a1; d4e4b32; 2f2685b; ef90cf9 S0; 39db4ad U8; 61a6140 chore
+B.merge-base HEAD master: 529da82a20ec9fecd25b2af525c5e65e78fce7a9
+B.master rev-parse (harness): 529da82a20ec9fecd25b2af525c5e65e78fce7a9 (equal)
+B.main.go: line16 var version = "0.9.0"
+B.CHANGELOG top: "## 0.9.0" (S0~S5, U8/U9/U10; U3/U4/U7 decided, not implemented)
+B.diffstat master...HEAD: 20 files changed, 528 insertions(+), 14 deletions(-)
+B.note: no v0.9.0 tag exists yet (latest tag v0.8.1)
+
+C notes grep (release|version|tag|hook.*test|unittest)
+C.FACTS.md: no matches
+C.LESSONS.md: no matches
+C.DECISIONS.md:4 "areas e.g.: version / tone / format / banned" (template)
+C.DECISIONS.md:9 "Python>=3.8 ... go1.27.3 ... bin/ dist/ .tools/ gitignored"
+C.DECISIONS.md:33 "확인하고 0.6.8로 릴리즈해" -> released 0.6.8
+C.DECISIONS.md:34 "[release] 261029 user: 다음 릴리즈부터 릴리즈에 이전 버전과 변경점 추가해" -> release.yml builds dist/notes.md "## Changes since <prev tag>"; from v0.7.0 on
+C.DECISIONS.md:42 "[local-cmd] 2026-10-29 ... 검증 통과 시 릴리즈" -> /version sync; released per verification
+C.DECISIONS.md:16,27,29,32 rotate/arch/category/conductor rules (no release content)
+
+NOT FOUND: any release/version match in FACTS.md or LESSONS.md; hook test (hook.*test|unittest) match in the 3 notes files; origin/main has no 0.8.x; v0.9.0 tag.

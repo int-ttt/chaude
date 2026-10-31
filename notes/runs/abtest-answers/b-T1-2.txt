@@ -1,0 +1,7 @@
+> rotation threshold 값은?
+프로젝트 지침(CLAUDE.md)에 적힌 rotation threshold는 메인 세션 모델별로 다릅니다. Haiku 메인은 80k 토큰에서 새 세션으로 핸드오프하고, Opus와 Sonnet 메인은 270k 토큰에서 교체합니다. 참고로 자동 압축은 이와 별개로 150k 창 기준입니다.
+
+다만 이 값은 지침 문서 기준이고, 실제 코드의 설정값까지 대조한 것은 아닙니다.
+
+
+[2m[ctx 30,838 | in 2 cr 12,819 cc 18,017 out 201 | $0.1507 | 5h 0.41 | sess ebb49b3e rot 0][0m

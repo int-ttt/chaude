@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -12,6 +13,7 @@ import (
 type Metrics struct {
 	dir   string
 	flags map[string]any
+	mu    sync.Mutex // serializes appends from concurrent turns and polls
 }
 
 func newMetrics(dir string, flags map[string]any) *Metrics {
@@ -23,6 +25,8 @@ func (m *Metrics) Log(rec map[string]any) error {
 	if m == nil || m.dir == "" {
 		return nil
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	now := time.Now().UTC()
 	out := make(map[string]any, len(rec)+2)
 	for k, v := range rec {

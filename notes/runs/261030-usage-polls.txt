@@ -1,0 +1,7 @@
+02:27:05Z You are currently using your subscription to power your Claude Code usage  Current session: 61% used · resets Oct 30 at 12:50pm (Asia/Seoul) Current week (all models): 31% used · resets Nov 1 at 5pm (Asia/Seoul)  What's contributing to your usage? Approximate · sessions on this machine only · shares overlap  Last 24h · 3718 requests · 100 sessions   97%  Give "opus-architect" subagents a cheaper model   Top subagents: opus-architect 27%, sonnet-analyst 26%, haiku-scout 17%, haiku-coder 6%, haiku-runner 3%, haiku-batch-worker 2%, sonnet-reviewer 2%, haiku-drafter 2%, +2 more  Last 7d · 7755 requests · 231 sessions   97%  Give "sonnet-analyst" subagents a cheaper model   12%  Run fewer sessions at once · up to 47 at once   Top subagents: sonnet-analyst 31%, opus-architect 16%, haiku-scout 7%, haiku-extractor 4%, haiku-coder 3%, analyst 3%, sonnet-reviewer 2%, haiku-runner 1%, +5 more 
+02:33:13Z current_session=65%
+02:38:48Z current_session=71%
+02:44:12Z current_session=74%
+02:49:44Z current_session=76%
+02:55:26Z current_session=79%
+03:01:02Z current_session=81%

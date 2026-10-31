@@ -1,0 +1,12 @@
+# v0.8.0 release push (haiku-runner)
+- build/vet/test: PASS (go test ./internal/harness ok, count=1)
+- staged: internal/harness/ (10 files incl. budget.go, budget_test.go), CHANGELOG.md; cmd/chaude/main.go unchanged so not staged
+- changelog: added U8b, U5c, U9 (off by default), BUG-1, BUG-2 bullets to 0.8.0
+- commit: d9165a58885f1fb7ac58dd9bd678d67d342aa320 (prev 5e415b5; trailer Co-Authored-By Haiku 5.5)
+- tag v0.8.0 (annotated): old 442e768 deleted, new target d9165a5
+- push master: 9522bc4..d9165a5 OK
+- push tag v0.8.0: new tag OK
+- remote tag: 2c6b0dd (tag object) peels to d9165a5 -- verified
+- unstaged/untracked remaining: 40 (notes/, not staged by design)
+- doubt: cmd/chaude/main.go version string still reportedly "0.7.3" per notes; not edited (no source edits allowed)
+- doubt: /usage one-shot budget charge not implemented (per notes)

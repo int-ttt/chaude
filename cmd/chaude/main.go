@@ -13,7 +13,7 @@ import (
 )
 
 // version is set at release time: -ldflags "-X main.version=X.Y.Z".
-var version = "0.8.1"
+var version = "0.8.2"
 
 const usage = `usage: chaude <command> [args]
   repl [flags]           terminal REPL over claude -p stream-json with session rotation (default with no command)

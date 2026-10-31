@@ -1,0 +1,5 @@
+> rotation threshold 값은?
+프로젝트 지침 기준으로 main 세션의 rotation threshold는 Haiku가 80k, Opus와 Sonnet이 270k입니다. Haiku는 80k에 도달하면 새 세션으로 handoff합니다. 참고로 auto-compaction은 이와 별개로 150k window입니다.
+
+
+[2m[ctx 30,437 | in 2 cr 0 cc 30,435 out 123 | $0.2459 | 5h 0.39 | sess 3ca45655 rot 0][0m

@@ -10,7 +10,7 @@ import (
 )
 
 // ctxBarMax is the context size the /usage ctx bar is measured against.
-const ctxBarMax = 270_000
+const ctxBarMax = 150_000
 
 const barCells = 10
 

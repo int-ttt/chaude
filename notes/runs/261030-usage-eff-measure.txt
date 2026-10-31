@@ -1,0 +1,117 @@
+# eff.py  projects=/Users/leekwangseok/.claude/projects/-Users-leekwangseok-PycharmProjects-claude-harness metrics=/Users/leekwangseok/PycharmProjects/claude-harness/notes/metrics
+# prices USD/MTok (ASSUMED): opus in5 out25 cw6.25 cr0.5 | sonnet in3 out15 cw3.75 cr0.3 | haiku in1 out5 cw1.25 cr0.1
+# dedupe: message.id keep last. day = UTC date of message ts. subagent first msg = first assistant usage record in file.
+# cwrite = cache_creation_input_tokens (5m+1h sum)
+
+=================== ALL DAYS ===================
+## a) spawn count by agent type (subagent files; day = UTC date of first msg)
+  general-purpose: 1
+  haiku-batch-worker: 33
+  haiku-checker: 6
+  haiku-coder: 59
+  haiku-drafter: 9
+  haiku-researcher: 7
+  haiku-runner: 33
+  haiku-scout: 229
+  opus-architect: 36
+  sonnet-analyst: 181
+  sonnet-reviewer: 18
+  TOTAL spawns: 612
+## b) per agent type: count | sum cwrite | mean/median FIRST cwrite | sum cread | sum out | models
+  general-purpose | n=1 | cw=29723 | first_mean=18870 first_median=18870 | cr=149655 | out=4005 | claude-haiku-5-5 x7
+  haiku-batch-worker | n=33 | cw=517900 | first_mean=4710 first_median=4461 | cr=1228215 | out=181671 | claude-haiku-5-5 x117
+  haiku-checker | n=6 | cw=82400 | first_mean=4075 first_median=3400 | cr=241161 | out=22290 | claude-haiku-5-5 x25
+  haiku-coder | n=59 | cw=1277884 | first_mean=4245 first_median=3487 | cr=10627803 | out=435668 | claude-haiku-5-5 x558
+  haiku-drafter | n=9 | cw=390332 | first_mean=4687 first_median=5917 | cr=1965177 | out=143668 | claude-haiku-5-5 x76
+  haiku-researcher | n=7 | cw=521443 | first_mean=4545 first_median=4794 | cr=1837839 | out=97595 | claude-haiku-5-5 x65
+  haiku-runner | n=33 | cw=458811 | first_mean=4357 first_median=3954 | cr=2981981 | out=151152 | claude-haiku-5-5 x191
+  haiku-scout | n=229 | cw=3771895 | first_mean=3068 first_median=2352 | cr=13830526 | out=1413634 | claude-haiku-5-5 x1101,<synthetic> x1
+  opus-architect | n=36 | cw=1579577 | first_mean=6571 first_median=7308 | cr=11727803 | out=438489 | claude-opus-5-5 x415,<synthetic> x2
+  sonnet-analyst | n=181 | cw=5017914 | first_mean=4197 first_median=2736 | cr=34847424 | out=1289969 | claude-sonnet-5-5 x1577,<synthetic> x1
+  sonnet-reviewer | n=18 | cw=335562 | first_mean=4272 first_median=4884 | cr=1307833 | out=63561 | claude-sonnet-5-5 x112
+## c) main sessions (non-subagent): sessions=107 msgs=959 in=2200 out=795313 cw=3929870 cr=64857885
+## d) est USD by model (main+sub), components
+  opus: in=0.01 out=16.29 cwrite=14.45 cread=16.92 total=47.67
+  sonnet: in=0.01 out=20.74 cwrite=21.08 cread=11.11 total=52.94
+  haiku: in=0.01 out=15.01 cwrite=12.48 cread=7.47 total=34.97
+  ALL: in=0.02 out=52.05 cwrite=48.00 cread=35.50 total=135.58
+  unknown-model msgs skipped: {'<synthetic>': 10}
+## e) cwrite share of est USD = 35.4% ; subagent-first-msg cwrite USD = 6.33 (4.7% of total est USD, 13.2% of cwrite USD)
+## f) short subagent files (<=3 msgs): count=189 cwrite USD=4.22
+
+=================== 2026-10-29 ===================
+## a) spawn count by agent type (subagent files; day = UTC date of first msg)
+  haiku-batch-worker: 25
+  haiku-checker: 3
+  haiku-coder: 45
+  haiku-drafter: 9
+  haiku-researcher: 6
+  haiku-runner: 26
+  haiku-scout: 175
+  opus-architect: 28
+  sonnet-analyst: 122
+  sonnet-reviewer: 12
+  TOTAL spawns: 451
+## b) per agent type: count | sum cwrite | mean/median FIRST cwrite | sum cread | sum out | models
+  haiku-batch-worker | n=25 | cw=441691 | first_mean=4351 first_median=3656 | cr=1055587 | out=165589 | claude-haiku-5-5 x93
+  haiku-checker | n=3 | cw=47897 | first_mean=4217 first_median=3505 | cr=166733 | out=13789 | claude-haiku-5-5 x16
+  haiku-coder | n=45 | cw=1041655 | first_mean=4115 first_median=3444 | cr=8736981 | out=343095 | claude-haiku-5-5 x438
+  haiku-drafter | n=9 | cw=390332 | first_mean=4687 first_median=5917 | cr=1965177 | out=143668 | claude-haiku-5-5 x76
+  haiku-researcher | n=6 | cw=471363 | first_mean=4421 first_median=4697 | cr=1674956 | out=88230 | claude-haiku-5-5 x59
+  haiku-runner | n=26 | cw=373803 | first_mean=4192 first_median=3167 | cr=2765188 | out=131640 | claude-haiku-5-5 x162
+  haiku-scout | n=175 | cw=3197420 | first_mean=3077 first_median=2344 | cr=12195026 | out=1179930 | claude-haiku-5-5 x907,<synthetic> x1
+  opus-architect | n=28 | cw=1099330 | first_mean=6678 first_median=7656 | cr=6509445 | out=313234 | claude-opus-5-5 x260,<synthetic> x1
+  sonnet-analyst | n=122 | cw=3067600 | first_mean=4526 first_median=2784 | cr=16927182 | out=705322 | claude-sonnet-5-5 x847,<synthetic> x1
+  sonnet-reviewer | n=12 | cw=242826 | first_mean=5027 first_median=5616 | cr=965581 | out=42025 | claude-sonnet-5-5 x79
+## c) main sessions (non-subagent): sessions=32 msgs=453 in=970 out=464525 cw=1971291 cr=35388340
+## d) est USD by model (main+sub), components
+  opus: in=0.00 out=9.33 cwrite=8.67 cread=4.33 total=22.33
+  sonnet: in=0.01 out=11.61 cwrite=12.98 cread=5.56 total=30.15
+  haiku: in=0.00 out=12.35 cwrite=9.49 cread=6.24 total=28.07
+  ALL: in=0.01 out=33.29 cwrite=31.13 cread=16.12 total=80.56
+  unknown-model msgs skipped: {'<synthetic>': 8}
+## e) cwrite share of est USD = 38.6% ; subagent-first-msg cwrite USD = 4.74 (5.9% of total est USD, 15.2% of cwrite USD)
+## f) short subagent files (<=3 msgs): count=139 cwrite USD=3.51
+
+=================== 2026-10-30 ===================
+## a) spawn count by agent type (subagent files; day = UTC date of first msg)
+  haiku-batch-worker: 6
+  haiku-checker: 3
+  haiku-coder: 5
+  haiku-runner: 3
+  haiku-scout: 30
+  opus-architect: 4
+  sonnet-analyst: 6
+  TOTAL spawns: 57
+## b) per agent type: count | sum cwrite | mean/median FIRST cwrite | sum cread | sum out | models
+  haiku-batch-worker | n=6 | cw=54106 | first_mean=5939 first_median=6124 | cr=96610 | out=12444 | claude-haiku-5-5 x15
+  haiku-checker | n=3 | cw=34503 | first_mean=3933 first_median=3184 | cr=74428 | out=8501 | claude-haiku-5-5 x9
+  haiku-coder | n=5 | cw=114566 | first_mean=4727 first_median=3693 | cr=1121396 | out=52320 | claude-haiku-5-5 x48
+  haiku-runner | n=3 | cw=38566 | first_mean=3904 first_median=4079 | cr=93548 | out=12511 | claude-haiku-5-5 x10
+  haiku-scout | n=30 | cw=401396 | first_mean=3404 first_median=2555 | cr=1026723 | out=195508 | claude-haiku-5-5 x109
+  opus-architect | n=4 | cw=90737 | first_mean=5230 first_median=5946 | cr=357217 | out=33951 | claude-opus-5-5 x23
+  sonnet-analyst | n=6 | cw=95558 | first_mean=3694 first_median=2632 | cr=204635 | out=24884 | claude-sonnet-5-5 x22
+## c) main sessions (non-subagent): sessions=2 msgs=21 in=42 out=27008 cw=144056 cr=1142233
+## d) est USD by model (main+sub), components
+  opus: in=0.00 out=0.85 cwrite=0.57 cread=0.18 total=1.59
+  sonnet: in=0.00 out=0.37 cwrite=0.36 cread=0.06 total=0.79
+  haiku: in=0.00 out=1.54 cwrite=0.98 cread=0.36 total=2.88
+  ALL: in=0.00 out=2.76 cwrite=1.91 cread=0.60 total=5.27
+## e) cwrite share of est USD = 36.2% ; subagent-first-msg cwrite USD = 0.45 (8.4% of total est USD, 23.3% of cwrite USD)
+## f) short subagent files (<=3 msgs): count=30 cwrite USD=0.55
+
+=================== RECONCILE (metrics vs transcripts) ===================
+metrics stage=turn sessions on days: 34 ; transcript main sessions on days: 34
+overlap=34 transcript-only=0 metrics-only=0
+transcript-only sessions est USD (main only, days) = 0.00 ; their subagent USD = 0.00
+subagent files with parent in metrics-covered sessions: 509 ; their USD (days) = 74.26
+## metrics max cost_usd vs transcript est (days): per overlap session
+  430496f9-6daf-495a-8b9f-52cd1aca8b18 metrics_max=4.0922 main_only=0.3626 main+sub=7.3690 subs=21
+  17d8f798-c6d3-4eae-a74a-b887226f4917 metrics_max=2.9309 main_only=0.5465 main+sub=5.6899 subs=26
+  4a1f8c79-66f6-4890-9a7d-cbc3408b0f00 metrics_max=nan main_only=0.0737 main+sub=0.5531 subs=4
+  6d98d82a-7a63-4904-9624-3c5f36107ebb metrics_max=nan main_only=0.0655 main+sub=0.6634 subs=5
+  83fc90cf-23b4-4033-ac95-28d2c709ca60 metrics_max=12.7880 main_only=3.0177 main+sub=22.7983 subs=95
+  d4657cd7-e546-4a34-8197-b0af0de4b40d metrics_max=2.3185 main_only=0.1089 main+sub=1.9692 subs=3
+  6b1635f6-c61b-4a4c-beff-87c9e887139e metrics_max=1.4413 main_only=0.3925 main+sub=3.2068 subs=27
+  26e84f4e-31c8-40df-b7ab-9f94fa83636c metrics_max=1.4184 main_only=0.2327 main+sub=2.6262 subs=12
+  ALL overlap with metrics cost: n=31 sum metrics_max=40.8440 sum main_only=11.3387 sum main+sub=82.8877 (n_nocost=3)

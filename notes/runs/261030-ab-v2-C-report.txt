@@ -1,0 +1,12 @@
+arm A: n=7 errors=0 correct=7 unique_sha=1
+  cost_usd mean=0.00489707 sd=0.00126419 min=0.00372771 max=0.00757278
+  num_turns mean=1.57143
+  total_cache_creation_tokens=107490
+  model claude-haiku-5-5 mean: cacheCreation=15355.7 cacheRead=122921 costUSD=0.00489707
+arm B: n=7 errors=0 correct=6 unique_sha=2
+  cost_usd mean=0.0033847 sd=0.000934921 min=0.00288461 max=0.0054554
+  num_turns mean=1.57143
+  total_cache_creation_tokens=71963
+  model claude-haiku-5-5 mean: cacheCreation=10280.4 cacheRead=85786 costUSD=0.0033847
+ratio b/a: cost_mean=0.691169 cache_creation_total=0.669486
+mann-whitney exact two-sided p (total_cost_usd)=0.0174825

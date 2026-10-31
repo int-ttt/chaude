@@ -1,0 +1,10 @@
+> internal/harness 의 TestOrchDefaultModel 이 실패한다. 고쳐라.
+`TestOrchDefaultModel` 수정 작업은 아직 끝나지 않았습니다. 실제 수정을 맡긴 haiku-coder 에이전트가 백그라운드에서 돌고 있고, 결과가 오면 알려드리겠습니다.
+
+제가 방금 빈 placeholder 에이전트를 하나 더 띄웠는데, 그쪽은 작업 지시가 없다고 보고하고 아무것도 수정하지 않았습니다. 그 보고는 실제 작업 결과가 아니니 무시해 주세요.
+
+추천:
+- 백그라운드 haiku-coder 결과를 기다렸다가, 테스트 통과 여부를 확인하겠습니다.
+
+
+[2m[ctx 39,943 | in 6 cr 84,074 cc 26,461 out 1529 | $0.0090 | 5h 0.76 | sess fb78e749 rot 0][0m

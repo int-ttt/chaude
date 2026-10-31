@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"sort"
@@ -32,6 +33,35 @@ type agentRec struct {
 	startSize   int64
 }
 
+// doneLine: the one-line completion notice of a finished agent (TUI note).
+func (a *agentRec) doneLine() string {
+	kind, model := "[agent 완료]", a.Model
+	if a.Failed {
+		kind = "[agent 실패]"
+	}
+	if model == "" {
+		model = "상속"
+	}
+	what := a.Summary
+	if what == "" {
+		what = lastSummary(a.Log)
+	}
+	if what == "" {
+		what = a.Task
+	}
+	return trunc(strings.Join(strings.Fields(fmt.Sprintf("%s %s %s · %s", kind, model, a.Name, what)), " "), 120)
+}
+
+// markDoneLocked marks a done (caller holds t.mu and persists). Returns its notice only on the
+// transition from running, so each agent is announced once.
+func markDoneLocked(a *agentRec) string {
+	if a.Done {
+		return ""
+	}
+	a.Done = true
+	return a.doneLine()
+}
+
 // agentTracker records delegations of one session.
 type agentTracker struct {
 	mu     sync.Mutex // turn goroutine writes, UI goroutine reads the status count
@@ -40,9 +70,29 @@ type agentTracker struct {
 	store      *agentStore
 	parent     func() string // session id of the child that owns this tracker
 	transcript func() string // that child's Claude Code transcript path
+	notify     func(string)  // receives one completion line per finished agent (nil: silent)
 }
 
 func newAgentTracker() *agentTracker { return &agentTracker{agents: map[string]*agentRec{}} }
+
+// emit delivers completion lines; called after t.mu is released (the sink may block on the UI loop).
+func (t *agentTracker) emit(lines []string) {
+	if t.notify == nil {
+		return
+	}
+	for _, l := range lines {
+		t.notify(l)
+	}
+}
+
+// agentNotice shows a completion line as a TUI note (no-op outside the TUI). Sent from a goroutine:
+// the notice can fire inside the bubbletea Update loop (doneMsg, interrupt), where a synchronous
+// Send would wait on the loop it is running in.
+func (r *Repl) agentNotice(s string) {
+	if r.ui != nil {
+		go r.ui.send(noteMsg(s))
+	}
+}
 
 func (t *agentTracker) onToolUse(id, name string, input map[string]any, now time.Time) {
 	t.mu.Lock()
@@ -75,16 +125,17 @@ func (t *agentTracker) onToolResult(id string) { t.onToolResultText(id, "") }
 // when run_in_background was absent from the input (agent-definition default); it stays running.
 func (t *agentTracker) onToolResultText(id, text string) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	if a := t.agents[id]; a != nil && !a.Background && strings.Contains(text, "Async agent launched") {
-		a.Background = true
-		t.persistLocked()
-		return
-	}
+	var lines []string
 	if a := t.agents[id]; a != nil && !a.Background {
-		a.Done = true
+		if strings.Contains(text, "Async agent launched") {
+			a.Background = true
+		} else if l := markDoneLocked(a); l != "" {
+			lines = append(lines, l)
+		}
 		t.persistLocked()
 	}
+	t.mu.Unlock()
+	t.emit(lines)
 }
 
 var notifIDRe = regexp.MustCompile(`<tool-use-id>([^<]+)</tool-use-id>`)
@@ -95,16 +146,21 @@ func (t *agentTracker) onNotification(text string) bool {
 		return false
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	found := false
+	var lines []string
 	for _, m := range notifIDRe.FindAllStringSubmatch(text, -1) {
 		if a := t.agents[m[1]]; a != nil {
-			a.Done, found = true, true
+			if l := markDoneLocked(a); l != "" {
+				lines = append(lines, l)
+			}
+			found = true
 		}
 	}
 	if found {
 		t.persistLocked()
 	}
+	t.mu.Unlock()
+	t.emit(lines)
 	return found
 }
 
@@ -134,30 +190,38 @@ func (t *agentTracker) onUserEvent(ev event) bool {
 // finishForeground marks every foreground agent done (turn ended without tool_result: esc, error).
 func (t *agentTracker) finishForeground() {
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	var lines []string
 	for _, a := range t.agents {
 		if !a.Background {
-			a.Done = true
+			if l := markDoneLocked(a); l != "" {
+				lines = append(lines, l)
+			}
 		}
 	}
 	t.persistLocked()
+	t.mu.Unlock()
+	t.emit(lines)
 }
 
 // finishOldestBackground marks the longest-running background agent done (fallback when the
 // completion notice itself was not visible on stdout).
 func (t *agentTracker) finishOldestBackground() {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	var old *agentRec
 	for _, a := range t.agents {
 		if !a.Done && a.Background && (old == nil || a.Started.Before(old.Started)) {
 			old = a
 		}
 	}
+	var lines []string
 	if old != nil {
-		old.Done = true
+		if l := markDoneLocked(old); l != "" {
+			lines = append(lines, l)
+		}
 		t.persistLocked()
 	}
+	t.mu.Unlock()
+	t.emit(lines)
 }
 
 func (t *agentTracker) running() []*agentRec {

@@ -3,18 +3,37 @@ package harness
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"time"
 )
 
-// fmtRateStatus: "now/reset · N%" from the five-hour rate window; "" when no percent is known.
-func fmtRateStatus(info map[string]any, now time.Time) string {
+// rateRawRow: the first rate_limit_info of a process, as key names only (no values).
+func rateRawRow(info map[string]any) map[string]any {
+	keys := make([]string, 0, len(info))
+	for k := range info {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return map[string]any{"stage": "rate_raw", "keys": keys, "rate_limit_type": str(info["rateLimitType"])}
+}
+
+// fiveHourUtil: the five-hour utilization (raw scale) from unifiedWindows, else the top-level fallback.
+func fiveHourUtil(info map[string]any) (float64, bool) {
 	w := asMap(asMap(info["unifiedWindows"])["five_hour"])
 	v, ok := rateNum(w["utilization"])
 	top := str(info["rateLimitType"]) // top-level fields only count for the 5h window
 	if !ok && (top == "" || top == "five_hour") {
 		v, ok = rateNum(info["utilization"])
 	}
+	return v, ok
+}
+
+// fmtRateStatus: "now/reset · N%" from the five-hour rate window; "" when no percent is known.
+func fmtRateStatus(info map[string]any, now time.Time) string {
+	w := asMap(asMap(info["unifiedWindows"])["five_hour"])
+	v, ok := fiveHourUtil(info)
+	top := str(info["rateLimitType"]) // top-level fields only count for the 5h window
 	if !ok {
 		return ""
 	}

@@ -1,0 +1,14 @@
+rows in window: 747
+== turn cost ==
+rows with cost_usd: 263
+per-session max cost_usd sum: 43.3377
+naive cost_usd sum: 467.1761
+cost_turn_usd sum: 0.0000 (rows: 0)
+== classify cost ==
+cost_usd sum: 3.7603 (rows: 199)
+== usage series ==
+(no usage rows)
+== rate ==
+stage=rate rows: 0
+rate_raw keys: -
+bad_lines: 0

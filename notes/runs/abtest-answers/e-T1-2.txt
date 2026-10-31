@@ -1,0 +1,10 @@
+> rotation threshold 값은?
+CLAUDE.md 기준 rotation threshold는 메인 세션 모델별로 다릅니다.
+
+- **Haiku 메인: 80k**. 넘으면 새 세션으로 handoff합니다.
+- **Opus / Sonnet 메인: 270k**.
+
+별도로 자동 compaction은 150k 윈도우 기준이고, 서브에이전트는 100k 윈도우에서 자동 compaction됩니다. 이 값은 CLAUDE.md에 적힌 정책이며, 코드에서 실제 상수가 같은지는 확인하지 않았습니다.
+
+
+[2m[ctx 31,128 | in 2 cr 13,480 cc 17,646 out 640 | $0.0040 | 5h 0.75 | sess 2d1bcaf5 rot 0][0m

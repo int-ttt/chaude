@@ -1,0 +1,10 @@
+> rotation threshold 값은?
+CLAUDE.md 기준 rotation threshold는 메인 세션 종류별로 다릅니다.
+
+- **Haiku 메인:** 80k 토큰이 넘으면 새 세션으로 넘기는 handoff가 일어납니다.
+- **Opus / Sonnet 메인:** 270k 토큰입니다.
+
+별개로 자동 compaction은 150k window에서 동작합니다. 이 값은 CLAUDE.md에 적힌 내용이고, Go 코드(`internal/harness/`)의 실제 상수는 확인하지 않았습니다. 코드와 문서가 다를 수 있으니 필요하면 확인해 드리겠습니다.
+
+
+[2m[ctx 31,128 | in 2 cr 10,435 cc 20,691 out 628 | $0.0046 | 5h 0.75 | sess fbf04cf5 rot 0][0m

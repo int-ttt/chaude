@@ -213,6 +213,9 @@ func (r *Repl) route(line string) string {
 	if isAck(line) || strings.HasPrefix(line, "/") {
 		return line
 	}
+	if r.a.Orch != "" && r.a.Orch != "m0" {
+		return r.routeOrch(line)
+	}
 	t0 := time.Now()
 	last := ""
 	if n := len(r.tr.turns); n > 0 {

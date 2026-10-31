@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.2
+- sonnet/opus(비-haiku) 서브에이전트의 파일·셸 직접 접근을 훅으로 전면 차단; 모든 읽기/쓰기는 haiku 에이전트 경유
+- haiku-context-guard 매처 확장: Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell
+- sonnet/opus 서브에이전트는 haiku-* 에이전트만 호출 가능 (agent-model-pin)
+- sonnet-analyst/sonnet-reviewer/opus-architect tools: Agent 전용
+- haiku 에이전트: `RETURN: verbatim <=N chars` 지정 시 원문 발췌 반환 허용 (max 6000)
+- 훅 Pyright 경고 수정(reconfigure getattr, 모든 훅)
+- 탈출구: 환경변수 CLAUDE_HARNESS_ALLOW_SONNET_IO=1 (기본 off)
+- cmd/chaude version 0.8.2
+
 ## 0.8.1
 - resume 수정: 작업 알림(`<task-notification>`)을 사용자 이벤트에서 처리해 에이전트 추적이 끝나도록 함(onUserEvent).
 - 에이전트 패널(입력창 아래) 마우스 휠 스크롤.

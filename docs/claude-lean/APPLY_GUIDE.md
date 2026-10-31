@@ -154,7 +154,7 @@ diff ~/usage-before.txt ~/usage-after.txt
 | Opus가 "도구가 차단됐다"며 멈춤 | 정상 동작. 계속 그러면 CLAUDE.md가 적용됐는지 확인 (`/memory`) |
 | 에이전트 작업이 결과 없이 끝남 | 0.4.10부터 에이전트는 맥락이 차면 자동 압축 후 계속합니다. 예전 버전이면 업그레이드 |
 | 메모로 빠지면 안 되는 말이 메모됨 | 끝에 `!` 붙여 재전송, 반복되면 `STYLE_INBOX=0` |
-| 답이 너무 짧아 이해가 어려움 | "자세히" 요청 → `sonnet-analyst`가 `notes/runs/`에 작성 |
+| 답이 너무 짧아 이해가 어려움 | "자세히" 요청 → `sonnet-analyst`가 작성하고 `haiku-batch-worker`가 `notes/runs/`에 저장 |
 | `notes/LEDGER.md`에 `⚠ 이름과 다름` | `/hooks`에서 `agent-model-pin.py` 등록 확인. 등록돼 있으면 사용량 한도 등으로 Claude Code가 모델을 바꾼 경우 |
 | 훅 오류 메시지 | `python3 .claude/hooks/<훅>.py` 직접 실행해 오류 확인, `/hooks`에서 등록 확인 |
 

@@ -138,6 +138,7 @@ func (r *Repl) unbindActive() *liveChild {
 	r.cur = nil
 	if r.tracker == nil {
 		r.tracker = newAgentTracker()
+		r.tracker.notify = r.agentNotice
 	}
 	return c
 }
@@ -149,6 +150,7 @@ func (r *Repl) bindChild(c *liveChild) {
 	r.tracker = c.Tracker
 	if r.tracker == nil {
 		r.tracker = newAgentTracker()
+		r.tracker.notify = r.agentNotice
 	}
 	r.a.Model = c.Model
 	r.clockMu.Lock()

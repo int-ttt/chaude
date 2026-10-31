@@ -67,7 +67,7 @@
         ]
       },
       {
-        "matcher": "Read",
+        "matcher": "Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell",
         "hooks": [
           {
             "type": "command",

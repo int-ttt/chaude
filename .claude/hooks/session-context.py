@@ -4,7 +4,9 @@ continues after auto-compaction or in a new session, without /clear or re-readin
 import json, os, sys
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
-        _s.reconfigure(encoding="utf-8")
+        _reconf = getattr(_s, "reconfigure", None)
+        if _reconf:
+            _reconf(encoding="utf-8")
     except Exception:
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__

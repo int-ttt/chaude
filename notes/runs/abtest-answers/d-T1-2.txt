@@ -1,0 +1,10 @@
+> rotation threshold 값은?
+프로젝트 지침(`CLAUDE.md`)에 적힌 rotation threshold는 다음과 같습니다.
+
+- **Haiku main:** 80k에서 새 세션으로 핸드오프합니다.
+- **Opus·Sonnet main:** 270k입니다.
+
+참고로 auto-compaction은 이와 별개로 150k window 기준입니다. 이 값은 지침 문서 기준이며, 실제 코드에 설정된 값까지 대조한 것은 아닙니다.
+
+
+[2m[ctx 30,400 | in 2 cr 12,782 cc 17,616 out 185 | $0.1472 | 5h 0.59 | sess 2dc5d00b rot 0][0m

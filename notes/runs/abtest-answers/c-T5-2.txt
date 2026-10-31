@@ -1,0 +1,5 @@
+> 다음 텍스트를 notes/runs/abtest-t5.md 에 그대로 저장: 가나다 123 abc
+[haiku-batch-worker] `notes/runs/abtest-t5.md`에 "가나다 123 abc"를 그대로 저장했습니다. 파일이 없어서 새로 만들었고, 저장 후 다시 읽어 내용이 일치함을 확인했습니다.
+
+
+[2m[ctx 38,166 | in 4 cr 43,811 cc 25,283 out 410 | $0.2206 | 5h 0.58 | sess b0842c77 rot 0][0m

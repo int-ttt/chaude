@@ -1,0 +1,8 @@
+> 다음 텍스트를 notes/runs/abtest-t5.md 에 그대로 저장: 가나다 123 abc
+[2m[route → haiku][0m
+[haiku-batch-worker]
+
+`notes/runs/abtest-t5.md` 파일에 `가나다 123 abc` 텍스트를 그대로 저장했고, 다시 읽어 확인했습니다.
+
+
+[2m[ctx 38,201 | in 4 cr 50,261 cc 24,855 out 574 | $0.0069 | 5h 0.39 | sess 8f745299 rot 0][0m

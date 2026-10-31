@@ -97,3 +97,28 @@ func TestBackgroundAgentShownRunning(t *testing.T) {
 		t.Fatalf("notification must finish: %v", r)
 	}
 }
+
+func TestAgentDoneNotice(t *testing.T) {
+	var got []string
+	tr := newAgentTracker()
+	tr.notify = func(s string) { got = append(got, s) }
+	now := time.Now()
+	tr.onToolUse("f", "Agent", map[string]any{"description": "look up", "model": "haiku", "name": "scout", "prompt": "x"}, now)
+	tr.onSubEvent(event{"type": "assistant", "parent_tool_use_id": "f",
+		"message": map[string]any{"content": []any{map[string]any{"type": "text", "text": "report ready"}}}})
+	tr.onToolResultText("f", "found it")
+	tr.onToolResultText("f", "found it")
+	if len(got) != 1 || !strings.Contains(got[0], "haiku") || !strings.Contains(got[0], "report ready") {
+		t.Fatalf("foreground notices: %q", got)
+	}
+	tr.onToolUse("b", "Agent", map[string]any{"description": "bg job", "run_in_background": true}, now)
+	tr.onToolResultText("b", "Async agent launched successfully")
+	if len(got) != 1 {
+		t.Fatalf("launch must not notify: %q", got)
+	}
+	tr.onNotification("<task-notification><tool-use-id>b</tool-use-id></task-notification>")
+	tr.onNotification("<task-notification><tool-use-id>b</tool-use-id></task-notification>")
+	if len(got) != 2 || !strings.Contains(got[1], "상속") || !strings.Contains(got[1], "bg job") {
+		t.Fatalf("background notices: %q", got)
+	}
+}

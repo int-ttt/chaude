@@ -26,7 +26,7 @@ func TestRenderBar(t *testing.T) {
 }
 
 func TestDecorateUsage(t *testing.T) {
-	out := decorateUsage("Current session: 45% used\nother", 135_000)
+	out := decorateUsage("Current session: 45% used\nother", 75_000)
 	if !strings.HasPrefix(out, "Current session: 45% used  [") || !strings.Contains(out, "Context (now): [█████░░░░░] 50%") {
 		t.Errorf("bad output:\n%s", out)
 	}

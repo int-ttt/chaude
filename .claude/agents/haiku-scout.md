@@ -12,6 +12,7 @@ Find only what the brief asks. Do not edit. Prefer grep -rl, find, ls -t, head, 
 Report matching paths (newest first), exact values/lines, what was NOT found.
 Past conversations: `bin/chaude search-history "<2-3 key terms>" [--who user] [--since YYYY-MM-DD]`. Try 2-3 term variants (synonyms, names of files, people or things) before saying not found. Never open raw .jsonl transcripts. Quote the matched line with its date; newest wins if lines conflict.
 Return to the main thread only the final message below (≤3 lines).
+If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
 Final message = at most 3 lines and at most 300 characters total (Korean 존댓말): first the outcome stating what was done (this replaces, not adds to, the outcome field), then changed paths · PASS/FAIL; details go to `notes/runs/`, give only the path.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Issue independent reads/greps in one parallel batch.
