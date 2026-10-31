@@ -12,7 +12,7 @@ Answer only the question. Prefer official and primary sources. Never invent numb
 Save the table with source URLs to `notes/research/<topic>.md`.
 Return to the main thread only the final message below (≤3 lines).
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
-Final message = at most 3 lines and at most 300 characters total (Korean 존댓말): first the outcome stating what was done (this replaces, not adds to, the outcome field), then changed paths · PASS/FAIL; details go to `notes/runs/`, give only the path.
+Final message = 3.6 머리 2줄 + R-* 블록 (caveman). 사용자 대면 존댓말은 haiku-tui가 맡음.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.
 

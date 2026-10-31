@@ -16,7 +16,7 @@ First read `notes/FACTS.md` and `notes/DECISIONS.md`. Use only facts from them o
 5. Self-check before returning: grep each target for the new text and absence of the old text.
 Return content (the final message, ≤3 lines, ≤300 chars) covers: files changed · char counts (if limited) · self-check PASS/FAIL · "사용자 확인 필요". Changed sentences go to `notes/runs/` (path in the reply) unless the brief asks to show them.
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
-Final message = at most 3 lines and at most 300 characters total (Korean 존댓말): first the outcome stating what was done (this replaces, not adds to, the outcome field), then changed paths · PASS/FAIL; details go to `notes/runs/`, give only the path.
+Final message = 3.6 머리 2줄 + R-* 블록 (caveman). 사용자 대면 존댓말은 haiku-tui가 맡음.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.
 
