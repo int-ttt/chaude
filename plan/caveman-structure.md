@@ -1,0 +1,191 @@
+# caveman 기반 새 구조 설계 계획서
+
+status: 설계안 v1 (구현 코드·측정 절차 미포함)
+date: 2026-10-31
+scope: 하네스 내부 메시지 경로를 "caveman 채널(형식 고정 축약)"과 "사용자 채널(한국어 존댓말)"로 분리하는 구조 설계
+not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 재실행
+
+## 0. 이전 결과에서 가져온 제약 (근거만 인용, 재측정 없음)
+
+- C1: 자유 축약형 전체 caveman은 비채택. 한정어·검색 범위·잘림 여부가 먼저 사라짐 (notes/runs/261030-plan-caveman-relay-read-review.md:8, :14-15)
+- C2: 형식 고정 반환 스키마만 조건부 검토 대상 (notes/runs/261030-plan-caveman-relay-read.md:40-47, notes/runs/261030-plan-caveman-relay-flow.md:52)
+- C3: 한정어(only, except, not, unless, 미확인)는 압축 금지. 예: "36번만 해당" -> "36 해당"은 의미 변경 (read.md:20)
+- C4: 번역 전용 hop 추가 금지. scout가 같은 실행 안에서 한국어 요약을 직접 씀 (read.md:25). 중계 단계 3개 이상이면 절감 상쇄 가능성 높음 (flow.md:83)
+- C5: opus-architect는 Agent 도구만 있어 [ws:<id>] 줄을 직접 낼 수 없음. 라우팅 주체는 메인 세션/하네스 (notes/runs/261030-plan-caveman-relay-flow-review.md:23)
+- C6: 서브에이전트는 부모 맥락을 기본 상속하지 않음(fork만 상속), Agent 호출 model 인자는 alias만 (notes/runs/261030-plan-caveman-relay-structure-review.md:5). 따라서 필요한 맥락은 브리프에 직접 적어야 함
+- C7: CLAUDE.md:4 "Korean, 존댓말."은 서브에이전트에도 적재됨. 에이전트 파일만 바꾸면 규칙 충돌 (notes/runs/261030-plan-caveman-relay-impl-review.md:8)
+- C8: 차단형 훅은 실행 중 세션·코딩 작업을 막을 수 있음. allowlist 밖 전부 차단 금지, 구현은 별도 worktree에서만, stash 금지 (impl-review.md:5, :10, :15, :38)
+- C9: 비용 근거는 조건 A 1회뿐 (total_cost_usd=0.5437, output=6196; notes/deprecated/261030-run-caveman-relay.md:5). B·C 미실행, 모델 단가는 billing.md에 없음 (같은 파일 :9). 따라서 본 구조의 절감량은 미확인
+- C10: 현 구조는 이미 "메인 -> opus-architect(Agent만) -> haiku-*" 패턴 (structure-review.md:22). 새 구조는 이 골격을 유지하고 메시지 형식만 바꿈
+
+## 1. 목표
+
+- G1: 사람이 읽지 않는 hop(에이전트 간 브리프·반환)을 형식 고정 축약으로 통일
+- G2: 축약해도 근거(경로:행), 한정어, 검색 범위, 잘림 여부는 필드로 강제 보존
+- G3: 사용자에게 가는 텍스트만 한국어 존댓말. 번역 전용 단계를 새로 만들지 않음 (C4)
+- G4: 기존 에이전트 체계·모델 고정·메인 스레드 가드 동작은 그대로 둠
+- 절감 목표 수치: 미확인 (C9, 본 문서에서 정하지 않음)
+
+## 2. 구조 개요: 채널 3층
+
+| 층 | 경로 | 언어·형식 |
+|---|---|---|
+| L0 사용자 채널 | 사용자 <-> 메인 세션 | 한국어 존댓말, 자연문 |
+| L1 지휘 채널 | 메인 <-> opus-architect / sonnet-analyst / sonnet-reviewer | caveman 브리프(B형식) / 결정 반환(R-decide) |
+| L2 작업 채널 | opus·sonnet <-> haiku-* | caveman 브리프(B형식) / 읽기·쓰기 반환(R-read, R-write) |
+
+- rule_1: caveman은 L1·L2 전용. L0으로 나가는 문장은 그 문장을 쓰는 마지막 작성자가 처음부터 한국어로 씀
+- rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둘 수 있음. 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음
+- rule_3: 중계 단계 수는 현 구조보다 늘리지 않음 (C4)
+
+## 3. 메시지 형식 정의
+
+### 3.1 브리프 B형식 (하향)
+
+```
+task: <한 줄 동사구>
+paths: <절대경로>[:<행범위>], ...
+ctx: E<n>: <경로>:<행> / <수치 또는 인용 요지>   (상속 없음, C6)
+limits: <수정 금지 경로>, <금지 행위>
+return: R-read | R-write | R-decide, <상한(자 또는 줄)>
+lang: caveman | ko
+```
+
+- ctx의 E<n> 근거 행 형식은 이전 정의를 재사용 (notes/deprecated/261030-plan-caveman-relay.md:16-19)
+- 사용자 원문·한국어 값은 ctx 안에서도 verbatim
+
+### 3.2 읽기 반환 R-read
+
+```
+claim: <경로>:<행> | <사실 또는 원문 인용> [확실|추정|불확실]
+searched: <본 경로·패턴>
+not_found: <찾았으나 없음 확인>
+not_checked: <안 본 범위>
+truncated: yes|no ; omitted: <생략 항목 또는 ->
+summary_ko: <선택, 1~5줄>
+```
+
+- not_found와 not_checked는 합치지 않음 ("없음"과 "안 봄" 구분, read-review.md:15)
+
+### 3.3 쓰기 반환 R-write
+
+```
+changed: <경로 목록>
+diffstat: <git diff --stat 요지>
+check: <명령> -> PASS|FAIL
+ws: <작업 공간 id | none>
+summary_ko: <선택, 1~5줄>
+```
+
+- 필드 목록은 flow.md:58-61 정의를 그대로 씀
+
+### 3.4 결정 반환 R-decide
+
+```
+decision: <한 줄>
+why: <근거 E<n> 참조>
+rejected: <버린 안: 이유>
+risks: <항목>
+open_q: <사용자만 답할 수 있는 질문 | ->
+plan_path: <경로 | ->
+summary_ko: <1~5줄, L0 전달용>
+```
+
+### 3.5 caveman 허용·금지 범위
+
+- 허용: 조사·접속어·인사·머리말 생략, key: value, 명사구, 영어 키
+- 금지: 한정어 삭제(C3), 수치의 단위·대상 생략, 경로·행 생략, 확실도 표시 삭제, not_found/not_checked 병합, 한국어 값 번역·축약
+- 빈 필드는 키를 지우지 않고 "-"로 둠 (필드 누락과 "해당 없음" 구분)
+
+## 4. 에이전트별 적용표
+
+| 에이전트 | 받는 형식 | 내는 형식 | 비고 |
+|---|---|---|---|
+| 메인 세션 | L0 한국어 | L1 B형식 | 사용자에게는 summary_ko만 전달 |
+| opus-architect | B형식 | R-decide | 계획 파일 본문은 노트 규칙(영어 key: value) 따름 |
+| sonnet-analyst | B형식 | R-decide 또는 R-write | |
+| sonnet-reviewer | B형식 | R-decide (decision=verdict) | |
+| haiku-scout, haiku-researcher | B형식 | R-read | 1단계 적용 대상 |
+| haiku-coder, haiku-batch-worker, haiku-runner | B형식 | R-write | |
+| haiku-checker | B형식 | R-write (check 필드 중심) | |
+| haiku-drafter | B형식 | R-write | 산출 문서 자체는 한국어 유지 (L0 산출물) |
+| haiku-extractor | 기존 | 기존 | 파일 출력 전용, 변경 없음 |
+| haiku-prompter | B형식 | 라운드 로그 | TUI 로그가 L0인지 미정 (Q2) |
+
+## 5. 규칙 충돌 해소 (CLAUDE.md:4, C7)
+
+- O1: CLAUDE.md 4행 범위를 "사용자에게 보이는 텍스트"로 한정하고 에이전트 간 반환은 caveman 형식이라고 명시
+  - 장점: 단일 출처, 모든 에이전트 일관
+  - 단점: 전역 규칙 변경, 사용자 승인 필요
+- O2: haiku-scout.md, haiku-researcher.md에만 예외 1줄 추가, 나머지 불변 (read.md:69)
+  - 장점: 변경 범위 최소, 되돌리기 쉬움
+  - 단점: CLAUDE.md와 충돌 상태 유지, L2 읽기 경로에만 적용
+- O3: 브리프 lang 필드로 호출마다 지정, 파일 변경 없음
+  - 장점: 파일 변경 0
+  - 단점: 매 브리프 비용, 누락 시 한국어로 회귀
+- choice: 1단계는 O2(+ 브리프 lang 필드 병기), 사용자 승인 시 마지막 단계에서 O1로 통합하고 O2 예외줄 제거
+- why: O1은 사용자만 승인할 수 있고(Q1), O2는 승인 없이도 범위가 작아 되돌리기 쉬움
+
+## 6. 형식 감시 (차단 아님)
+
+- component: 신규 훅 .claude/hooks/caveman-format.py (이름 제안)
+- 위치: Agent 호출 반환 직후 검사 (PostToolUse 대상 도구 matcher 이름은 미확인)
+- mode: 환경변수 CAVEMAN_GUARD=log|warn|off, 기본 log (impl.md:80의 log 기본값 원칙 재사용)
+  - log: 누락 필드를 notes/metrics/<날짜>.jsonl에 1행 기록
+  - warn: 호출자 맥락에 "필수 필드 누락: <키>, 재요청" 1줄 주입
+  - 어느 모드에서도 도구 실행 차단·종료 코드 차단 없음 (C8)
+- 검사 항목: 형식별 필수 키 존재, truncated 값 yes|no, claim 행의 "<경로>:<행> |" 패턴
+- 검사 불가 항목: 한정어 손실은 정적 검사로 판별 불가 -> 감시 범위 밖으로 명시
+
+## 7. 라우팅·작업 공간 경계
+
+- [ws:<id>] 표기와 세션 재개는 메인/하네스 책임 (C5, internal/harness/orchws.go:78-101)
+- 상위 에이전트는 R-write의 ws 값을 다음 브리프에 "ws: <id> 이어서"로 적기만 함
+- mode f는 --clients-file 설정 시에만 live 자식을 둠 (repl.go:204-208). 기본 실행 활성 여부 미확인 -> ws 필드는 none 허용
+
+## 8. 적용 단계 (설계 순서, 실행 아님)
+
+- S0 정본: 형식 정의 정본 1개를 docs/claude-lean/CAVEMAN_FORMAT.md에 둠. 각 에이전트 파일에는 자기 반환 템플릿 블록만 복사 (상속 없음 C6, 매번 파일 읽기 비용 회피)
+- S1 읽기 경로: haiku-scout, haiku-researcher에 R-read 템플릿 + O2 예외줄
+- S2 쓰기 경로: haiku-coder, haiku-batch-worker, haiku-runner, haiku-checker, haiku-drafter에 R-write 템플릿
+- S3 지휘 경로: opus-architect, sonnet-*에 B형식 작성 규칙과 R-decide 템플릿
+- S4 감시: caveman-format.py를 log 모드로 등록
+- S5 통합: 사용자 승인(Q1) 시 CLAUDE.md:4 범위 한정(O1), O2 예외줄 제거
+- 공통: 단계마다 별도 worktree 브랜치·별도 커밋, 되돌리기는 해당 단계 커밋 revert. master 작업 트리에서 직접 적용 금지 (C8)
+
+## 9. 바꾸지 않는 것
+
+- main-thread-guard.py, agent-model-pin.py 동작
+- fork 미사용, subagent_type은 정의된 에이전트만 (structure.md:30-31)
+- L0 한국어 존댓말 규칙
+- haiku-drafter가 만드는 사용자 문서의 언어
+- notes/* 기존 기록과 이전 계획 파일
+
+## 10. 설계 정합성 확인 항목 (정적 확인, 측정 아님)
+
+- 각 에이전트 파일의 반환 템플릿이 정본과 문자열 일치
+- CLAUDE.md·에이전트 파일 간 언어 규칙 충돌 0건 (S5 전에는 O2 예외 2파일만 허용)
+- 훅 기본값 log, 모든 모드에서 차단 경로 없음
+- haiku-drafter 산출물·L0 경로는 한국어 유지
+
+## 11. 위험
+
+- R1: 짧은 작업에서 필수 키 때문에 반환이 오히려 길어질 수 있음. 완화: 빈 값 "-" 허용, summary_ko 선택
+- R2: 영어 키와 한국어 값 혼합으로 Haiku가 값까지 영어로 바꿀 수 있음. 완화: 3.5 금지 항목에 명시
+- R3: 정본과 에이전트 파일 사본 불일치. 완화: 10절 문자열 일치 확인
+- R4: summary_ko와 본문 내용 불일치(요약이 한정어 누락). 완화: summary_ko에도 C3 적용
+- R5: 감시 훅이 형식만 보고 내용 누락은 못 잡음 (6절 검사 불가 항목)
+
+## 12. 사용자만 답할 수 있는 질문
+
+- Q1: CLAUDE.md:4 범위 한정(O1)을 승인하시는지
+- Q2: TUI에 보이는 haiku-prompter 라운드 로그를 L0(한국어)로 볼지 (impl.md:161 U1)
+- Q3: worktree 기준점에 현재 master의 미커밋 변경을 포함할지 (impl.md:161 U10)
+
+## 13. 미확인
+
+- 본 구조의 토큰·비용 절감량
+- 모델별 단가 (billing.md 미기재)
+- 반환 검사용 PostToolUse matcher 이름
+- mode f 기본 활성 여부
+- 서브에이전트 캐시가 부모와 공유되는지
