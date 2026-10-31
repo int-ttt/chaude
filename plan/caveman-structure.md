@@ -152,12 +152,12 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 ## 6. 형식 감시 (차단 아님)
 
 - component: 신규 훅 .claude/hooks/caveman-format.py (이름 제안)
-- 위치: Agent 호출 반환 직후 검사 (PostToolUse 대상 도구 matcher 이름은 미확인, U3 보류, 구현 단계에서 처리)
+- 위치: Agent 호출 반환 직후 검사 (PostToolUse 대상 도구 matcher 이름은 Agent|Task (U3 결정됨))
 - mode: 환경변수 CAVEMAN_GUARD=log|warn|off, 기본 log. impl.md:80 원안은 log|enforce|off였으나 enforce는 차단이므로 C8에 따라 제외하고 비차단 warn으로 대체. 원안 log는 "차단했을 호출" 기록, 여기서 log는 "필수 필드 누락" 기록으로 의미가 다름
   - log: 누락 필드를 notes/metrics/<날짜>.jsonl에 1행 기록
   - warn: 호출자 맥락에 "필수 필드 누락: <키>, 재요청" 1줄 주입
   - 어느 모드에서도 도구 실행 차단·종료 코드 차단 없음 (C8)
-- 검사 항목: 형식별 필수 키 존재, truncated 값 yes|no, claim 행의 "<경로>:<행> |" 패턴, status 값 4종 중 하나, lang: ko 브리프의 반환에 summary_ko 존재 (훅이 브리프 본문을 볼 수 있는지 미확인), 검사 가능 여부 미정 (U7 보류)
+- 검사 항목: 형식별 필수 키 존재, truncated 값 yes|no, claim 행의 "<경로>:<행> |" 패턴, status 값 4종 중 하나, lang: ko 브리프의 반환에 summary_ko 존재 (tool_input.prompt로 확인, U7 결정됨)
 - 검사 불가 항목: 한정어 손실은 정적 검사로 판별 불가 -> 감시 범위 밖으로 명시
 - 감시 대상 언어 규칙 (Q2 결정): 한국어 존댓말 검사는 haiku-tui 출력에만 적용. haiku-prompter 전달문(전달문 = 원문 + 요약, U8 = c)은 B형식 필수 키(task·paths·limits·return·lang) 검사 대상이고 존댓말 검사 제외. 검사 불가 항목은 그대로
 
@@ -165,7 +165,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 
 - [ws:<id>] 표기와 세션 재개는 메인/하네스 책임 (C5). 하네스는 internal/harness/orchws.go:78-101에서 ws 줄을 parseWS로 파싱해 haiku로 보내고 저장된 세션을 재개함
 - 상위 에이전트는 R-write의 ws 값을 다음 브리프에 "ws: <id> 이어서"로 적기만 함
-- mode f는 --clients-file 설정 시에만 live 자식을 둠 (repl.go:204-208). 기본 실행 활성 여부 미확인 -> ws 필드는 none 허용
+- mode f는 기본 실행에서 live 자식을 둠 (repl.go:1090, :204-208; --clients-file=""일 때만 꺼짐) -> ws 필드는 none 허용
 
 ## 8. 적용 단계 (설계 순서, 실행 아님)
 
@@ -225,17 +225,17 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 
 (Q1~Q3 외 미확인·결정 항목 묶음. 각 항목 질문 1개 + 선택지. 본문 13장 등은 그대로 둠)
 - 결정됨: U1, U2, U5, U6, U8, U9, U10 (U5 = 캐시 비공유, 서브에이전트는 자기 결과만 부모에 전달; U8 = (c) 원문 + 요약)
-- 보류: U3, U4, U7 (사용자 판단 없음, 구현 단계에서 처리)
+- 결정됨(구현 조사): U3, U4, U7 (261031)
 - 미확인: U8 해석 확인 1건 ("사용자 대면 출력은 haiku-tui가 맡는다" 해석은 사용자 답변에 없어 맞음으로 간주하지 않음)
 
 - U1 (13장 1, 1절): 절감 목표 수치를 정하시겠습니까? [결정됨: (a)]
   - 선택지: (a) 정하지 않고 구현 후 측정해 판단 (b) 목표 수치를 직접 지정 (c) 조건 B/C 측정을 먼저 하고 결정
 - U2 (13장 2): 모델별 단가 자료를 제공하시겠습니까? [결정됨: (b)]
   - 선택지: (a) 단가를 직접 제공 (b) 공식 문서 조사를 의뢰 (c) 단가 없이 토큰 수 기준으로만 판단
-- U3 (13장 3, 6절): 반환 검사 훅의 PostToolUse matcher 이름을 어떻게 확인하시겠습니까? [보류(사용자 판단 없음, 구현 단계에서 처리)]
+- U3 (13장 3, 6절): 반환 검사 훅의 PostToolUse matcher 이름을 어떻게 확인하시겠습니까? [결정됨(구현 조사): PostToolUse matcher = Agent|Task, settings.json PreToolUse:50과 동일]
     - 맥락: 반환 검사 훅이 걸릴 도구 호출 이름(PostToolUse matcher)을 아직 확인하지 못함
   - 선택지: (a) 구현 단계에서 조사 (b) 지금 조사 의뢰 (c) 훅 없이 진행하고 6절 보류
-- U4 (13장 4, 7절): mode f(--clients-file)를 기본으로 사용하십니까? [보류(사용자 판단 없음, 구현 단계에서 처리)]
+- U4 (13장 4, 7절): mode f(--clients-file)를 기본으로 사용하십니까? [결정됨(구현 조사): 기본 실행에서 활성, repl.go:1090 기본값 ~/.chaude/clients.json, --clients-file=""일 때만 꺼짐; ws 키 필수, 값 none 허용]
     - 맥락: 기본 실행에서 mode f의 live 자식이 켜지는지 확인하지 못함(--clients-file 설정 시에만 켜짐)
   - 선택지: (a) 사용 (b) 미사용 (c) 모름, 구현 전에 확인
 - U5 (13장 5): 서브에이전트 캐시가 부모와 공유되는지 조사할까요? [결정됨: 공유하지 않음; 서브에이전트는 자기 결과만 부모에 전달]
@@ -243,7 +243,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
   - 선택지: (a) 구현 전 조사 (b) 조사 없이 진행 (c) 구현 후 비용 측정으로 판단
 - U6 (구 Q3, 8절): worktree 기준점을 무엇으로 하시겠습니까? [결정됨: (b)]
   - 선택지: (a) master 미커밋 변경 포함 (b) 커밋된 HEAD 기준 (c) 미커밋 변경을 먼저 커밋한 뒤 분기
-- U7 (6절): lang: ko 브리프 여부를 훅이 볼 수 있는지 불확실한데, summary_ko 필수 검사를 어떻게 하시겠습니까? [보류(사용자 판단 없음, 구현 단계에서 처리)]
+- U7 (6절): lang: ko 브리프 여부를 훅이 볼 수 있는지 불확실한데, summary_ko 필수 검사를 어떻게 하시겠습니까? [결정됨(구현 조사): PostToolUse 입력에 tool_input.prompt 포함, lang: ko 줄 있으면 summary_ko 검사]
     - 맥락: 훅이 lang: ko 브리프 본문을 볼 수 있는지 불확실하여 summary_ko 필수 검사 가능 여부를 모름
   - 선택지: (a) 검사 보류 (b) 구현 단계에서 확인 후 결정 (c) summary_ko를 항상 필수로 변경
 - U8 (4절, Q2 후속): haiku-prompter가 opus 세션에 보내는 전달문 형식은 무엇으로 하시겠습니까? 그리고 "메인 세션의 사용자 대면 출력을 haiku-tui가 맡는다"는 2절 해석이 맞습니까? [결정됨: (c) 원문 + 요약. 해석 확인됨: 맞음 (261031)]
