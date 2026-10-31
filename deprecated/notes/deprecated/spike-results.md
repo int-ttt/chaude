@@ -1,3 +1,5 @@
+> DEPRECATED (2026-10-31): Phase0 spike 증거 디렉터리 없음, 참조 0건
+
 # Phase 0 spike results
 asof: 2026-10-28
 claude: 2.1.312 (Claude Code), macOS, model haiku (claude-haiku-5-5), login = existing subscription (init apiKeySource: none)

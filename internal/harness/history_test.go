@@ -53,7 +53,7 @@ func TestInputHistoryCap(t *testing.T) {
 }
 
 func TestRewindState(t *testing.T) {
-	bl := []block{{"user", "/help"}, {"note", "n"}, {"user", "one"}, {"asst", "r1"}, {"user", "two"}, {"asst", "r2"}}
+	bl := []block{{"user", "/help", false}, {"note", "n", false}, {"user", "one", false}, {"asst", "r1", false}, {"user", "two", false}, {"asst", "r2", false}}
 	var s rewindState
 	if s.Open(nil) {
 		t.Fatal("nothing to rewind")

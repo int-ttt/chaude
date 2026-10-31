@@ -1,3 +1,5 @@
+> DEPRECATED (2026-10-31): 참조 0건, 원본 계획
+
 # plan: multiproc finish + v0.8.0 release
 date: 261029
 status: plan only. no source edited.

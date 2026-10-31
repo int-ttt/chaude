@@ -175,6 +175,8 @@ type Repl struct {
 	agents          *agentStore // on-disk agent state (nil/empty path = off)
 	draining        []*drain
 	lastReply       string
+	lastMeasure     string // "[측정] ..." line of the turn that just ended (saved by recordSave)
+	recTopic        string
 	lastReco        string
 	lastRotFail     time.Time
 	notices         []string
@@ -891,6 +893,7 @@ func (r *Repl) thresholdFor(model string) int {
 func shouldRotate(ctx, thr int) bool { return ctx >= thr }
 
 func (r *Repl) handle(line string) {
+	r.lastMeasure = ""
 	r.pollDrains()
 	r.tracker.dismissRestored()
 	r.budget.reset()
@@ -954,6 +957,10 @@ func (r *Repl) handle(line string) {
 		fields[k] = v
 	}
 	_ = r.metrics.Log(fields)
+	r.lastMeasure = measureLine(fields)
+	if r.lastMeasure != "" {
+		r.p(r.lastMeasure, "\n")
+	}
 	newCat, catRot := categoryRotation(line, reply, r.cat, r.a.NoCategoryRotate)
 	if newCat != "" || catRot {
 		_ = r.metrics.Log(map[string]any{"stage": "category", "from": r.cat, "to": newCat, "switch": catRot, "session": r.sess.SessionID})
@@ -1052,7 +1059,11 @@ func (r *Repl) loop() int {
 			continue
 		}
 		if f := strings.Fields(line); f[0] == "/resume" {
-			r.resumeLine(f[1:]...)
+			if len(f) > 1 && f[1] == "claude" {
+				r.resumeLine(f[2:]...)
+			} else {
+				r.recordResumePlain(strings.Join(f[1:], " "))
+			}
 			continue
 		} else if f[0] == "/import" {
 			a := "latest"
@@ -1067,6 +1078,7 @@ func (r *Repl) loop() int {
 			continue
 		}
 		r.handle(line)
+		r.recordSave(line)
 	}
 	return 0
 }
@@ -1094,7 +1106,7 @@ func Main(args []string) int {
 	fs.IntVar(&a.SnapshotChars, "snapshot-chars", 24000, "")
 	fs.BoolVar(&a.AutoAllow, "auto-allow", false, "allow all permission prompts (testing)")
 	fs.BoolVar(&a.ShowRotation, "show-rotation", false, "print a one-line rotation marker")
-	fs.StringVar(&a.MetricsDir, "metrics-dir", filepath.Join("notes", "metrics"), "per-turn JSONL metrics dir (empty=off)")
+	fs.StringVar(&a.MetricsDir, "metrics-dir", "auto", "per-turn JSONL metrics dir (auto=<record>/metrics, empty=off)")
 	fs.BoolVar(&a.NoValidate, "no-handoff-validate", false, "disable handoff validation (safety guard)")
 	fs.IntVar(&a.MaxDrain, "max-drain", 3, "max concurrently draining old sessions (0=never drain)")
 	fs.DurationVar(&a.DrainTimeout, "drain-timeout", 60*time.Minute, "give up waiting for draining agents")
@@ -1118,6 +1130,9 @@ func Main(args []string) int {
 			return 0
 		}
 		return 2
+	}
+	if a.MetricsDir == "auto" {
+		a.MetricsDir = filepath.Join(recordDir(a.Cwd), "metrics")
 	}
 	mode, err := parseOrch(a.Orch)
 	if err != nil {

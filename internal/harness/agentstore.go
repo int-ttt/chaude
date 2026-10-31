@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -89,15 +88,6 @@ func (s *agentStore) put(recs []savedAgent) {
 		s.m[a.ID] = a
 	}
 	s.flushLocked()
-}
-
-// pidAlive reports whether a process exists (signal 0).
-func pidAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
 }
 
 // interruptRunning marks stored running agents interrupted: those of this process (shutdown, own=true)

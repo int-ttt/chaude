@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SubagentStop hook: append each agent's short result to notes/LEDGER.md (no model tokens).
+"""SubagentStop hook: append each agent's short result to record/LEDGER.md (no model tokens).
 Records the model the agent actually ran on (read from its transcript), flagged when it differs
 from the model its name says. Gives continuity across auto-compaction and new sessions without /clear."""
 import glob, json, os, re, sys, time
@@ -94,7 +94,8 @@ if model:
     if want in ("haiku", "sonnet", "opus") and want not in model:
         tag += " ⚠ 이름과 다름"
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
-path = os.path.join(root, "notes", "LEDGER.md")
+rec = os.environ.get("HARNESS_RECORD_DIR") or os.path.join(root, "record")
+path = os.path.join(rec, "LEDGER.md")
 lines = [l.strip() for l in msg.splitlines() if l.strip()][:3]
 entry = f"- {time.strftime('%m-%d %H:%M')} [{tag}] " + " / ".join(lines)[:300] + "\n"
 os.makedirs(os.path.dirname(path), exist_ok=True)

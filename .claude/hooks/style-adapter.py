@@ -4,7 +4,7 @@
 - "일반모드" / "절약모드" switch claude-lean off / on for this project (no model call). While off,
   every prompt gets a [normal] tag and nothing else below runs.
 - Status checks ("진행상황", "끝났어?") are answered from logs/*.status without calling the model.
-- Plain information statements are queued in notes/INBOX.md without calling the model, then
+- Plain information statements are queued in record/INBOX.md without calling the model, then
   delivered together with the next instruction. Disable with STYLE_INBOX=0; end a message with
   "?" or "!" to send it to the model immediately.
 - Everything else gets a one-line tag so the main thread handles it with minimal thinking:
@@ -24,8 +24,8 @@ from _lean import lean_off, OFF_FLAG
 data = json.load(sys.stdin)
 prompt = (data.get("prompt") or "").strip()
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
-notes = os.path.join(root, "notes")
-inbox = os.path.join(notes, "INBOX.md")
+rec = os.environ.get("HARNESS_RECORD_DIR") or os.path.join(root, "record")
+inbox = os.path.join(rec, "INBOX.md")
 
 
 def block(msg):
@@ -124,7 +124,7 @@ if (os.environ.get("STYLE_INBOX", "1") != "0" and 8 <= len(prompt) <= 120 and "\
         and prompt.count(".") <= 1 and not prompt.endswith("!") and not re.match(CORRECTION, prompt)
         and not re.search(IMPERATIVE, prompt) and not re.search(QUESTION, prompt)
         and re.search(DECLARATIVE, prompt) and not last_reply_asks()):
-    os.makedirs(notes, exist_ok=True)
+    os.makedirs(rec, exist_ok=True)
     with open(inbox, "a", encoding="utf-8") as f:
         f.write(f"- {time.strftime('%m-%d %H:%M')} {prompt}\n")
     n = len(tail(inbox, 1000))
@@ -179,12 +179,12 @@ if pending:
 # 3. Long pasted text → file, so briefs carry a path instead of the text.
 if len(prompt) > 1500 or prompt.count("\n") > 20 or "<pasted_content" in prompt:
     h = hashlib.sha1(prompt.encode()).hexdigest()[:8]
-    path = os.path.join(notes, "pastes", f"{h}.md")
+    path = os.path.join(rec, "pastes", f"{h}.md")
     dup = os.path.exists(path)
     if not dup:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         open(path, "w", encoding="utf-8").write(prompt)
-    tags.append(f"[paste] {'same text as before, already at' if dup else 'saved to'} notes/pastes/{h}.md — give agents this path; never quote the text in briefs.")
+    tags.append(f"[paste] {'same text as before, already at' if dup else 'saved to'} record/pastes/{h}.md — give agents this path; never quote the text in briefs.")
 
 # 4. One-line routing tags for short prompts.
 p = prompt.rstrip(".!~ ")

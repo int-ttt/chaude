@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0-r1
+- record 기록 기능 추가(internal/harness/record*.go)
+- 에이전트 반환 템플릿에 3.6 status·reason 머리 2줄 추가, 반환 규칙 정리(I9)
+- 진행 보고 규칙 추가: status 줄 형식(step/pct), scout 상한 120s·10분, haiku-tui 존댓말 1줄 렌더
+- caveman-format 훅 재작성: haiku-tui 존댓말·haiku-prompter 브리프 검사 추가, 테스트 tests/hooks로 통합
+- haiku-prompter 브리프·반환 형식 보완, 훅 재작성 전 기준선 스냅샷 커밋
+- deprecated/ 정리: 이전 노트·가져오기 자료를 deprecated/ 아래로 이동
+- 버전 표기: cmd/chaude/main.go, docs/claude-lean/README.md를 0.9.0-r1로 갱신
+
 ## 0.9.0
 - caveman 형식 정본 docs/claude-lean/CAVEMAN_FORMAT.md 신설 (S0)
 - haiku-scout·haiku-researcher R-read 템플릿, 감시 훅 caveman-format.py(PostToolUse Agent|Task, 기본 log, 비차단) 등록 (S1)

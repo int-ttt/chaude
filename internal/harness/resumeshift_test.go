@@ -43,7 +43,7 @@ func TestImportShowsTurnsInTUI(t *testing.T) {
 	r := &Repl{tracker: newAgentTracker()}
 	m := newTUIModel(r, make(chan string, 1))
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
-	m.blocks = []block{{"user", "/import abc"}}
+	m.blocks = []block{{"user", "/import abc", false}}
 	m.Update(importedMsg{turns: [][2]string{{"첫 질문", "첫 답변"}, {"둘째 질문", "둘째 답변"}}})
 	var got []string
 	for _, b := range m.blocks {

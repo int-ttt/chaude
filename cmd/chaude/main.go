@@ -13,11 +13,11 @@ import (
 )
 
 // version is set at release time: -ldflags "-X main.version=X.Y.Z".
-var version = "0.9.1"
+var version = "0.9.0-r1"
 
 const usage = `usage: chaude <command> [args]
   repl [flags]           terminal REPL over claude -p stream-json with session rotation (default with no command)
-  metrics [--dir D] [--csv]   summarize per-turn metrics (notes/metrics)
+  metrics [--dir D] [--csv]   summarize per-turn metrics (record/metrics)
   --from-claude ID|latest|PATH [--import-dry-run]   start a repl from a plain Claude Code session
   --version              print version
   gen-settings <os>      print/write OS-specific .claude/settings.json (mac|linux|windows) [--out FILE]

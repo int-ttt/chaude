@@ -1,23 +1,3 @@
-- 10-28 23:55 [agent] hook 내용 열어보고 묶음 확정해
-- 10-28 23:55 [agent] ㅇㅇ 테스트 해봐
-- 10-28 23:56 [agent] ㅇㅇ 구현하고 빌드해
-- 10-28 23:56 [agent] <summary> / 1. Primary Request and Intent: / I am the sonnet-analyst subagent working for a coordinator (the main thread) on /Users/leekwangseok/PycharmProjects/claude-harness. The original task, quoting the user: "장기 세션(현재 이 프로젝트를 기획한 이유, 한 항목에 대한 대화를 끊김 없이 이용하는것)을 유지하는것에 유리한 방향으로 개선점을 찾아". I analy
-- 10-28 23:58 [agent] <summary> / Compact instructions (from CLAUDE.md): keep only open workstreams with their goal and next action, the pending `추천:` default, active agent IDs and what each holds, paths of final files, and unresolved user requests. Drop agent outputs, resolved corrections and anything already in notes/.
-- 10-29 00:01 [agent] ㅇㅇ 둘 다 해
-- 10-29 00:04 [agent] ㅇㅇ 구현하고 빌드해
-- 10-29 00:06 [agent] ㅇㅇ 한국어 유지하자
-- 10-29 00:06 [agent] 결과 나오면 바로 정리해줘
-- 10-29 00:06 [agent] ㅇㅇ 구현하고 빌드해
-- 10-29 00:10 [agent] 진행상황 알려줘
-- 10-29 00:11 [agent] 하네스에서 이 대화 이어가며 테스트해
-- 10-29 00:16 [agent] ㅇㅇ 추가하고 전환 테스트해
-- 10-29 00:21 [agent] 진행상황 알려줘
-- 10-29 00:23 [agent] relay로 해
-- 10-29 00:23 [agent] relay로 해
-- 10-29 00:23 [agent] klaud로 해
-- 10-29 00:27 [agent] 진행상황 알려줘
-- 10-29 00:28 [agent] ㅇㅇ gh 로그인 방식으로 바꿔
-- 10-29 00:28 [agent] 이름 변경도 같이 진행해
 - 10-29 00:29 [agent] ㅇㅇ 그렇게 해
 - 10-29 00:29 [agent] <summary> / 1. Primary Request and Intent: / I am a sonnet-analyst subagent in /Users/leekwangseok/PycharmProjects/claude-harness. Standing agent rules: write user-facing answers in Korean 존댓말. Agent-read notes are terse English `key: value`. Return ≤5 lines. Do not commit. Do not invent facts. Dele
 - 10-29 00:30 [agent] ㅇㅇ 확인해봐
@@ -298,3 +278,23 @@
 - 10-31 19:04 [haiku-coder · haiku 5.5] Sonnet 티어 제거(step 9)와 검증(step 10)을 마쳤습니다. go build/vet/test 및 hook 테스트 모두 exit 0입니다. / 변경: .claude/agents/sonnet-{analyst,reviewer}.md 삭제, .claude/hooks/agent-model-pin.py, tests/hooks/test_orch_gate.py 수정 (상세 `notes/runs/261031-haiku-model-policy-impl.md` §7). / PASS (go build/vet/test, unittest 10
 - 10-31 19:44 [opus-architect · opus 5.5] I've sent haiku-scout to map the spawn paths and roles. I'll wait for its results before deciding anything.
 - 10-31 20:14 [haiku-scout · haiku 5.5] status: done / reason: - / claim: /Users/leekwangseok/PycharmProjects/claude-harness/plan/caveman-structure.md:81-91 | "### 3.3 쓰기 반환 R-write / changed: <경로 목록> / diffstat: <git diff --stat 요지> / check: <명령> -> PASS|FAIL / ws: <작업 공간 id | none> / summary_ko: <lang: ko일 때 필수, 1~5줄>" 블록 자체에는 status·re
+- 10-31 20:32 [haiku-scout · haiku 5.5] status: done / reason: - / claim: /Users/leekwangseok/PycharmProjects/claude-harness/notes/runs/261031-plan-progress-report.md:1-69 | 전문 verbatim, 3328자 (≤4000, 생략 없음) [확실]
+- 10-31 20:43 [opus-architect · opus 5.5] I started three scouts at the same time to check the plan items against the real source: agent templates, the hook and its tests, and the docs, CLAUDE.md, ws and merge state. I'm waiting for their results.
+- 10-31 20:45 [opus-architect · opus 5.5] Five scouts are now checking the source in parallel, one per item group (A: canonical templates, B: agent templates, C: hook, D: rules, E: routing and worktree). I'll wait for all of them before writing anything.
+- 10-31 20:45 [haiku-scout · haiku 5.5] status: done / reason: - / claim: S1 | PARTIAL | haiku-scout.md:22-33, haiku-researcher.md:19-30 | R-read 템플릿 있음. "O2 예외줄" 없음(agents 전체 grep O2 0건). 감시 훅 log 모드는 agent .md 밖이라 미확인 [확실]
+- 10-31 20:55 [haiku-batch-worker · haiku 5.5] status: done / changed: /Users/leekwangseok/PycharmProjects/claude-harness/notes/runs/261031-plan-impl-gap-review.md (24줄, 신규 저장) / check: wc -l -> 24 · PASS
+- 10-31 20:56 [haiku-scout · haiku 5.5] status: done / reason: - / claim: notes/runs/261031-plan-impl-gap.md:8-38 | A1 I6 haiku-prompter 머리·R-블록 추가 / A2 I2 B형식 6키 추가 / A3 I13 orchws parseWS none 허용 / B1 I9 존댓말 충돌 / B2 I14 main-thread-guard·agent-model-pin 변경 [확실]
+- 10-31 20:56 [haiku-scout · haiku 5.5] status: done / reason: - / claim: /Users/leekwangseok/PycharmProjects/claude-harness/.claude/agents/haiku-prompter.md:1-16 [확실]
+- 10-31 20:58 [opus-architect · opus 5.5] haiku-prompter.md 수정(A1·A2)과 계획서 133·164행 수정을 병렬로 맡겼습니다. 두 결과를 기다리겠습니다.
+- 10-31 22:30 [haiku-scout · haiku 5.5] status: done / reason: - / Read-only facts only, no edits. Some Go notes/ writes resolve via dir flags; flagged where unverified.
+- 10-31 22:47 [haiku-batch-worker · haiku 5.5] status: done / changed: /Users/leekwangseok/PycharmProjects/claude-harness/notes/runs/261031-plan-record-tui-review.md / check: `wc -l` -> 48 lines
+- 10-31 22:50 [agent] <analysis> / Chronological walk-through of this run, for continuation after compaction: / 1. The brief asked me to implement the TUI output-record feature per the plan at notes/runs/261031-plan-record-tui.md, merging review items I1–I14 from notes/runs/261031-plan-record-tui-review.md. Constraints: 
+- 10-31 22:55 [agent] <analysis> / Scope: record-tui workstream in /Users/leekwangseok/PycharmProjects/claude-harness. Brief items (a) tui.go record-on-done + fromRecord flag, (b) /resume topic list/show (native moves to /resume claude), (c) repl.go plain path parity, (d) remove notes/ writer text from main.md. Acceptanc
+- 10-31 22:57 [haiku-coder · haiku 5.5] status: done / changed: internal/harness/record_turn.go (new, untracked), repl.go, tui.go, agentview.go, agentview_test.go, history_test.go, resumeshift_test.go, CLAUDE.md (main.md absent, so CLAUDE.md used) / diffstat: tracked 7 files, +64/-38; record_turn.go new
+- 10-31 23:06 [haiku-batch-worker · haiku 5.5] MOVED: 33 items to deprecated/ (paths kept, git mv staged, nothing deleted, not committed). Full list in the body below. / KEPT: rule-1 live state plus items with live refs; ambiguous ones listed below, left in place. / Doubts: scripts/claude_usage_import.py and usage_sync.py had zero refs, moved as
+- 10-31 23:23 [haiku-scout · haiku 5.5] status: done / reason: - / claim: notes/FACTS.md:7 | "- 출처: https://docs.claude.com/en/docs/about-claude/pricing (platform.claude.com 으로 리다이렉트), 확인일 2026-10-29" [확실]
+- 10-31 23:29 [haiku-scout · haiku 5.5] status: partial / reason: 4000자 상한. 헤더·코드블록 우선 발췌, 산문·표 생략 / claim: /Users/leekwangseok/PycharmProjects/claude-harness/plan/caveman-structure.md:52-61 | 3.1 브리프 B형식 [확실]
+- 10-31 23:29 [haiku-scout · haiku 5.5] status: partial / reason: 141-279 전체 원문은 4000자 초과 가능성이 커서 헤더와 핵심 줄만 발췌함. 3.1~3.6 템플릿 코드블록은 이 범위에 없음. / claim: plan/caveman-structure.md:150 | `## 6. 형식 감시 (차단 아님)` [확실]
+- 10-31 23:33 [haiku-scout · haiku 5.5] status: done / reason: - / claim: /Users/leekwangseok/PycharmProjects/claude-harness/notes/runs/261031-plan-record-output.md | wc -l=141 [확실]
+- 10-31 23:53 [opus-architect · opus 5.5] Three read-only scouts are running (spec/plan, notes/ references, repl/tui code). Waiting for results.
+- 10-31 23:54 [haiku-scout · haiku 5.5] status: done / reason: -> / claim: internal/harness/record_turn.go:12 | `func recordSkip(prompt string) bool` skips when first field starts "/" or first field == "분석"/"측정" (exact token; "분석해줘" not skipped) [확실]

@@ -5,30 +5,31 @@ source: plan/caveman-structure.md 3.1~3.6 (v7)
 ## 3.1 브리프 B형식 (하향)
 
 ```
-task: <한 줄 동사구>
-paths: <절대경로>[:<행범위>], ...
-ctx: E<n>: <경로>:<행> / <수치 또는 인용 요지>   (상속 없음, C6)
-limits: <수정 금지 경로>, <금지 행위>
-return: R-read | R-write | R-decide, <상한(자 또는 줄)>
-lang: caveman | ko   (ko = summary_ko 필수, rule_4)
+task: <one-line verb phrase>
+paths: <absolute path>[:<line range>], ...
+ctx: E<n>: <path>:<line> / <number or quote gist>   (no inheritance, C6)
+limits: <paths not to edit>, <forbidden actions>
+return: R-read | R-write | R-decide, <cap (chars or lines)>
+lang: caveman | ko   (ko = summary_ko required, rule_4)
 ```
 
-- ctx의 E<n> 근거 행 형식은 이전 정의를 재사용 (notes/deprecated/261030-plan-caveman-relay.md:16-19)
+- ctx의 E<n> 근거 행 형식은 이전 정의를 재사용
 - 사용자 원문·한국어 값은 ctx 안에서도 verbatim
 
 ## 3.2 읽기 반환 R-read
 
 ```
-claim: <경로>:<행> | <사실 또는 원문 인용> [확실|추정|불확실]
-searched: <본 경로·패턴>
-not_found: <찾았으나 없음 확인>
-not_checked: <안 본 범위>
-truncated: yes|no ; omitted: <생략 항목 또는 ->
-summary_ko: <lang: ko일 때 필수, 1~5줄>
+claim: <path>:<line> | <fact or verbatim quote> [sure|likely|unsure]
+searched: <paths/patterns looked at>
+not_found: <looked, confirmed absent>
+not_checked: <ranges not looked at>
+truncated: yes|no ; omitted: <omitted items or ->
+summary_ko: <required only when lang: ko, 1-5 lines>
 ```
 
 - not_found와 not_checked는 합치지 않음 ("없음"과 "안 봄" 구분, read-review.md:15)
 - 반환 상한에 걸리면 truncated: yes와 omitted 목록을 반드시 씀 (C12)
+- 브리프·R-read 값은 영어만 씀 (claim·reason·searched·not_found·not_checked). 한국어는 원문 인용 안에서만. 출력창 한국어화(요약 + 항목 번역)는 haiku-tui가 맡음 (plan/caveman-structure.md 2.1, 261101)
 
 ## 3.3 쓰기 반환 R-write
 
@@ -64,7 +65,7 @@ summary_ko: <lang: ko일 때 필수, 1~5줄, L0 전달용>
 
 ```
 status: done | partial | fail | blocked
-reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
+reason: <one line when partial/fail/blocked, else ->
 ```
 
 - blocked: 훅·권한 거부로 도구 사용이 막힌 경우. 거부 메시지를 verbatim 인용하고 우회 없이 반환

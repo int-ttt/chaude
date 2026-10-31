@@ -35,7 +35,7 @@ def _session_start_ts(path):
 
 def emit(text):
     """Context for the model + systemMessage (shown to the user; plain stdout is not)."""
-    msg = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
+    msg: dict[str, object] = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
     if upd:
         msg["systemMessage"] = upd
     print(json.dumps(msg, ensure_ascii=False))
@@ -102,6 +102,13 @@ def tail(rel, n):
         return []
 
 
+def pick(rel_new, rel_old):
+    """record/ file if it exists (absolute HARNESS_RECORD_DIR wins when set), else the legacy notes/ file."""
+    rec = os.environ.get("HARNESS_RECORD_DIR")
+    new = os.path.abspath(os.path.join(rec, os.path.basename(rel_new))) if rec else rel_new
+    return new if os.path.exists(os.path.join(root, new)) else rel_old
+
+
 if data.get("source", "startup") == "startup":       # storage: per-agent/session hook state older than 3 days
     import glob as _g0, time as _t0
     for _p in _g0.glob(os.path.join(root, "logs", ".*-*")):
@@ -111,11 +118,11 @@ if data.get("source", "startup") == "startup":       # storage: per-agent/sessio
         except OSError:
             pass
 
-out = [f"[session:{data.get('source', 'start')}] snapshot of notes/ (state lives in files; don't re-read them unless needed):"]
+out = [f"[session:{data.get('source', 'start')}] snapshot of notes/ + record/ (state lives in files; don't re-read them unless needed):"]
 open_items = head("notes/OPEN.md", 20)
 if open_items:
     out += ["OPEN:"] + open_items
-recent = tail("notes/LEDGER.md", 5)
+recent = tail(pick("record/LEDGER.md", "notes/LEDGER.md"), 5)
 if recent:
     out += ["Recent agent results (LEDGER):"] + recent
 if data.get("source", "startup") in ("startup", "clear"):
@@ -151,7 +158,7 @@ if data.get("source", "startup") in ("startup", "clear"):
             out += ["Previous session, last messages:"] + msgs[-6:]
     except Exception:
         pass
-inbox = tail("notes/INBOX.md", 50)
+inbox = tail(pick("record/INBOX.md", "notes/INBOX.md"), 50)
 if inbox:
     out.append(f"INBOX: {len(inbox)} queued user notes (delivered with the next instruction).")
 if upd:

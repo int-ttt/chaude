@@ -73,7 +73,7 @@ func TestUsagePopupOpenClose(t *testing.T) {
 func TestWheelScrollHoldsPosition(t *testing.T) {
 	m, _ := avModel(t)
 	for i := 0; i < 80; i++ {
-		m.blocks = append(m.blocks, block{"note", "line"})
+		m.blocks = append(m.blocks, block{"note", "line", false})
 	}
 	m.refresh()
 	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: 5, Y: 2})
@@ -101,7 +101,7 @@ func TestWheelScrollHoldsPosition(t *testing.T) {
 func TestScrollBottomOnInputAndUpdate(t *testing.T) {
 	m, _ := avModel(t)
 	for i := 0; i < 80; i++ {
-		m.blocks = append(m.blocks, block{"note", "line"})
+		m.blocks = append(m.blocks, block{"note", "line", false})
 	}
 	m.refresh()
 	if !m.vp.AtBottom() {

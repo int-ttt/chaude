@@ -74,6 +74,13 @@ def check_jondaetmal(text):
     return []
 
 
+def check_caveman_leak(text):                   # S2: caveman 반환 키가 haiku-tui 응답에 새어 나왔는지
+    text = re.sub(r"```.*?```", "", text, flags=re.S)
+    if re.search(r"^\s*(status|reason|claim|searched|not_found|not_checked|truncated|omitted|summary_ko):\s", text, re.M):
+        return ["caveman_leak"]
+    return []
+
+
 def check_brief(prompt):
     return [f"brief:{k}" for k in B_KEYS if value_of(prompt, k) is None]
 
@@ -92,7 +99,7 @@ def main():
     resp = resp_text(data.get("tool_response"))
     m = re.search(r"^return:\s*(R-read|R-write|R-decide)", prompt, re.M)
     if agent == "haiku-tui":                    # 존댓말 검사만, return: 필터 무시 (plan:160)
-        fmt, missing = "tui", check_jondaetmal(resp)
+        fmt, missing = "tui", check_jondaetmal(resp) + check_caveman_leak(resp)
     elif agent == "haiku-prompter":             # 전달문: B형식 키 검사, 존댓말 검사 제외 (plan:160)
         fmt, missing = "prompter", check_brief(prompt)
         if m:
@@ -112,7 +119,7 @@ def main():
     row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", now), "hook": "caveman-format",
            "agent": agent, "fmt": fmt, "missing": missing}
     try:
-        d = os.path.join(root, "notes", "metrics")
+        d = os.path.join(os.environ.get("HARNESS_RECORD_DIR") or os.path.join(root, "record"), "metrics")
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, time.strftime("%Y-%m-%d", now) + ".jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")

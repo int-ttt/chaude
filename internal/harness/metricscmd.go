@@ -13,13 +13,16 @@ import (
 // MetricsMain implements `chaude metrics [--dir D] [--csv]`: summarize or dump per-turn JSONL.
 func MetricsMain(args []string) int {
 	fs := flag.NewFlagSet("metrics", flag.ContinueOnError)
-	dir := fs.String("dir", filepath.Join("notes", "metrics"), "metrics directory")
+	dir := fs.String("dir", "auto", "metrics directory (auto=<record>/metrics)")
 	csv := fs.Bool("csv", false, "print turn rows as CSV instead of a summary")
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
 		}
 		return 2
+	}
+	if *dir == "auto" {
+		*dir = filepath.Join(recordDir(""), "metrics")
 	}
 	files, _ := filepath.Glob(filepath.Join(*dir, "*.jsonl"))
 	sort.Strings(files)

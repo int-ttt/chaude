@@ -1,7 +1,7 @@
 """Tests for .claude/hooks/caveman-format.py (PostToolUse, never blocks, always exit 0).
 
 Run: cd repo && python3 -m unittest discover tests/hooks -v
-Each run uses a temporary CLAUDE_PROJECT_DIR so notes/metrics in the repo is not written."""
+Each run uses a temporary CLAUDE_PROJECT_DIR so record/metrics in the repo is not written."""
 import glob, json, os, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
@@ -45,6 +45,7 @@ class CavemanFormatHookTest(unittest.TestCase):
 
     def run_hook(self, stdin, guard="log"):
         env = dict(os.environ, CLAUDE_PROJECT_DIR=self.root, CAVEMAN_GUARD=guard)
+        env.pop("HARNESS_RECORD_DIR", None)
         raw = stdin if isinstance(stdin, bytes) else json.dumps(stdin, ensure_ascii=False).encode("utf-8")
         p = subprocess.run([sys.executable, "-I", HOOK], input=raw, env=env, capture_output=True, timeout=20)
         self.assertEqual(p.returncode, 0, p.stderr.decode("utf-8", "ignore"))
@@ -52,7 +53,7 @@ class CavemanFormatHookTest(unittest.TestCase):
 
     def rows(self):
         out = []
-        for f in glob.glob(os.path.join(self.root, "notes", "metrics", "*.jsonl")):
+        for f in glob.glob(os.path.join(self.root, "record", "metrics", "*.jsonl")):
             with open(f, encoding="utf-8") as fh:
                 out += [json.loads(line) for line in fh if line.strip()]
         return out
@@ -170,6 +171,16 @@ class CavemanFormatHookTest(unittest.TestCase):
     def test_j3_tui_code_block_ignored(self):
         resp = "```\n이것은 있다.\n```\n작업을 완료했습니다.\n"
         self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response=resp))
+        self.assertEqual(self.rows(), [])
+
+    def test_j4_tui_caveman_leak_one_row(self):
+        self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response="읽기 결과입니다.\nclaim: a.go:1 | x"))
+        rows = self.rows()
+        self.assertEqual(len(rows), 1)
+        self.assertIn("caveman_leak", rows[0]["missing"])
+
+    def test_j5_tui_polite_list_no_row(self):
+        self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response="확인했습니다.\n- a.go:1 — 내용입니다."))
         self.assertEqual(self.rows(), [])
 
     def test_k_prompter_missing_lang(self):

@@ -1,3 +1,5 @@
+> DEPRECATED (2026-10-31): 참조 0건, usage 효율 계획
+
 # plan: usage efficiency (identical input-output) - 261030
 goal: same user input -> same output, fewer tokens/usage. Every item names measured metric + expected effect; none changes output.
 sources: notes/runs/261030-usage-eff-measure.txt (eff.py, all transcripts, assumed prices opus 5/25/cw6.25/cr0.5, sonnet 3/15/3.75/0.3, haiku 1/5/1.25/0.1 per MTok), notes/runs/261030-usage-m3.txt (measure.py), notes/runs/261030-usage-ur-reconcile.txt.

@@ -113,7 +113,7 @@ func (m *tuiModel) openAgentView(id string) {
 func (m *tuiModel) openAgentKey() {
 	l := m.r.tracker.sortedAll()
 	if len(l) == 0 {
-		m.blocks = append(m.blocks, block{"note", "no agents yet"})
+		m.blocks = append(m.blocks, block{"note", "no agents yet", false})
 		m.refresh()
 		return
 	}

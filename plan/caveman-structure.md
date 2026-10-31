@@ -43,10 +43,22 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 - rule_7 (U10 = b, 결정됨): 현행 haiku-prompter의 반복·재귀 루프 소유 역할은 유지하고 사용자 프롬프트 전달 역할을 추가함
 
 - rule_1: caveman은 L1·L2 전용. L0으로 나가는 문장은 그 문장을 쓰는 마지막 작성자가 처음부터 한국어로 씀
-- rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둠 (필수 조건은 rule_4). 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음. summary_ko는 현 에이전트 파일의 "최종 메시지 = Korean 존댓말 요약" 규칙 자리를 그대로 씀 (C11). 바뀌는 것은 최종 메시지가 "한국어 요약만"에서 "caveman 본문 + summary_ko"로 바뀌는 것뿐
+- rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둠 (필수 조건은 rule_4). 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음. summary_ko는 현 에이전트 파일의 "최종 메시지 = Korean 존댓말 요약" 규칙 자리를 그대로 씀 (C11). 바뀌는 것은 최종 메시지가 "한국어 요약만"에서 "caveman 본문 + summary_ko"로 바뀌는 것뿐 (261101: summary_ko는 opus R-decide에만 남고, 쓰기·읽기 에이전트 반환에는 없음. relay가 있으면 relay를 그대로 haiku-tui에 전달, 2.1절)
 - rule_3: 중계 단계 수는 현 구조보다 늘리지 않음 (C4)
-- rule_4: summary_ko는 메인 직속 반환에만 씀. 브리프가 lang: ko이면 summary_ko 필수, lang: caveman이면 생략 (L2 반환은 상위 에이전트가 읽으므로 한국어 불필요). 메인은 항상 lang: ko, opus는 haiku 브리프에 lang: caveman (U7 결정됨(구현 조사, tool_input.prompt로 lang: ko 확인))
+- rule_4: summary_ko는 메인 직속 반환에만 씀. 브리프가 lang: ko이면 summary_ko 필수, lang: caveman이면 생략 (L2 반환은 상위 에이전트가 읽으므로 한국어 불필요). 메인은 항상 lang: ko, opus는 haiku 브리프에 lang: caveman (U7 결정됨(구현 조사, tool_input.prompt로 lang: ko 확인)) 단 261101부터 쓰기·읽기 에이전트 브리프는 메인 직속이어도 lang: caveman, 한국어화는 haiku-tui가 맡음 (2.1절)
 - rule_5: 중첩 hop에서 상위 에이전트는 하위 반환을 자기 반환에 E<n> 근거 행으로 다시 씀. 하위 반환 전문을 그대로 붙여 올리지 않음
+
+### 2.1 쓰기·읽기 흐름 (261101, 사용자 요청 2·3)
+
+- 공통: 하위 에이전트(haiku-coder, haiku-batch-worker, haiku-scout, haiku-researcher)는 Agent 도구가 없어 haiku-tui를 직접 부를 수 없음. "opus와 haiku-tui에 전달" = 하위 반환은 호출자(opus)로 감 -> opus는 판단에 쓰고 같은 블록을 고치지 않고 R-decide의 relay 필드에 붙임 -> 메인(Haiku)은 relay를 그대로 haiku-tui에 넘김 -> haiku-tui 출력이 출력창에 표시됨. 메인이 직접 부른 작은 작업은 메인이 반환 블록을 그대로 haiku-tui에 넘김
+- 쓰기 흐름: opus(작은 작업은 메인) -> haiku-coder(코드) 또는 haiku-batch-worker(문서·노트·일괄 수정) -> 반환 = 완료 여부(status) + 바꾼 부분(changed: <경로>: <바꾼 부분 한 줄>)만 -> opus + haiku-tui. diffstat·check·summary_ko는 반환에 넣지 않음. 검증은 haiku-checker가 따로 하고 그 결과(check: <명령> -> PASS|FAIL)도 relay로 전달
+- 쓰기 출력창: "<작업> 완료했습니다." 1줄 + 파일마다 "<경로>: <바꾼 부분>" 1줄 (+ 검증 결과 1줄). partial·fail·blocked이면 status와 reason을 그대로 알림
+- 읽기 흐름: opus -> haiku-scout(로컬 파일·과거 대화) 또는 haiku-researcher(웹) -> R-read(caveman, 3.2, 영어만; 한국어는 원문 인용 안에서만) -> opus + haiku-tui. 브리프·R-read·relay 모두 영어. opus는 claim·not_found·not_checked를 판단 근거로 쓰고 relay 문구는 고치지 않음
+- 읽기 출력창: 요약과 번역물만 표시. haiku-tui가 먼저 존댓말 1~3줄 요약, 이어서 claim마다 "- <경로>:<행> — <한국어 번역>" 목록. not_found는 "없음 확인", not_checked는 "미확인" 1줄. caveman 키 줄·영어 원문 문장은 표시하지 않음. TUI는 caveman 반환(status: + reason: 줄)의 도구 결과 미리보기를 숨김 (internal/harness/tui.go isCavemanBlock, 261101)
+- relay가 없을 때(opus가 판단만 하고 하위 작업이 없는 경우): 기존대로 R-decide의 summary_ko를 haiku-tui에 전달. haiku-runner 반환도 쓰기 흐름과 같은 형식(status + changed)으로 relay
+- relay 상한: 1500자. 넘으면 opus가 claim 줄을 줄이고 not_found·not_checked는 남기며 truncated: yes 표시
+- 메인(Haiku) 역할 변화 없음: 라우팅과 haiku-tui 호출만, 파일 직접 접근 불가 (main-thread-guard.py, CLAUDE.md:4)
+- S6 전 과도기: 에이전트 파일은 아직 옛 R-write 정의. 쓰기 브리프 limits에 "return: status + changed(경로: 바꾼 부분) only" 명시
 
 ## 3. 메시지 형식 정의
 
@@ -81,14 +93,12 @@ summary_ko: <lang: ko일 때 필수, 1~5줄>
 ### 3.3 쓰기 반환 R-write
 
 ```
-changed: <경로 목록>
-diffstat: <git diff --stat 요지>
-check: <명령> -> PASS|FAIL
-ws: <작업 공간 id | none>
-summary_ko: <lang: ko일 때 필수, 1~5줄>
+changed: <경로>: <바꾼 부분 한 줄>   (파일마다 1줄)
+ws: <작업 공간 id>   (worktree를 쓴 경우만, 아니면 줄 생략)
 ```
+- 261101 변경: 3.6 머리(status = 완료 여부) + changed만 반환. diffstat·check·summary_ko 제외. haiku-checker 반환은 3.6 머리 + check: <명령> -> PASS|FAIL (2.1절)
 
-- 필드 목록은 flow.md:58-61 정의를 그대로 씀
+- (261101 이전) 필드 목록은 flow.md:58-61 정의를 그대로 씀. 261101부터 필드 목록은 위 블록과 2.1절이 정본 (flow.md 파일은 현재 없음)
 
 ### 3.4 결정 반환 R-decide
 
@@ -123,15 +133,15 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 
 | 에이전트 | 받는 형식 | 내는 형식 | 비고 |
 |---|---|---|---|
-| 메인 세션 | L0 한국어 | L1 B형식 | 사용자에게는 summary_ko만 전달 (사용자 대면 출력은 haiku-tui 정의 따름) |
-| opus-architect | B형식 | R-decide | 계획 파일 본문은 노트 규칙(영어 key: value) 따름 |
-| haiku-scout, haiku-researcher | B형식 | R-read | 1단계 적용 대상 |
-| haiku-coder, haiku-batch-worker, haiku-runner | B형식 | R-write | |
-| haiku-checker | B형식 | R-write (check 필드 중심) | |
+| 메인 세션 | L0 한국어 | L1 B형식 | opus의 relay(없으면 summary_ko)를 그대로 haiku-tui에 전달 (2.1절, 사용자 대면 출력은 haiku-tui 정의 따름) |
+| opus-architect | B형식 | R-decide + relay(하위 반환 원문, ≤1500자, 2.1절) | 계획 파일 본문은 노트 규칙(영어 key: value) 따름 |
+| haiku-scout, haiku-researcher | B형식 | R-read | 1단계 적용 대상. 반환은 opus 판단 + relay로 haiku-tui (2.1절) |
+| haiku-coder, haiku-batch-worker, haiku-runner | B형식 | R-write (status + changed만, 2.1절) | 반환은 opus 판단 + relay로 haiku-tui |
+| haiku-checker | B형식 | 3.6 머리 + check 줄 | 검증 결과도 relay로 haiku-tui에 전달 (2.1절) |
 | haiku-drafter | B형식 | R-write | 산출 문서 자체는 한국어 유지 (L0 산출물) |
 | haiku-extractor | 기존 | 기존 | 파일 출력 전용, 변경 없음 |
 | haiku-prompter | 사용자 원문 | 원문 verbatim + 요약 (U8 = c) | 존댓말 검사 제외. 사용자 프롬프트를 opus 세션에 전달, 한국어 존댓말 비적용 (Q2 결정). 현행 반복 루프 역할 유지 + 전달 역할 추가 (U10 = b, 결정됨). B형식 브리프 필수 5키(task, paths, limits, return, lang), ctx 선택 (A2) |
-| haiku-tui | B형식 또는 R-* 반환 | L0 한국어 존댓말 자연문 | 사용자에게 답변하는 에이전트. 한국어 존댓말은 이 출력에만 적용 (Q2 결정). 에이전트 파일은 구현 단계에 신설 (U9 = a, 결정됨) |
+| haiku-tui | relay(하위 R-write·R-read 원문) 또는 R-* 반환 | L0 한국어 존댓말 자연문 | 사용자에게 답변하는 에이전트. 한국어 존댓말은 이 출력에만 적용 (Q2 결정). 에이전트 파일은 구현 단계에 신설 (U9 = a, 결정됨) 쓰기: 완료 + 바꾼 부분, 읽기: 요약 후 항목 표시 (2.1절) |
 
 ## 5. 규칙 충돌 해소 (CLAUDE.md:4, C7)
 
@@ -173,6 +183,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 - S3 지휘 경로: opus-architect에 B형식 작성 규칙과 R-decide 템플릿
 - S4 감시 확대: 감시 훅 검사 대상 목록에 S2·S3 에이전트 추가 (목록은 훅 설정 1곳에서 관리)
 - S5 통합 (Q1 승인 반영): CLAUDE.md:4 범위를 사용자 노출 텍스트로 한정(O1), O2 예외줄 제거. 전역 CLAUDE.md는 이번 계획 갱신에서 수정하지 않음
+- S6 쓰기·읽기 흐름 반영 (261101, 미실행, 사용자 승인 필요): CAVEMAN_FORMAT.md 3.3을 2.1절 R-write로 맞춤; haiku-coder.md·haiku-batch-worker.md 반환 = status + changed만; haiku-checker.md = status + check; haiku-runner.md·haiku-drafter.md 반환 템플릿도 같은 기준으로 정리; haiku-scout.md·haiku-researcher.md에 relay 1줄; haiku-tui.md input에 relay와 쓰기·읽기 출력 형식; opus-architect.md R-decide에 relay 필드; caveman-format.py:15 REQUIRED["R-write"] = ["changed"] 및 tests/hooks/test_caveman_format.py:26,73 갱신 (haiku-coder)
 - 공통: 단계마다 별도 worktree 브랜치·별도 커밋, 되돌리기는 해당 단계 커밋 revert. master 작업 트리에서 직접 적용 금지 (C8)
 - 병합 (Q3 결정): caveman 구현(S0~S5)이 끝난 뒤에 master로 병합. 병합 전까지 단계별 worktree 브랜치 유지. 단계별 부분 병합은 하지 않는 것으로 해석함 (해석, 확인은 U6과 함께)
 - 시작 절차 (U6 = b, 결정됨): worktree는 커밋된 HEAD 기준으로 분기. master의 미커밋 변경은 worktree에 포함하지 않음

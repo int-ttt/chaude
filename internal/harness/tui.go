@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -88,7 +89,27 @@ func resultText(v any) string {
 	return strings.Join(parts, "\n")
 }
 
-type block struct{ kind, text string } // kind: user | asst | tool | result | note
+var cavemanStatusRe = regexp.MustCompile(`^status:\s*(done|partial|fail|blocked)\b`)
+
+// isCavemanBlock reports whether s is an agent caveman return (3.6 header: a status line and a reason line).
+func isCavemanBlock(s string) bool {
+	hasStatus, hasReason := false, false
+	for _, ln := range strings.Split(s, "\n") {
+		ln = strings.TrimSpace(ln)
+		if cavemanStatusRe.MatchString(ln) {
+			hasStatus = true
+		}
+		if strings.HasPrefix(ln, "reason:") {
+			hasReason = true
+		}
+	}
+	return hasStatus && hasReason
+}
+
+type block struct {
+	kind, text string
+	fromRecord bool // loaded by /resume: never merged with streamed text or re-recorded
+} // kind: user | asst | tool | result | note
 
 type tuiModel struct {
 	r         *Repl
@@ -155,7 +176,7 @@ var slashCmds = []slashCmd{
 	{"/clear", "start a fresh session (handoff note carried over)"},
 	{"/status", "model, context tokens, session"},
 	{"/model", "show or switch model: /model <name>"},
-	{"/resume", "list Claude Code sessions and import one (/resume claude)"},
+	{"/resume", "list record topics, or show one: /resume [n|slug] (/resume claude: Claude Code sessions)"},
 	{"/import", "import a session: /import [id|latest]"},
 	{"/rotate", "hand off to a fresh session"},
 	{"/usage", "plan usage and limits (from claude)"},
@@ -358,11 +379,11 @@ func (m *tuiModel) layout() {
 }
 
 func (m *tuiModel) appendAsst(s string) {
-	if n := len(m.blocks); n > 0 && m.blocks[n-1].kind == "asst" && m.gotText {
+	if n := len(m.blocks); n > 0 && m.blocks[n-1].kind == "asst" && m.gotText && !m.blocks[n-1].fromRecord {
 		m.blocks[n-1].text += s
 		return
 	}
-	m.blocks = append(m.blocks, block{"asst", s})
+	m.blocks = append(m.blocks, block{"asst", s, false})
 	m.gotText = true
 }
 
@@ -395,35 +416,37 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t += "(" + v.arg + ")"
 		}
 		m.lastTool = trunc(t, 40)
-		m.blocks = append(m.blocks, block{"tool", t})
+		m.blocks = append(m.blocks, block{"tool", t, false})
 		m.refresh()
 	case toolResultMsg:
 		s := strings.TrimSpace(string(v))
-		lines := strings.Split(s, "\n")
-		t := trunc(lines[0], 160)
-		if len(lines) > 1 {
-			t += fmt.Sprintf(" … (+%d lines)", len(lines)-1)
+		if !isCavemanBlock(s) { // agent caveman return: hidden from the TUI transcript
+			lines := strings.Split(s, "\n")
+			t := trunc(lines[0], 160)
+			if len(lines) > 1 {
+				t += fmt.Sprintf(" … (+%d lines)", len(lines)-1)
+			}
+			m.blocks = append(m.blocks, block{"result", t, false})
 		}
-		m.blocks = append(m.blocks, block{"result", t})
 		m.refresh()
 	case noteMsg:
 		m.gotText = false
-		m.blocks = append(m.blocks, block{"note", string(v)})
+		m.blocks = append(m.blocks, block{"note", string(v), false})
 		m.refresh()
 	case permMsg:
 		m.perm, m.av, m.usage = &v, nil, ""
-		m.blocks = append(m.blocks, block{"note", fmt.Sprintf("Allow %s(%s)?  [y] yes  [n] no", v.tool, v.arg)})
+		m.blocks = append(m.blocks, block{"note", fmt.Sprintf("Allow %s(%s)?  [y] yes  [n] no", v.tool, v.arg), false})
 		m.refresh()
 	case importedMsg:
 		m.gotText = false
 		m.blocks = nil
 		turns := v.turns
 		if len(turns) > 100 {
-			m.blocks = append(m.blocks, block{"note", fmt.Sprintf("(%d earlier turns not shown)", len(turns)-100)})
+			m.blocks = append(m.blocks, block{"note", fmt.Sprintf("(%d earlier turns not shown)", len(turns)-100), false})
 			turns = turns[len(turns)-100:]
 		}
 		for _, t := range turns {
-			m.blocks = append(m.blocks, block{"user", t[0]}, block{"asst", t[1]})
+			m.blocks = append(m.blocks, block{"user", t[0], false}, block{"asst", t[1], false})
 		}
 		m.refresh()
 		m.vp.GotoBottom()
@@ -485,11 +508,11 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		switch strings.ToLower(k.String()) {
 		case "y", "enter":
 			m.perm.reply <- true
-			m.blocks = append(m.blocks, block{"note", "allowed"})
+			m.blocks = append(m.blocks, block{"note", "allowed", false})
 			m.perm = nil
 		case "n", "esc":
 			m.perm.reply <- false
-			m.blocks = append(m.blocks, block{"note", "denied"})
+			m.blocks = append(m.blocks, block{"note", "denied", false})
 			m.perm = nil
 		case "ctrl+c":
 			m.perm.reply <- false
@@ -519,7 +542,7 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if cut, text, ok := m.rw.Confirm(m.blocks); ok {
 				m.blocks = m.blocks[:cut]
 				m.in.SetValue(text)
-				m.blocks = append(m.blocks, block{"note", "rewound to this prompt (view + input only; the child session keeps its context. Use /clear or /rotate to reset it)"})
+				m.blocks = append(m.blocks, block{"note", "rewound to this prompt (view + input only; the child session keeps its context. Use /clear or /rotate to reset it)", false})
 				m.vp.GotoBottom()
 				m.refresh()
 				m.after()
@@ -540,7 +563,7 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			id := m.pick[m.pickSel].ID
 			m.pick = nil
 			m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
-			m.blocks = append(m.blocks, block{"user", "/import " + id})
+			m.blocks = append(m.blocks, block{"user", "/import " + id, false})
 			m.vp.GotoBottom()
 			m.refresh()
 			m.submit <- "/import " + id
@@ -572,7 +595,7 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.in.Value() == "" && time.Since(m.lastEsc) < 600*time.Millisecond {
 			m.lastEsc = time.Time{}
 			if !m.rw.Open(m.blocks) {
-				m.blocks = append(m.blocks, block{"note", "nothing to rewind to"})
+				m.blocks = append(m.blocks, block{"note", "nothing to rewind to", false})
 				m.refresh()
 			}
 			return m, nil
@@ -657,7 +680,7 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 					go func() { usageSend(m.r, usageMsg(usageFetch(m.r.lastCtx))) }()
 					return m, nil
 				}
-				m.blocks = append(m.blocks, block{"note", busySlashMsg})
+				m.blocks = append(m.blocks, block{"note", busySlashMsg, false})
 				m.refresh()
 				return m, nil
 			}
@@ -716,7 +739,7 @@ var usageFetch = func(ctx int) string {
 
 // sendPrompt shows the prompt in the transcript and hands it to the sender goroutine.
 func (m *tuiModel) sendPrompt(line string) {
-	m.blocks = append(m.blocks, block{"user", line})
+	m.blocks = append(m.blocks, block{"user", line, false})
 	m.curPrompt = line
 	m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
 	m.held = false
@@ -877,7 +900,7 @@ func (m *tuiModel) after() {
 
 func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 	f := strings.Fields(line)
-	note := func(s string) { m.blocks = append(m.blocks, block{"note", s}); m.refresh() }
+	note := func(s string) { m.blocks = append(m.blocks, block{"note", s, false}); m.refresh() }
 	switch f[0] {
 	case "/quit", "/exit":
 		return m.quit()
@@ -910,23 +933,39 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
-		m.blocks = append(m.blocks, block{"user", line})
+		m.blocks = append(m.blocks, block{"user", line, false})
 		m.vp.GotoBottom()
 		m.refresh()
 		m.submit <- line
 	case "/resume":
-		l, msg := m.r.sessionList(f[1:]...)
-		if msg != "" {
-			note(msg)
+		if len(f) > 1 && f[1] == "claude" {
+			l, msg := m.r.sessionList(f[2:]...)
+			if msg != "" {
+				note(msg)
+				break
+			}
+			if len(l) > 30 {
+				l = l[:30]
+			}
+			m.pick, m.pickSel = l, 0
 			break
 		}
-		if len(l) > 30 {
-			l = l[:30]
+		lines, blocks, err := recordResume(recordDir(m.r.a.Cwd), strings.Join(f[1:], " "))
+		if err != nil {
+			note(err.Error())
+			break
 		}
-		m.pick, m.pickSel = l, 0
+		for _, l := range lines {
+			m.blocks = append(m.blocks, block{"note", l, true})
+		}
+		for _, b := range blocks {
+			m.blocks = append(m.blocks, block{b.Kind, b.Text, true})
+		}
+		m.vp.GotoBottom()
+		m.refresh()
 	case "/import":
 		m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
-		m.blocks = append(m.blocks, block{"user", line})
+		m.blocks = append(m.blocks, block{"user", line, false})
 		m.vp.GotoBottom()
 		m.refresh()
 		m.submit <- line
@@ -949,7 +988,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 			m.blocks = nil
 		}
 		m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
-		m.blocks = append(m.blocks, block{"user", line})
+		m.blocks = append(m.blocks, block{"user", line, false})
 		m.vp.GotoBottom()
 		m.refresh()
 		m.submit <- line
@@ -965,7 +1004,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 
 func (m *tuiModel) setMode(p permMode) {
 	m.r.mode.Store(int32(p))
-	m.blocks = append(m.blocks, block{"note", "mode: " + p.String()})
+	m.blocks = append(m.blocks, block{"note", "mode: " + p.String(), false})
 	m.refresh()
 }
 
@@ -1156,6 +1195,7 @@ func (r *Repl) runTUI() int {
 				r.rotate("model " + f[1])
 			default:
 				r.handle(line)
+				r.recordSave(line)
 			}
 			p.Send(doneMsg{})
 		}

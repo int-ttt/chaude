@@ -1,3 +1,5 @@
+> DEPRECATED (2026-10-31): 참조 0건, relay 계획 검토본
+
 # 검토: 261030-plan-caveman-relay.md
 date: 261030
 reviewer: opus-architect

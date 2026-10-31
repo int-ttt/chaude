@@ -3,10 +3,10 @@
 설치된 버전은 프로젝트의 `.claude/claude-lean.version`에서 확인할 수 있습니다. 업그레이드는 새 패키지로 설치를 다시 실행하면 됩니다 (`APPLY_GUIDE.md` 5-1).
 
 ## 0.5.3
-- SessionStart 훅: `/clear` 직후에도 notes 스냅샷과 지워진 직전 대화의 마지막 메시지를 주입 (session-context 훅, 테스트 추가)
+- SessionStart 훅: `/clear` 직후에도 지워진 직전 대화의 마지막 메시지를 주입 (session-context 훅, 테스트 추가)
 
 ## 0.5.2
-- 위임 비용 집계(`notes/runs/261028-analyst-delegation-cost.md`) 반영: Opus→Opus 위임 금지(`opus-architect`는 ESCALATE 경로일 때만), 20응답을 넘을 큰 작업은 처음부터 분할, 첫 브리프에 검증 기준 포함, 같은 파일을 다시 읽는 연속 작업은 한 위임으로 묶기
+- 위임 비용 집계 반영: Opus→Opus 위임 금지(`opus-architect`는 ESCALATE 경로일 때만), 20응답을 넘을 큰 작업은 처음부터 분할, 첫 브리프에 검증 기준 포함, 같은 파일을 다시 읽는 연속 작업은 한 위임으로 묶기
 - sonnet-analyst: 약 20응답을 넘으면 마일스톤에서 멈추고 보고 (계속 진행하지 않음)
 - sonnet-analyst: 연속 작업이 같은 파일을 다시 읽으면 위임 한 번으로 묶기
 - 답변 말미 라벨을 `다음 할 일:`에서 `추천:`으로 변경 (CLAUDE.md·README·APPLY_GUIDE·distill 스킬·style-adapter 훅). 훅은 구 라벨도 계속 인식.
@@ -31,7 +31,7 @@
 - 메인 스레드를 커스텀 에이전트로 실행하는 안은 측정 후 결정 (구현 안 함)
 - 근거와 비교표: `PLAN_0.5.0.md`
 - 정확한 문구가 정해진 수정(버전 올리기, 같은 문구 일괄 변경)만 Haiku가 맡고, 무엇을 고칠지 정해야 하는 여러 파일 수정은 Sonnet이 맡음. Sonnet은 원인 분석·설계 판단에도 씀
-- 근거: 같은 커밋을 Haiku(high·max)와 Sonnet(medium)에 재현한 시험에서 Sonnet이 실제 변경과 더 가깝고 빠르며 비용은 큰 차이 없었음 (표본 커밋별 1회; `notes/runs/261028-haiku-vs-sonnet.md`)
+- 근거: 같은 커밋을 Haiku(high·max)와 Sonnet(medium)에 재현한 시험에서 Sonnet이 실제 변경과 더 가깝고 빠르며 비용은 큰 차이 없었음 (표본 커밋별 1회)
 - 메인 압축 창 300k → 150k (`autoCompactWindow`). 리셋 안내 기본값은 끄기로 바뀜 (`LEAN_RESET_AT` 0). 선택지는 끄기(기본)·100k·120k
 - 업그레이드: 저장된 안내 값 250k는 120k로, 이전 기본값 150k·100k는 끄기로 바뀜. 설치 파일의 기본값(`LEAN_RESET_AT`)은 직접 고친 값이 아닐 때만 교체되고, `HAIKU_CALL_MAX` 등 직접 고친 값은 그대로 유지
 - 리셋 안내 훅은 `LEAN_RESET_AT`이 0이거나 없으면 아무것도 하지 않음
@@ -101,7 +101,6 @@
 ## 2026.10.28-1
 - 에이전트 이름 앞에 모델 표시 (`haiku-scout`, `sonnet-analyst` 등): `/list-agents`·실행 표시에서 모델이 보임. 업그레이드 시 예전 이름 파일은 백업으로 이동
 - 모델 고정 훅: Opus가 호출 시 모델을 덮어쓰지 못함, 기본 제공 에이전트(Explore 등)는 Haiku로
-- `notes/LEDGER.md`에 실제로 돈 모델 기록, 이름과 다르면 `⚠`
 - 일반 모드: `일반모드` / `절약모드` 입력으로 절약 규칙 끄고 켜기 (모델 호출 없음)
 
 ## 2026.10.27 (-1 ~ -5)
