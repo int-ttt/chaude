@@ -34,6 +34,8 @@ lang: caveman | ko   (ko = summary_ko 필수, rule_4)
 ```
 When the brief has `return: R-decide`, the final message is the 3.6 status header + the R-decide block:
 ```
+status: done | partial | fail | blocked
+reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 decision: <한 줄>
 why: <근거 E<n> 참조>
 rejected: <버린 안: 이유>

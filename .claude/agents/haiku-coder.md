@@ -21,6 +21,8 @@ Agent-read files (notes/*, runs/): terse English `key: value`, Korean values ver
 ## Return format (caveman R-write)
 When the brief has `return: R-write` (B형식, docs/claude-lean/CAVEMAN_FORMAT.md), the final message is the 3.6 status header + the R-write block:
 ```
+status: done | partial | fail | blocked
+reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 changed: <경로 목록>
 diffstat: <git diff --stat 요지>
 check: <명령> -> PASS|FAIL
