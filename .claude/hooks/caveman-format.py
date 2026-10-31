@@ -8,6 +8,7 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
     except Exception:
         pass
 
+# 감시 대상 목록 (plan:174, 이곳 1곳에서 관리)
 TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "opus-architect", "haiku-tui", "haiku-prompter"}  # S4: extend here only
 REQUIRED = {                                    # 3.2~3.4 keys (status header 3.6 is checked for every fmt)
     "R-read": ["claim", "searched", "not_found", "not_checked", "truncated"],
@@ -16,6 +17,7 @@ REQUIRED = {                                    # 3.2~3.4 keys (status header 3.
 }
 STATUS_KEYS = ["status", "reason"]
 STATUS_VALUES = {"done", "partial", "fail", "blocked"}
+B_KEYS = ("task", "paths", "limits", "return", "lang")  # plan:160 B형식 필수 키
 
 
 def resp_text(r):
@@ -63,6 +65,19 @@ def check(prompt, text, fmt):
     return missing
 
 
+def check_jondaetmal(text):
+    text = re.sub(r"```.*?```", "", text, flags=re.S)  # 코드블록 내용 제외
+    for s in re.split(r"[.!?\n]+", text):
+        s = s.strip()
+        if s and s[-1] == "다" and (len(s) < 2 or s[-2] != "니"):
+            return ["존댓말"]
+    return []
+
+
+def check_brief(prompt):
+    return [f"brief:{k}" for k in B_KEYS if value_of(prompt, k) is None]
+
+
 def main():
     data = json.load(sys.stdin)
     if not isinstance(data, dict) or data.get("tool_name") not in ("Agent", "Task"):
@@ -74,11 +89,19 @@ def main():
     prompt = tin.get("prompt") or ""
     if not isinstance(prompt, str):
         return
+    resp = resp_text(data.get("tool_response"))
     m = re.search(r"^return:\s*(R-read|R-write|R-decide)", prompt, re.M)
-    if not m:
+    if agent == "haiku-tui":                    # 존댓말 검사만, return: 필터 무시 (plan:160)
+        fmt, missing = "tui", check_jondaetmal(resp)
+    elif agent == "haiku-prompter":             # 전달문: B형식 키 검사, 존댓말 검사 제외 (plan:160)
+        fmt, missing = "prompter", check_brief(prompt)
+        if m:
+            missing += check(prompt, resp, m.group(1))
+    elif not m:
         return                                  # legacy brief: not checked
-    fmt = m.group(1)
-    missing = check(prompt, resp_text(data.get("tool_response")), fmt)
+    else:
+        fmt = m.group(1)
+        missing = check(prompt, resp, fmt)
     mode = os.environ.get("CAVEMAN_GUARD", "log")
     if mode not in ("log", "warn", "off"):
         mode = "log"
