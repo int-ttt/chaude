@@ -1,7 +1,8 @@
 # caveman 기반 새 구조 설계 계획서
 
-status: 설계안 v4 (구현 코드·측정 절차 미포함)
+status: 설계안 v5 (구현 코드·측정 절차 미포함)
 date: 2026-10-31
+history: v5 = 사용자 결정 반영(Q1 범위 한정, Q2 역할 정의, Q3 병합 시점), 14절 사용자 답변 필요 항목 추가 / v4 = summary_ko 조건 문구 통일, 상태 머리 위치 정정, 정합성 확인 항목 추가 / v1-v3 = 이전 커밋 이력 참조
 scope: 하네스 내부 메시지 경로를 "caveman 채널(형식 고정 축약)"과 "사용자 채널(한국어 존댓말)"로 분리하는 구조 설계
 not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 재실행
 
@@ -33,9 +34,11 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 
 | 층 | 경로 | 언어·형식 |
 |---|---|---|
-| L0 사용자 채널 | 사용자 <-> 메인 세션 | 한국어 존댓말, 자연문 |
+| L0 사용자 채널 | 입력: 사용자 -> haiku-prompter -> opus 세션 / 출력: haiku-tui -> 사용자 | haiku-tui 출력만 한국어 존댓말 자연문. haiku-prompter는 사용자 프롬프트를 opus 세션에 전달(사용자 원문 verbatim, 존댓말 규칙 비적용) |
 | L1 지휘 채널 | 메인 <-> opus-architect / sonnet-analyst / sonnet-reviewer | caveman 브리프(B형식) / 결정 반환(R-decide) |
 | L2 작업 채널 | opus·sonnet <-> haiku-* | caveman 브리프(B형식) / 읽기·쓰기 반환(R-read, R-write) |
+
+- rule_6 (Q2 결정): haiku-prompter = 사용자 프롬프트를 opus 세션에 전달하는 역할. haiku-tui = 사용자에게 답변하는 에이전트. 한국어 존댓말 표기는 haiku-tui 출력에만 적용. 아래 표·절의 "메인 세션" 중 사용자 대면 출력은 haiku-tui가 맡는 것으로 해석함 (해석, 14절 U8에서 확인)
 
 - rule_1: caveman은 L1·L2 전용. L0으로 나가는 문장은 그 문장을 쓰는 마지막 작성자가 처음부터 한국어로 씀
 - rule_2: 반환 하나에 "caveman 본문 + 한국어 요약 1~5줄(summary_ko)"을 함께 둠 (필수 조건은 rule_4). 메인은 summary_ko만 사용자에게 전달하고 본문은 번역하지 않음. summary_ko는 현 에이전트 파일의 "최종 메시지 = Korean 존댓말 요약" 규칙 자리를 그대로 씀 (C11). 바뀌는 것은 최종 메시지가 "한국어 요약만"에서 "caveman 본문 + summary_ko"로 바뀌는 것뿐
@@ -118,7 +121,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 
 | 에이전트 | 받는 형식 | 내는 형식 | 비고 |
 |---|---|---|---|
-| 메인 세션 | L0 한국어 | L1 B형식 | 사용자에게는 summary_ko만 전달 |
+| 메인 세션 | L0 한국어 | L1 B형식 | 사용자에게는 summary_ko만 전달 (사용자 대면 출력은 haiku-tui 정의 따름) |
 | opus-architect | B형식 | R-decide | 계획 파일 본문은 노트 규칙(영어 key: value) 따름 |
 | sonnet-analyst | B형식 | R-decide 또는 R-write | |
 | sonnet-reviewer | B형식 | R-decide (decision=verdict) | 메인만 호출 (C13) |
@@ -127,7 +130,8 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 | haiku-checker | B형식 | R-write (check 필드 중심) | |
 | haiku-drafter | B형식 | R-write | 산출 문서 자체는 한국어 유지 (L0 산출물) |
 | haiku-extractor | 기존 | 기존 | 파일 출력 전용, 변경 없음 |
-| haiku-prompter | B형식 | 라운드 로그 | TUI 로그가 L0인지 미정 (Q2) |
+| haiku-prompter | 사용자 원문(verbatim) | B형식 (opus 세션 전달용) | 사용자 프롬프트를 opus 세션에 전달. 한국어 존댓말 비적용 (Q2 결정). 전달문 구성은 U8 |
+| haiku-tui | B형식 또는 R-* 반환 | L0 한국어 존댓말 자연문 | 사용자에게 답변하는 에이전트. 한국어 존댓말은 이 출력에만 적용 (Q2 결정). 에이전트 파일 미존재, U9 |
 
 ## 5. 규칙 충돌 해소 (CLAUDE.md:4, C7)
 
@@ -140,8 +144,8 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 - O3: 브리프 lang 필드로 호출마다 지정, 파일 변경 없음
   - 장점: 파일 변경 0
   - 단점: 매 브리프 비용, 누락 시 한국어로 회귀
-- choice: 1단계는 O2(+ 브리프 lang 필드 병기), 사용자 승인 시 마지막 단계에서 O1로 통합하고 O2 예외줄 제거
-- why: O1은 사용자만 승인할 수 있고(Q1), O2는 승인 없이도 범위가 작아 되돌리기 쉬움
+- choice (Q1 결정, 사용자): O1 승인. CLAUDE.md:4 범위를 "사용자에게 보이는 텍스트(haiku-tui 출력 포함 L0)"로 한정, 에이전트 간 반환은 caveman 형식. 전역 CLAUDE.md 파일은 이번에 수정하지 않고 계획에만 반영. 실제 수정은 S5. S5 전 과도기에는 O2(+ 브리프 lang 필드 병기) 유지
+- why: 사용자가 Q1에서 범위 한정(O1)을 승인함. O2는 과도기 한정 예외이며 S5에서 제거
 
 ## 6. 형식 감시 (차단 아님)
 
@@ -153,6 +157,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
   - 어느 모드에서도 도구 실행 차단·종료 코드 차단 없음 (C8)
 - 검사 항목: 형식별 필수 키 존재, truncated 값 yes|no, claim 행의 "<경로>:<행> |" 패턴, status 값 4종 중 하나, lang: ko 브리프의 반환에 summary_ko 존재 (훅이 브리프 본문을 볼 수 있는지 미확인)
 - 검사 불가 항목: 한정어 손실은 정적 검사로 판별 불가 -> 감시 범위 밖으로 명시
+- 감시 대상 언어 규칙 (Q2 결정): 한국어 존댓말 검사는 haiku-tui 출력에만 적용. haiku-prompter 전달문은 B형식 필수 키(task·paths·limits·return·lang) 검사 대상이고 존댓말 검사 제외. 검사 불가 항목은 그대로
 
 ## 7. 라우팅·작업 공간 경계
 
@@ -167,8 +172,9 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 - S2 쓰기 경로: haiku-coder, haiku-batch-worker, haiku-runner, haiku-checker, haiku-drafter에 R-write 템플릿
 - S3 지휘 경로: opus-architect, sonnet-*에 B형식 작성 규칙과 R-decide 템플릿
 - S4 감시 확대: 감시 훅 검사 대상 목록에 S2·S3 에이전트 추가 (목록은 훅 설정 1곳에서 관리)
-- S5 통합: 사용자 승인(Q1) 시 CLAUDE.md:4 범위 한정(O1), O2 예외줄 제거
+- S5 통합 (Q1 승인 반영): CLAUDE.md:4 범위를 사용자 노출 텍스트로 한정(O1), O2 예외줄 제거. 전역 CLAUDE.md는 이번 계획 갱신에서 수정하지 않음
 - 공통: 단계마다 별도 worktree 브랜치·별도 커밋, 되돌리기는 해당 단계 커밋 revert. master 작업 트리에서 직접 적용 금지 (C8)
+- 병합 (Q3 결정): caveman 구현(S0~S5)이 끝난 뒤에 master로 병합. 병합 전까지 단계별 worktree 브랜치 유지. 단계별 부분 병합은 하지 않는 것으로 해석함 (해석, 확인은 U6과 함께)
 
 ## 9. 바꾸지 않는 것
 
@@ -197,9 +203,9 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 
 ## 12. 사용자만 답할 수 있는 질문
 
-- Q1: CLAUDE.md:4 범위 한정(O1)을 승인하시는지
-- Q2: TUI에 보이는 haiku-prompter 라운드 로그를 L0(한국어)로 볼지 (impl.md:161 U1)
-- Q3: worktree 기준점에 현재 master의 미커밋 변경을 포함할지 (impl.md:161 U10)
+- Q1 [결정됨]: O1 승인. CLAUDE.md:4 범위를 사용자 노출 텍스트로 한정 (5절, 8절 S5 반영)
+- Q2 [결정됨]: haiku-prompter = 사용자 프롬프트를 opus 세션에 전달. haiku-tui = 사용자에게 답변. 한국어 존댓말은 haiku-tui 출력에만 (2·4·6절 반영)
+- Q3 [결정됨]: caveman 구현이 끝나면 병합 (8절 반영). 원래 Q3(worktree 기준점에 master 미커밋 변경 포함 여부, impl.md:161 U10)은 답이 없어 14절 U6으로 이관
 
 ## 13. 미확인
 
@@ -208,3 +214,30 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 - 반환 검사용 PostToolUse matcher 이름
 - mode f 기본 활성 여부
 - 서브에이전트 캐시가 부모와 공유되는지
+- haiku-tui 에이전트 파일이 현재 존재하지 않음 (현 에이전트 목록에 없음)
+- 현행 haiku-prompter 정의는 반복·재귀 요청의 루프 소유자로, Q2 새 정의(프롬프트 전달)와 다름
+
+## 14. 사용자 답변 필요 항목
+
+(Q1~Q3 외 미확인·결정 항목 묶음. 각 항목 질문 1개 + 선택지. 본문 13장 등은 그대로 둠)
+
+- U1 (13장 1, 1절): 절감 목표 수치를 정하시겠습니까?
+  - 선택지: (a) 정하지 않고 구현 후 측정해 판단 (b) 목표 수치를 직접 지정 (c) 조건 B/C 측정을 먼저 하고 결정
+- U2 (13장 2): 모델별 단가 자료를 제공하시겠습니까?
+  - 선택지: (a) 단가를 직접 제공 (b) 공식 문서 조사를 의뢰 (c) 단가 없이 토큰 수 기준으로만 판단
+- U3 (13장 3, 6절): 반환 검사 훅의 PostToolUse matcher 이름을 어떻게 확인하시겠습니까?
+  - 선택지: (a) 구현 단계에서 조사 (b) 지금 조사 의뢰 (c) 훅 없이 진행하고 6절 보류
+- U4 (13장 4, 7절): mode f(--clients-file)를 기본으로 사용하십니까?
+  - 선택지: (a) 사용 (b) 미사용 (c) 모름, 구현 전에 확인
+- U5 (13장 5): 서브에이전트 캐시가 부모와 공유되는지 조사할까요?
+  - 선택지: (a) 구현 전 조사 (b) 조사 없이 진행 (c) 구현 후 비용 측정으로 판단
+- U6 (구 Q3, 8절): worktree 기준점을 무엇으로 하시겠습니까?
+  - 선택지: (a) master 미커밋 변경 포함 (b) 커밋된 HEAD 기준 (c) 미커밋 변경을 먼저 커밋한 뒤 분기
+- U7 (6절): lang: ko 브리프 여부를 훅이 볼 수 있는지 불확실한데, summary_ko 필수 검사를 어떻게 하시겠습니까?
+  - 선택지: (a) 검사 보류 (b) 구현 단계에서 확인 후 결정 (c) summary_ko를 항상 필수로 변경
+- U8 (4절, Q2 후속): haiku-prompter가 opus 세션에 보내는 전달문 형식은 무엇으로 하시겠습니까? 그리고 "메인 세션의 사용자 대면 출력을 haiku-tui가 맡는다"는 2절 해석이 맞습니까?
+  - 선택지: (a) 사용자 원문 verbatim + B형식 머리 (b) 사용자 원문만 (c) 원문 + 요약 포함. 해석 확인: 맞음 / 아님, 정정
+- U9 (13장 신규): haiku-tui 에이전트 파일은 어떻게 하시겠습니까?
+  - 선택지: (a) 구현 단계에 신설 (b) 기존 에이전트로 대체 (c) 별도 계획서로 분리
+- U10 (13장 신규): 현행 haiku-prompter(반복 루프 소유자)는 어떻게 하시겠습니까?
+  - 선택지: (a) 새 정의로 대체 (b) 루프 역할 유지 + 전달 역할 추가 (c) 별도 에이전트로 분리
