@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse hook (matcher: Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell), v0.8.2.
 
-- Subagent whose agent_type is set and does not start with haiku- (sonnet-*, opus-*, built-ins such as Explore,
+- Subagent whose agent_type is set and does not start with haiku- (opus-*, built-ins such as Explore,
   custom agents): no direct file or shell access. Every file touch goes through haiku-* agents.
   Escape hatch: env CLAUDE_HARNESS_ALLOW_SONNET_IO=1 disables the file-tool block (never Bash/PowerShell).
   statusline-setup is allowed for file tools only while env CHAUDE_ROTATING=1 is set (session rotation).
@@ -26,7 +26,7 @@ sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 FILE_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Grep", "Glob")
 SHELL_TOOLS = ("Bash", "PowerShell")
 ALLOW_IO = ("haiku-",)
-DENY_MSG = "sonnet/opus/비-haiku 에이전트는 파일·셸 직접 접근 금지 (v0.8.2). haiku-scout(읽기)/haiku-batch-worker(쓰기)/haiku-coder(코드)에 위임하세요."
+DENY_MSG = "opus/비-haiku 에이전트는 파일·셸 직접 접근 금지 (v0.8.2). haiku-scout(읽기)/haiku-batch-worker(쓰기)/haiku-coder(코드)에 위임하세요."
 
 
 def deny(reason):

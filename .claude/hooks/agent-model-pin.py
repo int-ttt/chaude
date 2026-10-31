@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """PreToolUse hook (Agent|Task): every subagent runs on the model its name says.
 
-- haiku-* / sonnet-* / opus-* agents: a `model` passed by the main thread is removed, so the agent file's
+- haiku-* / opus-* agents: a `model` passed by the main thread is removed, so the agent file's
   `model:` line always wins (per-call model would otherwise override it).
 - Built-in general-purpose / Explore / Plan from the main thread: denied (they carry a large default prompt);
-  the reason names the haiku-*/sonnet-* agent to use. claude-code-guide is allowed and pinned to Haiku.
-- Called from inside a subagent (Sonnet/Opus handing work down): only haiku-* agents are allowed (v0.8.2; sonnet-reviewer
-  is no longer an allowed target, so a sonnet/opus subagent cannot recurse into another sonnet/opus agent).
-  The sonnet/opus caller check runs before lean_off(), so it also applies in default mode.
-- haiku-prompter (loop owner): main thread only; it may call sonnet-analyst/sonnet-reviewer/opus-architect/haiku-*.
+  the reason names the haiku-* agent to use. claude-code-guide is allowed and pinned to Haiku.
+- Called from inside a subagent (Opus handing work down): only haiku-* agents are allowed (v0.8.2).
+  The opus caller check runs before lean_off(), so it also applies in default mode.
+- haiku-prompter (loop owner): main thread only; it may call opus-architect/haiku-*. (sonnet tier removed 2026-10-31.)
 - Other agents (the user's own) are left alone. No-op in normal mode otherwise."""
 import json, os, re, sys
 for _s in (sys.stdin, sys.stdout, sys.stderr):
@@ -24,7 +23,7 @@ from _lean import lean_off
 
 BUILTIN = {"claude-code-guide"}
 BLOCKED = {"general-purpose", "Explore", "Plan"}
-SUB_CALLERS = {"sonnet-reviewer", "sonnet-analyst", "opus-architect"}
+SUB_CALLERS = {"opus-architect"}
 
 try:
     data = json.load(sys.stdin)
@@ -37,16 +36,16 @@ if data.get("tool_name") in ("Agent", "Task") and data.get("agent_id"):
                           "permissionDecisionReason": "haiku-prompter는 메인 스레드에서만 호출할 수 있습니다 (재귀 금지)."}}, ensure_ascii=False))
         sys.exit(0)
     if data.get("agent_type") == "haiku-prompter":
-        if _target in ("sonnet-analyst", "sonnet-reviewer", "opus-architect") or (_target.startswith("haiku-") and _target != "haiku-prompter"):
+        if _target == "opus-architect" or (_target.startswith("haiku-") and _target != "haiku-prompter"):
             sys.exit(0)
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                          "permissionDecisionReason": "haiku-prompter는 sonnet-analyst/sonnet-reviewer/opus-architect/haiku-* 만 호출할 수 있습니다."}}, ensure_ascii=False))
+                          "permissionDecisionReason": "haiku-prompter는 opus-architect/haiku-* 만 호출할 수 있습니다."}}, ensure_ascii=False))
         sys.exit(0)
 if data.get("tool_name") in ("Agent", "Task") and data.get("agent_id") and data.get("agent_type") in SUB_CALLERS:
     target = str((data.get("tool_input") or {}).get("subagent_type") or "")
     if not target.startswith("haiku-"):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                          "permissionDecisionReason": "sonnet/opus 서브에이전트는 haiku-* 에이전트만 호출할 수 있습니다 (v0.8.2)."}}, ensure_ascii=False))
+                          "permissionDecisionReason": "opus 서브에이전트는 haiku-* 에이전트만 호출할 수 있습니다 (v0.8.2)."}}, ensure_ascii=False))
         sys.exit(0)
 if lean_off() or data.get("tool_name") not in ("Agent", "Task"):
     sys.exit(0)
@@ -54,9 +53,9 @@ if os.environ.get("CHAUDE_ORCH", "").strip().lower() == "e" and not data.get("ag
     _ti = data.get("tool_input") or {}
     _st = str(_ti.get("subagent_type") or "")
     _prompt = str(_ti.get("prompt") or "")
-    if _st.startswith(("sonnet-", "opus-")) and "ESCALATE" not in _prompt:
+    if _st.startswith("opus-") and "ESCALATE" not in _prompt:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                          "permissionDecisionReason": "E gate: Sonnet/Opus only on escalation after 2 Haiku failures (put ESCALATE in the brief)"}}, ensure_ascii=False))
+                          "permissionDecisionReason": "E gate: Opus only on escalation after 2 Haiku failures (put ESCALATE in the brief)"}}, ensure_ascii=False))
         sys.exit(0)
     _paths = []
     for _p in re.findall(r'(/[^\s`\'"(),<>]+)', _prompt):
@@ -80,16 +79,16 @@ if data.get("agent_id") and not kind.startswith("haiku-"):
 if kind in BLOCKED:
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                       "permissionDecisionReason": f"Built-in {kind} agent is blocked (large default prompt). Use haiku-scout "
-                                                  "(search), haiku-coder / haiku-batch-worker (edits), sonnet-analyst (judgment), "
-                                                  "opus-architect (design)."}}))
+                                                  "(search), haiku-coder / haiku-batch-worker (edits), "
+                                                  "opus-architect (design, judgment)."}}))
     sys.exit(0)
 asked = inp.get("model")
-if kind.startswith(("haiku-", "sonnet-", "opus-")):
+if kind.startswith(("haiku-", "opus-")):
     if not asked:
         sys.exit(0)
     del inp["model"]
     why = f"model '{asked}' removed: {kind} runs on its own model"
-elif kind in BUILTIN and asked not in ("haiku", "sonnet"):
+elif kind in BUILTIN and asked != "haiku":
     inp["model"] = "haiku"
     why = f"{kind} pinned to haiku" + (f" (asked '{asked}')" if asked else "")
 else:

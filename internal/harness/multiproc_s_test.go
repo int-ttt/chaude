@@ -265,148 +265,6 @@ func (r *Repl) setClock(t time.Time) {
 	r.clockMu.Unlock()
 }
 
-func TestRouteKeepsPreviousChildLive(t *testing.T) {
-	var n int
-	withFakeSessions(t, &n)
-	r := newMPRepl(t, "opus")
-	seedTurn(r)
-	if err := r.switchChild("sonnet", ""); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := r.children.Take(childKey(r.a.Cwd, "opus")); !ok || r.a.Model != "sonnet" || n != 1 {
-		t.Fatalf("opus not parked live (model=%s n=%d)", r.a.Model, n)
-	}
-}
-
-func TestRouteToHaikuParksLive(t *testing.T) {
-	var n int
-	withFakeSessions(t, &n)
-	r := newMPRepl(t, "opus")
-	seedTurn(r)
-	if err := r.switchChild("haiku", ""); err != nil {
-		t.Fatal(err)
-	}
-	if rec, ok := r.reg.Get(r.a.Cwd, "opus"); !ok || rec.State != clientParked {
-		t.Fatalf("registry: %+v", rec)
-	}
-}
-
-func TestRouteBackUsesLiveNotParkedMap(t *testing.T) {
-	var n int
-	withFakeSessions(t, &n)
-	r := newMPRepl(t, "opus")
-	orig := r.sess
-	seedTurn(r)
-	r.parked["opus"] = "stale-id"
-	if err := r.switchChild("sonnet", ""); err != nil {
-		t.Fatal(err)
-	}
-	r.pendingSnapshot = "x"
-	r.setClock(time.Now())
-	if err := r.switchChild("opus", ""); err != nil {
-		t.Fatal(err)
-	}
-	if r.sess != orig || n != 1 || r.resumeID != "" {
-		t.Fatalf("did not reuse live child (n=%d)", n)
-	}
-}
-
-func TestRouteWorkerSwitchClosesParkedHaiku(t *testing.T) {
-	var n int
-	withFakeSessions(t, &n)
-	r := newMPRepl(t, "opus")
-	seedTurn(r)
-	cc := &cntCloser{}
-	r.children.Park(childKey(r.a.Cwd, "haiku"), &liveChild{Sess: cc, Model: "haiku", LastAPI: time.Now()})
-	r.setClock(time.Now())
-	if err := r.switchChild("haiku", "worker-1"); err != nil {
-		t.Fatal(err)
-	}
-	if cc.count() != 1 {
-		t.Fatalf("parked haiku closes=%d", cc.count())
-	}
-}
-
-func TestNoResumeOfLiveSessionID(t *testing.T) {
-	var got []string
-	newSessionFn = func(o SessionOpts) (*Session, error) {
-		got = append(got, o.Resume)
-		s, _, _ := fakeSession()
-		return s, nil
-	}
-	defer func() { newSessionFn = NewSession }()
-	r := newMPRepl(t, "opus")
-	seedTurn(r)
-	r.parked["sonnet"] = "old-sid"
-	cc := &cntCloser{}
-	r.children.Park(childKey(r.a.Cwd, "sonnet"), &liveChild{Sess: cc, Model: "sonnet", LastAPI: time.Now()})
-	r.reg.Upsert(clientRec{Cwd: r.a.Cwd, Model: "sonnet", SessionID: "live-sid", State: clientParked, LastAPI: time.Now()})
-	// the parked-live sonnet child is a cntCloser, so it is "live" but not a *Session: bindChild gets nil sess
-	_ = r.switchChild("sonnet", "")
-	for _, id := range got {
-		if id == "live-sid" {
-			t.Fatal("resumed a session id that is still live")
-		}
-	}
-}
-
-func TestRouteDeadChildFallsBack(t *testing.T) {
-	var n int
-	withFakeSessions(t, &n)
-	r := newMPRepl(t, "opus")
-	seedTurn(r)
-	d := &deadCloser{}
-	r.children.Park(childKey(r.a.Cwd, "sonnet"), &liveChild{Sess: d, Model: "sonnet", LastAPI: time.Now()})
-	if err := r.switchChild("sonnet", ""); err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 || d.count() != 1 {
-		t.Fatalf("started=%d closes=%d", n, d.count())
-	}
-}
-
-func TestRouteFallsBackWithoutRegistry(t *testing.T) {
-	var n int
-	withFakeSessions(t, &n)
-	classifyFn = func(line, cur, last string, c []haikuWorker) (routeResult, float64, map[string]any, error) {
-		return routeResult{Model: "sonnet", Task: "t"}, 0, nil, nil
-	}
-	defer func() { classifyFn = classify }()
-	r := newMPRepl(t, "opus")
-	r.reg, r.children = nil, nil
-	r.route("please refactor the module")
-	if r.a.Model != "sonnet" {
-		t.Fatalf("model=%s", r.a.Model)
-	}
-}
-
-func TestRouteStartFailRollsBack(t *testing.T) {
-	newSessionFn = func(SessionOpts) (*Session, error) { return nil, io.ErrClosedPipe }
-	defer func() { newSessionFn = NewSession }()
-	r := newMPRepl(t, "opus")
-	orig := r.sess
-	seedTurn(r)
-	if err := r.switchChild("sonnet", ""); err == nil {
-		t.Fatal("want error")
-	}
-	if r.a.Model != "opus" || r.sess != orig {
-		t.Fatalf("not rolled back: model=%s", r.a.Model)
-	}
-}
-
-func TestRouteStartFailPrintsViaRepl(t *testing.T) {
-	newSessionFn = func(SessionOpts) (*Session, error) { return nil, io.ErrClosedPipe }
-	defer func() { newSessionFn = NewSession }()
-	r := newMPRepl(t, "opus")
-	var sb strings.Builder
-	r.out = &sb
-	seedTurn(r)
-	_ = r.switchChild("sonnet", "")
-	if !strings.Contains(sb.String(), "cannot start claude") {
-		t.Fatalf("out: %q", sb.String())
-	}
-}
-
 func TestRouteSameModelWorkerUsesOldPath(t *testing.T) {
 	var got []string
 	newSessionFn = func(o SessionOpts) (*Session, error) {
@@ -466,8 +324,8 @@ func TestSweepIdleClosesParkedOnly(t *testing.T) {
 	r := newMPRepl(t, "opus")
 	cold, warm := &cntCloser{}, &cntCloser{}
 	now := time.Now()
-	r.children.Park(childKey(r.a.Cwd, "haiku"), &liveChild{Sess: cold, Model: "haiku", LastAPI: now.Add(-2 * time.Hour)})
-	r.children.Park(childKey(r.a.Cwd, "sonnet"), &liveChild{Sess: warm, Model: "sonnet", LastAPI: now})
+	r.children.Park(childKey(r.a.Cwd, "haiku", ""), &liveChild{Sess: cold, Model: "haiku", LastAPI: now.Add(-2 * time.Hour)})
+	r.children.Park(childKey(r.a.Cwd, "sonnet", ""), &liveChild{Sess: warm, Model: "sonnet", LastAPI: now})
 	r.setClock(now.Add(-2 * time.Hour))
 	if !r.sweepIdle(now) {
 		t.Fatal("active not due")
@@ -483,7 +341,7 @@ func TestSweepDrainsBusyParked(t *testing.T) {
 	tk := newAgentTracker()
 	tk.onToolUse("a1", "Agent", map[string]any{"description": "d", "name": "w", "prompt": "p"}, time.Now())
 	c := &cntCloser{}
-	r.children.Park(childKey(r.a.Cwd, "haiku"), &liveChild{Sess: c, Tracker: tk, Model: "haiku", LastAPI: time.Now().Add(-2 * time.Hour)})
+	r.children.Park(childKey(r.a.Cwd, "haiku", ""), &liveChild{Sess: c, Tracker: tk, Model: "haiku", LastAPI: time.Now().Add(-2 * time.Hour)})
 	r.sweepIdle(time.Now())
 	time.Sleep(50 * time.Millisecond)
 	if c.count() != 0 {

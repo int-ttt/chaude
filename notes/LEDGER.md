@@ -1,7 +1,3 @@
-- 10-28 23:46 [agent] ㅇㅇ 그렇게 해
-- 10-28 23:48 [agent] ㅇㅇ 그렇게 진행해
-- 10-28 23:48 [agent] ㅇㅇ 구현하고 빌드해
-- 10-28 23:51 [agent] ㅇㅇ 구현하고 빌드해
 - 10-28 23:54 [agent] ㅇㅇ 결과 나오면 바로 구현 진행해
 - 10-28 23:55 [agent] hook 내용 열어보고 묶음 확정해
 - 10-28 23:55 [agent] ㅇㅇ 테스트 해봐
@@ -298,3 +294,7 @@
 - 10-31 18:27 [sonnet-analyst · sonnet 5.5] Haiku 조사 에이전트(haiku-scout)를 띄워 두었습니다. 라우터 심볼 호출부, 메인 모델 설정 위치, CLAUDE_ROUTER_MODEL 줄 목록, sonnet 포함 파일을 한 번에 조사하는 중입니다. 결과가 오기 전에는 삭제나 수정을 시작하지 않습니다.
 - 10-31 18:40 [sonnet-analyst · sonnet 5.5] 계획서를 haiku-scout가 읽고 있습니다. 결과가 오면 단계 목록에 따라 라우터 제거부터 진행하겠습니다.
 - 10-31 18:44 [sonnet-analyst · sonnet 5.5] 원본에는 이번 세션의 모델호출 정책 흔적이 없습니다. 다만 `git status`에는 이번 세션 이전부터 있던 미커밋 변경 29줄이 남아 있습니다. 어떤 것도 되돌리거나 쓰지 않았고 조회만 했습니다. 복제본은 접근하지 않았습니다. / **git log 최신 3건** / - `0ee3501` merge: caveman-impl v0.9.0 into master
+- 10-31 19:00 [agent] I'm not going to write out my analysis block. The summary itself is below. / <summary> / 1. Primary Request and Intent:
+- 10-31 19:03 [agent] <analysis> / Summary of the session so far, for the compact. Work is the model-call policy subagent task in /Users/leekwangseok/PycharmProjects/claude-harness (master). The brief said: no commit, push, tag, stash, reset, or checkout; edit the working tree only; do not touch the clone or the T direct
+- 10-31 19:04 [haiku-coder · haiku 5.5] Sonnet 티어 제거(step 9)와 검증(step 10)을 마쳤습니다. go build/vet/test 및 hook 테스트 모두 exit 0입니다. / 변경: .claude/agents/sonnet-{analyst,reviewer}.md 삭제, .claude/hooks/agent-model-pin.py, tests/hooks/test_orch_gate.py 수정 (상세 `notes/runs/261031-haiku-model-policy-impl.md` §7). / PASS (go build/vet/test, unittest 10
+- 10-31 19:44 [opus-architect · opus 5.5] I've sent haiku-scout to map the spawn paths and roles. I'll wait for its results before deciding anything.

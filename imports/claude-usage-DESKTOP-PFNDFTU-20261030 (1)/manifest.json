@@ -1,0 +1,13 @@
+{
+  "host": "DESKTOP-PFNDFTU",
+  "created": "2026-10-30T20:42:37+09:00",
+  "counts": {
+    "files_scanned": 12,
+    "rows": 1367,
+    "sessions": 8,
+    "duplicates_dropped": 1815,
+    "skipped_bad_lines": 0,
+    "masked_emails": 0
+  },
+  "include_conversations": false
+}

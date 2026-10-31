@@ -10,10 +10,11 @@ import (
 	"time"
 )
 
-// childKey identifies a live child session by working directory and model.
+// childKey identifies a live child session by working directory, model and role.
 // An empty cwd means the process working directory; symlinks are resolved so
-// /var and /private/var on macOS map to the same key.
-func childKey(cwd, model string) string {
+// /var and /private/var on macOS map to the same key. An empty role gives the
+// role-less key; a non-empty role appends one more NUL-separated field.
+func childKey(cwd, model, role string) string {
 	if cwd == "" {
 		if wd, err := os.Getwd(); err == nil {
 			cwd = wd
@@ -25,7 +26,10 @@ func childKey(cwd, model string) string {
 	if real, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = real
 	}
-	return cwd + "\x00" + model
+	if role == "" {
+		return cwd + "\x00" + model
+	}
+	return cwd + "\x00" + model + "\x00" + role
 }
 
 // closer is the part of a child session that childSet needs; *Session satisfies it.
@@ -37,6 +41,7 @@ type liveChild struct {
 	Tracker  *agentTracker
 	Model    string
 	Role     string
+	Lazy     bool // resident lazy slot: retired by sweepParked after residentLazyIdle parked
 	LastAPI  time.Time
 	LastCtx  int
 	Files    []string
@@ -86,6 +91,33 @@ func (s *childSet) Park(key string, c *liveChild) {
 	if old != nil && old.Sess != nil && old.Sess != c.Sess {
 		old.Sess.Close()
 	}
+}
+
+// Len returns the number of parked children.
+func (s *childSet) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.m)
+}
+
+// EvictLRU removes and returns the parked child with the oldest LastAPI. The caller retires it.
+func (s *childSet) EvictLRU() (*liveChild, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var oldestKey string
+	var oldest *liveChild
+	var oldestAt time.Time
+	for k, c := range s.m {
+		at := c.lastAPI()
+		if oldest == nil || at.Before(oldestAt) || (at.Equal(oldestAt) && k < oldestKey) {
+			oldestKey, oldest, oldestAt = k, c, at
+		}
+	}
+	if oldest == nil {
+		return nil, false
+	}
+	delete(s.m, oldestKey)
+	return oldest, true
 }
 
 // Take removes and returns the child stored under key.

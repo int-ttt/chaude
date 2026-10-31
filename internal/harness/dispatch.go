@@ -40,7 +40,37 @@ func checkWorkerCap(set *childSet, max int) error {
 	n := len(set.m)
 	set.mu.Unlock()
 	if n >= max {
-		return fmt.Errorf("워커 세션 상한(%d개)에 도달해 새 세션을 시작하지 않습니다. 기존 세션을 정리하거나 -max-workers 값을 올려 주세요.", max)
+		return workerCapErr(max)
+	}
+	return nil
+}
+
+func workerCapErr(max int) error {
+	return fmt.Errorf("워커 세션 상한(%d개)에 도달해 새 세션을 시작하지 않습니다. 기존 세션을 정리하거나 -max-workers 값을 올려 주세요.", max)
+}
+
+// admit makes room for one more live worker before a new child is spawned. Counts the parked
+// children plus the active one (it is parked by the caller next), and evicts the parked child
+// with the oldest LastAPI while the count is at or above the cap. Refuses when nothing can be evicted.
+func (r *Repl) admit() error {
+	if r.children == nil {
+		return nil
+	}
+	limit := r.a.MaxWorkers
+	if limit <= 0 {
+		limit = DefaultMaxWorkers
+	}
+	count := r.children.Len()
+	if r.sess != nil {
+		count++
+	}
+	for count >= limit {
+		c, ok := r.children.EvictLRU()
+		if !ok {
+			return workerCapErr(limit)
+		}
+		r.retire(c)
+		count--
 	}
 	return nil
 }

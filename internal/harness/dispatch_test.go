@@ -13,7 +13,7 @@ func TestPickChild(t *testing.T) {
 	const limit, deadline = 80_000, time.Hour
 	dir := t.TempDir()
 	reg := newClientRegistry(filepath.Join(dir, "clients.json"))
-	key := childKey(dir, "sonnet")
+	key := childKey(dir, "sonnet", "")
 
 	set := newChildSet()
 	if got := pickChild(set, nil, key, dir, "sonnet", limit, now, deadline); got != actStartNew {

@@ -1,9 +1,6 @@
 package harness
 
 import (
-	"fmt"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -21,8 +18,6 @@ type workerPool struct {
 	mu sync.Mutex
 	l  map[string]*haikuWorker
 }
-
-const maxCandidates = 5
 
 func newWorkerPool() *workerPool { return &workerPool{l: map[string]*haikuWorker{}} }
 
@@ -47,24 +42,6 @@ func (p *workerPool) noteEdit(id, task, file string) {
 	w.Updated = time.Now()
 }
 
-// candidates: newest first, at most maxCandidates.
-func (p *workerPool) candidates() []haikuWorker {
-	if p == nil {
-		return nil
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var l []haikuWorker
-	for _, w := range p.l {
-		l = append(l, *w)
-	}
-	sort.Slice(l, func(i, j int) bool { return l[i].Updated.After(l[j].Updated) })
-	if len(l) > maxCandidates {
-		l = l[:maxCandidates]
-	}
-	return l
-}
-
 func (p *workerPool) has(id string) bool {
 	if p == nil {
 		return false
@@ -73,16 +50,4 @@ func (p *workerPool) has(id string) bool {
 	defer p.mu.Unlock()
 	_, ok := p.l[id]
 	return ok
-}
-
-// candidateText is the classifier-facing list ("" when empty).
-func candidateText(c []haikuWorker) string {
-	if len(c) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, w := range c {
-		fmt.Fprintf(&b, "- %s | task: %s | edited: %s\n", w.ID, w.Task, trunc(strings.Join(w.Files, ", "), 160))
-	}
-	return b.String()
 }

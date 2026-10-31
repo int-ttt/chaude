@@ -39,7 +39,7 @@ func (b *budget) charge(s *Session, total float64) {
 	b.running = 0
 }
 
-// chargeOneShot books a cost of a separate one-shot process (classifier, /usage).
+// chargeOneShot books a cost of a separate one-shot process (/usage).
 func (b *budget) chargeOneShot(cost float64) {
 	if b == nil || b.cap <= 0 || cost <= 0 {
 		return

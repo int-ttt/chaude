@@ -75,13 +75,13 @@ class OrchGateTest(unittest.TestCase):
         self.assertIn("deny", out)
         self.assertIn("E gate", out)
 
-    def test_4a_sonnet_without_escalate_denied(self):
-        out = run_hook(PIN, self.agent_payload("sonnet-analyst", "Decide the trade-off."), orch="e")
+    def test_4a_opus_without_escalate_denied(self):
+        out = run_hook(PIN, self.agent_payload("opus-architect", "Decide the trade-off."), orch="e")
         self.assertIn("deny", out)
         self.assertIn("E gate", out)
 
-    def test_4b_sonnet_with_escalate_not_gated(self):
-        out = run_hook(PIN, self.agent_payload("sonnet-analyst", "ESCALATE: decide the trade-off."), orch="e")
+    def test_4b_opus_with_escalate_not_gated(self):
+        out = run_hook(PIN, self.agent_payload("opus-architect", "ESCALATE: decide the trade-off."), orch="e")
         self.assertNotIn("E gate", out)
 
     def test_5_orch_unset_no_gate(self):
@@ -90,7 +90,7 @@ class OrchGateTest(unittest.TestCase):
         self.assertNotIn("E gate", out)
 
     def test_6_subagent_call_not_gated(self):
-        out = run_hook(PIN, self.agent_payload("sonnet-analyst", "no escalate here", agent_id="a1"), orch="e")
+        out = run_hook(PIN, self.agent_payload("opus-architect", "no escalate here", agent_id="a1"), orch="e")
         self.assertNotIn("E gate", out)
 
     def test_7_main_guard_e_allows_read(self):

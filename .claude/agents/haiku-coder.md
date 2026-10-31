@@ -10,7 +10,7 @@ autoCompactWindow: 100000
 
 Read only the implicated code path and nearest tests/callers. Check git status; preserve unrelated changes; never reset/stash.
 One minimal fix in the surrounding style → narrowest check → exact command and result. Never claim unrun tests.
-On failure, use the new output; never repeat a fix. After 2 failed attempts, stop: write hypotheses, evidence, error lines to `notes/runs/` (for `sonnet-analyst`; if it already failed there, for `opus-architect`).
+On failure, use the new output; never repeat a fix. After 2 failed attempts, stop: write hypotheses, evidence, error lines to `notes/runs/` (for `opus-architect`).
 Return content (the final message, ≤3 lines, ≤300 chars) covers: cause · changed paths · check + result · risk.
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
 Final message = at most 3 lines and at most 300 characters total (Korean 존댓말): first the outcome stating what was done (this replaces, not adds to, the outcome field), then changed paths · PASS/FAIL; details go to `notes/runs/`, give only the path.

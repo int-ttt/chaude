@@ -83,7 +83,7 @@ func (r *Repl) parkOld() (*liveChild, bool) {
 		old.Sess.Close()
 		return old, false
 	}
-	key := childKey(r.a.Cwd, old.Model)
+	key := childKey(r.a.Cwd, old.Model, old.Role)
 	if prev, ok := r.children.Take(key); ok && prev != nil && prev != old {
 		r.retire(prev)
 	}
@@ -116,7 +116,7 @@ func (r *Repl) endParked(model, reason string) bool {
 	if r.children == nil {
 		return false
 	}
-	c, ok := r.children.Take(childKey(r.a.Cwd, model))
+	c, ok := r.children.Take(childKey(r.a.Cwd, model, ""))
 	if !ok || c == nil {
 		return false
 	}
@@ -133,9 +133,14 @@ func (r *Repl) endAllParked(reason string) {
 		return
 	}
 	for _, k := range r.children.Expired(time.Now(), 0) {
-		if i := strings.IndexByte(k, 0); i >= 0 {
-			r.endParked(k[i+1:], reason)
+		c, ok := r.children.Take(k)
+		if !ok || c == nil {
+			continue
 		}
+		if c.Sess != nil {
+			r.retire(c)
+		}
+		r.reg.MarkEnded(r.a.Cwd, c.Model, reason, time.Now())
 	}
 }
 
@@ -149,7 +154,7 @@ func (r *Repl) switchChild(target, resumeID string) error {
 		return nil
 	}
 	now := time.Now()
-	key := childKey(r.a.Cwd, target)
+	key := childKey(r.a.Cwd, target, "")
 	act := actStartNew
 	if resumeID == "" {
 		act = pickChild(r.children, r.reg, key, r.a.Cwd, target, r.thresholdFor(target), now, r.warmDeadline())
@@ -199,6 +204,11 @@ func (r *Repl) switchChild(target, resumeID string) error {
 	if snap != "" {
 		snap = r.withDesignPath(target, snap)
 	}
+	if live == nil {
+		if err := r.admit(); err != nil {
+			return err
+		}
+	}
 	oldModel := r.a.Model
 	old, parked := r.parkOld()
 	var err error
@@ -218,7 +228,7 @@ func (r *Repl) switchChild(target, resumeID string) error {
 		r.a.Model = oldModel
 		r.resumeID = ""
 		if old != nil && parked {
-			if c, ok := r.children.Take(childKey(r.a.Cwd, old.Model)); ok {
+			if c, ok := r.children.Take(childKey(r.a.Cwd, old.Model, old.Role)); ok {
 				r.bindChild(c)
 				r.reg.Upsert(clientRec{Cwd: r.a.Cwd, Model: old.Model, SessionID: sessID(c.Sess), State: clientLive,
 					LastAPI: c.lastAPI(), LastCtx: c.LastCtx, OwnerPID: ownPID(), ChildPID: childPID(c.Sess)})

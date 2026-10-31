@@ -24,8 +24,9 @@ const (
 	dim = "\033[2m"
 	rst = "\033[0m"
 
-	// rotation threshold for opus/sonnet (haiku uses the -threshold flag, default 150000)
-	opusSonnetThreshold = 150_000
+	// rotation thresholds: opus uses opusThreshold; every other model (haiku, unknown, sonnet) uses -threshold, default haikuThreshold
+	haikuThreshold = 80_000
+	opusThreshold  = 200_000
 
 	handoffPrompt = "Write a handoff note for a fresh session that will continue this work. No tools. " +
 		"Sections: Goal; Decisions; Files created/changed; In-progress work; Open questions; " +
@@ -36,6 +37,16 @@ const (
 		"implement yourself only design-level or tightly coupled parts, then verify Haiku's diff. " +
 		"Log each delegation (agent, tokens, duration, outcome, retries)."
 )
+
+const forwardRule = "[forward] You are the Haiku main: you receive the user's input first. Forward design, judgment, diagnosis, planning and multi-step implementation to the opus-architect agent in ONE foreground call; the brief carries the user's original text verbatim plus a short summary, in caveman B format (docs/claude-lean/CAVEMAN_FORMAT.md 3.1). Simple lookups go to haiku-scout, repeat/loop requests to haiku-prompter. Relay the result to the user in Korean 존댓말; do not decide design yourself."
+
+// forwardRuleFor returns the forward rule for a child on model; an Opus main already has the judgment, so no rule.
+func forwardRuleFor(model string) string {
+	if strings.Contains(strings.ToLower(model), "opus") {
+		return ""
+	}
+	return forwardRule
+}
 
 // Args mirrors the argparse flags.
 type Args struct {
@@ -58,7 +69,6 @@ type Args struct {
 	FromClaude       string        // import a plain Claude Code transcript: session id | path | latest
 	ImportDry        bool          // with FromClaude: print the handoff stats and exit
 	NoCategoryRotate bool          // disable category-based rotation (no marker rule, no switch rotation)
-	Conductor        bool          // Haiku-fixed main orchestrates; opus-tier work: Haiku plans -> opus-architect review -> Haiku executes
 	NoDelegationRule bool          // do not append the haiku delegation rule to the child's system prompt
 	CacheTTL         string        // prompt cache TTL requested from claude: auto|1h|5m (see withCacheTTL)
 	IdleRotate       time.Duration // idle time after which a child is treated as cold; 0 = off
@@ -171,7 +181,7 @@ type Repl struct {
 	drainMu         sync.Mutex
 	cat             string              // current task category from the child's [cat: X] marker
 	delegs          int                 // Agent/Task tool calls in the current turn
-	pool            *workerPool         // Haiku sessions with edit history (direct routing candidates)
+	pool            *workerPool         // Haiku sessions with edit history (edit history)
 	parked          map[string]string   // model -> session id left by a direct Haiku switch
 	resumeID        string              // session id start() resumes once
 	curTask         string              // terse task of the current routed turn
@@ -179,6 +189,8 @@ type Repl struct {
 	idle            idleTurn            // child-initiated turn being rendered (idle reader goroutine only)
 	reg             *clientRegistry     // per-(cwd,model) client registry; nil = off (old routing)
 	children        *childSet           // live child processes kept per (cwd,model); nil = off
+	resident        []residentSlot      // --resident preset slots; nil = off
+	residentUp      bool                // spawnResident ran (once, after the first successful start)
 	idleRotate      time.Duration       // idle deadline base (--idle-rotate); 0 = off
 	budget          *budget             // per-task USD ledger; nil = off
 	ttl             string              // prompt cache TTL requested (--cache-ttl)
@@ -242,6 +254,9 @@ func (r *Repl) start() error {
 	if !r.a.NoDelegationRule {
 		rule = delegationRule
 	}
+	if fr := forwardRuleFor(r.a.Model); fr != "" {
+		rule = strings.TrimSpace(rule + " " + fr)
+	}
 	if !r.a.NoCategoryRotate {
 		rule = strings.TrimSpace(rule + " " + categoryRule)
 	}
@@ -290,6 +305,12 @@ func (r *Repl) start() error {
 		}
 		r.idleEvent(s, tk, ev)
 	})
+	if len(r.resident) > 0 && !r.residentUp {
+		r.residentUp = true
+		if err := r.spawnResident(); err != nil {
+			r.p(dim+"chaude: resident slots: "+err.Error()+rst, "\n")
+		}
+	}
 	return nil
 }
 
@@ -423,7 +444,7 @@ func (r *Repl) idleFinish(s *Session, tk *agentTracker, result event) {
 		t0 = time.Now()
 	}
 	fields := map[string]any{"stage": "turn", "source": "background", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
-		"model": r.a.Model, "conductor": r.a.Conductor, "ctx": r.lastCtx, "session": s.SessionID, "cost_usd": cost, "rotations": r.rotations}
+		"model": r.a.Model, "ctx": r.lastCtx, "session": s.SessionID, "cost_usd": cost, "rotations": r.rotations}
 	if d, ok := r.turnCostUSD(s.SessionID, cost); ok {
 		fields["cost_turn_usd"] = d
 	}
@@ -860,11 +881,14 @@ func (r *Repl) pollDrains() {
 func (r *Repl) effectiveThreshold() int { return r.thresholdFor(r.a.Model) }
 
 func (r *Repl) thresholdFor(model string) int {
-	if model == "opus" || model == "sonnet" {
-		return opusSonnetThreshold
+	if strings.Contains(model, "opus") {
+		return opusThreshold
 	}
 	return r.a.Threshold
 }
+
+// shouldRotate reports whether the context token count has reached the rotation threshold.
+func shouldRotate(ctx, thr int) bool { return ctx >= thr }
 
 func (r *Repl) handle(line string) {
 	r.pollDrains()
@@ -875,9 +899,6 @@ func (r *Repl) handle(line string) {
 		return
 	}
 	text := line
-	if r.a.Conductor {
-		text = r.route(line)
-	}
 	if ns := r.takeNotices(); len(ns) > 0 {
 		text = strings.Join(ns, "\n") + "\n\n" + text
 	}
@@ -918,7 +939,7 @@ func (r *Repl) handle(line string) {
 	r.wsRecord(reply)
 	r.pollUsage()
 	fields := map[string]any{"stage": "turn", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
-		"model": r.a.Model, "conductor": r.a.Conductor, "ctx": r.lastCtx, "session": r.sess.SessionID, "draining": len(r.draining),
+		"model": r.a.Model, "ctx": r.lastCtx, "session": r.sess.SessionID, "draining": len(r.draining),
 		"cost_usd": cost, "duration_ms": time.Since(t0).Milliseconds(), "rotations": r.rotations, "delegations": r.delegs}
 	if d, ok := r.turnCostUSD(r.sess.SessionID, cost); ok {
 		fields["cost_turn_usd"] = d // cost_usd is cumulative per session; this is the turn's own share
@@ -948,7 +969,7 @@ func (r *Repl) handle(line string) {
 	autoOK := r.a.MaxAutoRotations < 0 || r.rotations < r.a.MaxAutoRotations
 	cooled := r.lastRotFail.IsZero() || time.Since(r.lastRotFail) >= r.a.Cooldown
 	thr := r.effectiveThreshold()
-	if autoOK && cooled && r.lastCtx >= thr {
+	if autoOK && cooled && shouldRotate(r.lastCtx, thr) {
 		r.rotate(fmt.Sprintf("ctx %s >= %s", commas(r.lastCtx), commas(thr)))
 	}
 }
@@ -1065,7 +1086,7 @@ func Main(args []string) int {
 	var a Args
 	fs.StringVar(&a.Model, "model", "haiku", "")
 	fs.StringVar(&a.Cwd, "cwd", "", "")
-	fs.IntVar(&a.Threshold, "threshold", 150_000, "rotate after an answer when context tokens >= this")
+	fs.IntVar(&a.Threshold, "threshold", haikuThreshold, "rotate after an answer when context tokens >= this")
 	fs.IntVar(&a.CompactWindow, "compact-window", 400_000, "child-only CLAUDE_CODE_AUTO_COMPACT_WINDOW (keep > threshold; 0=off)")
 	fs.IntVar(&a.MaxAutoRotations, "max-auto-rotations", -1, "max automatic rotations (default unlimited)")
 	fs.StringVar(&a.Transcript, "transcript", filepath.Join(osenv.StateDir(), "transcript.jsonl"), "")
@@ -1080,7 +1101,6 @@ func Main(args []string) int {
 	fs.DurationVar(&a.Cooldown, "rotate-cooldown", 2*time.Minute, "min gap after a failed rotation")
 	fs.BoolVar(&a.NoCategoryRotate, "no-category-rotate", false, "disable category-based session rotation")
 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
-	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: Haiku-fixed main; a one-shot Sonnet classifier tags tier (haiku|sonnet|opus); sonnet tier -> sonnet-analyst hint, opus tier -> plan->review->execute hint")
 	fs.StringVar(&a.AgentsFile, "agents-file", defaultAgentsFile(), "persisted sub-agent state, restored on restart and /resume (empty=off)")
 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
@@ -1090,6 +1110,9 @@ func Main(args []string) int {
 	fs.StringVar(&a.ClientsFile, "clients-file", defaultClientsFile(), "per-(cwd,model) client registry (empty=off)")
 	fs.IntVar(&a.MaxWorkers, "max-workers", DefaultMaxWorkers, "cap on concurrent live worker sessions (env CHAUDE_MAX_WORKERS when unset)")
 	fs.StringVar(&a.Orch, "orch", "m0", "orchestration mode m0|b|c|d|e|f (A/B test)")
+	var resident, residentMainModel string
+	fs.StringVar(&resident, "resident", "off", "resident slot preset off|min|fixed (env CHAUDE_RESIDENT when unset)")
+	fs.StringVar(&residentMainModel, "resident-main-model", "", "main slot model when --resident is not off (default: fixed=opus, min=haiku)")
 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -1127,8 +1150,29 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
+	residentSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "resident" {
+			residentSet = true
+		}
+	})
+	resName := resident
+	if env := strings.TrimSpace(os.Getenv("CHAUDE_RESIDENT")); !residentSet && env != "" {
+		resName = env
+	}
+	slots, residentCap, err := residentPreset(resName, residentMainModel)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	if residentCap > 0 && !maxWorkersSet && strings.TrimSpace(os.Getenv("CHAUDE_MAX_WORKERS")) == "" {
+		mw = residentCap
+	}
+	if len(slots) > 0 {
+		a.Model = slots[0].Model
+	}
 	a.MaxWorkers = mw
-	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1)}
+	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1), resident: slots}
 	if st, err := os.Stdin.Stat(); err == nil {
 		r.interactive = st.Mode()&os.ModeCharDevice != 0
 	}
@@ -1140,7 +1184,7 @@ func Main(args []string) int {
 	r.reconcileStart()
 	r.metrics = newMetrics(a.MetricsDir, map[string]any{"threshold": a.Threshold, "handoff_validate": !a.NoValidate,
 		"max_drain": a.MaxDrain, "drain_timeout_s": int(a.DrainTimeout.Seconds()), "compact_window": a.CompactWindow,
-		"delegation_rule": !a.NoDelegationRule, "category_rotate": !a.NoCategoryRotate, "conductor": a.Conductor})
+		"delegation_rule": !a.NoDelegationRule, "category_rotate": !a.NoCategoryRotate})
 	r.seenTools = map[string]bool{}
 	if a.FromClaude != "" {
 		if code, done := r.importFromClaude(); done {
@@ -1201,21 +1245,11 @@ func (r *Repl) reconcileStart() {
 	}
 }
 
-// setConductor toggles classifier routing (a one-shot Sonnet call per prompt picks the model of the session that answers).
-func (r *Repl) setConductor(on bool) {
-	r.a.Conductor = on
-	r.p(fmt.Sprintf("conductor: %v (classifier routes each prompt to haiku|sonnet|opus)", on), "\n")
-}
-
 // modeLine handles "/mode [name]" on the plain path (no arg shows, "next" cycles).
 func (r *Repl) modeLine(args []string) {
 	cur := permMode(r.mode.Load())
-	if len(args) > 0 && (args[0] == "conductor" || args[0] == "conductor-off") {
-		r.setConductor(args[0] == "conductor")
-		return
-	}
 	if len(args) == 0 {
-		r.p("mode "+cur.String()+"  (conductor="+fmt.Sprint(r.a.Conductor)+"; default | acceptEdits | plan | auto)", "\n")
+		r.p("mode "+cur.String()+"  (default | acceptEdits | plan | auto)", "\n")
 		return
 	}
 	p, ok := cur.Next(), true

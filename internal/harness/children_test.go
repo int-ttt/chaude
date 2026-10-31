@@ -12,14 +12,14 @@ func TestChildKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k := childKey("", "sonnet")
-	if k != childKey(".", "sonnet") {
-		t.Errorf("empty cwd and \".\" differ: %q vs %q", k, childKey(".", "sonnet"))
+	k := childKey("", "sonnet", "")
+	if k != childKey(".", "sonnet", "") {
+		t.Errorf("empty cwd and \".\" differ: %q vs %q", k, childKey(".", "sonnet", ""))
 	}
-	if k != childKey(wd, "sonnet") {
-		t.Errorf("empty cwd and working dir differ: %q vs %q", k, childKey(wd, "sonnet"))
+	if k != childKey(wd, "sonnet", "") {
+		t.Errorf("empty cwd and working dir differ: %q vs %q", k, childKey(wd, "sonnet", ""))
 	}
-	if childKey(wd, "sonnet") == childKey(wd, "haiku") {
+	if childKey(wd, "sonnet", "") == childKey(wd, "haiku", "") {
 		t.Errorf("different models share a key")
 	}
 }

@@ -9,7 +9,7 @@ autoCompactWindow: 100000
 ---
 
 - input from main: user verbatim, target agent, task brief.
-- LOOP_TARGETS: sonnet-analyst, sonnet-reviewer, opus-architect. If target is haiku-* -> one call, no re-ask, return result.
+- LOOP_TARGETS: opus-architect, haiku-scout, haiku-coder, haiku-checker. If target is haiku-* -> one call, no re-ask, return result.
 - never call haiku-prompter. Bash only for `date +%s` / `date`.
 - step 0: write done-criteria (<=5 bullets) from user verbatim; parse mode per round-count rules below.
 - each round: one foreground Agent call to target; check each criterion met/unmet; log line.

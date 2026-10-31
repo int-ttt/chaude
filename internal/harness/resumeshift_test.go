@@ -60,7 +60,7 @@ func TestImportShowsTurnsInTUI(t *testing.T) {
 	}
 }
 
-// After an import the current child has seen nothing; a model switch (conductor route, /model) must not
+// After an import the current child has seen nothing; a model switch (/model) must not
 // ask it for a handoff (wasted turn, empty note) nor replace the import snapshot.
 func TestRotateKeepsPendingSnapshot(t *testing.T) {
 	old, _, oldIn := fakeSession()

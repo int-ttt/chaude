@@ -1,0 +1,2065 @@
+diff --git a/.claude/agents/haiku-coder.md b/.claude/agents/haiku-coder.md
+index af76b42..87ad1d8 100644
+--- a/.claude/agents/haiku-coder.md
++++ b/.claude/agents/haiku-coder.md
+@@ -10,7 +10,7 @@ autoCompactWindow: 100000
+ 
+ Read only the implicated code path and nearest tests/callers. Check git status; preserve unrelated changes; never reset/stash.
+ One minimal fix in the surrounding style → narrowest check → exact command and result. Never claim unrun tests.
+-On failure, use the new output; never repeat a fix. After 2 failed attempts, stop: write hypotheses, evidence, error lines to `notes/runs/` (for `sonnet-analyst`; if it already failed there, for `opus-architect`).
++On failure, use the new output; never repeat a fix. After 2 failed attempts, stop: write hypotheses, evidence, error lines to `notes/runs/` (for `opus-architect`).
+ Return content (the final message, ≤3 lines, ≤300 chars) covers: cause · changed paths · check + result · risk.
+ If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
+ Final message = at most 3 lines and at most 300 characters total (Korean 존댓말): first the outcome stating what was done (this replaces, not adds to, the outcome field), then changed paths · PASS/FAIL; details go to `notes/runs/`, give only the path.
+diff --git a/.claude/agents/haiku-prompter.md b/.claude/agents/haiku-prompter.md
+index 6e925d6..88606d3 100644
+--- a/.claude/agents/haiku-prompter.md
++++ b/.claude/agents/haiku-prompter.md
+@@ -9,7 +9,7 @@ autoCompactWindow: 100000
+ ---
+ 
+ - input from main: user verbatim, target agent, task brief.
+-- LOOP_TARGETS: sonnet-analyst, sonnet-reviewer, opus-architect. If target is haiku-* -> one call, no re-ask, return result.
++- LOOP_TARGETS: opus-architect, haiku-scout, haiku-coder, haiku-checker. If target is haiku-* -> one call, no re-ask, return result.
+ - never call haiku-prompter. Bash only for `date +%s` / `date`.
+ - step 0: write done-criteria (<=5 bullets) from user verbatim; parse mode per round-count rules below.
+ - each round: one foreground Agent call to target; check each criterion met/unmet; log line.
+diff --git a/.claude/agents/opus-architect.md b/.claude/agents/opus-architect.md
+index bd0730f..878589a 100644
+--- a/.claude/agents/opus-architect.md
++++ b/.claude/agents/opus-architect.md
+@@ -1,6 +1,6 @@
+ ---
+ name: opus-architect
+-description: Opus. Work sonnet-analyst escalated (ESCALATE scope file), the user forced with opus로, or that already failed - design, architecture, algorithms, hard diagnosis, strategy or document-structure decisions. Decides first; no direct file access (Agent tool only); delegates all reading and editing to Haiku/Sonnet.
++description: Opus. Work the Haiku main forwards (user input relay, original text verbatim + summary), the user forced with opus로, or that already failed - design, architecture, algorithms, hard diagnosis, strategy or document-structure decisions. Decides first; no direct file access (Agent tool only); delegates all reading and editing to Haiku.
+ tools: Agent
+ model: opus
+ effort: high
+@@ -9,10 +9,10 @@ autoCompactWindow: 100000
+ ---
+ 
+ No direct file access (v0.8.2): you have only the Agent tool - no Read/Write/Edit/Bash/Grep/Glob. Design and delegate only. Every file read, search, edit or command goes through a delegate: reading/search -> `haiku-scout` (RETURN: verbatim <=4000 chars), edits/code -> `haiku-coder`/`haiku-batch-worker`, plans/answers written to `notes/runs/` -> `haiku-batch-worker` (verbatim save). Put exact paths, line ranges and wording in each brief; verify via `haiku-checker`.
+-The brief quotes the user's words and the conversation context you need, or is an `ESCALATE` scope file from sonnet-analyst: start from it, don't redo its reading. Have `haiku-scout` read `notes/FACTS.md`, `notes/DECISIONS.md`, `notes/LESSONS.md` and only the files that bear on the decision (grep first, partial reads) and return excerpts (RETURN: verbatim <=4000 chars); never repeat approaches LESSONS.md marks as failed.
++The brief quotes the user's words and the conversation context you need. Have `haiku-scout` read `notes/FACTS.md`, `notes/DECISIONS.md`, `notes/LESSONS.md` and only the files that bear on the decision (grep first, partial reads) and return excerpts (RETURN: verbatim <=4000 chars); never repeat approaches LESSONS.md marks as failed.
+ 1. Decide: problem and constraints, 2-3 options with trade-offs, the choice and why.
+ 2. Small implementation: hand it to `haiku-coder` with an exact spec (you cannot edit yourself); have `haiku-checker` run the narrowest check; report the exact result.
+-3. Otherwise have `haiku-batch-worker` save `notes/runs/<YYMMDD>-plan-<topic>.md` verbatim so Sonnet/Haiku can implement without re-deciding: goal, chosen approach and why, ordered steps per file (exact names, signatures, data formats, wording), edge cases, acceptance checks, what must NOT change.
++3. Otherwise have `haiku-batch-worker` save `notes/runs/<YYMMDD>-plan-<topic>.md` verbatim so Haiku can implement without re-deciding: goal, chosen approach and why, ordered steps per file (exact names, signatures, data formats, wording), edge cases, acceptance checks, what must NOT change.
+ Anything the user reads: Korean 존댓말. Return ≤5 lines: the decision in one line, plan path or changed files, checks run, any question only the user can answer.
+ Final message = only a brief result summary (a few lines, Korean 존댓말: outcome · changed paths · PASS/FAIL) for the main session to post; full details go to `notes/runs/`, give only the path.
+ Mechanical sub-steps (bulk edits, conversions, wide searches): with the Agent tool, hand them to `haiku-batch-worker`/`haiku-scout`/`haiku-coder` (≤5-line briefs) and check results; else list them under `## [haiku] steps` in your result file (agent, files, exact change) and say so.
+diff --git a/.claude/agents/sonnet-analyst.md b/.claude/agents/sonnet-analyst.md
+deleted file mode 100644
+index c244a20..0000000
+--- a/.claude/agents/sonnet-analyst.md
++++ /dev/null
+@@ -1,44 +0,0 @@
+----
+-name: sonnet-analyst
+-description: Sonnet (분석 담당). Complexity 1-2 work and implementing opus-architect plans. Reasoning the main thread hands off - long explanations, plans, comparisons, option analysis from given facts; synthesizing many sources; interpreting data or analysis results; multi-file/design-level code; tasks Haiku failed twice.
+-tools: Agent
+-model: sonnet
+-effort: medium
+-omitClaudeMd: true
+-autoCompactWindow: 100000
+----
+-
+-Questions handed off by the main thread: the brief quotes the user's words and the needed context. Draft the answer for the user (Korean 존댓말) via `haiku-drafter`, save it verbatim to `notes/runs/<YYMMDD>-answer-<topic>.md` via `haiku-batch-worker`; return only the path + a 1-line gist.
+-Read failure reports in the brief first; never repeat tried approaches. Documents: read FACTS.md / DECISIONS.md; never invent facts.
+-Separate evidence from inference; mark uncertainty. Code: smallest complete change, narrow verification, exact results.
+-Full write-up → `notes/runs/<YYMMDD>-analyst-<topic>.md` via `haiku-batch-worker` (verbatim save).
+-Otherwise return ≤5 lines: conclusion · confidence · path · open question.
+-Final message = only a brief result summary (a few lines, Korean 존댓말: outcome · changed paths · PASS/FAIL) for the main session to post; full details go to `notes/runs/`, give only the path.
+-Your final message stays in the main thread's context: never paste file contents, lists or long explanations — put them in files.
+-Scope first: you have no Read/Write/Edit/Grep/Glob/Bash/WebSearch/WebFetch. Every read goes via `haiku-scout` with `RETURN: verbatim <=4000 chars` (web via `haiku-researcher` with the same RETURN). Bundle at most 3 files (유사 파일끼리 최대 3개 파일/묶음); all file edits go to `haiku-coder`/`haiku-batch-worker`. Stop without implementing and return `ESCALATE: notes/runs/<YYMMDD>-scope-<topic>.md` (what you found, the open decision, the options) when: two or more plausible designs and no evidence for one; requirements conflict; 5+ interlocked files must change; or your own check fails once. Escalating early is cheaper than a weak result. Over ~20 responses: stop at a milestone and report instead of continuing; spawn nothing for the same files you already read.
+-Mechanical sub-steps (bulk edits, conversions, wide searches): with the Agent tool, hand them to `haiku-batch-worker`/`haiku-scout`/`haiku-coder` (≤5-line briefs) and check results; else list them under `## [haiku] steps` in your result file (agent, files, exact change) and say so.
+-- never edit files yourself; hand every edit to haiku-coder with an exact spec, then verify its diff via haiku-checker or Bash git diff.
+-Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.
+-
+-Plan review (from the Haiku main): when the brief gives a plan path to review, have haiku-scout read it (RETURN: verbatim <=4000 chars), then have haiku-batch-worker write only concrete improvements (missing steps, wrong agent choice, risks, ordering) to the path named in the brief (default `<plan>-review.md`); do not execute the plan. Return ≤3 lines: verdict, path.
+-
+-## Caveman briefs and returns
+-Briefs to other agents use B형식 (docs/claude-lean/CAVEMAN_FORMAT.md 3.1): keys task, paths, ctx, limits, return, lang; set lang: ko only when the result goes to the user.
+-```
+-task: <한 줄 동사구>
+-paths: <절대경로>[:<행범위>], ...
+-ctx: E<n>: <경로>:<행> / <수치 또는 인용 요지>   (상속 없음, C6)
+-limits: <수정 금지 경로>, <금지 행위>
+-return: R-read | R-write | R-decide, <상한(자 또는 줄)>
+-lang: caveman | ko   (ko = summary_ko 필수, rule_4)
+-```
+-When the brief has `return: R-decide`, the final message is the 3.6 status header + the R-decide block:
+-```
+-decision: <한 줄>
+-why: <근거 E<n> 참조>
+-rejected: <버린 안: 이유>
+-risks: <항목>
+-open_q: <사용자만 답할 수 있는 질문 | ->
+-plan_path: <경로 | ->
+-summary_ko: <lang: ko일 때 필수, 1~5줄, L0 전달용>
+-```
+diff --git a/.claude/agents/sonnet-reviewer.md b/.claude/agents/sonnet-reviewer.md
+deleted file mode 100644
+index 949b2d4..0000000
+--- a/.claude/agents/sonnet-reviewer.md
++++ /dev/null
+@@ -1,36 +0,0 @@
+----
+-name: sonnet-reviewer
+-description: Sonnet (검토 담당). Read-only review before anything leaves the project - submitted, published, printed, sent, merged or released (documents, reports, slides, code diffs). Replaces the main thread reading full text.
+-tools: Agent
+-model: sonnet
+-effort: medium
+-omitClaudeMd: true
+-autoCompactWindow: 100000
+----
+-
+-Do not edit. Read nothing directly: haiku-scout reads and returns excerpts with `RETURN: verbatim <=4000 chars`; haiku-checker runs `bin/chaude charcount <file>` and `git diff -- <paths>` (`RETURN: verbatim <=4000 chars`). Documents: facts vs FACTS.md, tone/versions/format vs DECISIONS.md, the requirements named in the brief, length limits (from haiku-checker charcount), clarity for the intended reader, consistency across versions. Code: bugs, edge cases, unrelated changes.
+-Issue list (severity, file:line, one-line fix) → `notes/runs/<YYMMDD>-review-<topic>.md` via `haiku-batch-worker` (verbatim save).
+-Return ≤5 lines: PASS / FIX · top 3 issues · path.
+-Final message = only a brief result summary (a few lines, Korean 존댓말: outcome · changed paths · PASS/FAIL) for the main session to post; full details go to `notes/runs/`, give only the path.
+-Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.
+-
+-## Caveman briefs and returns
+-Briefs to other agents use B형식 (docs/claude-lean/CAVEMAN_FORMAT.md 3.1): keys task, paths, ctx, limits, return, lang; set lang: ko only when the result goes to the user.
+-```
+-task: <한 줄 동사구>
+-paths: <절대경로>[:<행범위>], ...
+-ctx: E<n>: <경로>:<행> / <수치 또는 인용 요지>   (상속 없음, C6)
+-limits: <수정 금지 경로>, <금지 행위>
+-return: R-read | R-write | R-decide, <상한(자 또는 줄)>
+-lang: caveman | ko   (ko = summary_ko 필수, rule_4)
+-```
+-When the brief has `return: R-decide`, the final message is the 3.6 status header + the R-decide block:
+-```
+-decision: <한 줄>
+-why: <근거 E<n> 참조>
+-rejected: <버린 안: 이유>
+-risks: <항목>
+-open_q: <사용자만 답할 수 있는 질문 | ->
+-plan_path: <경로 | ->
+-summary_ko: <lang: ko일 때 필수, 1~5줄, L0 전달용>
+-```
+diff --git a/.claude/hooks/agent-model-pin.py b/.claude/hooks/agent-model-pin.py
+index 88c2faf..80b63cf 100755
+--- a/.claude/hooks/agent-model-pin.py
++++ b/.claude/hooks/agent-model-pin.py
+@@ -1,14 +1,13 @@
+ #!/usr/bin/env python3
+ """PreToolUse hook (Agent|Task): every subagent runs on the model its name says.
+ 
+-- haiku-* / sonnet-* / opus-* agents: a `model` passed by the main thread is removed, so the agent file's
++- haiku-* / opus-* agents: a `model` passed by the main thread is removed, so the agent file's
+   `model:` line always wins (per-call model would otherwise override it).
+ - Built-in general-purpose / Explore / Plan from the main thread: denied (they carry a large default prompt);
+-  the reason names the haiku-*/sonnet-* agent to use. claude-code-guide is allowed and pinned to Haiku.
+-- Called from inside a subagent (Sonnet/Opus handing work down): only haiku-* agents are allowed (v0.8.2; sonnet-reviewer
+-  is no longer an allowed target, so a sonnet/opus subagent cannot recurse into another sonnet/opus agent).
+-  The sonnet/opus caller check runs before lean_off(), so it also applies in default mode.
+-- haiku-prompter (loop owner): main thread only; it may call sonnet-analyst/sonnet-reviewer/opus-architect/haiku-*.
++  the reason names the haiku-* agent to use. claude-code-guide is allowed and pinned to Haiku.
++- Called from inside a subagent (Opus handing work down): only haiku-* agents are allowed (v0.8.2).
++  The opus caller check runs before lean_off(), so it also applies in default mode.
++- haiku-prompter (loop owner): main thread only; it may call opus-architect/haiku-*. (sonnet tier removed 2026-10-31.)
+ - Other agents (the user's own) are left alone. No-op in normal mode otherwise."""
+ import json, os, re, sys
+ for _s in (sys.stdin, sys.stdout, sys.stderr):
+@@ -24,7 +23,7 @@ from _lean import lean_off
+ 
+ BUILTIN = {"claude-code-guide"}
+ BLOCKED = {"general-purpose", "Explore", "Plan"}
+-SUB_CALLERS = {"sonnet-reviewer", "sonnet-analyst", "opus-architect"}
++SUB_CALLERS = {"opus-architect"}
+ 
+ try:
+     data = json.load(sys.stdin)
+@@ -37,16 +36,16 @@ if data.get("tool_name") in ("Agent", "Task") and data.get("agent_id"):
+                           "permissionDecisionReason": "haiku-prompter는 메인 스레드에서만 호출할 수 있습니다 (재귀 금지)."}}, ensure_ascii=False))
+         sys.exit(0)
+     if data.get("agent_type") == "haiku-prompter":
+-        if _target in ("sonnet-analyst", "sonnet-reviewer", "opus-architect") or (_target.startswith("haiku-") and _target != "haiku-prompter"):
++        if _target == "opus-architect" or (_target.startswith("haiku-") and _target != "haiku-prompter"):
+             sys.exit(0)
+         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+-                          "permissionDecisionReason": "haiku-prompter는 sonnet-analyst/sonnet-reviewer/opus-architect/haiku-* 만 호출할 수 있습니다."}}, ensure_ascii=False))
++                          "permissionDecisionReason": "haiku-prompter는 opus-architect/haiku-* 만 호출할 수 있습니다."}}, ensure_ascii=False))
+         sys.exit(0)
+ if data.get("tool_name") in ("Agent", "Task") and data.get("agent_id") and data.get("agent_type") in SUB_CALLERS:
+     target = str((data.get("tool_input") or {}).get("subagent_type") or "")
+     if not target.startswith("haiku-"):
+         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+-                          "permissionDecisionReason": "sonnet/opus 서브에이전트는 haiku-* 에이전트만 호출할 수 있습니다 (v0.8.2)."}}, ensure_ascii=False))
++                          "permissionDecisionReason": "opus 서브에이전트는 haiku-* 에이전트만 호출할 수 있습니다 (v0.8.2)."}}, ensure_ascii=False))
+         sys.exit(0)
+ if lean_off() or data.get("tool_name") not in ("Agent", "Task"):
+     sys.exit(0)
+@@ -54,9 +53,9 @@ if os.environ.get("CHAUDE_ORCH", "").strip().lower() == "e" and not data.get("ag
+     _ti = data.get("tool_input") or {}
+     _st = str(_ti.get("subagent_type") or "")
+     _prompt = str(_ti.get("prompt") or "")
+-    if _st.startswith(("sonnet-", "opus-")) and "ESCALATE" not in _prompt:
++    if _st.startswith("opus-") and "ESCALATE" not in _prompt:
+         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+-                          "permissionDecisionReason": "E gate: Sonnet/Opus only on escalation after 2 Haiku failures (put ESCALATE in the brief)"}}, ensure_ascii=False))
++                          "permissionDecisionReason": "E gate: Opus only on escalation after 2 Haiku failures (put ESCALATE in the brief)"}}, ensure_ascii=False))
+         sys.exit(0)
+     _paths = []
+     for _p in re.findall(r'(/[^\s`\'"(),<>]+)', _prompt):
+@@ -80,16 +79,16 @@ if data.get("agent_id") and not kind.startswith("haiku-"):
+ if kind in BLOCKED:
+     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                       "permissionDecisionReason": f"Built-in {kind} agent is blocked (large default prompt). Use haiku-scout "
+-                                                  "(search), haiku-coder / haiku-batch-worker (edits), sonnet-analyst (judgment), "
+-                                                  "opus-architect (design)."}}))
++                                                  "(search), haiku-coder / haiku-batch-worker (edits), "
++                                                  "opus-architect (design, judgment)."}}))
+     sys.exit(0)
+ asked = inp.get("model")
+-if kind.startswith(("haiku-", "sonnet-", "opus-")):
++if kind.startswith(("haiku-", "opus-")):
+     if not asked:
+         sys.exit(0)
+     del inp["model"]
+     why = f"model '{asked}' removed: {kind} runs on its own model"
+-elif kind in BUILTIN and asked not in ("haiku", "sonnet"):
++elif kind in BUILTIN and asked != "haiku":
+     inp["model"] = "haiku"
+     why = f"{kind} pinned to haiku" + (f" (asked '{asked}')" if asked else "")
+ else:
+diff --git a/.claude/hooks/caveman-format.py b/.claude/hooks/caveman-format.py
+index 7c0196a..d3c6db8 100644
+--- a/.claude/hooks/caveman-format.py
++++ b/.claude/hooks/caveman-format.py
+@@ -8,7 +8,7 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
+     except Exception:
+         pass
+ 
+-TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "opus-architect", "sonnet-analyst", "sonnet-reviewer", "haiku-tui", "haiku-prompter"}  # S4: extend here only
++TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "opus-architect", "haiku-tui", "haiku-prompter"}  # S4: extend here only
+ REQUIRED = {                                    # 3.2~3.4 keys (status header 3.6 is checked for every fmt)
+     "R-read": ["claim", "searched", "not_found", "not_checked", "truncated"],
+     "R-write": ["changed", "diffstat", "check", "ws"],
+diff --git a/.claude/hooks/haiku-context-guard.py b/.claude/hooks/haiku-context-guard.py
+index 2e71574..d36f73b 100755
+--- a/.claude/hooks/haiku-context-guard.py
++++ b/.claude/hooks/haiku-context-guard.py
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env python3
+ """PreToolUse hook (matcher: Read|Write|Edit|MultiEdit|NotebookEdit|Grep|Glob|Bash|PowerShell), v0.8.2.
+ 
+-- Subagent whose agent_type is set and does not start with haiku- (sonnet-*, opus-*, built-ins such as Explore,
++- Subagent whose agent_type is set and does not start with haiku- (opus-*, built-ins such as Explore,
+   custom agents): no direct file or shell access. Every file touch goes through haiku-* agents.
+   Escape hatch: env CLAUDE_HARNESS_ALLOW_SONNET_IO=1 disables the file-tool block (never Bash/PowerShell).
+   statusline-setup is allowed for file tools only while env CHAUDE_ROTATING=1 is set (session rotation).
+@@ -26,7 +26,7 @@ sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
+ FILE_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Grep", "Glob")
+ SHELL_TOOLS = ("Bash", "PowerShell")
+ ALLOW_IO = ("haiku-",)
+-DENY_MSG = "sonnet/opus/비-haiku 에이전트는 파일·셸 직접 접근 금지 (v0.8.2). haiku-scout(읽기)/haiku-batch-worker(쓰기)/haiku-coder(코드)에 위임하세요."
++DENY_MSG = "opus/비-haiku 에이전트는 파일·셸 직접 접근 금지 (v0.8.2). haiku-scout(읽기)/haiku-batch-worker(쓰기)/haiku-coder(코드)에 위임하세요."
+ 
+ 
+ def deny(reason):
+diff --git a/.claude/hooks/main-thread-guard.py b/.claude/hooks/main-thread-guard.py
+index 91a5938..905ad03 100755
+--- a/.claude/hooks/main-thread-guard.py
++++ b/.claude/hooks/main-thread-guard.py
+@@ -29,6 +29,6 @@ if tool in WORK_TOOLS:
+     print(json.dumps({"hookSpecificOutput": {
+         "hookEventName": "PreToolUse",
+         "permissionDecision": "deny",
+-        "permissionDecisionReason": f"Main session does not use {tool}. Delegate: search->haiku-scout, web->haiku-researcher/`/research`, writing->haiku-drafter, verify->haiku-checker/`/check`, bulk/notes->haiku-batch-worker, jobs->haiku-runner/`/status`, code->haiku-coder, reasoning/synthesis->sonnet-analyst (ESCALATE -> opus-architect), final review->sonnet-reviewer. If the user wants you to work directly, tell them to type 일반모드."
++        "permissionDecisionReason": f"Main session does not use {tool}. Delegate: search->haiku-scout, web->haiku-researcher/`/research`, writing->haiku-drafter, verify->haiku-checker/`/check`, bulk/notes->haiku-batch-worker, jobs->haiku-runner/`/status`, code->haiku-coder, design/judgment->opus-architect, final check->haiku-checker. If the user wants you to work directly, tell them to type 일반모드."
+     }}))
+ sys.exit(0)
+diff --git a/.claude/settings.json b/.claude/settings.json
+index 54651d8..258d23e 100644
+--- a/.claude/settings.json
++++ b/.claude/settings.json
+@@ -1,5 +1,5 @@
+ {
+-  "model": "opus",
++  "model": "haiku",
+   "effortLevel": "low",
+   "autoCompactWindow": 150000,
+   "env": {
+diff --git a/CLAUDE.md b/CLAUDE.md
+index adfd950..9f66d82 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -2,18 +2,18 @@
+ # Policy: the main thread listens and routes (Haiku in chaude; Opus only if forced); subagents do all work
+ 
+ Korean, 존댓말 for user-visible text only (haiku-tui output incl. L0); agent-to-agent briefs/returns use caveman format (docs/claude-lean/CAVEMAN_FORMAT.md). Main thread has no work tools (hook-enforced). Minimize main-thread tokens.
+-- Flow = 대기 → 프롬프트: stay idle (no output) until a user prompt arrives; then one delegation round (all agent calls in one message, foreground, wait for results), then exactly one final reply, then idle again. No interim status text, no narration between calls, no second round unless the user prompts again. Main-thread reply ≤ a few sentences; the user's final answer is printed in full in the reply (TUI output pane, 기본값), never only as a file path or written to a file (결과는 파일 경로만 전달 금지; 파일로 출력하지 말고 TUI에 내용을 직접 출력); `notes/runs/` is for agent-to-agent hand-off only. Tests, builds, verification, reviews and file edits belong to Haiku/Sonnet agents, never to Opus.
++- Flow = 대기 → 프롬프트: stay idle (no output) until a user prompt arrives; then one delegation round (all agent calls in one message, foreground, wait for results), then exactly one final reply, then idle again. No interim status text, no narration between calls, no second round unless the user prompts again. Main-thread reply ≤ a few sentences; the user's final answer is printed in full in the reply (TUI output pane, 기본값), never only as a file path or written to a file (결과는 파일 경로만 전달 금지; 파일로 출력하지 말고 TUI에 내용을 직접 출력); `notes/runs/` is for agent-to-agent hand-off only. Tests, builds, verification, reviews and file edits belong to Haiku agents, never to Opus.
+ - Scroll rule (chaude TUI): output pane jumps to bottom on prompt input and on any output update (notes/runs/scroll-bottom.md); keep it.
+ 
+-- Delegate all file/web work; agent descriptions say who does what. Agent names carry their model (`haiku-*`, `sonnet-*`, `opus-*`); never pass `model` when calling them (a hook strips it).
+-- Routing: Sonnet = 검토·분석 (`sonnet-reviewer` review, `sonnet-analyst` analysis); Haiku = simple lookup/questions - "이거 뭐였는지 찾아" style search/query prompts → `haiku-scout` (effort high; `haiku-researcher` for web). Bounded/mechanical → a Haiku agent. Only edits whose exact text is already specified (version bumps, identical wording replacement across files) → `haiku-coder`/`haiku-batch-worker`; multi-file edits that need deciding what to change → `sonnet-analyst`; `sonnet-analyst` also for diagnosis or design judgment. Anything needing judgment (synthesis, design, multi-file code, long answers) → `sonnet-analyst`; it scopes first and returns `ESCALATE: <path>` before implementing when the task is beyond it → give that path to `opus-architect` (Opus, high effort) as is, don't re-brief. Opus delegating to Opus saves nothing, so use `opus-architect` only for an ESCALATE path (separate context) or when the user says `opus로`, the same item was corrected twice, or an agent already failed on it. The user can force `haiku로` / `sonnet으로` / `opus로`. Start every delegating reply with the route, e.g. `[sonnet-analyst]`, `[ESCALATE → opus-architect]`. `sonnet-reviewer` before anything is submitted or printed.
+-- sonnet/opus 에이전트 파일 직접 접근 전면 금지 (Read·Write·Edit·Grep·Glob 및 Bash/PowerShell 포함, 훅 강제): 파일 읽기는 haiku-scout(RETURN: verbatim <=4000 chars), 쓰기는 haiku-batch-worker/haiku-coder, 웹은 haiku-researcher가 수행. sonnet-analyst는 유사 파일끼리 최대 3개 파일/묶음 단위로 Haiku에게 요청하고 요약만 받아 분석 (토큰 절약 목적).
+-- Sonnet/Opus agents hand mechanical sub-steps to Haiku agents themselves when they can, and hand work only to `haiku-*` agents (D11); a result listing `## [haiku] steps` → give that path to the matching Haiku agents in one parallel round.
++- Delegate all file/web work; agent descriptions say who does what. Agent names carry their model (`haiku-*`, `opus-*`); never pass `model` when calling them (a hook strips it).
++- Routing: Haiku main receives user input and forwards design/judgment (synthesis, design, multi-file code, long answers, diagnosis) to `opus-architect` (Opus, high effort, separate context; don't re-brief). Haiku agents execute: simple lookup/questions - "이거 뭐였는지 찾아" style search/query prompts → `haiku-scout` (effort high; `haiku-researcher` for web); bounded/mechanical edits → `haiku-coder`/`haiku-batch-worker`; long runs → `haiku-runner`. No router and no Sonnet tier. The user can force `haiku로` / `opus로`. Start every delegating reply with the route, e.g. `[haiku-scout]`, `[opus-architect]`. `haiku-checker` before anything is submitted or printed.
++- opus 에이전트 파일 직접 접근 전면 금지 (Read·Write·Edit·Grep·Glob 및 Bash/PowerShell 포함, 훅 강제): 파일 읽기는 haiku-scout(RETURN: verbatim <=4000 chars), 쓰기는 haiku-batch-worker/haiku-coder, 웹은 haiku-researcher가 수행. 유사 파일끼리 최대 3개 파일/묶음 단위로 Haiku에게 요청하고 요약만 받아 분석 (토큰 절약 목적).
++- Opus agents hand mechanical sub-steps to Haiku agents themselves when they can, and hand work only to `haiku-*` agents (D11); a result listing `## [haiku] steps` → give that path to the matching Haiku agents in one parallel round.
+ - Opus never reads or writes files directly (`opus-architect` has only the Agent tool): reads are delegated to `haiku-scout`, writes to `haiku-coder`/`haiku-batch-worker` (notes/runs documents: verbatim → `haiku-batch-worker`; user-voice prose only → `haiku-drafter`). Opus (main or architect) decides and delegates only.
+-- `opus-architect` finishes small work through those delegates or returns a plan path. For a plan: reply with the path + ≤3-line gist + a `추천:` line (implement `<plan path>`); on approval give the plan path to `sonnet-analyst` (`haiku-coder` for mechanical steps), then `sonnet-reviewer`. If the user asked to go straight through, implement without stopping.
++- `opus-architect` finishes small work through those delegates or returns a plan path. For a plan: reply with the path + ≤3-line gist + a `추천:` line (implement `<plan path>`); on approval give the plan path to `haiku-coder`/`haiku-batch-worker` (one per mechanical step group), then `haiku-checker`. If the user asked to go straight through, implement without stopping.
+ - Answers without file/web work — decide who answers:
+   - Opus itself: explanations, results, concepts, opinions, OR anything needing nuance from this conversation that can't be put in a short brief (ambiguous intent, priorities/strategy/trade-off calls, pushback verdicts).
+-  - Documents the user will keep (full plans, comparisons, option analyses that need research) → `sonnet-analyst` with the user's words quoted + needed facts. It returns the answer text; relay it in the reply (user wants output in the TUI, not a file). Write `notes/runs/` only if the user asks to keep a document.
++  - Documents the user will keep (full plans, comparisons, option analyses that need research) → `opus-architect` with the user's words quoted + needed facts. It returns the answer text; relay it in the reply (user wants output in the TUI, not a file). Write `notes/runs/` only if the user asks to keep a document.
+ - One delegation round per user message: put every agent call in ONE message (parallel). Never chain agents through the main thread; agents self-verify.
+ - Brief ≤5 lines: goal · target paths · constraints · acceptance · "return ≤5 lines". Acceptance = how the agent self-checks (so no re-run); consecutive tasks re-reading the same files → one delegation. Paths only, never pasted content.
+ - Continue the same `haiku-drafter`/`haiku-coder` per workstream. Revisions and "아니…" corrections: relay the user's exact words + ≤1 line.
+@@ -25,9 +25,9 @@ Korean, 존댓말 for user-visible text only (haiku-tui output incl. L0); agent-
+ - Hook tags (`[ack]` `[retry]` `[frag]` `[inbox]` `[paste]` `[ctx]` `[normal]` `[lean]`) carry their own instruction: follow it, don't re-plan.
+ - Corrections: follow the hook's one-line tag and the `correction` skill. Same item corrected twice → ≤5-bullet checklist, confirm, then one brief.
+ - `notes/FACTS.md`, `notes/DECISIONS.md` are the source of truth; agents read and update them. `notes/DELIVERABLES.md` (final files), `notes/OPEN.md` (pending/deadlines), `notes/LESSONS.md` (what failed) — pass the relevant one in briefs.
+-- The user does not routinely use `/clear` or `/compact`; never suggest them. To reset: `/exit`, then `claude` (the previous session's last messages are injected; also injected after a `/clear` the user runs themselves). Auto-compaction (150k window) bounds context; rotation threshold: Haiku main 80k (new session handoff), Opus and Sonnet main 270k; state lives in notes/ and `notes/LEDGER.md` (agent results, hook-written); a snapshot is injected after compaction or in a new session. Switching workstreams: just continue and name the workstream in briefs.
++- The user does not routinely use `/clear` or `/compact`; never suggest them. To reset: `/exit`, then `claude` (the previous session's last messages are injected; also injected after a `/clear` the user runs themselves). Auto-compaction (150k window) bounds context; rotation threshold: Haiku main 80k (new session handoff), Opus main 200k; state lives in notes/ and `notes/LEDGER.md` (agent results, hook-written); a snapshot is injected after compaction or in a new session. Switching workstreams: just continue and name the workstream in briefs.
+ 
+ # Compact instructions
+ Keep only: open workstreams with goal and next action, the pending `추천:` default, active agent IDs and what each holds, paths of final files, unresolved user requests. Drop agent outputs, resolved corrections, and anything already in notes/.
+ <!-- claude-lean:end -->
+-- Chaude conductor (Haiku-fixed main): the main session is always Haiku (`--model haiku`); the classifier is always Sonnet and only tags size. Opus is for design only, never main. Large/judgment/design task (arrives with a `[routing: large ...]` hint) → workflow: (1) Haiku writes the full design/orchestration plan to `notes/runs/<YYMMDD>-plan-<topic>.md`; (2) in one foreground round Haiku hands that path to `opus-architect` (design review) and/or `sonnet-analyst` and asks for improvements only (written to `...-plan-<topic>-review.md`, no execution); (3) Haiku merges the improvements into the plan; (4) Haiku executes the improved plan via Haiku agents (`haiku-coder`/`haiku-batch-worker`/`haiku-scout`/`haiku-runner`), then `sonnet-reviewer`. Small tasks: Haiku does them via Haiku agents directly. Forced `opus로`/`sonnet으로` (`--model`) is kept as is. The Opus-main rules above apply only to a forced Opus main.
++- Chaude conductor (Haiku-fixed main): the main session is always Haiku (`--model haiku`) and receives user input. Opus is for design only, never main. Large/judgment/design task → workflow: (1) Haiku writes the full design/orchestration plan to `notes/runs/<YYMMDD>-plan-<topic>.md`; (2) in one foreground round Haiku hands that path to `opus-architect` (design review) and asks for improvements only (written to `...-plan-<topic>-review.md`, no execution); (3) Haiku merges the improvements into the plan; (4) Haiku executes the improved plan via Haiku agents (`haiku-coder`/`haiku-batch-worker`/`haiku-scout`/`haiku-runner`), then `haiku-checker`. Small tasks: Haiku does them via Haiku agents directly. Forced `opus로` (`--model`) is kept as is. The Opus-main rules above apply only to a forced Opus main.
+diff --git a/internal/harness/budget.go b/internal/harness/budget.go
+index 6d211a3..bc2ef08 100644
+--- a/internal/harness/budget.go
++++ b/internal/harness/budget.go
+@@ -39,7 +39,7 @@ func (b *budget) charge(s *Session, total float64) {
+ 	b.running = 0
+ }
+ 
+-// chargeOneShot books a cost of a separate one-shot process (classifier, /usage).
++// chargeOneShot books a cost of a separate one-shot process (/usage).
+ func (b *budget) chargeOneShot(cost float64) {
+ 	if b == nil || b.cap <= 0 || cost <= 0 {
+ 		return
+diff --git a/internal/harness/children.go b/internal/harness/children.go
+index 16a454c..6b3dd26 100644
+--- a/internal/harness/children.go
++++ b/internal/harness/children.go
+@@ -10,10 +10,11 @@ import (
+ 	"time"
+ )
+ 
+-// childKey identifies a live child session by working directory and model.
++// childKey identifies a live child session by working directory, model and role.
+ // An empty cwd means the process working directory; symlinks are resolved so
+-// /var and /private/var on macOS map to the same key.
+-func childKey(cwd, model string) string {
++// /var and /private/var on macOS map to the same key. An empty role gives the
++// role-less key; a non-empty role appends one more NUL-separated field.
++func childKey(cwd, model, role string) string {
+ 	if cwd == "" {
+ 		if wd, err := os.Getwd(); err == nil {
+ 			cwd = wd
+@@ -25,7 +26,10 @@ func childKey(cwd, model string) string {
+ 	if real, err := filepath.EvalSymlinks(cwd); err == nil {
+ 		cwd = real
+ 	}
+-	return cwd + "\x00" + model
++	if role == "" {
++		return cwd + "\x00" + model
++	}
++	return cwd + "\x00" + model + "\x00" + role
+ }
+ 
+ // closer is the part of a child session that childSet needs; *Session satisfies it.
+@@ -37,6 +41,7 @@ type liveChild struct {
+ 	Tracker  *agentTracker
+ 	Model    string
+ 	Role     string
++	Lazy     bool // resident lazy slot: retired by sweepParked after residentLazyIdle parked
+ 	LastAPI  time.Time
+ 	LastCtx  int
+ 	Files    []string
+@@ -88,6 +93,33 @@ func (s *childSet) Park(key string, c *liveChild) {
+ 	}
+ }
+ 
++// Len returns the number of parked children.
++func (s *childSet) Len() int {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	return len(s.m)
++}
++
++// EvictLRU removes and returns the parked child with the oldest LastAPI. The caller retires it.
++func (s *childSet) EvictLRU() (*liveChild, bool) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++	var oldestKey string
++	var oldest *liveChild
++	var oldestAt time.Time
++	for k, c := range s.m {
++		at := c.lastAPI()
++		if oldest == nil || at.Before(oldestAt) || (at.Equal(oldestAt) && k < oldestKey) {
++			oldestKey, oldest, oldestAt = k, c, at
++		}
++	}
++	if oldest == nil {
++		return nil, false
++	}
++	delete(s.m, oldestKey)
++	return oldest, true
++}
++
+ // Take removes and returns the child stored under key.
+ func (s *childSet) Take(key string) (*liveChild, bool) {
+ 	s.mu.Lock()
+diff --git a/internal/harness/children_test.go b/internal/harness/children_test.go
+index a3ef9e7..ea54a6f 100644
+--- a/internal/harness/children_test.go
++++ b/internal/harness/children_test.go
+@@ -12,14 +12,14 @@ func TestChildKey(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	k := childKey("", "sonnet")
+-	if k != childKey(".", "sonnet") {
+-		t.Errorf("empty cwd and \".\" differ: %q vs %q", k, childKey(".", "sonnet"))
++	k := childKey("", "sonnet", "")
++	if k != childKey(".", "sonnet", "") {
++		t.Errorf("empty cwd and \".\" differ: %q vs %q", k, childKey(".", "sonnet", ""))
+ 	}
+-	if k != childKey(wd, "sonnet") {
+-		t.Errorf("empty cwd and working dir differ: %q vs %q", k, childKey(wd, "sonnet"))
++	if k != childKey(wd, "sonnet", "") {
++		t.Errorf("empty cwd and working dir differ: %q vs %q", k, childKey(wd, "sonnet", ""))
+ 	}
+-	if childKey(wd, "sonnet") == childKey(wd, "haiku") {
++	if childKey(wd, "sonnet", "") == childKey(wd, "haiku", "") {
+ 		t.Errorf("different models share a key")
+ 	}
+ }
+diff --git a/internal/harness/classifier.go b/internal/harness/classifier.go
+deleted file mode 100644
+index 3225af1..0000000
+--- a/internal/harness/classifier.go
++++ /dev/null
+@@ -1,299 +0,0 @@
+-package harness
+-
+-import (
+-	"bytes"
+-	"encoding/json"
+-	"fmt"
+-	"os"
+-	"os/exec"
+-	"strings"
+-	"sync"
+-	"time"
+-)
+-
+-const (
+-	routerModelDefault = "haiku" // classifier model when CHAUDE_ROUTER_MODEL is unset or invalid
+-	routerModelEnv     = "CHAUDE_ROUTER_MODEL"
+-	// Deprecated: the Sonnet router path is deprecated in favor of Haiku (user-approved default flip: Haiku is now the default).
+-	// Behavior is unchanged and CHAUDE_ROUTER_MODEL=sonnet remains the rollback; keep this text byte-identical (sha256 test).
+-	classifyPromptSonnet = "You are a router, not an answerer. Never answer or explain. Output exactly five lines:\n" +
+-		"topic: same|new\ntier: haiku|sonnet|opus\nkind: lookup|edit|other\nworker: <id from the candidate list>|new\ntask: <the user's request, terse, machine-style: no honorifics, greetings or filler; keep paths, names, numbers; end with 'reply: Korean 존댓말, one final message only after the work is done, no interim status message, no 추천 block; if you delegate to an agent, run it in the foreground and wait for its result before replying'>\n" +
+-		"topic: new when the prompt is unrelated to the current work (a different workstream, or a side task such as a simple test/lookup even if the subject is not new); follow-ups, corrections, pushback, questions about the same files or subject are same. When unsure, same. " +
+-		"tier: haiku = simple lookup, search, count, run/monitor, one-step edit of one file with a clear scope, version bump with exact text. " +
+-		"sonnet = analysis, review, comparison summary, multi-file code change, clear multi-step task, release, deploy or merge, new feature or refactor with a given scope. " +
+-		"opus = design, architecture, trade-off or recommendation, strategy/priority/roadmap, diagnosis with unknown cause, repeated failure, 'opus로'; new feature or refactor whose design is open. " +
+-		"when unsure between haiku and sonnet, or sonnet and opus, sonnet. " +
+-		"kind: lookup = simple lookup/search/'find what this was'/count/read-only question; edit = simple edit of file content (replace text, rename a string, fix a typo, small mechanical change); other = anything else, and always other for judgment, strategy, trade-offs, corrections, pushback, design. " +
+-		"A lookup or edit that is tier haiku is sent straight to a Haiku session.worker: only for kind edit; pick the candidate whose task or edited files fit this request's context, otherwise new; use new for lookup and other. " +
+-		"Always output topic, tier, kind and worker."
+-	// classifyPromptHaiku: tuned on the 30-prompt dev set (draft 1, frozen); rules same as the Sonnet prompt plus an ordered decision and a sonnet fallback.
+-	classifyPromptHaiku = "You are a router, not an answerer. Never answer or explain. Output exactly five lines:\n" +
+-		"topic: same|new\ntier: haiku|sonnet|opus\nkind: lookup|edit|other\nworker: <id from the candidate list>|new\ntask: <the user's request, terse, machine-style: no honorifics, greetings or filler; keep paths, names, numbers; end with 'reply: Korean 존댓말, one final message only after the work is done, no interim status message, no 추천 block; if you delegate to an agent, run it in the foreground and wait for its result before replying'>\n" +
+-		"topic: new when the prompt is unrelated to the current work (a different workstream, or a side task such as a simple test/lookup even if the subject is not new); follow-ups, corrections, pushback, questions about the same files or subject are same. When unsure, same. " +
+-		"tier: decide in this order. 1) opus if any opus signal applies. 2) haiku only if the whole request is one simple lookup, search, count, run/monitor, or one-step edit of one named file with a clear scope, or a version bump with exact text. 3) otherwise sonnet. If no rule clearly matches, sonnet.\n" +
+-		"haiku = simple lookup, search, count, run/monitor, one-step edit of one file with a clear scope (including renaming one symbol in one file), version bump with exact text. " +
+-		"sonnet = analysis, review, comparison summary, multi-file code change, clear multi-step task, release, deploy or merge, new feature or refactor with a given scope (named files or modules mean the scope is given). " +
+-		"opus = design, architecture, planning or proposing an approach, trade-off or recommendation, strategy/priority/roadmap, diagnosis with unknown cause, repeated failure, 'opus로'; new feature or refactor whose design is open. " +
+-		"when unsure between haiku and sonnet, or sonnet and opus, sonnet. " +
+-		"kind: lookup = simple lookup/search/'find what this was'/count/read-only question; edit = simple edit of file content (replace text, rename a string, fix a typo, small mechanical change); other = anything else, and always other for judgment, strategy, trade-offs, corrections, pushback, design. " +
+-		"A lookup or edit that is tier haiku is sent straight to a Haiku session.worker: only for kind edit; pick the candidate whose task or edited files fit this request's context, otherwise new; use new for lookup and other. " +
+-		"Always output topic, tier, kind and worker."
+-)
+-
+-var routerModelWarn sync.Once
+-
+-// Deprecated: "sonnet" is a deprecated router model value (no longer the default; Haiku is); it stays valid for rollback via CHAUDE_ROUTER_MODEL=sonnet.
+-// routerModel returns the classifier model from CHAUDE_ROUTER_MODEL (trimmed, lowercased): sonnet or haiku.
+-// Unset or empty -> routerModelDefault; any other value -> routerModelDefault with a one-time stderr warning.
+-func routerModel() string {
+-	switch v := strings.ToLower(strings.TrimSpace(os.Getenv(routerModelEnv))); v {
+-	case "":
+-		return routerModelDefault
+-	case "sonnet", "haiku":
+-		return v
+-	default:
+-		routerModelWarn.Do(func() {
+-			fmt.Fprintf(os.Stderr, "chaude: invalid %s=%q (want sonnet or haiku); using %s\n", routerModelEnv, v, routerModelDefault)
+-		})
+-		return routerModelDefault
+-	}
+-}
+-
+-// routerPrompt returns the classifier system prompt that matches the router model.
+-func routerPrompt(model string) string {
+-	if model == "haiku" {
+-		return classifyPromptHaiku
+-	}
+-	return classifyPromptSonnet
+-}
+-
+-// delegateHint is prepended to the task when a forced Opus main session gets an unrelated or simple prompt:
+-// Opus keeps its context (no rotation/handoff) and a cheaper agent does the work.
+-const delegateHint = "[routing: unrelated or simple side task. Do not do it in the main context; delegate in the foreground: search/lookup/'find what this was' questions -> haiku-scout (effort high); mechanical/test run -> another Haiku agent; review/check -> sonnet-reviewer; analysis/judgment -> sonnet-analyst, and reply with its result.]\n"
+-
+-// sonnetHint is prepended to a sonnet-tier task on the Haiku-fixed main session: no plan, one foreground round to
+-// sonnet-analyst; an ESCALATE path goes straight to opus-architect.
+-const sonnetHint = "[routing: sonnet tier. Do not write a plan. In ONE foreground round delegate to sonnet-analyst: user's words quoted + target paths + 'reply: Korean 존댓말'. " +
+-	"If it returns ESCALATE: <path>, give that path to opus-architect as is (no Haiku plan step). sonnet-reviewer only before release/merge/submission.]\n"
+-
+-// planHint is prepended to an opus-tier task on the Haiku-fixed main session: Haiku orchestrates, Opus only
+-// reviews the plan (design), then Haiku executes the improved plan.
+-const planHint = "[routing: opus tier (design/judgment). Haiku main runs this workflow: (1) write the full design/orchestration plan to notes/runs/<YYMMDD>-plan-<topic>.md yourself; " +
+-	"(2) in ONE foreground round call opus-architect (design review, effort high) with that plan path and ask for improvements only, written to notes/runs/<YYMMDD>-plan-<topic>-review.md; " +
+-	"(3) merge their improvements into the plan; (4) execute the improved plan through Haiku agents (haiku-coder/batch-worker/scout/runner), sonnet-reviewer before finishing. Opus/Sonnet do not execute.]\n"
+-
+-// pickModel applies the switch policy. The main session is Haiku-fixed: Opus/Sonnet are used only as
+-// design/review subagents, never as main. A main forced by the user (--model sonnet|opus) stays as is.
+-// delegate=true only for a forced Opus main with an unrelated haiku-tier task (same-session subagent delegation).
+-func pickModel(cur, topic, tier string) (model string, delegate bool) {
+-	switch cur {
+-	case "", "haiku":
+-		return "haiku", false
+-	case "opus":
+-		return "opus", topic == "new" && tier == "haiku"
+-	}
+-	return cur, false
+-}
+-
+-// pickTarget: Haiku always, whatever the kind (a forced Sonnet/Opus main is kept).
+-func pickTarget(cur, topic, tier, kind string) (model string, delegate bool) {
+-	return pickModel(cur, topic, tier)
+-}
+-
+-// route is a parsed classifier answer.
+-type routeResult struct {
+-	Model, Task, Kind, Worker string // Worker: a candidate session id when Model is haiku and kind is edit, else ""
+-	Tier                      string // "haiku", "sonnet" or "opus"
+-	Size                      string // derived from Tier for metrics: haiku -> "small", sonnet|opus -> "large"
+-	SizeDefaulted             bool   // tier tag missing or invalid; sonnet (or size-only mapping) was used
+-}
+-
+-// parseRoute extracts the target model and task from the classifier output; ok=false when unusable.
+-func parseRoute(out, cur string) (model, task string, ok bool) {
+-	r, ok := parseRouteFull(out, cur, nil)
+-	return r.Model, r.Task, ok
+-}
+-
+-// parseRouteFull also reads kind and worker; worker must be one of cands (else it is dropped = fresh session).
+-func parseRouteFull(out, cur string, cands []haikuWorker) (rr routeResult, ok bool) {
+-	var topic, tier, size, kind, worker, task string
+-	for _, l := range strings.Split(out, "\n") {
+-		l = strings.TrimSpace(l)
+-		lo := strings.ToLower(l)
+-		switch {
+-		case strings.HasPrefix(lo, "topic:"):
+-			topic = strings.TrimSpace(lo[6:])
+-		case strings.HasPrefix(lo, "tier:"):
+-			tier = strings.Trim(lo[5:], " .")
+-		case strings.HasPrefix(lo, "size:"):
+-			size = strings.Trim(lo[5:], " .")
+-		case strings.HasPrefix(lo, "kind:") && task == "":
+-			kind = strings.TrimSpace(lo[5:])
+-		case strings.HasPrefix(lo, "worker:") && task == "":
+-			worker = strings.TrimSpace(l[7:])
+-		case strings.HasPrefix(lo, "task:"):
+-			task = strings.TrimSpace(l[5:])
+-		case task != "" && l != "":
+-			task += "\n" + l
+-		}
+-	}
+-	if task == "" || topic != "same" && topic != "new" {
+-		return rr, false
+-	}
+-	// tier wins when valid; otherwise the legacy size tag maps (small -> haiku, large -> sonnet); missing or unknown -> sonnet
+-	tierDefaulted := tier != "haiku" && tier != "sonnet" && tier != "opus"
+-	if tierDefaulted {
+-		tier = "sonnet"
+-		if size == "small" {
+-			tier = "haiku"
+-		}
+-	}
+-	size = "large" // derived metric only: haiku -> small, sonnet|opus -> large
+-	if tier == "haiku" {
+-		size = "small"
+-	}
+-	if kind != "lookup" && kind != "edit" {
+-		kind = "other"
+-	}
+-	model, del := pickTarget(cur, topic, tier, kind)
+-	if del {
+-		task = delegateHint + task
+-	} else if model == "haiku" && tier == "opus" {
+-		task = planHint + task
+-	} else if model == "haiku" && tier == "sonnet" {
+-		task = sonnetHint + task
+-	}
+-	rr = routeResult{Model: model, Task: task, Kind: kind, Tier: tier, Size: size, SizeDefaulted: tierDefaulted}
+-	if model == "haiku" && kind == "edit" {
+-		for _, c := range cands {
+-			if c.ID == worker {
+-				rr.Worker = worker
+-			}
+-		}
+-	}
+-	return rr, true
+-}
+-
+-// classifyFn is a test seam for classify.
+-var classifyFn = classify
+-
+-// classify makes one short Sonnet call; returns model, terse task, cost and token usage.
+-func classify(line, cur, lastUser string, cands []haikuWorker) (rr routeResult, cost float64, usage map[string]any, err error) {
+-	in := "current session model: " + cur + " (keep it unless topic is new)\nprevious user prompt: " + trunc(lastUser, 200) + "\n"
+-	if ct := candidateText(cands); ct != "" {
+-		in += "haiku worker candidates (sessions that already edited files):\n" + ct
+-	}
+-	in += "user prompt:\n" + line
+-	rm := routerModel()
+-	cmd := exec.Command("claude", "-p", in, "--model", rm, "--output-format", "json",
+-		"--system-prompt", routerPrompt(rm), "--tools", "", "--no-session-persistence")
+-	cmd.Env = cleanEnv(0)
+-	cmd.Dir = os.TempDir() // no project CLAUDE.md in the classifier context
+-	var out bytes.Buffer
+-	cmd.Stdout = &out
+-	if err = cmd.Run(); err != nil {
+-		return
+-	}
+-	var j map[string]any
+-	if err = json.Unmarshal(out.Bytes(), &j); err != nil {
+-		return
+-	}
+-	cost, _ = j["total_cost_usd"].(float64)
+-	usage = asMap(j["usage"])
+-	rr, ok := parseRouteFull(str(j["result"]), cur, cands)
+-	if !ok {
+-		return routeResult{}, cost, usage, os.ErrInvalid
+-	}
+-	return rr, cost, usage, nil
+-}
+-
+-// route classifies a prompt and switches the session model if needed; returns the text to send
+-// (the terse task, or the original line for acks / classifier failure).
+-func (r *Repl) route(line string) string {
+-	if isAck(line) || strings.HasPrefix(line, "/") {
+-		return line
+-	}
+-	if r.a.Orch != "" && r.a.Orch != "m0" {
+-		return r.routeOrch(line)
+-	}
+-	t0 := time.Now()
+-	last := ""
+-	if n := len(r.tr.turns); n > 0 {
+-		last = r.tr.turns[n-1][0]
+-	}
+-	rr, cost, usage, err := classifyFn(line, r.a.Model, last, r.pool.candidates())
+-	r.budget.chargeOneShot(cost)
+-	model, task := rr.Model, rr.Task
+-	f := map[string]any{"stage": "classify", "cost_usd": cost, "duration_ms": time.Since(t0).Milliseconds(), "from_model": r.a.Model, "conductor": true, "router_model": routerModel(), "router_prompt": routerModel()}
+-	for k, v := range usageFields(usage) {
+-		f["result_"+k] = v
+-	}
+-	if err != nil {
+-		f["error"] = err.Error()
+-		_ = r.metrics.Log(f)
+-		return line
+-	}
+-	f["routed_model"] = model
+-	f["kind"] = rr.Kind
+-	f["tier"] = rr.Tier
+-	f["size"] = rr.Size
+-	if rr.SizeDefaulted {
+-		f["size_defaulted"] = true
+-	}
+-	if rr.Worker != "" {
+-		f["worker"] = rr.Worker
+-	}
+-	_ = r.metrics.Log(f)
+-	r.curTask = task
+-	if r.reg != nil && r.children != nil {
+-		return r.routeChildren(model, task, rr.Worker)
+-	}
+-	if model == "haiku" && (r.a.Model != "haiku" || rr.Worker != "") {
+-		r.p(dim+"[route → haiku"+map[bool]string{true: " (기존 세션 " + trunc(rr.Worker, 8) + ")", false: ""}[rr.Worker != ""]+"]"+rst, "\n")
+-		r.switchSession("haiku", rr.Worker)
+-		return task
+-	}
+-	r.p(dim+"[route → "+model+"]"+rst, "\n")
+-	if model != r.a.Model {
+-		if pid := r.parked[model]; pid != "" && r.a.Model == "haiku" {
+-			// back from a Haiku session: resume the parked session instead of a handoff rotation
+-			delete(r.parked, model)
+-			r.switchSession(model, pid)
+-			return task
+-		}
+-		r.a.Model = model
+-		if len(r.tr.turns) == 0 && r.pendingSnapshot == "" {
+-			r.sess.Close()
+-			if err := r.start(); err != nil {
+-				return task
+-			}
+-		} else {
+-			r.rotate("route " + model)
+-		}
+-	}
+-	return task
+-}
+-
+-// switchSession replaces the child with a session on model, resuming resume (a session id) when set.
+-// The session being left is parked (its id is kept, no handoff) so a later switch back can resume it.
+-func (r *Repl) switchSession(model, resume string) {
+-	if r.sess != nil && r.a.Model != model {
+-		if id := r.sess.SessionID; id != "" {
+-			if r.parked == nil {
+-				r.parked = map[string]string{}
+-			}
+-			r.parked[r.a.Model] = id
+-		}
+-	}
+-	if r.sess != nil {
+-		r.sess.Close()
+-	}
+-	r.a.Model = model
+-	if resume != "" {
+-		r.pendingSnapshot = "" // resumed session already has its context
+-	}
+-	r.resumeID = resume
+-	if err := r.start(); err != nil {
+-		fmt.Fprintln(os.Stderr, "chaude: cannot start claude:", err)
+-	}
+-}
+diff --git a/internal/harness/classifier_model_test.go b/internal/harness/classifier_model_test.go
+deleted file mode 100644
+index fba991c..0000000
+--- a/internal/harness/classifier_model_test.go
++++ /dev/null
+@@ -1,39 +0,0 @@
+-package harness
+-
+-import (
+-	"os"
+-	"testing"
+-)
+-
+-func TestRouterModelDefault(t *testing.T) {
+-	t.Setenv(routerModelEnv, "")
+-	os.Unsetenv(routerModelEnv)
+-	if m := routerModel(); m != "haiku" {
+-		t.Fatalf("unset: got %q, want haiku", m)
+-	}
+-	if routerPrompt(routerModel()) != classifyPromptHaiku {
+-		t.Error("unset: prompt must be the Haiku prompt")
+-	}
+-}
+-
+-func TestRouterModelHaiku(t *testing.T) {
+-	t.Setenv(routerModelEnv, "haiku")
+-	if m := routerModel(); m != "haiku" {
+-		t.Fatalf("haiku: got %q, want haiku", m)
+-	}
+-	if routerPrompt(routerModel()) != classifyPromptHaiku {
+-		t.Error("haiku: prompt must be the Haiku prompt")
+-	}
+-}
+-
+-func TestRouterModelInvalidFallsBack(t *testing.T) {
+-	for _, v := range []string{"opus", "sonet", "bogus"} {
+-		t.Setenv(routerModelEnv, v)
+-		if m := routerModel(); m != "haiku" {
+-			t.Errorf("%q: got %q, want haiku", v, m)
+-		}
+-		if routerPrompt(routerModel()) != classifyPromptHaiku {
+-			t.Errorf("%q: prompt must fall back to the Haiku prompt", v)
+-		}
+-	}
+-}
+diff --git a/internal/harness/conductor_test.go b/internal/harness/conductor_test.go
+index f291d72..f83f4e6 100644
+--- a/internal/harness/conductor_test.go
++++ b/internal/harness/conductor_test.go
+@@ -1,212 +1,67 @@
+ package harness
+ 
+-import (
+-	"os"
+-	"strings"
+-	"testing"
+-)
++import "testing"
+ 
+-func TestParseRoute(t *testing.T) {
+-	m, task, ok := parseRoute("topic: New\nsize: Small\ntask: count funcs in a.go\nreply: Korean 존댓말", "opus")
+-	if !ok || m != "opus" || task != delegateHint+"count funcs in a.go\nreply: Korean 존댓말" { // forced opus main keeps delegation
+-		t.Fatal(m, task, ok)
+-	}
+-	for _, bad := range []string{"", "model: gpt\ntask: x", "topic: new\nsize: small", "hello"} {
+-		if _, _, ok := parseRoute(bad, "opus"); ok {
+-			t.Errorf("accepted %q", bad)
+-		}
+-	}
+-}
+-
+-// TestParseRouteSize: tier is normalized; a missing or unknown tier routes as sonnet (ok), topic and task are still required.
+-// A legacy size-only line maps small -> haiku, large -> sonnet and is marked defaulted. Size is derived from tier.
+-func TestParseRouteSize(t *testing.T) {
+-	for _, c := range []struct {
+-		name, in, tier, kind string
+-		defaulted            bool
+-	}{
+-		{"missing tier -> sonnet, kind other", "topic: new\ntask: x", "sonnet", "other", true},
+-		{"same topic, no tier -> sonnet", "topic: same\ntask: x", "sonnet", "other", true},
+-		{"legacy Small. size -> haiku", "topic: same\nsize: Small.\nkind: lookup\ntask: x", "haiku", "lookup", true},
+-		{"tier Haiku. -> haiku", "topic: same\ntier: Haiku.\nkind: lookup\ntask: x", "haiku", "lookup", false},
+-		{"tier medium -> sonnet", "topic: same\ntier: medium\nkind: other\ntask: x", "sonnet", "other", true},
+-		{"tier opus", "topic: same\ntier: opus\nkind: other\ntask: x", "opus", "other", false},
+-		{"tier wins over legacy size", "topic: same\ntier: sonnet\nsize: small\ntask: x", "sonnet", "other", false},
+-	} {
+-		rr, ok := parseRouteFull(c.in, "haiku", nil)
+-		wantSize := "large"
+-		if c.tier == "haiku" {
+-			wantSize = "small"
+-		}
+-		if !ok || rr.Tier != c.tier || rr.Size != wantSize || rr.SizeDefaulted != c.defaulted || rr.Kind != c.kind {
+-			t.Errorf("%s: tier=%q size=%q defaulted=%v kind=%q ok=%v", c.name, rr.Tier, rr.Size, rr.SizeDefaulted, rr.Kind, ok)
+-		}
+-	}
+-	for _, bad := range []string{"size: small\ntask: x", "topic: same\nsize: small"} {
+-		if _, ok := parseRouteFull(bad, "haiku", nil); ok {
+-			t.Errorf("accepted %q", bad)
+-		}
+-	}
+-	// forced opus main, topic new, tier missing (sonnet): stays opus and is not delegated
+-	rr, ok := parseRouteFull("topic: new\ntask: x", "opus", nil)
+-	if !ok || rr.Model != "opus" || strings.HasPrefix(rr.Task, delegateHint) {
+-		t.Errorf("forced opus, missing tier: model=%q delegated=%v ok=%v", rr.Model, strings.HasPrefix(rr.Task, delegateHint), ok)
+-	}
+-	// haiku main, tier missing (sonnet): sonnet hint is attached, no plan workflow
+-	rr, ok = parseRouteFull("topic: same\ntask: x", "haiku", nil)
+-	if !ok || !strings.HasPrefix(rr.Task, sonnetHint) || strings.HasPrefix(rr.Task, planHint) {
+-		t.Errorf("haiku main, missing tier: sonnetHint missing or planHint present, ok=%v", ok)
+-	}
+-}
+-
+-func TestClassifyPromptSizeRule(t *testing.T) {
+-	if !strings.Contains(classifyPromptSonnet, "tier: haiku|sonnet|opus") || !strings.Contains(classifyPromptSonnet, "when unsure between haiku and sonnet, or sonnet and opus, sonnet") {
+-		t.Error("classifier prompt must keep tier: haiku|sonnet|opus and the unsure rule")
+-	}
+-}
+-
+-// TestClassifierLive runs the real classifier (costs ~$0.007 per prompt): CHAUDE_LIVE=1 go test -run ClassifierLive ./internal/harness
+-func TestClassifierLive(t *testing.T) {
+-	if os.Getenv("CHAUDE_LIVE") == "" {
+-		t.Skip("set CHAUDE_LIVE=1")
++func TestWorkerPool(t *testing.T) {
++	p := newWorkerPool()
++	p.noteEdit("", "t", "a.go")
++	p.noteEdit("s1", "task one", "a.go")
++	p.noteEdit("s1", "task one", "a.go")
++	p.noteEdit("s2", "task two", "b.go")
++	if !p.has("s1") || !p.has("s2") || p.has("") || p.has("nope") {
++		t.Fatalf("has: %+v", p.l)
+ 	}
+-	cases := []struct{ prompt, want string }{
+-		{"캐시 TTL을 1시간으로 고정하는 안과 5분으로 두는 안 중에 어느 쪽이 나을지 장단점 비교해서 골라줘", "haiku"},
+-		{"아니 그게 아니라 내가 말한 건 세션 회전이 아니라 카테고리 분류였어. 다시 생각해봐", "haiku"},
+-		{"방금 수정한 category.go 의 isAck 로직이 틀렸어. 두 글자 이하 문장이 왜 ack 처리되는지 고쳐야 해", "haiku"},
+-		{"앞으로 한 달 동안 하네스 개선 우선순위를 어떻게 잡는 게 좋을지 전략을 세워줘", "haiku"},
+-		{"cmd/chaude/main.go 의 version 값이 뭔지 알려줘", "haiku"},
+-		{"README.md 에서 'foo' 를 'bar' 로 전부 바꿔줘", "haiku"},
++	if n := len(p.l["s1"].Files); n != 1 {
++		t.Fatalf("s1 files=%d, want 1 (dedup)", n)
+ 	}
+-	for _, c := range cases {
+-		rr, _, _, err := classify(c.prompt, "haiku", "", nil)
+-		m, task := rr.Model, rr.Task
+-		if err != nil || !strings.Contains(c.want, m) {
+-			t.Errorf("%q -> %q (%v), want %s", c.prompt, m, err, c.want)
+-		}
+-		t.Logf("%s -> %s | %s", c.prompt[:12], m, task)
++	var np *workerPool
++	np.noteEdit("x", "t", "f")
++	if np.has("x") {
++		t.Fatal("nil pool")
+ 	}
+ }
+ 
+-func TestMainRouteSwitchPolicy(t *testing.T) {
+-	for _, c := range []struct {
+-		name, in, cur, want string
+-		hint                bool
+-	}{
+-		{"same haiku -> haiku", "topic: same\ntier: haiku\ntask: fix typo", "haiku", "haiku", false},
+-		{"empty cur -> haiku", "topic: same\ntier: haiku\ntask: x", "", "haiku", false},
+-		{"unrelated haiku on haiku -> haiku, no hint", "topic: new\ntier: haiku\ntask: run tests", "haiku", "haiku", false},
+-		{"forced opus unrelated haiku -> delegate", "topic: new\ntier: haiku\ntask: run tests", "opus", "opus", true},
+-		{"forced opus same opus tier stays", "topic: same\ntier: opus\ntask: x", "opus", "opus", false},
+-		{"forced opus same sonnet tier stays, no hint", "topic: same\ntier: sonnet\ntask: analyze", "opus", "opus", false},
+-		{"forced sonnet stays", "topic: new\ntier: opus\ntask: redesign", "sonnet", "sonnet", false},
+-	} {
+-		m, task, ok := parseRoute(c.in, c.cur)
+-		if !ok || m != c.want || strings.HasPrefix(task, delegateHint) != c.hint {
+-			t.Errorf("%s: got %q hint=%v ok=%v", c.name, m, strings.HasPrefix(task, delegateHint), ok)
+-		}
+-		if c.want != "haiku" && (strings.HasPrefix(task, sonnetHint) || strings.HasPrefix(task, planHint)) {
+-			t.Errorf("%s: forced main must not get sonnet/plan hint", c.name)
+-		}
+-	}
+-	if routerModelDefault != "haiku" {
+-		t.Error("classifier default model must be haiku")
++// TestThresholdFor: opus (including full model IDs) rotates at opusThreshold; every other model
++// (haiku, empty, unknown, and a sonnet value left in a saved session) uses the -threshold value.
++func TestThresholdFor(t *testing.T) {
++	if haikuThreshold != 80_000 || opusThreshold != 200_000 {
++		t.Fatalf("haiku=%d opus=%d", haikuThreshold, opusThreshold)
+ 	}
+-	if !strings.Contains(classifyPromptSonnet, "topic: same|new") || !strings.Contains(classifyPromptSonnet, "tier: haiku|sonnet|opus") {
+-		t.Error("classifier prompt must ask topic and tier")
+-	}
+-}
+-
+-// TestHaikuPlanWorkflow: the main session is Haiku for every prompt; opus-tier tasks carry the
+-// plan -> Opus review -> Haiku execute workflow hint, sonnet-tier tasks carry the sonnet-analyst hint, haiku-tier neither.
+-func TestHaikuPlanWorkflow(t *testing.T) {
+-	cands := []haikuWorker{{ID: "w-readme", Task: "README foo->bar", Files: []string{"README.md"}}}
+ 	for _, c := range []struct {
+-		name, in, cur, worker string
+-		plan, sonnet          bool
++		model string
++		flag  int
++		want  int
+ 	}{
+-		{"lookup", "topic: new\ntier: haiku\nkind: lookup\nworker: new\ntask: find X", "haiku", "", false, false},
+-		{"edit matching worker", "topic: new\ntier: haiku\nkind: edit\nworker: w-readme\ntask: replace b", "haiku", "w-readme", false, false},
+-		{"unknown worker -> fresh", "topic: new\ntier: haiku\nkind: edit\nworker: w-ghost\ntask: replace b", "haiku", "", false, false},
+-		{"opus tier -> haiku + plan workflow", "topic: same\ntier: opus\nkind: other\nworker: new\ntask: weigh A vs B", "haiku", "", true, false},
+-		{"sonnet tier -> haiku + sonnet hint, no plan", "topic: same\ntier: sonnet\nkind: other\nworker: new\ntask: review diff", "haiku", "", false, true},
+-		{"opus tier from stale opus cur stays opus (forced)", "topic: new\ntier: opus\nkind: lookup\ntask: roadmap", "opus", "", false, false},
+-		{"opus tier from empty cur -> haiku + plan", "topic: new\ntier: opus\nkind: other\ntask: design", "", "", true, false},
+-		{"haiku other -> haiku, no plan", "topic: same\ntier: haiku\nkind: other\ntask: pushback", "haiku", "", false, false},
++		{"haiku", haikuThreshold, 80_000},
++		{"opus", haikuThreshold, 200_000},
++		{"claude-opus-5-5", haikuThreshold, 200_000},
++		{"", haikuThreshold, 80_000},
++		{"sonnet", haikuThreshold, 80_000},
++		{"sonnet", 150_000, 150_000},
+ 	} {
+-		rr, ok := parseRouteFull(c.in, c.cur, cands)
+-		want := "haiku"
+-		if c.cur == "opus" {
+-			want = "opus"
+-		}
+-		if !ok || rr.Model != want || rr.Worker != c.worker {
+-			t.Errorf("%s: got model=%q worker=%q ok=%v", c.name, rr.Model, rr.Worker, ok)
+-		}
+-		if has := strings.HasPrefix(rr.Task, planHint); has != c.plan {
+-			t.Errorf("%s: planHint=%v want %v", c.name, has, c.plan)
+-		}
+-		if has := strings.HasPrefix(rr.Task, sonnetHint); has != c.sonnet {
+-			t.Errorf("%s: sonnetHint=%v want %v", c.name, has, c.sonnet)
+-		}
+-	}
+-	for _, w := range []string{"opus-architect", "notes/runs/", "Haiku agents"} {
+-		if !strings.Contains(planHint, w) {
+-			t.Errorf("planHint missing %q", w)
++		r := &Repl{a: Args{Model: c.model, Threshold: c.flag}}
++		if got := r.thresholdFor(c.model); got != c.want {
++			t.Errorf("thresholdFor(%q) flag=%d = %d, want %d", c.model, c.flag, got, c.want)
+ 		}
+ 	}
+ }
+ 
+-// TestSonnetTierHint: a sonnet tier on a Haiku main gets only the sonnet-analyst hint (no plan step);
+-// forced opus/sonnet mains and haiku tier get no hint.
+-func TestSonnetTierHint(t *testing.T) {
+-	for _, w := range []string{"sonnet-analyst", "ESCALATE", "opus-architect"} {
+-		if !strings.Contains(sonnetHint, w) {
+-			t.Errorf("sonnetHint missing %q", w)
+-		}
+-	}
+-	for _, w := range []string{"plan-<topic>", "write the full design"} {
+-		if strings.Contains(sonnetHint, w) {
+-			t.Errorf("sonnetHint must not contain %q", w)
+-		}
+-	}
++// TestShouldRotateBoundary: rotation fires at the threshold itself (>=) for haiku and opus.
++func TestShouldRotateBoundary(t *testing.T) {
++	haiku := &Repl{a: Args{Model: "haiku", Threshold: haikuThreshold}}
++	opus := &Repl{a: Args{Model: "opus", Threshold: haikuThreshold}}
+ 	for _, c := range []struct {
+-		name, in, cur, want string
+-		sonnet, plan        bool
++		r    *Repl
++		ctx  int
++		want bool
+ 	}{
+-		{"sonnet tier on haiku main", "topic: same\ntier: sonnet\ntask: analyze X", "haiku", "haiku", true, false},
+-		{"sonnet tier on forced opus main", "topic: same\ntier: sonnet\ntask: analyze X", "opus", "opus", false, false},
+-		{"sonnet tier on forced sonnet main", "topic: same\ntier: sonnet\ntask: analyze X", "sonnet", "sonnet", false, false},
+-		{"haiku tier on haiku main", "topic: same\ntier: haiku\ntask: analyze X", "haiku", "haiku", false, false},
++		{haiku, 79_999, false},
++		{haiku, 80_000, true},
++		{opus, 199_999, false},
++		{opus, 200_000, true},
+ 	} {
+-		rr, ok := parseRouteFull(c.in, c.cur, nil)
+-		if !ok || rr.Model != c.want {
+-			t.Errorf("%s: model=%q ok=%v", c.name, rr.Model, ok)
++		if got := shouldRotate(c.ctx, c.r.effectiveThreshold()); got != c.want {
++			t.Errorf("model=%s ctx=%d shouldRotate=%v, want %v", c.r.a.Model, c.ctx, got, c.want)
+ 		}
+-		if has := strings.HasPrefix(rr.Task, sonnetHint); has != c.sonnet {
+-			t.Errorf("%s: sonnetHint=%v want %v", c.name, has, c.sonnet)
+-		}
+-		if has := strings.HasPrefix(rr.Task, planHint); has != c.plan {
+-			t.Errorf("%s: planHint=%v want %v", c.name, has, c.plan)
+-		}
+-	}
+-}
+-
+-func TestWorkerPool(t *testing.T) {
+-	p := newWorkerPool()
+-	p.noteEdit("", "t", "a.go")
+-	p.noteEdit("s1", "task one", "a.go")
+-	p.noteEdit("s1", "task one", "a.go")
+-	p.noteEdit("s2", "task two", "b.go")
+-	c := p.candidates()
+-	if len(c) != 2 || c[0].ID != "s2" || len(c[1].Files) != 1 || !p.has("s1") || p.has("") {
+-		t.Fatalf("%+v", c)
+-	}
+-	var np *workerPool
+-	np.noteEdit("x", "t", "f")
+-	if np.candidates() != nil {
+-		t.Fatal("nil pool")
+-	}
+-	if !strings.Contains(candidateText(c), "s2 | task: task two | edited: b.go") {
+-		t.Fatal(candidateText(c))
+ 	}
+ }
+diff --git a/internal/harness/delegation_test.go b/internal/harness/delegation_test.go
+index e135e64..4c06ca8 100644
+--- a/internal/harness/delegation_test.go
++++ b/internal/harness/delegation_test.go
+@@ -10,3 +10,21 @@ func TestDelegationRuleNamesHaikuCoder(t *testing.T) {
+ 		t.Fatalf("delegationRule must name the haiku-coder agent: %q", delegationRule)
+ 	}
+ }
++
++func TestForwardRuleFor(t *testing.T) {
++	if forwardRuleFor("haiku") != forwardRule {
++		t.Errorf("forwardRuleFor(haiku) must return forwardRule")
++	}
++	if forwardRuleFor("") != forwardRule {
++		t.Errorf("forwardRuleFor(empty) must return forwardRule")
++	}
++	if forwardRuleFor("opus") != "" {
++		t.Errorf("forwardRuleFor(opus) must be empty")
++	}
++	if forwardRuleFor("claude-opus-4") != "" {
++		t.Errorf("forwardRuleFor(claude-opus-4) must be empty")
++	}
++	if !strings.Contains(forwardRule, "opus-architect") {
++		t.Errorf("forwardRule must name the opus-architect agent")
++	}
++}
+diff --git a/internal/harness/dispatch.go b/internal/harness/dispatch.go
+index 5c44fa8..c495c76 100644
+--- a/internal/harness/dispatch.go
++++ b/internal/harness/dispatch.go
+@@ -40,7 +40,37 @@ func checkWorkerCap(set *childSet, max int) error {
+ 	n := len(set.m)
+ 	set.mu.Unlock()
+ 	if n >= max {
+-		return fmt.Errorf("워커 세션 상한(%d개)에 도달해 새 세션을 시작하지 않습니다. 기존 세션을 정리하거나 -max-workers 값을 올려 주세요.", max)
++		return workerCapErr(max)
++	}
++	return nil
++}
++
++func workerCapErr(max int) error {
++	return fmt.Errorf("워커 세션 상한(%d개)에 도달해 새 세션을 시작하지 않습니다. 기존 세션을 정리하거나 -max-workers 값을 올려 주세요.", max)
++}
++
++// admit makes room for one more live worker before a new child is spawned. Counts the parked
++// children plus the active one (it is parked by the caller next), and evicts the parked child
++// with the oldest LastAPI while the count is at or above the cap. Refuses when nothing can be evicted.
++func (r *Repl) admit() error {
++	if r.children == nil {
++		return nil
++	}
++	limit := r.a.MaxWorkers
++	if limit <= 0 {
++		limit = DefaultMaxWorkers
++	}
++	count := r.children.Len()
++	if r.sess != nil {
++		count++
++	}
++	for count >= limit {
++		c, ok := r.children.EvictLRU()
++		if !ok {
++			return workerCapErr(limit)
++		}
++		r.retire(c)
++		count--
+ 	}
+ 	return nil
+ }
+diff --git a/internal/harness/dispatch_test.go b/internal/harness/dispatch_test.go
+index 541ee45..d2ac555 100644
+--- a/internal/harness/dispatch_test.go
++++ b/internal/harness/dispatch_test.go
+@@ -13,7 +13,7 @@ func TestPickChild(t *testing.T) {
+ 	const limit, deadline = 80_000, time.Hour
+ 	dir := t.TempDir()
+ 	reg := newClientRegistry(filepath.Join(dir, "clients.json"))
+-	key := childKey(dir, "sonnet")
++	key := childKey(dir, "sonnet", "")
+ 
+ 	set := newChildSet()
+ 	if got := pickChild(set, nil, key, dir, "sonnet", limit, now, deadline); got != actStartNew {
+diff --git a/internal/harness/haikupool.go b/internal/harness/haikupool.go
+index ba6b864..ceda1ca 100644
+--- a/internal/harness/haikupool.go
++++ b/internal/harness/haikupool.go
+@@ -1,9 +1,6 @@
+ package harness
+ 
+ import (
+-	"fmt"
+-	"sort"
+-	"strings"
+ 	"sync"
+ 	"time"
+ )
+@@ -22,8 +19,6 @@ type workerPool struct {
+ 	l  map[string]*haikuWorker
+ }
+ 
+-const maxCandidates = 5
+-
+ func newWorkerPool() *workerPool { return &workerPool{l: map[string]*haikuWorker{}} }
+ 
+ // noteEdit records that Haiku session id edited file while handling task.
+@@ -47,24 +42,6 @@ func (p *workerPool) noteEdit(id, task, file string) {
+ 	w.Updated = time.Now()
+ }
+ 
+-// candidates: newest first, at most maxCandidates.
+-func (p *workerPool) candidates() []haikuWorker {
+-	if p == nil {
+-		return nil
+-	}
+-	p.mu.Lock()
+-	defer p.mu.Unlock()
+-	var l []haikuWorker
+-	for _, w := range p.l {
+-		l = append(l, *w)
+-	}
+-	sort.Slice(l, func(i, j int) bool { return l[i].Updated.After(l[j].Updated) })
+-	if len(l) > maxCandidates {
+-		l = l[:maxCandidates]
+-	}
+-	return l
+-}
+-
+ func (p *workerPool) has(id string) bool {
+ 	if p == nil {
+ 		return false
+@@ -74,15 +51,3 @@ func (p *workerPool) has(id string) bool {
+ 	_, ok := p.l[id]
+ 	return ok
+ }
+-
+-// candidateText is the classifier-facing list ("" when empty).
+-func candidateText(c []haikuWorker) string {
+-	if len(c) == 0 {
+-		return ""
+-	}
+-	var b strings.Builder
+-	for _, w := range c {
+-		fmt.Fprintf(&b, "- %s | task: %s | edited: %s\n", w.ID, w.Task, trunc(strings.Join(w.Files, ", "), 160))
+-	}
+-	return b.String()
+-}
+diff --git a/internal/harness/idlesweep.go b/internal/harness/idlesweep.go
+index 94834bc..d8988ae 100644
+--- a/internal/harness/idlesweep.go
++++ b/internal/harness/idlesweep.go
+@@ -32,6 +32,7 @@ func (r *Repl) idleDue(now time.Time) bool {
+ // should be rotated (the caller then sends the internal "/idle-rotate" line). UI goroutine, not busy.
+ // A parked child with delegated agents still running is left alone until they finish.
+ func (r *Repl) sweepIdle(now time.Time) bool {
++	r.sweepParked(now) // lazy resident slots first; every sweepIdle caller gets it
+ 	if r.children != nil {
+ 		deadline := idleDeadline(r.idleRotate, r.effTTL())
+ 		type kc struct {
+diff --git a/internal/harness/multiproc_s_test.go b/internal/harness/multiproc_s_test.go
+index aa4f458..f911c6d 100644
+--- a/internal/harness/multiproc_s_test.go
++++ b/internal/harness/multiproc_s_test.go
+@@ -265,148 +265,6 @@ func (r *Repl) setClock(t time.Time) {
+ 	r.clockMu.Unlock()
+ }
+ 
+-func TestRouteKeepsPreviousChildLive(t *testing.T) {
+-	var n int
+-	withFakeSessions(t, &n)
+-	r := newMPRepl(t, "opus")
+-	seedTurn(r)
+-	if err := r.switchChild("sonnet", ""); err != nil {
+-		t.Fatal(err)
+-	}
+-	if _, ok := r.children.Take(childKey(r.a.Cwd, "opus")); !ok || r.a.Model != "sonnet" || n != 1 {
+-		t.Fatalf("opus not parked live (model=%s n=%d)", r.a.Model, n)
+-	}
+-}
+-
+-func TestRouteToHaikuParksLive(t *testing.T) {
+-	var n int
+-	withFakeSessions(t, &n)
+-	r := newMPRepl(t, "opus")
+-	seedTurn(r)
+-	if err := r.switchChild("haiku", ""); err != nil {
+-		t.Fatal(err)
+-	}
+-	if rec, ok := r.reg.Get(r.a.Cwd, "opus"); !ok || rec.State != clientParked {
+-		t.Fatalf("registry: %+v", rec)
+-	}
+-}
+-
+-func TestRouteBackUsesLiveNotParkedMap(t *testing.T) {
+-	var n int
+-	withFakeSessions(t, &n)
+-	r := newMPRepl(t, "opus")
+-	orig := r.sess
+-	seedTurn(r)
+-	r.parked["opus"] = "stale-id"
+-	if err := r.switchChild("sonnet", ""); err != nil {
+-		t.Fatal(err)
+-	}
+-	r.pendingSnapshot = "x"
+-	r.setClock(time.Now())
+-	if err := r.switchChild("opus", ""); err != nil {
+-		t.Fatal(err)
+-	}
+-	if r.sess != orig || n != 1 || r.resumeID != "" {
+-		t.Fatalf("did not reuse live child (n=%d)", n)
+-	}
+-}
+-
+-func TestRouteWorkerSwitchClosesParkedHaiku(t *testing.T) {
+-	var n int
+-	withFakeSessions(t, &n)
+-	r := newMPRepl(t, "opus")
+-	seedTurn(r)
+-	cc := &cntCloser{}
+-	r.children.Park(childKey(r.a.Cwd, "haiku"), &liveChild{Sess: cc, Model: "haiku", LastAPI: time.Now()})
+-	r.setClock(time.Now())
+-	if err := r.switchChild("haiku", "worker-1"); err != nil {
+-		t.Fatal(err)
+-	}
+-	if cc.count() != 1 {
+-		t.Fatalf("parked haiku closes=%d", cc.count())
+-	}
+-}
+-
+-func TestNoResumeOfLiveSessionID(t *testing.T) {
+-	var got []string
+-	newSessionFn = func(o SessionOpts) (*Session, error) {
+-		got = append(got, o.Resume)
+-		s, _, _ := fakeSession()
+-		return s, nil
+-	}
+-	defer func() { newSessionFn = NewSession }()
+-	r := newMPRepl(t, "opus")
+-	seedTurn(r)
+-	r.parked["sonnet"] = "old-sid"
+-	cc := &cntCloser{}
+-	r.children.Park(childKey(r.a.Cwd, "sonnet"), &liveChild{Sess: cc, Model: "sonnet", LastAPI: time.Now()})
+-	r.reg.Upsert(clientRec{Cwd: r.a.Cwd, Model: "sonnet", SessionID: "live-sid", State: clientParked, LastAPI: time.Now()})
+-	// the parked-live sonnet child is a cntCloser, so it is "live" but not a *Session: bindChild gets nil sess
+-	_ = r.switchChild("sonnet", "")
+-	for _, id := range got {
+-		if id == "live-sid" {
+-			t.Fatal("resumed a session id that is still live")
+-		}
+-	}
+-}
+-
+-func TestRouteDeadChildFallsBack(t *testing.T) {
+-	var n int
+-	withFakeSessions(t, &n)
+-	r := newMPRepl(t, "opus")
+-	seedTurn(r)
+-	d := &deadCloser{}
+-	r.children.Park(childKey(r.a.Cwd, "sonnet"), &liveChild{Sess: d, Model: "sonnet", LastAPI: time.Now()})
+-	if err := r.switchChild("sonnet", ""); err != nil {
+-		t.Fatal(err)
+-	}
+-	if n != 1 || d.count() != 1 {
+-		t.Fatalf("started=%d closes=%d", n, d.count())
+-	}
+-}
+-
+-func TestRouteFallsBackWithoutRegistry(t *testing.T) {
+-	var n int
+-	withFakeSessions(t, &n)
+-	classifyFn = func(line, cur, last string, c []haikuWorker) (routeResult, float64, map[string]any, error) {
+-		return routeResult{Model: "sonnet", Task: "t"}, 0, nil, nil
+-	}
+-	defer func() { classifyFn = classify }()
+-	r := newMPRepl(t, "opus")
+-	r.reg, r.children = nil, nil
+-	r.route("please refactor the module")
+-	if r.a.Model != "sonnet" {
+-		t.Fatalf("model=%s", r.a.Model)
+-	}
+-}
+-
+-func TestRouteStartFailRollsBack(t *testing.T) {
+-	newSessionFn = func(SessionOpts) (*Session, error) { return nil, io.ErrClosedPipe }
+-	defer func() { newSessionFn = NewSession }()
+-	r := newMPRepl(t, "opus")
+-	orig := r.sess
+-	seedTurn(r)
+-	if err := r.switchChild("sonnet", ""); err == nil {
+-		t.Fatal("want error")
+-	}
+-	if r.a.Model != "opus" || r.sess != orig {
+-		t.Fatalf("not rolled back: model=%s", r.a.Model)
+-	}
+-}
+-
+-func TestRouteStartFailPrintsViaRepl(t *testing.T) {
+-	newSessionFn = func(SessionOpts) (*Session, error) { return nil, io.ErrClosedPipe }
+-	defer func() { newSessionFn = NewSession }()
+-	r := newMPRepl(t, "opus")
+-	var sb strings.Builder
+-	r.out = &sb
+-	seedTurn(r)
+-	_ = r.switchChild("sonnet", "")
+-	if !strings.Contains(sb.String(), "cannot start claude") {
+-		t.Fatalf("out: %q", sb.String())
+-	}
+-}
+-
+ func TestRouteSameModelWorkerUsesOldPath(t *testing.T) {
+ 	var got []string
+ 	newSessionFn = func(o SessionOpts) (*Session, error) {
+@@ -466,8 +324,8 @@ func TestSweepIdleClosesParkedOnly(t *testing.T) {
+ 	r := newMPRepl(t, "opus")
+ 	cold, warm := &cntCloser{}, &cntCloser{}
+ 	now := time.Now()
+-	r.children.Park(childKey(r.a.Cwd, "haiku"), &liveChild{Sess: cold, Model: "haiku", LastAPI: now.Add(-2 * time.Hour)})
+-	r.children.Park(childKey(r.a.Cwd, "sonnet"), &liveChild{Sess: warm, Model: "sonnet", LastAPI: now})
++	r.children.Park(childKey(r.a.Cwd, "haiku", ""), &liveChild{Sess: cold, Model: "haiku", LastAPI: now.Add(-2 * time.Hour)})
++	r.children.Park(childKey(r.a.Cwd, "sonnet", ""), &liveChild{Sess: warm, Model: "sonnet", LastAPI: now})
+ 	r.setClock(now.Add(-2 * time.Hour))
+ 	if !r.sweepIdle(now) {
+ 		t.Fatal("active not due")
+@@ -483,7 +341,7 @@ func TestSweepDrainsBusyParked(t *testing.T) {
+ 	tk := newAgentTracker()
+ 	tk.onToolUse("a1", "Agent", map[string]any{"description": "d", "name": "w", "prompt": "p"}, time.Now())
+ 	c := &cntCloser{}
+-	r.children.Park(childKey(r.a.Cwd, "haiku"), &liveChild{Sess: c, Tracker: tk, Model: "haiku", LastAPI: time.Now().Add(-2 * time.Hour)})
++	r.children.Park(childKey(r.a.Cwd, "haiku", ""), &liveChild{Sess: c, Tracker: tk, Model: "haiku", LastAPI: time.Now().Add(-2 * time.Hour)})
+ 	r.sweepIdle(time.Now())
+ 	time.Sleep(50 * time.Millisecond)
+ 	if c.count() != 0 {
+diff --git a/internal/harness/orch.go b/internal/harness/orch.go
+index 0c8b635..c54b27f 100644
+--- a/internal/harness/orch.go
++++ b/internal/harness/orch.go
+@@ -35,13 +35,13 @@ func applyOrchEnv(mode string) {
+ 	_ = os.Setenv("CHAUDE_ORCH", mode)
+ }
+ 
+-const orchRuleB = "[orch B] Opus main decides inline. ALL file reads/writes go through haiku-scout/haiku-coder/haiku-batch-worker. sonnet-analyst only for judgment over >=3 sources or >~8k tokens of material; no sonnet relay hop. One haiku-scout call per decision (batch all reads), RETURN cap 4000 chars. Merge would-be short spawns (<=3 msgs) into one brief. Reuse the same haiku-coder instance per workstream."
++const orchRuleB = "[orch B] Opus main decides inline. ALL file reads/writes go through haiku-scout/haiku-coder/haiku-batch-worker. opus-architect only for judgment over >=3 sources or >~8k tokens of material; no relay hop. One haiku-scout call per decision (batch all reads), RETURN cap 4000 chars. Merge would-be short spawns (<=3 msgs) into one brief. Reuse the same haiku-coder instance per workstream."
+ 
+-const orchRuleC = orchRuleB + " [orch C] haiku-scout returns a structured digest (key: value, <=4000 chars); decide from the digest. sonnet-analyst only on escalation or after Haiku fails twice."
++const orchRuleC = orchRuleB + " [orch C] haiku-scout returns a structured digest (key: value, <=4000 chars); decide from the digest. opus-architect only on escalation or after Haiku fails twice."
+ 
+ const orchRuleD = "[orch D] Write one task brief, then issue ALL Haiku calls (scout reads, coder edits on disjoint files, checker) in ONE message in parallel. No intermediate agent, no sequential ping-pong. Coder briefs must name disjoint file sets; sum of RETURN caps <= 8000 chars per round; max 2 rounds per task; second round only on FAIL."
+ 
+-const orchRuleE = "[orch E] Haiku main does all work itself; no Sonnet/Opus agents except escalation after 2 Haiku failures (put ESCALATE in that brief). Spawning a reader is allowed only if the brief names absolute file paths and declares 'RETURN: <=N chars' with N <= 0.25 x total bytes of those files; otherwise the hook blocks it and you do the work inline with your own tools."
++const orchRuleE = "[orch E] Haiku main does all work itself; no Opus agents except escalation after 2 Haiku failures (put ESCALATE in that brief). Spawning a reader is allowed only if the brief names absolute file paths and declares 'RETURN: <=N chars' with N <= 0.25 x total bytes of those files; otherwise the hook blocks it and you do the work inline with your own tools."
+ 
+ const orchRuleF = "[orch F] Turns prefixed [ws:<id>] belong to one workstream; the harness routes them to the same live Haiku child, rotating at 40k tokens, 20 turns or idle >270s with a <=1500-char handoff. Keep one workstream id per task."
+ 
+diff --git a/internal/harness/repl.go b/internal/harness/repl.go
+index 625f913..dc5da69 100644
+--- a/internal/harness/repl.go
++++ b/internal/harness/repl.go
+@@ -24,8 +24,9 @@ const (
+ 	dim = "\033[2m"
+ 	rst = "\033[0m"
+ 
+-	// rotation threshold for opus/sonnet (haiku uses the -threshold flag, default 150000)
+-	opusSonnetThreshold = 150_000
++	// rotation thresholds: opus uses opusThreshold; every other model (haiku, unknown, sonnet) uses -threshold, default haikuThreshold
++	haikuThreshold = 80_000
++	opusThreshold  = 200_000
+ 
+ 	handoffPrompt = "Write a handoff note for a fresh session that will continue this work. No tools. " +
+ 		"Sections: Goal; Decisions; Files created/changed; In-progress work; Open questions; " +
+@@ -37,6 +38,16 @@ const (
+ 		"Log each delegation (agent, tokens, duration, outcome, retries)."
+ )
+ 
++const forwardRule = "[forward] You are the Haiku main: you receive the user's input first. Forward design, judgment, diagnosis, planning and multi-step implementation to the opus-architect agent in ONE foreground call; the brief carries the user's original text verbatim plus a short summary, in caveman B format (docs/claude-lean/CAVEMAN_FORMAT.md 3.1). Simple lookups go to haiku-scout, repeat/loop requests to haiku-prompter. Relay the result to the user in Korean 존댓말; do not decide design yourself."
++
++// forwardRuleFor returns the forward rule for a child on model; an Opus main already has the judgment, so no rule.
++func forwardRuleFor(model string) string {
++	if strings.Contains(strings.ToLower(model), "opus") {
++		return ""
++	}
++	return forwardRule
++}
++
+ // Args mirrors the argparse flags.
+ type Args struct {
+ 	Model            string
+@@ -58,7 +69,6 @@ type Args struct {
+ 	FromClaude       string        // import a plain Claude Code transcript: session id | path | latest
+ 	ImportDry        bool          // with FromClaude: print the handoff stats and exit
+ 	NoCategoryRotate bool          // disable category-based rotation (no marker rule, no switch rotation)
+-	Conductor        bool          // Haiku-fixed main orchestrates; opus-tier work: Haiku plans -> opus-architect review -> Haiku executes
+ 	NoDelegationRule bool          // do not append the haiku delegation rule to the child's system prompt
+ 	CacheTTL         string        // prompt cache TTL requested from claude: auto|1h|5m (see withCacheTTL)
+ 	IdleRotate       time.Duration // idle time after which a child is treated as cold; 0 = off
+@@ -171,7 +181,7 @@ type Repl struct {
+ 	drainMu         sync.Mutex
+ 	cat             string              // current task category from the child's [cat: X] marker
+ 	delegs          int                 // Agent/Task tool calls in the current turn
+-	pool            *workerPool         // Haiku sessions with edit history (direct routing candidates)
++	pool            *workerPool         // Haiku sessions with edit history (edit history)
+ 	parked          map[string]string   // model -> session id left by a direct Haiku switch
+ 	resumeID        string              // session id start() resumes once
+ 	curTask         string              // terse task of the current routed turn
+@@ -179,6 +189,8 @@ type Repl struct {
+ 	idle            idleTurn            // child-initiated turn being rendered (idle reader goroutine only)
+ 	reg             *clientRegistry     // per-(cwd,model) client registry; nil = off (old routing)
+ 	children        *childSet           // live child processes kept per (cwd,model); nil = off
++	resident        []residentSlot      // --resident preset slots; nil = off
++	residentUp      bool                // spawnResident ran (once, after the first successful start)
+ 	idleRotate      time.Duration       // idle deadline base (--idle-rotate); 0 = off
+ 	budget          *budget             // per-task USD ledger; nil = off
+ 	ttl             string              // prompt cache TTL requested (--cache-ttl)
+@@ -242,6 +254,9 @@ func (r *Repl) start() error {
+ 	if !r.a.NoDelegationRule {
+ 		rule = delegationRule
+ 	}
++	if fr := forwardRuleFor(r.a.Model); fr != "" {
++		rule = strings.TrimSpace(rule + " " + fr)
++	}
+ 	if !r.a.NoCategoryRotate {
+ 		rule = strings.TrimSpace(rule + " " + categoryRule)
+ 	}
+@@ -290,6 +305,12 @@ func (r *Repl) start() error {
+ 		}
+ 		r.idleEvent(s, tk, ev)
+ 	})
++	if len(r.resident) > 0 && !r.residentUp {
++		r.residentUp = true
++		if err := r.spawnResident(); err != nil {
++			r.p(dim+"chaude: resident slots: "+err.Error()+rst, "\n")
++		}
++	}
+ 	return nil
+ }
+ 
+@@ -423,7 +444,7 @@ func (r *Repl) idleFinish(s *Session, tk *agentTracker, result event) {
+ 		t0 = time.Now()
+ 	}
+ 	fields := map[string]any{"stage": "turn", "source": "background", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
+-		"model": r.a.Model, "conductor": r.a.Conductor, "ctx": r.lastCtx, "session": s.SessionID, "cost_usd": cost, "rotations": r.rotations}
++		"model": r.a.Model, "ctx": r.lastCtx, "session": s.SessionID, "cost_usd": cost, "rotations": r.rotations}
+ 	if d, ok := r.turnCostUSD(s.SessionID, cost); ok {
+ 		fields["cost_turn_usd"] = d
+ 	}
+@@ -860,12 +881,15 @@ func (r *Repl) pollDrains() {
+ func (r *Repl) effectiveThreshold() int { return r.thresholdFor(r.a.Model) }
+ 
+ func (r *Repl) thresholdFor(model string) int {
+-	if model == "opus" || model == "sonnet" {
+-		return opusSonnetThreshold
++	if strings.Contains(model, "opus") {
++		return opusThreshold
+ 	}
+ 	return r.a.Threshold
+ }
+ 
++// shouldRotate reports whether the context token count has reached the rotation threshold.
++func shouldRotate(ctx, thr int) bool { return ctx >= thr }
++
+ func (r *Repl) handle(line string) {
+ 	r.pollDrains()
+ 	r.tracker.dismissRestored()
+@@ -875,9 +899,6 @@ func (r *Repl) handle(line string) {
+ 		return
+ 	}
+ 	text := line
+-	if r.a.Conductor {
+-		text = r.route(line)
+-	}
+ 	if ns := r.takeNotices(); len(ns) > 0 {
+ 		text = strings.Join(ns, "\n") + "\n\n" + text
+ 	}
+@@ -918,7 +939,7 @@ func (r *Repl) handle(line string) {
+ 	r.wsRecord(reply)
+ 	r.pollUsage()
+ 	fields := map[string]any{"stage": "turn", "start_ms": t0.UnixMilli(), "end_ms": time.Now().UnixMilli(),
+-		"model": r.a.Model, "conductor": r.a.Conductor, "ctx": r.lastCtx, "session": r.sess.SessionID, "draining": len(r.draining),
++		"model": r.a.Model, "ctx": r.lastCtx, "session": r.sess.SessionID, "draining": len(r.draining),
+ 		"cost_usd": cost, "duration_ms": time.Since(t0).Milliseconds(), "rotations": r.rotations, "delegations": r.delegs}
+ 	if d, ok := r.turnCostUSD(r.sess.SessionID, cost); ok {
+ 		fields["cost_turn_usd"] = d // cost_usd is cumulative per session; this is the turn's own share
+@@ -948,7 +969,7 @@ func (r *Repl) handle(line string) {
+ 	autoOK := r.a.MaxAutoRotations < 0 || r.rotations < r.a.MaxAutoRotations
+ 	cooled := r.lastRotFail.IsZero() || time.Since(r.lastRotFail) >= r.a.Cooldown
+ 	thr := r.effectiveThreshold()
+-	if autoOK && cooled && r.lastCtx >= thr {
++	if autoOK && cooled && shouldRotate(r.lastCtx, thr) {
+ 		r.rotate(fmt.Sprintf("ctx %s >= %s", commas(r.lastCtx), commas(thr)))
+ 	}
+ }
+@@ -1065,7 +1086,7 @@ func Main(args []string) int {
+ 	var a Args
+ 	fs.StringVar(&a.Model, "model", "haiku", "")
+ 	fs.StringVar(&a.Cwd, "cwd", "", "")
+-	fs.IntVar(&a.Threshold, "threshold", 150_000, "rotate after an answer when context tokens >= this")
++	fs.IntVar(&a.Threshold, "threshold", haikuThreshold, "rotate after an answer when context tokens >= this")
+ 	fs.IntVar(&a.CompactWindow, "compact-window", 400_000, "child-only CLAUDE_CODE_AUTO_COMPACT_WINDOW (keep > threshold; 0=off)")
+ 	fs.IntVar(&a.MaxAutoRotations, "max-auto-rotations", -1, "max automatic rotations (default unlimited)")
+ 	fs.StringVar(&a.Transcript, "transcript", filepath.Join(osenv.StateDir(), "transcript.jsonl"), "")
+@@ -1080,7 +1101,6 @@ func Main(args []string) int {
+ 	fs.DurationVar(&a.Cooldown, "rotate-cooldown", 2*time.Minute, "min gap after a failed rotation")
+ 	fs.BoolVar(&a.NoCategoryRotate, "no-category-rotate", false, "disable category-based session rotation")
+ 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
+-	fs.BoolVar(&a.Conductor, "conductor", true, "conductor mode: Haiku-fixed main; a one-shot Sonnet classifier tags tier (haiku|sonnet|opus); sonnet tier -> sonnet-analyst hint, opus tier -> plan->review->execute hint")
+ 	fs.StringVar(&a.AgentsFile, "agents-file", defaultAgentsFile(), "persisted sub-agent state, restored on restart and /resume (empty=off)")
+ 	fs.StringVar(&a.FromClaude, "from-claude", "", "start from a plain Claude Code transcript: session id, .jsonl path or latest")
+ 	fs.BoolVar(&a.ImportDry, "import-dry-run", false, "with --from-claude: build the handoff, print size and 추천 status, do not launch claude")
+@@ -1090,6 +1110,9 @@ func Main(args []string) int {
+ 	fs.StringVar(&a.ClientsFile, "clients-file", defaultClientsFile(), "per-(cwd,model) client registry (empty=off)")
+ 	fs.IntVar(&a.MaxWorkers, "max-workers", DefaultMaxWorkers, "cap on concurrent live worker sessions (env CHAUDE_MAX_WORKERS when unset)")
+ 	fs.StringVar(&a.Orch, "orch", "m0", "orchestration mode m0|b|c|d|e|f (A/B test)")
++	var resident, residentMainModel string
++	fs.StringVar(&resident, "resident", "off", "resident slot preset off|min|fixed (env CHAUDE_RESIDENT when unset)")
++	fs.StringVar(&residentMainModel, "resident-main-model", "", "main slot model when --resident is not off (default: fixed=opus, min=haiku)")
+ 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
+ 		if err == flag.ErrHelp {
+ 			return 0
+@@ -1127,8 +1150,29 @@ func Main(args []string) int {
+ 		fmt.Fprintln(os.Stderr, err)
+ 		return 2
+ 	}
++	residentSet := false
++	fs.Visit(func(f *flag.Flag) {
++		if f.Name == "resident" {
++			residentSet = true
++		}
++	})
++	resName := resident
++	if env := strings.TrimSpace(os.Getenv("CHAUDE_RESIDENT")); !residentSet && env != "" {
++		resName = env
++	}
++	slots, residentCap, err := residentPreset(resName, residentMainModel)
++	if err != nil {
++		fmt.Fprintln(os.Stderr, err)
++		return 2
++	}
++	if residentCap > 0 && !maxWorkersSet && strings.TrimSpace(os.Getenv("CHAUDE_MAX_WORKERS")) == "" {
++		mw = residentCap
++	}
++	if len(slots) > 0 {
++		a.Model = slots[0].Model
++	}
+ 	a.MaxWorkers = mw
+-	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1)}
++	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1), resident: slots}
+ 	if st, err := os.Stdin.Stat(); err == nil {
+ 		r.interactive = st.Mode()&os.ModeCharDevice != 0
+ 	}
+@@ -1140,7 +1184,7 @@ func Main(args []string) int {
+ 	r.reconcileStart()
+ 	r.metrics = newMetrics(a.MetricsDir, map[string]any{"threshold": a.Threshold, "handoff_validate": !a.NoValidate,
+ 		"max_drain": a.MaxDrain, "drain_timeout_s": int(a.DrainTimeout.Seconds()), "compact_window": a.CompactWindow,
+-		"delegation_rule": !a.NoDelegationRule, "category_rotate": !a.NoCategoryRotate, "conductor": a.Conductor})
++		"delegation_rule": !a.NoDelegationRule, "category_rotate": !a.NoCategoryRotate})
+ 	r.seenTools = map[string]bool{}
+ 	if a.FromClaude != "" {
+ 		if code, done := r.importFromClaude(); done {
+@@ -1201,21 +1245,11 @@ func (r *Repl) reconcileStart() {
+ 	}
+ }
+ 
+-// setConductor toggles classifier routing (a one-shot Sonnet call per prompt picks the model of the session that answers).
+-func (r *Repl) setConductor(on bool) {
+-	r.a.Conductor = on
+-	r.p(fmt.Sprintf("conductor: %v (classifier routes each prompt to haiku|sonnet|opus)", on), "\n")
+-}
+-
+ // modeLine handles "/mode [name]" on the plain path (no arg shows, "next" cycles).
+ func (r *Repl) modeLine(args []string) {
+ 	cur := permMode(r.mode.Load())
+-	if len(args) > 0 && (args[0] == "conductor" || args[0] == "conductor-off") {
+-		r.setConductor(args[0] == "conductor")
+-		return
+-	}
+ 	if len(args) == 0 {
+-		r.p("mode "+cur.String()+"  (conductor="+fmt.Sprint(r.a.Conductor)+"; default | acceptEdits | plan | auto)", "\n")
++		r.p("mode "+cur.String()+"  (default | acceptEdits | plan | auto)", "\n")
+ 		return
+ 	}
+ 	p, ok := cur.Next(), true
+diff --git a/internal/harness/resumeshift_test.go b/internal/harness/resumeshift_test.go
+index c670d7f..e6e4063 100644
+--- a/internal/harness/resumeshift_test.go
++++ b/internal/harness/resumeshift_test.go
+@@ -60,7 +60,7 @@ func TestImportShowsTurnsInTUI(t *testing.T) {
+ 	}
+ }
+ 
+-// After an import the current child has seen nothing; a model switch (conductor route, /model) must not
++// After an import the current child has seen nothing; a model switch (/model) must not
+ // ask it for a handoff (wasted turn, empty note) nor replace the import snapshot.
+ func TestRotateKeepsPendingSnapshot(t *testing.T) {
+ 	old, _, oldIn := fakeSession()
+diff --git a/internal/harness/routerprompt_test.go b/internal/harness/routerprompt_test.go
+deleted file mode 100644
+index 477e776..0000000
+--- a/internal/harness/routerprompt_test.go
++++ /dev/null
+@@ -1,75 +0,0 @@
+-package harness
+-
+-import (
+-	"crypto/sha256"
+-	"encoding/hex"
+-	"fmt"
+-	"os"
+-	"path/filepath"
+-	"testing"
+-)
+-
+-// sonnetPromptSHA256 freezes classifyPromptSonnet; change it only with a deliberate prompt change.
+-const sonnetPromptSHA256 = "bd3790c78a32bcadd964a0bd57431bfb483dbbd7f17a122579f312a51b2c6e62"
+-
+-func promptSHA256(s string) string {
+-	sum := sha256.Sum256([]byte(s))
+-	return hex.EncodeToString(sum[:])
+-}
+-
+-// TestRouterPromptDump writes both router prompts and their hashes to $CHAUDE_DUMP_PROMPTS.
+-func TestRouterPromptDump(t *testing.T) {
+-	dir := os.Getenv("CHAUDE_DUMP_PROMPTS")
+-	if dir == "" {
+-		t.Skip("set CHAUDE_DUMP_PROMPTS=<dir> to dump router prompts")
+-	}
+-	if err := os.MkdirAll(dir, 0o755); err != nil {
+-		t.Fatal(err)
+-	}
+-	if err := os.WriteFile(filepath.Join(dir, "sonnet.txt"), []byte(classifyPromptSonnet), 0o644); err != nil {
+-		t.Fatal(err)
+-	}
+-	if err := os.WriteFile(filepath.Join(dir, "haiku.txt"), []byte(classifyPromptHaiku), 0o644); err != nil {
+-		t.Fatal(err)
+-	}
+-	hashes := fmt.Sprintf("sonnet %s\nhaiku %s\n", promptSHA256(classifyPromptSonnet), promptSHA256(classifyPromptHaiku))
+-	if err := os.WriteFile(filepath.Join(dir, "hashes.txt"), []byte(hashes), 0o644); err != nil {
+-		t.Fatal(err)
+-	}
+-}
+-
+-// TestSonnetPromptFrozen fails if the Sonnet router prompt text changes.
+-func TestSonnetPromptFrozen(t *testing.T) {
+-	if got := promptSHA256(classifyPromptSonnet); got != sonnetPromptSHA256 {
+-		t.Fatalf("classifyPromptSonnet sha256 = %s, want %s", got, sonnetPromptSHA256)
+-	}
+-}
+-
+-// TestRouterModelEnvCases checks CHAUDE_ROUTER_MODEL parsing (trim, lowercase, fallback to sonnet).
+-func TestRouterModelEnvCases(t *testing.T) {
+-	cases := []struct {
+-		name  string
+-		env   string
+-		unset bool
+-		want  string
+-	}{
+-		{name: "unset", unset: true, want: "haiku"},
+-		{name: "sonnet", env: "sonnet", want: "sonnet"},
+-		{name: "SONNET with space", env: "SONNET ", want: "sonnet"},
+-		{name: "haiku", env: "haiku", want: "haiku"},
+-		{name: "Haiku with leading space", env: " Haiku", want: "haiku"},
+-		{name: "opus falls back", env: "opus", want: "haiku"},
+-		{name: "x falls back", env: "x", want: "haiku"},
+-	}
+-	for _, c := range cases {
+-		t.Run(c.name, func(t *testing.T) {
+-			t.Setenv(routerModelEnv, c.env)
+-			if c.unset {
+-				os.Unsetenv(routerModelEnv)
+-			}
+-			if got := routerModel(); got != c.want {
+-				t.Errorf("CHAUDE_ROUTER_MODEL=%q (unset=%v): got %q, want %q", c.env, c.unset, got, c.want)
+-			}
+-		})
+-	}
+-}
+diff --git a/internal/harness/session_switch.go b/internal/harness/session_switch.go
+new file mode 100644
+index 0000000..172f0b0
+--- /dev/null
++++ b/internal/harness/session_switch.go
+@@ -0,0 +1,30 @@
++package harness
++
++import (
++	"fmt"
++	"os"
++)
++
++// switchSession replaces the child with a session on model, resuming resume (a session id) when set.
++// The session being left is parked (its id is kept, no handoff) so a later switch back can resume it.
++func (r *Repl) switchSession(model, resume string) {
++	if r.sess != nil && r.a.Model != model {
++		if id := r.sess.SessionID; id != "" {
++			if r.parked == nil {
++				r.parked = map[string]string{}
++			}
++			r.parked[r.a.Model] = id
++		}
++	}
++	if r.sess != nil {
++		r.sess.Close()
++	}
++	r.a.Model = model
++	if resume != "" {
++		r.pendingSnapshot = "" // resumed session already has its context
++	}
++	r.resumeID = resume
++	if err := r.start(); err != nil {
++		fmt.Fprintln(os.Stderr, "chaude: cannot start claude:", err)
++	}
++}
+diff --git a/internal/harness/switchchild.go b/internal/harness/switchchild.go
+index a3e2a2a..1736287 100644
+--- a/internal/harness/switchchild.go
++++ b/internal/harness/switchchild.go
+@@ -83,7 +83,7 @@ func (r *Repl) parkOld() (*liveChild, bool) {
+ 		old.Sess.Close()
+ 		return old, false
+ 	}
+-	key := childKey(r.a.Cwd, old.Model)
++	key := childKey(r.a.Cwd, old.Model, old.Role)
+ 	if prev, ok := r.children.Take(key); ok && prev != nil && prev != old {
+ 		r.retire(prev)
+ 	}
+@@ -116,7 +116,7 @@ func (r *Repl) endParked(model, reason string) bool {
+ 	if r.children == nil {
+ 		return false
+ 	}
+-	c, ok := r.children.Take(childKey(r.a.Cwd, model))
++	c, ok := r.children.Take(childKey(r.a.Cwd, model, ""))
+ 	if !ok || c == nil {
+ 		return false
+ 	}
+@@ -133,9 +133,14 @@ func (r *Repl) endAllParked(reason string) {
+ 		return
+ 	}
+ 	for _, k := range r.children.Expired(time.Now(), 0) {
+-		if i := strings.IndexByte(k, 0); i >= 0 {
+-			r.endParked(k[i+1:], reason)
++		c, ok := r.children.Take(k)
++		if !ok || c == nil {
++			continue
+ 		}
++		if c.Sess != nil {
++			r.retire(c)
++		}
++		r.reg.MarkEnded(r.a.Cwd, c.Model, reason, time.Now())
+ 	}
+ }
+ 
+@@ -149,7 +154,7 @@ func (r *Repl) switchChild(target, resumeID string) error {
+ 		return nil
+ 	}
+ 	now := time.Now()
+-	key := childKey(r.a.Cwd, target)
++	key := childKey(r.a.Cwd, target, "")
+ 	act := actStartNew
+ 	if resumeID == "" {
+ 		act = pickChild(r.children, r.reg, key, r.a.Cwd, target, r.thresholdFor(target), now, r.warmDeadline())
+@@ -199,6 +204,11 @@ func (r *Repl) switchChild(target, resumeID string) error {
+ 	if snap != "" {
+ 		snap = r.withDesignPath(target, snap)
+ 	}
++	if live == nil {
++		if err := r.admit(); err != nil {
++			return err
++		}
++	}
+ 	oldModel := r.a.Model
+ 	old, parked := r.parkOld()
+ 	var err error
+@@ -218,7 +228,7 @@ func (r *Repl) switchChild(target, resumeID string) error {
+ 		r.a.Model = oldModel
+ 		r.resumeID = ""
+ 		if old != nil && parked {
+-			if c, ok := r.children.Take(childKey(r.a.Cwd, old.Model)); ok {
++			if c, ok := r.children.Take(childKey(r.a.Cwd, old.Model, old.Role)); ok {
+ 				r.bindChild(c)
+ 				r.reg.Upsert(clientRec{Cwd: r.a.Cwd, Model: old.Model, SessionID: sessID(c.Sess), State: clientLive,
+ 					LastAPI: c.lastAPI(), LastCtx: c.LastCtx, OwnerPID: ownPID(), ChildPID: childPID(c.Sess)})
+diff --git a/internal/harness/tui.go b/internal/harness/tui.go
+index 348ab30..857b85a 100644
+--- a/internal/harness/tui.go
++++ b/internal/harness/tui.go
+@@ -168,7 +168,7 @@ var slashCmds = []slashCmd{
+ 	{"/init", "analyze repo, propose CLAUDE.md (runs a turn)"},
+ 	{"/review", "review current changes (runs a turn)"},
+ 	{"/doctor", "check installation and config (runs a turn)"},
+-	{"/mode", "permission mode: default|acceptEdits|plan|auto (shift+tab cycles); conductor|conductor-off = Sonnet conductor"},
++	{"/mode", "permission mode: default|acceptEdits|plan|auto (shift+tab cycles)"},
+ 	{"/mouse", "toggle mouse wheel scroll (off = select text)"},
+ 	{"/version", "harness and claude versions"},
+ 	{"/exit", "exit"},
+@@ -935,14 +935,6 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
+ 			note("mode " + permMode(m.r.mode.Load()).String() + "  (default | acceptEdits | plan | auto; shift+tab cycles)")
+ 			break
+ 		}
+-		if f[1] == "conductor" || f[1] == "conductor-off" {
+-			m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
+-			m.blocks = append(m.blocks, block{"user", line})
+-			m.vp.GotoBottom()
+-			m.refresh()
+-			m.submit <- line
+-			break
+-		}
+ 		p, ok := parseMode(f[1])
+ 		if !ok {
+ 			note("unknown mode " + f[1] + " (default | acceptEdits | plan | auto)")
+@@ -1158,8 +1150,6 @@ func (r *Repl) runTUI() int {
+ 					a = f[1]
+ 				}
+ 				r.importSession(a)
+-			case f[0] == "/mode" && len(f) > 1 && (f[1] == "conductor" || f[1] == "conductor-off"):
+-				r.setConductor(f[1] == "conductor")
+ 			case f[0] == "/model" && len(f) > 1:
+ 				r.endParked(f[1], "model-switch") // rotate starts a fresh child under this key
+ 				r.a.Model = f[1]
+diff --git a/notes/DECISIONS.md b/notes/DECISIONS.md
+index af8c4c2..cbb0db5 100644
+--- a/notes/DECISIONS.md
++++ b/notes/DECISIONS.md
+@@ -38,10 +38,12 @@
+ - [routing] 261029 user: conductor main session Haiku-fixed, Opus only for design -> pickModel/pickTarget return haiku (forced --model sonnet|opus kept; forced opus keeps delegateHint). Large tasks get planHint: Haiku writes plan -> opus-architect/sonnet-analyst review (improvements only) -> Haiku merges and executes. route() no longer restarts the session when already haiku. CLAUDE.md + opus-architect/sonnet-analyst "Plan review" paragraph updated; test TestHaikuPlanWorkflow. Details notes/runs/haiku-conductor-plan.md.
+ - [routing] 261029 user: "sonnet-analyst는 파일 직접 접근 금지; 유사 파일끼리 묶어 최대 3개 파일/묶음 단위로 Haiku에게 정리 요청 후 요약만 받아 분석 (토큰 절약 목적). Opus 세션은 원래 정책대로 유지, Haiku가 대략적 계획 관리, 과거 구조와 현재 구조 부분 병합(하이브리드)." -> sonnet-analyst reads no files itself; Haiku condenses similar-file groups (max 3 files/group), analyst gets summaries only. Why: token saving. Other rules unchanged.
+ - [main-model] 2026-10-29 user: "chaude already running in GoLand terminal, text input works. Judge whether opus main should be used only for design turns. Apply switching criteria only to haiku; other models are used where long context must be kept." -> (1) Opus main only for design turns, as the original policy says. (2) context-threshold switching (T) applies only to Haiku main; Opus and Sonnet mains keep their context and do not switch by threshold. (3) GoLand terminal input issue resolved: text input works. Plan: notes/runs/261029-plan-hybrid-design.md
+-- [rotate] 2026-10-29 user: rotation threshold Haiku main 80k (new session handoff); Opus and Sonnet main 270k. Overview length cap (user decision, policy; no existing code limit): Haiku overview 3,000 chars; Opus/Sonnet overview 6,000 chars.
++- [rotate] 2026-10-29 user (SUPERSEDED by 2026-10-31): rotation threshold Haiku main 80k (new session handoff); Opus and Sonnet main 270k. Overview length cap (user decision, policy; no existing code limit): Haiku overview 3,000 chars; Opus/Sonnet overview 6,000 chars.
+ - [local-cmd] 2026-10-29 user: "알아서 처리, 검증 통과 시 릴리즈" -> held items resolved on safest default (keep current behavior, no code change): /clear deferral = keep (no deferral); /model name validation = none (claude CLI rejects bad names); /version = sync (cheap, no model call); conductor reverting /model = keep as is; unknown "/x" in plain mode = pass through to claude unchanged; /clear with running agents = keep current behavior. Reason: no small clearly-correct fix; avoids regressions. Also aligned agent "Return ≤5 lines" wording to final message ≤3 lines/300 chars; added idle-path specter test.
+ - [agents] 2026-10-30 v0.8.2 user: sonnet/opus(비-haiku) 서브에이전트 파일·셸 전면 차단, haiku-* 허용 목록 (훅 강제; 탈출구 CLAUDE_HARNESS_ALLOW_SONNET_IO=1); update to 35: sonnet-reviewer는 haiku-*만 호출 가능 (subagent caller); sonnet-reviewer/sonnet-analyst/opus-architect tools = Agent only.
+ - [routing] 261030 user: repeat/recursive requests -> haiku-prompter loop (B); prompter may call sonnet-analyst/sonnet-reviewer/opus-architect (scoped D11 exception); no recursion into haiku-prompter; default 3 rounds, count/time followed exactly; "haiku 제외" = haiku-* results not re-asked (pending user confirm). plan notes/runs/261030-plan-prompter-loop-final.md
+ - [usage] 261030 user: "5시간 사용률 상한을 40%에서 60%로 변경" -> 5h usage cap 40% -> 60%; no spend just to reach it; unverified items needing no extra usage get closed; reach reported via usagepoll (claude -p /usage). Also: "모든 모델/에이전트 동작 종료 시 수행한 동작을 TUI에 표기" -> one-line TUI note on every agent completion (agentTracker.notify).
+-- [rotate] 2026-10-30 user: "세션 컨텍스트 상한을 150K로 확정". rotation threshold = 150k for Haiku, Sonnet, Opus mains (replaces 2026-10-29 80k/270k); /usage bar max 150k; child compact-window 400k and settings autoCompactWindow 150000 unchanged. CLAUDE.md:28 still says 80k/270k (stale, main session to update).
++- [rotate] 2026-10-30 user: "세션 컨텍스트 상한을 150K로 확정". rotation threshold = 150k for Haiku, Sonnet, Opus mains (replaces 2026-10-29 80k/270k); /usage bar max 150k; child compact-window 400k and settings autoCompactWindow 150000 unchanged. CLAUDE.md:28 still says 80k/270k (stale, main session to update). (SUPERSEDED by 2026-10-31 for thresholds; 150k flag default now haikuThreshold 80k.)
++- [model-policy] 2026-10-31 user: router (classifier, claude -p) fully deleted; no classifier call; CHAUDE_ROUTER_MODEL and [routing] hint constants removed. Structure: haiku main takes user input directly; opus work is delegated by haiku via agent (opus-architect); no Go opus wrapper; sonnet tier removed. Rotation: haiku 80,000 tokens, opus 200,000 tokens (replaces 10-29 80k/270k and 10-30 150k). Haiku uses -threshold flag (default 80,000). Main model in .claude/settings.json = haiku. sonnet-* agent files and sonnet pin logic removed (see plan notes/runs/261031-plan-model-call-policy.md; run notes notes/runs/261031-haiku-model-policy-impl.md). Open: CLAUDE.md:28 stale; settings autoCompactWindow 150000 is below 200k opus threshold.
+ - [arch] 261031 user: "이 기획서를 메인 기획서로 두고 이 브랜치를 구현하는 것이 목표" -> main plan = notes/runs/261031-plan-io-architecture-review.md (opus-architect review); branch interactive-child-compare to be implemented per it. Note: plan verdict recommends AGAINST interactive TUI child (keep resident stream-json child); conflict with branch name pending user decision. Scope: notes/runs/261031-scope-io-architecture-branch.md
++- [model-policy] 2026-10-31 user: "라우터 완전 삭제 ... autoCompactWindow는 claude에만 적용". Conductor mode removed; chaude haiku main gets forwardRule (repl.go forwardRuleFor; opus model -> none) telling it to forward design/judgment to opus-architect with user text verbatim + summary (caveman B). settings autoCompactWindow 150000 = plain claude only; chaude child compact 400k unchanged; closes :47 open item. run: notes/runs/261031-caveman-router-removal-impl.md
+diff --git a/notes/LEDGER.md b/notes/LEDGER.md
+index ea624b2..9941957 100644
+--- a/notes/LEDGER.md
++++ b/notes/LEDGER.md
+@@ -1,7 +1,3 @@
+-- 10-28 23:46 [agent] ㅇㅇ 그렇게 해
+-- 10-28 23:48 [agent] ㅇㅇ 그렇게 진행해
+-- 10-28 23:48 [agent] ㅇㅇ 구현하고 빌드해
+-- 10-28 23:51 [agent] ㅇㅇ 구현하고 빌드해
+ - 10-28 23:54 [agent] ㅇㅇ 결과 나오면 바로 구현 진행해
+ - 10-28 23:55 [agent] hook 내용 열어보고 묶음 확정해
+ - 10-28 23:55 [agent] ㅇㅇ 테스트 해봐
+@@ -298,3 +294,7 @@
+ - 10-31 18:27 [sonnet-analyst · sonnet 5.5] Haiku 조사 에이전트(haiku-scout)를 띄워 두었습니다. 라우터 심볼 호출부, 메인 모델 설정 위치, CLAUDE_ROUTER_MODEL 줄 목록, sonnet 포함 파일을 한 번에 조사하는 중입니다. 결과가 오기 전에는 삭제나 수정을 시작하지 않습니다.
+ - 10-31 18:40 [sonnet-analyst · sonnet 5.5] 계획서를 haiku-scout가 읽고 있습니다. 결과가 오면 단계 목록에 따라 라우터 제거부터 진행하겠습니다.
+ - 10-31 18:44 [sonnet-analyst · sonnet 5.5] 원본에는 이번 세션의 모델호출 정책 흔적이 없습니다. 다만 `git status`에는 이번 세션 이전부터 있던 미커밋 변경 29줄이 남아 있습니다. 어떤 것도 되돌리거나 쓰지 않았고 조회만 했습니다. 복제본은 접근하지 않았습니다. / **git log 최신 3건** / - `0ee3501` merge: caveman-impl v0.9.0 into master
++- 10-31 19:00 [agent] I'm not going to write out my analysis block. The summary itself is below. / <summary> / 1. Primary Request and Intent:
++- 10-31 19:03 [agent] <analysis> / Summary of the session so far, for the compact. Work is the model-call policy subagent task in /Users/leekwangseok/PycharmProjects/claude-harness (master). The brief said: no commit, push, tag, stash, reset, or checkout; edit the working tree only; do not touch the clone or the T direct
++- 10-31 19:04 [haiku-coder · haiku 5.5] Sonnet 티어 제거(step 9)와 검증(step 10)을 마쳤습니다. go build/vet/test 및 hook 테스트 모두 exit 0입니다. / 변경: .claude/agents/sonnet-{analyst,reviewer}.md 삭제, .claude/hooks/agent-model-pin.py, tests/hooks/test_orch_gate.py 수정 (상세 `notes/runs/261031-haiku-model-policy-impl.md` §7). / PASS (go build/vet/test, unittest 10
++- 10-31 19:44 [opus-architect · opus 5.5] I've sent haiku-scout to map the spawn paths and roles. I'll wait for its results before deciding anything.
+diff --git a/notes/metrics/2026-10-31.jsonl b/notes/metrics/2026-10-31.jsonl
+index 34b2d4a..461bf38 100644
+--- a/notes/metrics/2026-10-31.jsonl
++++ b/notes/metrics/2026-10-31.jsonl
+@@ -451,3 +451,123 @@
+ {"conductor":true,"cost_usd":0.0005661500000000001,"duration_ms":4411,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1009,"result_cache_read_input_tokens":18765,"result_ctx":19776,"result_input_tokens":2,"result_output_tokens":353,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T09:47:01Z"}
+ {"ts": "2026-10-31T09:47:36Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
+ {"five_hour":0.65,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T09:47:47Z"}
++{"ts": "2026-10-31T09:47:58Z", "hook": "caveman-format", "agent": "haiku-coder", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"ts": "2026-10-31T09:48:13Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"conductor":true,"cost_turn_usd":0.08521992999999983,"cost_usd":0.6387965649999997,"ctx":102292,"delegations":1,"draining":0,"duration_ms":85697,"end_ms":1793440106929,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":4285,"result_cache_read_input_tokens":196712,"result_ctx":201001,"result_input_tokens":4,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":88884,"cacheCreationEphemeral5mInputTokens":147681,"cacheCreationInputTokens":236565,"cacheReadInputTokens":2284456,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.115885565,"inputTokens":156,"maxOutputTokens":128000,"outputTokens":97750,"provider":"firstParty","thinkingTokens":41289,"webSearchRequests":0},"claude-sonnet-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":96646,"cacheCreationInputTokens":96646,"cacheReadInputTokens":303060,"canonicalModel":"claude-sonnet-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.522911,"inputTokens":100,"maxOutputTokens":128000,"outputTokens":25079,"provider":"firstParty","thinkingTokens":1886,"webSearchRequests":0}},"result_output_tokens":2222,"rotations":2,"session":"54688a95-546a-4292-b865-75229a7575c0","spawn_types":{"haiku-coder":1,"haiku-scout":2,"sonnet-analyst":1},"spawns":4,"stage":"turn","start_ms":1793440021232,"sub_cache_creation_input_tokens":12637,"sub_cache_read_input_tokens":36779,"sub_input_tokens":12,"sub_msgs":4,"sub_output_tokens":22,"ts":"2026-10-31T09:48:26Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"라우터-tier-정책","session":"54688a95-546a-4292-b865-75229a7575c0","stage":"category","switch":false,"to":"라우터-tier-정책","ts":"2026-10-31T09:48:26Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"session_pct":65,"session_resets":"Oct 31 at 8:29pm (Asia/Seoul)","source":"cli","stage":"usage","ts":"2026-10-31T09:48:30Z","week_pct":72,"week_resets":"Nov 3 at 2:59pm (Asia/Seoul)"}
++{"conductor":true,"cost_usd":0.00072305,"duration_ms":5445,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1051,"result_cache_read_input_tokens":18765,"result_ctx":19818,"result_input_tokens":2,"result_output_tokens":650,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T09:49:20Z"}
++{"ts": "2026-10-31T09:50:17Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"five_hour":0.66,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T09:50:46Z"}
++{"conductor":true,"cost_turn_usd":0.09566240999999986,"cost_usd":0.7344589749999996,"ctx":108764,"delegations":1,"draining":0,"duration_ms":86064,"end_ms":1793440246858,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":6472,"result_cache_read_input_tokens":205453,"result_ctx":211929,"result_input_tokens":4,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":95356,"cacheCreationEphemeral5mInputTokens":176057,"cacheCreationInputTokens":271413,"cacheReadInputTokens":2643095,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.14724817499999998,"inputTokens":176,"maxOutputTokens":128000,"outputTokens":107141,"provider":"firstParty","thinkingTokens":43603,"webSearchRequests":0},"claude-sonnet-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":105281,"cacheCreationInputTokens":105281,"cacheReadInputTokens":312403,"canonicalModel":"claude-sonnet-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.5872108,"inputTokens":104,"maxOutputTokens":128000,"outputTokens":29256,"provider":"firstParty","thinkingTokens":2118,"webSearchRequests":0}},"result_output_tokens":2420,"rotations":2,"session":"54688a95-546a-4292-b865-75229a7575c0","spawn_types":{"haiku-scout":1,"sonnet-analyst":1},"spawns":2,"stage":"turn","start_ms":1793440160793,"sub_cache_creation_input_tokens":8635,"sub_cache_read_input_tokens":9343,"sub_input_tokens":4,"sub_msgs":2,"sub_output_tokens":22,"ts":"2026-10-31T09:50:46Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"라우터-tier-정책","session":"54688a95-546a-4292-b865-75229a7575c0","stage":"category","switch":false,"to":"라우터-tier-정책","ts":"2026-10-31T09:50:46Z"}
++{"conductor":true,"cost_usd":0.00079715,"duration_ms":5770,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1164,"result_cache_read_input_tokens":18765,"result_ctx":19931,"result_input_tokens":2,"result_output_tokens":753,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"opus","ts":"2026-10-31T09:54:10Z"}
++{"five_hour":0.67,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T09:54:56Z"}
++{"ts": "2026-10-31T09:55:04Z", "hook": "caveman-format", "agent": "haiku-batch-worker", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T09:55:35Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"five_hour":0.69,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T09:57:45Z"}
++{"ts": "2026-10-31T09:57:59Z", "hook": "caveman-format", "agent": "haiku-batch-worker", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"five_hour":0.7,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T09:58:48Z"}
++{"five_hour":0.71,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T09:58:50Z"}
++{"conductor":true,"cost_usd":null,"ctx":108764,"delegations":3,"draining":0,"duration_ms":300002,"end_ms":1793440750769,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":0,"result_cache_read_input_tokens":0,"result_ctx":0,"result_input_tokens":0,"result_output_tokens":0,"rotations":2,"session":"54688a95-546a-4292-b865-75229a7575c0","spawn_types":{"haiku-batch-worker":3,"haiku-coder":1,"haiku-scout":1,"opus-architect":1},"spawns":6,"stage":"turn","start_ms":1793440450767,"sub_cache_creation_input_tokens":68051,"sub_cache_read_input_tokens":117892,"sub_input_tokens":24,"sub_msgs":11,"sub_output_tokens":97,"ts":"2026-10-31T09:59:10Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"라우터-tier-정책","session":"54688a95-546a-4292-b865-75229a7575c0","stage":"category","switch":false,"to":"라우터-tier-정책","ts":"2026-10-31T09:59:10Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"session_pct":71,"session_resets":"Oct 31 at 8:29pm (Asia/Seoul)","source":"cli","stage":"usage","ts":"2026-10-31T09:59:13Z","week_pct":73,"week_resets":"Nov 3 at 2:59pm (Asia/Seoul)"}
++{"conductor":true,"cost_usd":0.00078755,"duration_ms":6030,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1126,"result_cache_read_input_tokens":18765,"result_ctx":19893,"result_input_tokens":2,"result_output_tokens":749,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T10:01:16Z"}
++{"five_hour":0.72,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:05:06Z"}
++{"ts": "2026-10-31T10:05:15Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:05:58Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"conductor":true,"cost_usd":null,"ctx":108764,"delegations":1,"draining":0,"duration_ms":300003,"end_ms":1793441176510,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":0,"result_cache_read_input_tokens":0,"result_ctx":0,"result_input_tokens":0,"result_output_tokens":0,"rotations":2,"session":"54688a95-546a-4292-b865-75229a7575c0","spawn_types":{"haiku-coder":1,"haiku-scout":2,"sonnet-analyst":1},"spawns":4,"stage":"turn","start_ms":1793440876507,"sub_cache_creation_input_tokens":72778,"sub_cache_read_input_tokens":1357053,"sub_input_tokens":80,"sub_msgs":38,"sub_output_tokens":234,"ts":"2026-10-31T10:06:16Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"라우터-tier-정책","session":"54688a95-546a-4292-b865-75229a7575c0","stage":"category","switch":false,"to":"라우터-tier-정책","ts":"2026-10-31T10:06:16Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"session_pct":73,"session_resets":"Oct 31 at 8:30pm (Asia/Seoul)","source":"cli","stage":"usage","ts":"2026-10-31T10:06:19Z","week_pct":73,"week_resets":"Nov 3 at 3pm (Asia/Seoul)"}
++{"dry_run":false,"files":0,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"reco_found":false,"reco_preserved":true,"snapshot_chars":5558,"source":"/Users/leekwangseok/.claude/projects/-Users-leekwangseok-PycharmProjects-claude-harness/54688a95-546a-4292-b865-75229a7575c0.jsonl","stage":"import","ts":"2026-10-31T10:06:56Z","turns":12}
++{"conductor":true,"cost_usd":0.00068895,"duration_ms":4507,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1153,"result_cache_read_input_tokens":18765,"result_ctx":19920,"result_input_tokens":2,"result_output_tokens":541,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"opus","ts":"2026-10-31T10:18:09Z"}
++{"five_hour":0.73,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:18:21Z"}
++{"conductor":true,"cost_turn_usd":0.00787557,"cost_usd":0.00787557,"ctx":37863,"delegations":1,"draining":0,"duration_ms":14545,"end_ms":1793441903715,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":24455,"result_cache_read_input_tokens":86252,"result_ctx":110713,"result_input_tokens":6,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":24455,"cacheCreationEphemeral5mInputTokens":6182,"cacheCreationInputTokens":30637,"cacheReadInputTokens":86252,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.00787557,"inputTokens":8,"maxOutputTokens":128000,"outputTokens":2697,"provider":"firstParty","thinkingTokens":1473,"webSearchRequests":0}},"result_output_tokens":1851,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","spawn_types":{"haiku-batch-worker":1},"spawns":1,"stage":"turn","start_ms":1793441889170,"sub_cache_creation_input_tokens":6182,"sub_cache_read_input_tokens":0,"sub_input_tokens":2,"sub_msgs":1,"sub_output_tokens":8,"ts":"2026-10-31T10:18:23Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"라우터-tier-정책","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T10:18:23Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"session_pct":73,"session_resets":"Oct 31 at 8:30pm (Asia/Seoul)","source":"cli","stage":"usage","ts":"2026-10-31T10:18:26Z","week_pct":73,"week_resets":"Nov 3 at 3pm (Asia/Seoul)"}
++{"five_hour":0.72,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:18:27Z"}
++{"five_hour":0.73,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:19:58Z"}
++{"ts": "2026-10-31T10:20:35Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:20:45Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:20:47Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"five_hour":0.74,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:20:56Z"}
++{"ts": "2026-10-31T10:21:22Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:21:35Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"five_hour":0.75,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:22:28Z"}
++{"ts": "2026-10-31T10:22:32Z", "hook": "caveman-format", "agent": "haiku-batch-worker", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"ts": "2026-10-31T10:22:49Z", "hook": "caveman-format", "agent": "haiku-checker", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"conductor":true,"cost_turn_usd":0.37481404,"cost_usd":0.38268961,"ctx":41057,"end_ms":1793442188120,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":3194,"result_cache_read_input_tokens":76417,"result_ctx":79617,"result_input_tokens":6,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":27649,"cacheCreationEphemeral5mInputTokens":134558,"cacheCreationInputTokens":162207,"cacheReadInputTokens":463716,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.057788210000000007,"inputTokens":70,"maxOutputTokens":128000,"outputTokens":61589,"provider":"firstParty","thinkingTokens":30223,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":32548,"cacheCreationInputTokens":32548,"cacheReadInputTokens":81487,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.3249014,"inputTokens":16,"maxOutputTokens":128000,"outputTokens":7290,"provider":"firstParty","thinkingTokens":2496,"webSearchRequests":0}},"result_output_tokens":2094,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","source":"background","spawn_types":{"haiku-batch-worker":1,"haiku-checker":1,"haiku-scout":5,"opus-architect":1},"spawns":8,"stage":"turn","start_ms":1793442184867,"sub_cache_creation_input_tokens":145253,"sub_cache_read_input_tokens":698770,"sub_input_tokens":54,"sub_msgs":24,"sub_output_tokens":168,"ts":"2026-10-31T10:23:08Z"}
++{"conductor":true,"cost_usd":0.00081925,"duration_ms":6338,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1117,"result_cache_read_input_tokens":18765,"result_ctx":19884,"result_input_tokens":2,"result_output_tokens":816,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T10:25:11Z"}
++{"five_hour":0.76,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:25:40Z"}
++{"ts": "2026-10-31T10:26:16Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:26:23Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"five_hour":0.77,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:26:48Z"}
++{"ts": "2026-10-31T10:27:31Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:27:46Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:27:47Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"five_hour":0.78,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:28:13Z"}
++{"ts": "2026-10-31T10:28:31Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:29:21Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"five_hour":0.79,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:29:57Z"}
++{"conductor":true,"cost_usd":null,"ctx":41057,"delegations":2,"draining":0,"duration_ms":300003,"end_ms":1793442611006,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":0,"result_cache_read_input_tokens":0,"result_ctx":0,"result_input_tokens":0,"result_output_tokens":0,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","spawn_types":{"haiku-coder":2,"haiku-scout":7,"opus-architect":1,"sonnet-analyst":1},"spawns":11,"stage":"turn","start_ms":1793442311003,"sub_cache_creation_input_tokens":34313,"sub_cache_read_input_tokens":87988,"sub_input_tokens":16,"sub_msgs":5,"sub_output_tokens":24,"ts":"2026-10-31T10:30:11Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"모델호출-정책-재구현","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T10:30:11Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"session_pct":80,"session_resets":"Oct 31 at 8:30pm (Asia/Seoul)","source":"cli","stage":"usage","ts":"2026-10-31T10:30:14Z","week_pct":74,"week_resets":"Nov 3 at 3pm (Asia/Seoul)"}
++{"ts": "2026-10-31T10:30:22Z", "hook": "caveman-format", "agent": "haiku-coder", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"ts": "2026-10-31T10:30:57Z", "hook": "caveman-format", "agent": "haiku-coder", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"five_hour":0.8,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:31:11Z"}
++{"ts": "2026-10-31T10:31:36Z", "hook": "caveman-format", "agent": "haiku-checker", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"ts": "2026-10-31T10:32:06Z", "hook": "caveman-format", "agent": "haiku-batch-worker", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"conductor":true,"cost_turn_usd":0.6515190150000002,"cost_usd":1.0342086250000002,"ctx":48875,"end_ms":1793442788640,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":7818,"result_cache_read_input_tokens":175253,"result_ctx":183079,"result_input_tokens":8,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":35467,"cacheCreationEphemeral5mInputTokens":326253,"cacheCreationInputTokens":361720,"cacheReadInputTokens":1224430,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.140859025,"inputTokens":182,"maxOutputTokens":128000,"outputTokens":161443,"provider":"firstParty","thinkingTokens":84017,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":76994,"cacheCreationInputTokens":76994,"cacheReadInputTokens":297718,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.8933496,"inputTokens":44,"maxOutputTokens":128000,"outputTokens":22433,"provider":"firstParty","thinkingTokens":7414,"webSearchRequests":0}},"result_output_tokens":3856,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","source":"background","spawn_types":{"haiku-batch-worker":1,"haiku-checker":1,"haiku-coder":1},"spawns":3,"stage":"turn","start_ms":1793442785653,"sub_cache_creation_input_tokens":27800,"sub_cache_read_input_tokens":188500,"sub_input_tokens":22,"sub_msgs":8,"sub_output_tokens":85,"ts":"2026-10-31T10:33:08Z"}
++{"conductor":true,"cost_usd":0.00058045,"duration_ms":4628,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"lookup","result_cache_creation_input_tokens":1008,"result_cache_read_input_tokens":18765,"result_ctx":19775,"result_input_tokens":2,"result_output_tokens":382,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"small","stage":"classify","tier":"haiku","ts":"2026-10-31T10:33:33Z"}
++{"five_hour":0.81,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:33:54Z"}
++{"conductor":true,"cost_turn_usd":0.006628200000000195,"cost_usd":1.0408368250000004,"ctx":51816,"delegations":1,"draining":0,"duration_ms":30076,"end_ms":1793442843534,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":2941,"result_cache_read_input_tokens":98856,"result_ctx":101801,"result_input_tokens":4,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":38408,"cacheCreationEphemeral5mInputTokens":343755,"cacheCreationInputTokens":382163,"cacheReadInputTokens":1374515,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.14748722499999997,"inputTokens":196,"maxOutputTokens":128000,"outputTokens":166143,"provider":"firstParty","thinkingTokens":84766,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":76994,"cacheCreationInputTokens":76994,"cacheReadInputTokens":297718,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.8933496,"inputTokens":44,"maxOutputTokens":128000,"outputTokens":22433,"provider":"firstParty","thinkingTokens":7414,"webSearchRequests":0}},"result_output_tokens":1456,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","spawn_types":{"haiku-scout":1},"spawns":1,"stage":"turn","start_ms":1793442813457,"sub_cache_creation_input_tokens":17502,"sub_cache_read_input_tokens":51229,"sub_input_tokens":10,"sub_msgs":5,"sub_output_tokens":43,"ts":"2026-10-31T10:34:03Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"모델호출-정책-재구현","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T10:34:03Z"}
++{"conductor":true,"cost_usd":0.00057105,"duration_ms":4059,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1011,"result_cache_read_input_tokens":18765,"result_ctx":19778,"result_input_tokens":2,"result_output_tokens":362,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T10:34:51Z"}
++{"ts": "2026-10-31T10:36:27Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:37:34Z", "hook": "caveman-format", "agent": "haiku-batch-worker", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"five_hour":0.82,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:37:37Z"}
++{"five_hour":0.83,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:37:46Z"}
++{"five_hour":0.82,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:38:00Z"}
++{"ts": "2026-10-31T10:38:55Z", "hook": "caveman-format", "agent": "haiku-coder", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"five_hour":0.83,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:39:11Z"}
++{"conductor":true,"cost_usd":null,"ctx":51816,"delegations":1,"draining":0,"duration_ms":300014,"end_ms":1793443191987,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":0,"result_cache_read_input_tokens":0,"result_ctx":0,"result_input_tokens":0,"result_output_tokens":0,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","spawn_types":{"haiku-batch-worker":1,"haiku-coder":2,"haiku-scout":1,"opus-architect":1},"spawns":5,"stage":"turn","start_ms":1793442891973,"sub_cache_creation_input_tokens":27898,"sub_cache_read_input_tokens":40793,"sub_input_tokens":12,"sub_msgs":6,"sub_output_tokens":66,"ts":"2026-10-31T10:39:51Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"모델호출-정책-재구현","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T10:39:51Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"session_pct":84,"session_resets":"Oct 31 at 8:30pm (Asia/Seoul)","source":"cli","stage":"usage","ts":"2026-10-31T10:39:55Z","week_pct":74,"week_resets":"Nov 3 at 3pm (Asia/Seoul)"}
++{"ts": "2026-10-31T10:41:10Z", "hook": "caveman-format", "agent": "haiku-coder", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"ts": "2026-10-31T10:41:29Z", "hook": "caveman-format", "agent": "haiku-runner", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"five_hour":0.84,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:41:47Z"}
++{"conductor":true,"cost_turn_usd":0.4024048999999992,"cost_usd":1.4432417249999996,"ctx":55499,"end_ms":1793443307788,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":3683,"result_cache_read_input_tokens":104848,"result_ctx":108535,"result_input_tokens":4,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":42091,"cacheCreationEphemeral5mInputTokens":487031,"cacheCreationInputTokens":529122,"cacheReadInputTokens":2587855,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.20748612499999997,"inputTokens":280,"maxOutputTokens":128000,"outputTokens":224565,"provider":"firstParty","thinkingTokens":114762,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":101792,"cacheCreationInputTokens":101792,"cacheReadInputTokens":366818,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":1.2357556,"inputTokens":58,"maxOutputTokens":128000,"outputTokens":32660,"provider":"firstParty","thinkingTokens":11492,"webSearchRequests":0}},"result_output_tokens":1946,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","source":"background","spawn_types":{"haiku-runner":1},"spawns":1,"stage":"turn","start_ms":1793443304191,"sub_cache_creation_input_tokens":4072,"sub_cache_read_input_tokens":47734,"sub_input_tokens":8,"sub_msgs":2,"sub_output_tokens":32,"ts":"2026-10-31T10:41:47Z"}
++{"conductor":true,"cost_usd":0.00060045,"duration_ms":4117,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1063,"result_cache_read_input_tokens":18765,"result_ctx":19830,"result_input_tokens":2,"result_output_tokens":400,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T10:44:26Z"}
++{"ts": "2026-10-31T10:44:41Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"conductor":true,"cost_turn_usd":0.07702300500000026,"cost_usd":1.5202647299999998,"ctx":59286,"delegations":1,"draining":0,"duration_ms":32252,"end_ms":1793443498678,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":3787,"result_cache_read_input_tokens":112476,"result_ctx":116267,"result_input_tokens":4,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":45878,"cacheCreationEphemeral5mInputTokens":503084,"cacheCreationInputTokens":548962,"cacheReadInputTokens":2716573,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.21371833,"inputTokens":290,"maxOutputTokens":128000,"outputTokens":228925,"provider":"firstParty","thinkingTokens":115558,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":108427,"cacheCreationInputTokens":108427,"cacheReadInputTokens":387037,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":1.3065464000000002,"inputTokens":66,"maxOutputTokens":128000,"outputTokens":34337,"provider":"firstParty","thinkingTokens":11590,"webSearchRequests":0}},"result_output_tokens":1609,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","spawn_types":{"haiku-scout":1,"opus-architect":1},"spawns":2,"stage":"turn","start_ms":1793443466425,"sub_cache_creation_input_tokens":18589,"sub_cache_read_input_tokens":30275,"sub_input_tokens":12,"sub_msgs":5,"sub_output_tokens":28,"ts":"2026-10-31T10:44:58Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"모델호출-정책-재구현","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T10:44:58Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"session_pct":85,"session_resets":"Oct 31 at 8:30pm (Asia/Seoul)","source":"cli","stage":"usage","ts":"2026-10-31T10:45:01Z","week_pct":74,"week_resets":"Nov 3 at 3pm (Asia/Seoul)"}
++{"conductor":true,"cost_turn_usd":0.012431499999999929,"cost_usd":1.5326962299999998,"ctx":63155,"end_ms":1793443563283,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":3869,"result_cache_read_input_tokens":59284,"result_ctx":63155,"result_input_tokens":2,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":49747,"cacheCreationEphemeral5mInputTokens":528910,"cacheCreationInputTokens":578657,"cacheReadInputTokens":2921348,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.22614983,"inputTokens":302,"maxOutputTokens":128000,"outputTokens":241686,"provider":"firstParty","thinkingTokens":123793,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":108427,"cacheCreationInputTokens":108427,"cacheReadInputTokens":387037,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":1.3065464000000002,"inputTokens":66,"maxOutputTokens":128000,"outputTokens":34337,"provider":"firstParty","thinkingTokens":11590,"webSearchRequests":0}},"result_output_tokens":248,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","source":"background","stage":"turn","start_ms":1793443563185,"sub_cache_creation_input_tokens":25826,"sub_cache_read_input_tokens":145491,"sub_input_tokens":10,"sub_msgs":5,"sub_output_tokens":19,"ts":"2026-10-31T10:46:03Z"}
++{"conductor":true,"cost_usd":0.00064585,"duration_ms":5252,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1115,"result_cache_read_input_tokens":18765,"result_ctx":19882,"result_input_tokens":2,"result_output_tokens":470,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T10:50:15Z"}
++{"five_hour":0.85,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:50:36Z"}
++{"ts": "2026-10-31T10:51:10Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T10:52:00Z", "hook": "caveman-format", "agent": "haiku-coder", "fmt": "R-write", "missing": ["status", "reason", "changed", "diffstat", "check", "ws"]}
++{"five_hour":0.86,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T10:52:05Z"}
++{"ts": "2026-10-31T10:52:19Z", "hook": "caveman-format", "agent": "haiku-runner", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"conductor":true,"cost_turn_usd":0.19054534000000012,"cost_usd":1.72324157,"ctx":67046,"delegations":1,"draining":0,"duration_ms":142486,"end_ms":1793443955631,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":3891,"result_cache_read_input_tokens":127353,"result_ctx":131248,"result_input_tokens":4,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":53638,"cacheCreationEphemeral5mInputTokens":565168,"cacheCreationInputTokens":618806,"cacheReadInputTokens":3219547,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.24259537,"inputTokens":338,"maxOutputTokens":128000,"outputTokens":257985,"provider":"firstParty","thinkingTokens":129381,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":126069,"cacheCreationInputTokens":126069,"cacheReadInputTokens":423446,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":1.4806462000000002,"inputTokens":78,"maxOutputTokens":128000,"outputTokens":38265,"provider":"firstParty","thinkingTokens":12228,"webSearchRequests":0}},"result_output_tokens":2156,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","spawn_types":{"haiku-coder":1,"haiku-runner":1,"haiku-scout":1,"opus-architect":1},"spawns":4,"stage":"turn","start_ms":1793443815446,"sub_cache_creation_input_tokens":17642,"sub_cache_read_input_tokens":36409,"sub_input_tokens":12,"sub_msgs":4,"sub_output_tokens":36,"ts":"2026-10-31T10:52:35Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"모델호출-정책-재구현","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T10:52:35Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"session_pct":86,"session_resets":"Oct 31 at 8:29pm (Asia/Seoul)","source":"cli","stage":"usage","ts":"2026-10-31T10:52:38Z","week_pct":74,"week_resets":"Nov 3 at 2:59pm (Asia/Seoul)"}
++{"conductor":true,"cost_usd":0.00066455,"duration_ms":5825,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1086,"result_cache_read_input_tokens":18765,"result_ctx":19853,"result_input_tokens":2,"result_output_tokens":519,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T10:54:48Z"}
++{"conductor":true,"cost_turn_usd":0.0013844400000000423,"cost_usd":1.72462601,"ctx":68395,"delegations":0,"draining":0,"duration_ms":5697,"end_ms":1793444094492,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":1349,"result_cache_read_input_tokens":67044,"result_ctx":68395,"result_input_tokens":2,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":54987,"cacheCreationEphemeral5mInputTokens":565168,"cacheCreationInputTokens":620155,"cacheReadInputTokens":3286591,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.24397981,"inputTokens":340,"maxOutputTokens":128000,"outputTokens":258873,"provider":"firstParty","thinkingTokens":129753,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":126069,"cacheCreationInputTokens":126069,"cacheReadInputTokens":423446,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":1.4806462000000002,"inputTokens":78,"maxOutputTokens":128000,"outputTokens":38265,"provider":"firstParty","thinkingTokens":12228,"webSearchRequests":0}},"result_output_tokens":888,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"turn","start_ms":1793444088795,"ts":"2026-10-31T10:54:54Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"모델호출-정책-재구현","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T10:54:54Z"}
++{"conductor":true,"cost_usd":0.0007437499999999999,"duration_ms":5588,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1042,"result_cache_read_input_tokens":18765,"result_ctx":19809,"result_input_tokens":2,"result_output_tokens":695,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T10:56:31Z"}
++{"conductor":true,"cost_turn_usd":0.033254555000000297,"cost_usd":1.7578805650000002,"ctx":69550,"delegations":1,"draining":0,"duration_ms":23850,"end_ms":1793444215383,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":1155,"result_cache_read_input_tokens":68393,"result_ctx":69550,"result_input_tokens":2,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":56142,"cacheCreationEphemeral5mInputTokens":571757,"cacheCreationInputTokens":627899,"cacheReadInputTokens":3354984,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.246501765,"inputTokens":344,"maxOutputTokens":128000,"outputTokens":260439,"provider":"firstParty","thinkingTokens":130341,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":128220,"cacheCreationInputTokens":128220,"cacheReadInputTokens":427194,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":1.5113788000000004,"inputTokens":80,"maxOutputTokens":128000,"outputTokens":39226,"provider":"firstParty","thinkingTokens":12255,"webSearchRequests":0}},"result_output_tokens":969,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","spawn_types":{"haiku-scout":1,"opus-architect":1},"spawns":2,"stage":"turn","start_ms":1793444191532,"sub_cache_creation_input_tokens":2151,"sub_cache_read_input_tokens":3748,"sub_input_tokens":2,"sub_msgs":1,"sub_output_tokens":8,"ts":"2026-10-31T10:56:55Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"모델호출-정책-재구현","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T10:56:55Z"}
++{"conductor":true,"cost_usd":0.00078035,"duration_ms":6286,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1060,"result_cache_read_input_tokens":18765,"result_ctx":19827,"result_input_tokens":2,"result_output_tokens":761,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T10:57:46Z"}
++{"conductor":true,"cost_turn_usd":0.0013188799999999112,"cost_usd":1.7591994450000001,"ctx":71011,"delegations":0,"draining":0,"duration_ms":4160,"end_ms":1793444270283,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":1461,"result_cache_read_input_tokens":69548,"result_ctx":71011,"result_input_tokens":2,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":57603,"cacheCreationEphemeral5mInputTokens":571757,"cacheCreationInputTokens":629360,"cacheReadInputTokens":3424532,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.247820645,"inputTokens":346,"maxOutputTokens":128000,"outputTokens":261101,"provider":"firstParty","thinkingTokens":130588,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":128220,"cacheCreationInputTokens":128220,"cacheReadInputTokens":427194,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":1.5113788000000004,"inputTokens":80,"maxOutputTokens":128000,"outputTokens":39226,"provider":"firstParty","thinkingTokens":12255,"webSearchRequests":0}},"result_output_tokens":662,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"turn","start_ms":1793444266123,"ts":"2026-10-31T10:57:50Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"모델호출-정책-재구현","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T10:57:50Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"session_pct":87,"session_resets":"Oct 31 at 8:30pm (Asia/Seoul)","source":"cli","stage":"usage","ts":"2026-10-31T10:57:52Z","week_pct":74,"week_resets":"Nov 3 at 3pm (Asia/Seoul)"}
++{"conductor":true,"cost_usd":0.00065375,"duration_ms":4876,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1117,"result_cache_read_input_tokens":18765,"result_ctx":19884,"result_input_tokens":2,"result_output_tokens":485,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T10:59:50Z"}
++{"five_hour":0.87,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T11:00:17Z"}
++{"ts": "2026-10-31T11:00:25Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T11:00:30Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"ts": "2026-10-31T11:01:07Z", "hook": "caveman-format", "agent": "haiku-scout", "fmt": "R-read", "missing": ["status", "reason", "claim", "searched", "not_found", "not_checked", "truncated"]}
++{"five_hour":0.88,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"stage":"rate","ts":"2026-10-31T11:01:35Z"}
++{"conductor":true,"cost_turn_usd":0.16927150000000002,"cost_usd":1.9284709450000002,"ctx":74839,"delegations":1,"draining":0,"duration_ms":105346,"end_ms":1793444495703,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"model":"haiku","result_cache_creation_input_tokens":3828,"result_cache_read_input_tokens":142995,"result_ctx":146827,"result_input_tokens":4,"result_model_usage":{"claude-haiku-5-5":{"cacheCreationEphemeral1hInputTokens":61431,"cacheCreationEphemeral5mInputTokens":610599,"cacheCreationInputTokens":672030,"cacheReadInputTokens":3650657,"canonicalModel":"claude-haiku-5-5","contextWindow":1000000,"costBasis":"list","costUSD":0.26517494499999994,"inputTokens":368,"maxOutputTokens":128000,"outputTokens":280041,"provider":"firstParty","thinkingTokens":140315,"webSearchRequests":0},"claude-opus-5-5":{"cacheCreationEphemeral1hInputTokens":0,"cacheCreationEphemeral5mInputTokens":142225,"cacheCreationInputTokens":142225,"cacheReadInputTokens":436875,"canonicalModel":"claude-opus-5-5","contextWindow":1000000,"costBasis":"list","costUSD":1.6632960000000003,"inputTokens":84,"maxOutputTokens":128000,"outputTokens":43223,"provider":"firstParty","thinkingTokens":13149,"webSearchRequests":0}},"result_output_tokens":1780,"rotations":2,"session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","spawn_types":{"haiku-scout":3,"opus-architect":1},"spawns":4,"stage":"turn","start_ms":1793444390357,"sub_cache_creation_input_tokens":14005,"sub_cache_read_input_tokens":9681,"sub_input_tokens":4,"sub_msgs":2,"sub_output_tokens":10,"ts":"2026-10-31T11:01:35Z"}
++{"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from":"모델호출-정책-재구현","session":"a19e8a79-0f23-4034-9cbc-eac1f531a15a","stage":"category","switch":false,"to":"모델호출-정책-재구현","ts":"2026-10-31T11:01:35Z"}
++{"conductor":true,"cost_usd":0.00062415,"duration_ms":5367,"flags":{"category_rotate":true,"compact_window":400000,"conductor":true,"delegation_rule":true,"drain_timeout_s":3600,"handoff_validate":true,"max_drain":3,"threshold":150000},"from_model":"haiku","kind":"other","result_cache_creation_input_tokens":1109,"result_cache_read_input_tokens":18765,"result_ctx":19876,"result_input_tokens":2,"result_output_tokens":429,"routed_model":"haiku","router_model":"haiku","router_prompt":"haiku","size":"large","stage":"classify","tier":"sonnet","ts":"2026-10-31T11:03:49Z"}
+diff --git a/tests/hooks/test_orch_gate.py b/tests/hooks/test_orch_gate.py
+index e339d2c..52fc1ba 100644
+--- a/tests/hooks/test_orch_gate.py
++++ b/tests/hooks/test_orch_gate.py
+@@ -75,13 +75,13 @@ class OrchGateTest(unittest.TestCase):
+         self.assertIn("deny", out)
+         self.assertIn("E gate", out)
+ 
+-    def test_4a_sonnet_without_escalate_denied(self):
+-        out = run_hook(PIN, self.agent_payload("sonnet-analyst", "Decide the trade-off."), orch="e")
++    def test_4a_opus_without_escalate_denied(self):
++        out = run_hook(PIN, self.agent_payload("opus-architect", "Decide the trade-off."), orch="e")
+         self.assertIn("deny", out)
+         self.assertIn("E gate", out)
+ 
+-    def test_4b_sonnet_with_escalate_not_gated(self):
+-        out = run_hook(PIN, self.agent_payload("sonnet-analyst", "ESCALATE: decide the trade-off."), orch="e")
++    def test_4b_opus_with_escalate_not_gated(self):
++        out = run_hook(PIN, self.agent_payload("opus-architect", "ESCALATE: decide the trade-off."), orch="e")
+         self.assertNotIn("E gate", out)
+ 
+     def test_5_orch_unset_no_gate(self):
+@@ -90,7 +90,7 @@ class OrchGateTest(unittest.TestCase):
+         self.assertNotIn("E gate", out)
+ 
+     def test_6_subagent_call_not_gated(self):
+-        out = run_hook(PIN, self.agent_payload("sonnet-analyst", "no escalate here", agent_id="a1"), orch="e")
++        out = run_hook(PIN, self.agent_payload("opus-architect", "no escalate here", agent_id="a1"), orch="e")
+         self.assertNotIn("E gate", out)
+ 
+     def test_7_main_guard_e_allows_read(self):

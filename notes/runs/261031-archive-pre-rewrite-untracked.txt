@@ -1,0 +1,67 @@
+ M .claude/agents/haiku-coder.md
+ M .claude/agents/haiku-prompter.md
+ M .claude/agents/opus-architect.md
+ D .claude/agents/sonnet-analyst.md
+ D .claude/agents/sonnet-reviewer.md
+ M .claude/hooks/agent-model-pin.py
+ M .claude/hooks/caveman-format.py
+ M .claude/hooks/haiku-context-guard.py
+ M .claude/hooks/main-thread-guard.py
+ M .claude/settings.json
+ M CLAUDE.md
+ M internal/harness/budget.go
+ M internal/harness/children.go
+ M internal/harness/children_test.go
+ D internal/harness/classifier_model_test.go
+ M internal/harness/conductor_test.go
+ M internal/harness/delegation_test.go
+ M internal/harness/dispatch.go
+ M internal/harness/dispatch_test.go
+ M internal/harness/haikupool.go
+ M internal/harness/idlesweep.go
+ M internal/harness/multiproc_s_test.go
+ M internal/harness/orch.go
+ M internal/harness/repl.go
+ M internal/harness/resumeshift_test.go
+ D internal/harness/routerprompt_test.go
+RM internal/harness/classifier.go -> internal/harness/session_switch.go
+ M internal/harness/switchchild.go
+ M internal/harness/tui.go
+ M notes/DECISIONS.md
+ M notes/LEDGER.md
+ M notes/metrics/2026-10-31.jsonl
+ M tests/hooks/test_orch_gate.py
+?? .DS_Store
+?? imports/
+?? internal/harness/childkey_test.go
+?? internal/harness/resident.go
+?? internal/harness/resident_test.go
+?? notes/runs/261031-archive-pre-rewrite-untracked.txt
+?? notes/runs/261031-archive-pre-rewrite.patch
+?? notes/runs/261031-caveman-router-removal-impl.md
+?? notes/runs/261031-haiku-model-policy-impl.md
+?? notes/runs/261031-plan-model-call-policy-review.md
+?? notes/runs/261031-plan-model-call-policy.md
+?? notes/runs/261031-plan-model-policy-rewrite-review.md
+?? notes/runs/261031-plan-model-policy-rewrite.md
+?? notes/runs/261031-plan-resident-impl.md
+?? scripts/.DS_Store
+--- untracked:
+.DS_Store
+imports/.DS_Store
+imports/claude-usage-DESKTOP-PFNDFTU-20261030 (1)/manifest.json
+imports/claude-usage-DESKTOP-PFNDFTU-20261030 (1)/sessions.jsonl
+imports/claude-usage-DESKTOP-PFNDFTU-20261030 (1)/usage/rows.jsonl
+internal/harness/childkey_test.go
+internal/harness/resident.go
+internal/harness/resident_test.go
+notes/runs/261031-archive-pre-rewrite-untracked.txt
+notes/runs/261031-archive-pre-rewrite.patch
+notes/runs/261031-caveman-router-removal-impl.md
+notes/runs/261031-haiku-model-policy-impl.md
+notes/runs/261031-plan-model-call-policy-review.md
+notes/runs/261031-plan-model-call-policy.md
+notes/runs/261031-plan-model-policy-rewrite-review.md
+notes/runs/261031-plan-model-policy-rewrite.md
+notes/runs/261031-plan-resident-impl.md
+scripts/.DS_Store
