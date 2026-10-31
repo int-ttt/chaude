@@ -39,7 +39,7 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 | L1 지휘 채널 | 메인 <-> opus-architect / sonnet-analyst / sonnet-reviewer | caveman 브리프(B형식) / 결정 반환(R-decide) |
 | L2 작업 채널 | opus·sonnet <-> haiku-* | caveman 브리프(B형식) / 읽기·쓰기 반환(R-read, R-write) |
 
-- rule_6 (Q2 결정): haiku-prompter = 사용자 프롬프트를 opus 세션에 전달하는 역할. haiku-prompter 전달문 형식 = (c) 사용자 원문 + 요약: 원문 verbatim 그대로 + 요약 줄을 함께 전달 (U8 = c, 결정됨). haiku-tui = 사용자에게 답변하는 에이전트. 한국어 존댓말 표기는 haiku-tui 출력에만 적용. 아래 표·절의 "메인 세션" 중 사용자 대면 출력은 haiku-tui가 맡는 것으로 해석함 (해석, 미확인: 14절 U8 해석 확인 1건)
+- rule_6 (Q2 결정): haiku-prompter = 사용자 프롬프트를 opus 세션에 전달하는 역할. haiku-prompter 전달문 형식 = (c) 사용자 원문 + 요약: 원문 verbatim 그대로 + 요약 줄을 함께 전달 (U8 = c, 결정됨). haiku-tui = 사용자에게 답변하는 에이전트. 한국어 존댓말 표기는 haiku-tui 출력에만 적용. 아래 표·절의 "메인 세션" 중 사용자 대면 출력은 haiku-tui가 맡는 것으로 해석함 (해석 확인됨: 261031 사용자 "u8 confirmed correct")
 - rule_7 (U10 = b, 결정됨): 현행 haiku-prompter의 반복·재귀 루프 소유 역할은 유지하고 사용자 프롬프트 전달 역할을 추가함
 
 - rule_1: caveman은 L1·L2 전용. L0으로 나가는 문장은 그 문장을 쓰는 마지막 작성자가 처음부터 한국어로 씀
@@ -246,7 +246,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 - U7 (6절): lang: ko 브리프 여부를 훅이 볼 수 있는지 불확실한데, summary_ko 필수 검사를 어떻게 하시겠습니까? [보류(사용자 판단 없음, 구현 단계에서 처리)]
     - 맥락: 훅이 lang: ko 브리프 본문을 볼 수 있는지 불확실하여 summary_ko 필수 검사 가능 여부를 모름
   - 선택지: (a) 검사 보류 (b) 구현 단계에서 확인 후 결정 (c) summary_ko를 항상 필수로 변경
-- U8 (4절, Q2 후속): haiku-prompter가 opus 세션에 보내는 전달문 형식은 무엇으로 하시겠습니까? 그리고 "메인 세션의 사용자 대면 출력을 haiku-tui가 맡는다"는 2절 해석이 맞습니까? [결정됨: (c) 원문 + 요약. 해석 확인은 미확인]
+- U8 (4절, Q2 후속): haiku-prompter가 opus 세션에 보내는 전달문 형식은 무엇으로 하시겠습니까? 그리고 "메인 세션의 사용자 대면 출력을 haiku-tui가 맡는다"는 2절 해석이 맞습니까? [결정됨: (c) 원문 + 요약. 해석 확인됨: 맞음 (261031)]
     - 맥락: 전달문 형식 외에, 2절의 "사용자 대면 출력은 haiku-tui가 맡는다" 해석이 맞는지 확인 필요
   - 선택지: (a) 사용자 원문 verbatim + B형식 머리 (b) 사용자 원문만 (c) 원문 + 요약 포함. 해석 확인: 맞음 / 아님, 정정
 - U9 (13장 신규): haiku-tui 에이전트 파일은 어떻게 하시겠습니까? [결정됨: (a)]
