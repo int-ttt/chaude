@@ -1,13 +1,15 @@
 #!/bin/sh
-# chaude installer (macOS / Linux, amd64 + arm64). Standalone: no repo checkout needed.
+# chaude installer (macOS / Linux, amd64 + arm64). Standalone: installs prebuilt release binaries only
+# (no source build, no repo checkout).
 #   curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | bash
-# Windows: irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
+# Windows: install.ps1 (irm ... | iex).
 # Env: CHAUDE_VERSION (default latest, e.g. v0.9.11), CHAUDE_INSTALL_DIR (default ~/.local/bin), CHAUDE_REPO.
-# Private repo: if `gh` is installed and logged in, it is used for downloads.
+# Auth (private repo): GH_TOKEN, else GITHUB_TOKEN, else `gh auth token`, else anonymous (public repo only).
 set -eu
 REPO="${CHAUDE_REPO:-int-ttt/chaude}"
 VERSION="${CHAUDE_VERSION:-latest}"
 DIR="${CHAUDE_INSTALL_DIR:-$HOME/.local/bin}"
+API="https://api.github.com"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
@@ -28,32 +30,48 @@ esac
 
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 
+token=""
+if [ -n "${GH_TOKEN:-}" ]; then token="$GH_TOKEN"
+elif [ -n "${GITHUB_TOKEN:-}" ]; then token="$GITHUB_TOKEN"
+elif command -v gh >/dev/null 2>&1; then token="$(gh auth token 2>/dev/null || true)"
+fi
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-  # works for private repos (uses your gh login)
-  tagarg=""; [ "$VERSION" = latest ] || tagarg="$VERSION"
-  echo "downloading via gh from ${REPO}"
-  # shellcheck disable=SC2086
-  gh release download $tagarg -R "$REPO" -p "chaude_*_${os}_${arch}.tar.gz" -p checksums.txt -D "$tmp" --clobber
-  name="$(cd "$tmp" && ls "chaude_"*"_${os}_${arch}.tar.gz" 2>/dev/null | head -n1 || true)"
-else
-  if [ "$VERSION" = latest ]; then
-    VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-      | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)"
-    [ -n "$VERSION" ] || { echo "could not resolve latest release of ${REPO} (private repo? install and log in with gh: gh auth login)" >&2; exit 1; }
-  fi
-  name="chaude_${VERSION#v}_${os}_${arch}.tar.gz"
-  base="https://github.com/${REPO}/releases/download/${VERSION}"
-  echo "downloading ${name}"
-  curl -fsSL "${base}/${name}" -o "${tmp}/${name}"
-  curl -fsSL "${base}/checksums.txt" -o "${tmp}/checksums.txt"
-fi
-[ -n "${name:-}" ] && [ -f "${tmp}/${name}" ] || { echo "download failed" >&2; exit 1; }
+# GitHub API GET (JSON)
+api_get() {
+  if [ -n "$token" ]; then curl -fsSL -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${token}" "$1"
+  else curl -fsSL -H "Accept: application/vnd.github+json" "$1"; fi
+}
+# download a release asset by its API url (octet-stream; follows the redirect to storage without the token)
+api_asset() {
+  if [ -n "$token" ]; then curl -fsSL -H "Accept: application/octet-stream" -H "Authorization: Bearer ${token}" -o "$2" "$1"
+  else curl -fsSL -H "Accept: application/octet-stream" -o "$2" "$1"; fi
+}
+# print the API url of the asset whose name is $1 (asset objects list "url" before "name")
+asset_url() {
+  printf '%s\n' "$json" | awk -v n="$1" '
+    /"url": *"[^"]*\/releases\/assets\/[0-9]+"/ { s=$0; sub(/.*"url": *"/, "", s); sub(/".*/, "", s); u=s }
+    index($0, "\"name\": \"" n "\"") { print u; exit }'
+}
+
+if [ "$VERSION" = latest ]; then rel="${API}/repos/${REPO}/releases/latest"; else rel="${API}/repos/${REPO}/releases/tags/${VERSION}"; fi
+json="$(api_get "$rel" 2>/dev/null)" || { echo "error: cannot read release ${VERSION} of ${REPO} (private repo? set GH_TOKEN or run: gh auth login)" >&2; exit 1; }
+tag="$(printf '%s\n' "$json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)"
+[ -n "$tag" ] || { echo "error: could not resolve release tag of ${REPO}" >&2; exit 1; }
+
+name="chaude_${tag#v}_${os}_${arch}.tar.gz"
+tar_url="$(asset_url "$name")"
+[ -n "$tar_url" ] || { echo "error: ${name} not found in release ${tag} (no prebuilt binary for ${os}/${arch})" >&2; exit 1; }
+sums_url="$(asset_url checksums.txt)"
+[ -n "$sums_url" ] || { echo "error: checksums.txt not found in release ${tag}; refusing to install" >&2; exit 1; }
+
+echo "downloading ${name} (${tag})"
+api_asset "$tar_url" "${tmp}/${name}"
+api_asset "$sums_url" "${tmp}/checksums.txt"
 
 # checksums.txt is required: never install an unverified binary
-[ -f "${tmp}/checksums.txt" ] || { echo "error: checksums.txt not found in release; refusing to install" >&2; exit 1; }
 want="$(awk -v f="$name" '$2 == f {print $1; exit}' "${tmp}/checksums.txt")"
 [ -n "$want" ] || { echo "error: ${name} is not listed in checksums.txt" >&2; exit 1; }
 got="$(sha256 "${tmp}/${name}")"

@@ -26,16 +26,23 @@ chaude --version
 ```
 
 - `%USERPROFILE%\.local\bin\chaude.exe`에 설치하고 체크섬을 검증합니다. 설치 방식과 환경변수는 macOS / Linux와 같습니다(`CHAUDE_VERSION`, `CHAUDE_INSTALL_DIR`, `CHAUDE_REPO`).
-- PATH에 없으면 사용자 PATH에 추가하는 명령을 출력합니다.
-- 릴리즈의 `chaude_<버전>_windows_<arch>.zip`을 직접 풀어 PATH에 넣어도 됩니다.
+- 체크섬 검증, 기존 `chaude.exe`의 `.bak` 백업, PATH 힌트 출력은 macOS / Linux와 같습니다.
 
 ### 비공개 저장소일 때
 
-현재 저장소는 비공개라서 위 raw URL은 로그인 없이는 404가 됩니다. `gh auth login`을 한 뒤 `gh api repos/int-ttt/chaude/contents/install.sh -H "Accept: application/vnd.github.raw" | bash`(Windows는 `install.ps1`을 같은 방식으로)로 받으면, 설치 스크립트가 `gh`로 릴리즈를 받습니다. 저장소를 공개하면 위 한 줄로 바로 설치됩니다.
+비공개 저장소라서 위 raw URL은 로그인 없이는 404가 됩니다. 설치 스크립트는 릴리즈를 GitHub API로 받으며 토큰을 이 순서로 찾습니다: `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth token`(gh가 있을 때). 토큰이 없으면 공개 저장소로 시도하고 실패합니다.
+
+- `gh auth login` 후 스크립트를 받아 실행: `gh api repos/int-ttt/chaude/contents/install.sh -H "Accept: application/vnd.github.raw" | bash`
+- Windows: `gh api repos/int-ttt/chaude/contents/install.ps1 -H "Accept: application/vnd.github.raw" | Out-String | iex`
+- 또는 `GH_TOKEN=<토큰>`을 설정하고 위의 raw 한 줄을 그대로 쓰면 됩니다.
+
+저장소를 공개하면 위 raw 한 줄로 바로 설치됩니다.
+
+## 개발자용
 
 ### 소스에서 빌드
 
-Go 1.22+가 필요하고 `cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude`로 됩니다(Go 모듈은 `src/main/intt`에 있습니다). mac/linux는 `platform_setup/install.sh`, windows는 `platform_setup\install.ps1`이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
+설치 스크립트는 소스 빌드를 하지 않습니다. 직접 빌드하려면 Go 1.22+가 필요하고 `cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude`로 됩니다(Go 모듈은 `src/main/intt`에 있습니다). mac/linux는 `platform_setup/install.sh`, windows는 `platform_setup\install.ps1`이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
 
 ## 사용
 

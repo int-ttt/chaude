@@ -1,9 +1,37 @@
-# chaude installer (Windows amd64 + arm64). Standalone: no repo checkout needed.
+# chaude installer (Windows amd64 + arm64). Standalone: installs prebuilt release binaries only
+# (no source build, no repo checkout).
 #   irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
 # Env: CHAUDE_VERSION (default latest, e.g. v0.9.11), CHAUDE_INSTALL_DIR (default %USERPROFILE%\.local\bin), CHAUDE_REPO.
-# Private repo: if `gh` is installed and logged in, it is used for downloads.
+# Auth (private repo): GH_TOKEN, else GITHUB_TOKEN, else `gh auth token`, else anonymous (public repo only).
 # Runs through iex, so no `exit` or `param` here: errors are caught and printed, the shell stays open.
 # Keep this file ASCII-only (irm may decode non-ASCII text incorrectly on Windows PowerShell 5.1).
+
+function Save-ReleaseAsset {
+    param([string]$Url, [string]$OutFile, [string]$Token)
+    Add-Type -AssemblyName System.Net.Http
+    # no auto-redirect: the token is sent to api.github.com only, the storage URL is fetched without it
+    $handler = New-Object System.Net.Http.HttpClientHandler
+    $handler.AllowAutoRedirect = $false
+    $client = New-Object System.Net.Http.HttpClient -ArgumentList $handler
+    try {
+        $req = New-Object System.Net.Http.HttpRequestMessage -ArgumentList ([System.Net.Http.HttpMethod]::Get), $Url
+        $req.Headers.Accept.ParseAdd('application/octet-stream')
+        if ($Token) { $req.Headers.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue -ArgumentList 'Bearer', $Token }
+        $resp = $client.SendAsync($req).GetAwaiter().GetResult()
+        $code = [int]$resp.StatusCode
+        if ($code -ge 300 -and $code -lt 400) {
+            $loc = $resp.Headers.Location
+            $resp.Dispose()
+            $req = New-Object System.Net.Http.HttpRequestMessage -ArgumentList ([System.Net.Http.HttpMethod]::Get), $loc
+            $resp = $client.SendAsync($req).GetAwaiter().GetResult()
+        }
+        $resp.EnsureSuccessStatusCode() | Out-Null
+        [IO.File]::WriteAllBytes($OutFile, $resp.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult())
+        $resp.Dispose()
+    } finally {
+        $client.Dispose()
+    }
+}
 
 function Install-Chaude {
     $ErrorActionPreference = 'Stop'
@@ -22,50 +50,48 @@ function Install-Chaude {
     }
     if ($version -ne 'latest' -and $version -notlike 'v*') { $version = "v$version" }
 
+    $token = $env:GH_TOKEN
+    if (-not $token) { $token = $env:GITHUB_TOKEN }
+    if (-not $token -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+        $ErrorActionPreference = 'Continue'
+        $token = (& gh auth token 2>$null | Out-String).Trim()
+        $ErrorActionPreference = 'Stop'
+    }
+    $headers = @{ Accept = 'application/vnd.github+json' }
+    if ($token) { $headers['Authorization'] = "Bearer $token" }
+
+    $relUrl = if ($version -eq 'latest') { "https://api.github.com/repos/$repo/releases/latest" } else { "https://api.github.com/repos/$repo/releases/tags/$version" }
+    try {
+        $rel = Invoke-RestMethod -Uri $relUrl -Headers $headers -UseBasicParsing
+    } catch {
+        throw "cannot read release $version of $repo (private repo? set GH_TOKEN or run: gh auth login)"
+    }
+    $tag = $rel.tag_name
+    if (-not $tag) { throw "could not resolve release tag of $repo" }
+
+    $name = "chaude_$($tag.TrimStart('v'))_windows_$arch.zip"
+    $zipAsset = $rel.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+    if (-not $zipAsset) { throw "$name not found in release $tag (no prebuilt binary for windows/$arch)" }
+    $sumsAsset = $rel.assets | Where-Object { $_.name -eq 'checksums.txt' } | Select-Object -First 1
+    if (-not $sumsAsset) { throw "checksums.txt not found in release $tag; refusing to install" }
+
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ('chaude-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
-        $useGh = $false
-        if (Get-Command gh -ErrorAction SilentlyContinue) {
-            & gh auth status *> $null
-            $useGh = ($LASTEXITCODE -eq 0)
-        }
-
-        if ($useGh) {
-            # works for private repos (uses your gh login)
-            Write-Host "downloading via gh from $repo"
-            $tagArgs = if ($version -eq 'latest') { @() } else { @($version) }
-            & gh release download @tagArgs -R $repo -p "chaude_*_windows_$arch.zip" -p checksums.txt -D $tmp --clobber
-            if ($LASTEXITCODE -ne 0) { throw "gh release download failed for $repo" }
-        } else {
-            if ($version -eq 'latest') {
-                try {
-                    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -UseBasicParsing
-                    $version = $rel.tag_name
-                } catch {
-                    throw "could not resolve latest release of $repo (private repo? install and log in with gh: gh auth login)"
-                }
-            }
-            $name = "chaude_$($version.TrimStart('v'))_windows_$arch.zip"
-            $base = "https://github.com/$repo/releases/download/$version"
-            Write-Host "downloading $name"
-            Invoke-WebRequest -Uri "$base/$name" -OutFile (Join-Path $tmp $name) -UseBasicParsing
-            Invoke-WebRequest -Uri "$base/checksums.txt" -OutFile (Join-Path $tmp 'checksums.txt') -UseBasicParsing
-        }
-
-        $zip = Get-ChildItem -Path $tmp -Filter "chaude_*_windows_$arch.zip" | Select-Object -First 1
-        if (-not $zip) { throw "download failed: no chaude_*_windows_$arch.zip in $tmp" }
+        Write-Host "downloading $name ($tag)"
+        $zip = Join-Path $tmp $name
         $sums = Join-Path $tmp 'checksums.txt'
-        if (-not (Test-Path $sums)) { throw 'checksums.txt not found in release; refusing to install' }
+        Save-ReleaseAsset -Url $zipAsset.url -OutFile $zip -Token $token
+        Save-ReleaseAsset -Url $sumsAsset.url -OutFile $sums -Token $token
 
         # checksums.txt is required: never install an unverified binary
-        $line = Get-Content $sums | Where-Object { $_ -match ('\s\*?' + [regex]::Escape($zip.Name) + '$') } | Select-Object -First 1
-        if (-not $line) { throw "$($zip.Name) is not listed in checksums.txt" }
+        $line = Get-Content $sums | Where-Object { $_ -match ('\s\*?' + [regex]::Escape($name) + '$') } | Select-Object -First 1
+        if (-not $line) { throw "$name is not listed in checksums.txt" }
         $want = ($line.Trim() -split '\s+')[0].ToLower()
-        $got = (Get-FileHash -Algorithm SHA256 -Path $zip.FullName).Hash.ToLower()
-        if ($want -ne $got) { throw "checksum mismatch for $($zip.Name)" }
+        $got = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLower()
+        if ($want -ne $got) { throw "checksum mismatch for $name" }
 
-        Expand-Archive -Path $zip.FullName -DestinationPath $tmp -Force
+        Expand-Archive -Path $zip -DestinationPath $tmp -Force
         $src = Join-Path $tmp 'chaude.exe'
         if (-not (Test-Path $src)) { throw 'chaude.exe not found in archive' }
 
