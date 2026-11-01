@@ -129,3 +129,31 @@ func TestWithCacheTTL(t *testing.T) {
 		}
 	}
 }
+
+func TestFmtK(t *testing.T) {
+	cases := map[int]string{0: "0", 999: "999", 1000: "1.00k", 1234: "1.23k", 1999: "1.99k", 12345: "12.3k",
+		123456: "123k", 999999: "999k", 1234567: "1.23M", -5: "0", 200000: "200k", 80000: "80.0k"}
+	for n, want := range cases {
+		if got := fmtK(n); got != want {
+			t.Errorf("fmtK(%d)=%q want %q", n, got, want)
+		}
+	}
+	if got := fmtLimit(200000); got != "200k" {
+		t.Errorf("fmtLimit(200000)=%q", got)
+	}
+	if got := fmtLimit(80000); got != "80k" {
+		t.Errorf("fmtLimit(80000)=%q", got)
+	}
+}
+
+func TestCtxBar(t *testing.T) {
+	if got := ctxBar(0, 200000, nil, 0); got != "M 0/200k P 0/80k T 0/80k C0 0/80k" {
+		t.Errorf("empty: %q", got)
+	}
+	if got := ctxBar(12345, 200000, map[string]int{"P": 1000, "C1": 999}, 2); got != "M 12.3k/200k P 1.00k/80k T 0/80k C0 0/80k C1 999/80k" {
+		t.Errorf("coder: %q", got)
+	}
+	if got := ctxBar(0, 200000, nil, 9); !strings.HasSuffix(got, " C4 0/80k") || strings.Contains(got, "C5") {
+		t.Errorf("cap: %q", got)
+	}
+}

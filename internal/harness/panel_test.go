@@ -311,6 +311,32 @@ func TestCursorRowIncludesBackgroundRows(t *testing.T) {
 	}
 }
 
+func TestAgentStatusTextPrefixedName(t *testing.T) {
+	r := &Repl{tracker: newAgentTracker(), a: Args{Model: "opus"}}
+	r.tracker.onToolUse("h1", "Agent", map[string]any{"description": "t", "subagent_type": "haiku-scout"}, time.Now())
+	h := r.tracker.running()
+	if len(h) != 1 {
+		t.Fatalf("running=%d", len(h))
+	}
+	if got := agentStatusText(h[0], "haiku"); got != "실행 중-haiku-scout(t)" {
+		t.Fatal(got)
+	}
+	if r.tracker.opusRunning() {
+		t.Fatal("haiku-scout is not opus")
+	}
+	r.tracker.onToolUse("o1", "Agent", map[string]any{"description": "t", "subagent_type": "opus-architect"}, time.Now())
+	for _, a := range r.tracker.running() {
+		if a.ID == "o1" {
+			if got := agentStatusText(a, "opus"); got != "실행 중-opus-architect(t)" {
+				t.Fatal(got)
+			}
+		}
+	}
+	if !r.tracker.opusRunning() {
+		t.Fatal("opus-architect running: want true")
+	}
+}
+
 func TestAgentStatusFormat(t *testing.T) {
 	r := &Repl{tracker: newAgentTracker(), a: Args{Model: "opus"}}
 	m := &tuiModel{r: r, w: 120}

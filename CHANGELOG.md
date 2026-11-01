@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.1
+- status 줄 변경: 역할별 컨텍스트 바(M, P, T, C0, 실행 중 코더 C1..C4) 표시(internal/harness/drain.go)
+- TUI 에이전트 라벨 수정: 접두 이름(haiku-scout, opus-architect) 기준으로 라벨 표시
+- /view 명령 추가(TUI 전용, Claude Code 세션 대화 보기: /view [id-prefix])
+- 버전 표기: cmd/chaude/main.go, docs/claude-lean/README.md를 0.9.1로 갱신
+
 ## 0.9.0-r1
 - record 기록 기능 추가(internal/harness/record*.go)
 - 에이전트 반환 템플릿에 3.6 status·reason 머리 2줄 추가, 반환 규칙 정리(I9)

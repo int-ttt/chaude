@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,6 +36,33 @@ func TestListClaudeSessions(t *testing.T) {
 	}
 	if listClaudeSessions(filepath.Join(d, "none")) != nil {
 		t.Fatal("expected nil")
+	}
+}
+
+func TestViewHelpers(t *testing.T) {
+	d := t.TempDir()
+	now := time.Now()
+	writeSess(t, d, "abc123def", now, "hello", "second")
+	writeSess(t, d, "abd999", now.Add(-time.Hour), "x")
+	l := listClaudeSessions(d)
+	if n := len(matchSessions(l, "abc")); n != 1 {
+		t.Fatalf("prefix abc: got %d", n)
+	}
+	if n := len(matchSessions(l, "ab")); n != 2 {
+		t.Fatalf("prefix ab: got %d", n)
+	}
+	if s := formatSessionList(l); !strings.Contains(s, "abc123de") || !strings.Contains(s, "hello") {
+		t.Fatalf("list wrong:\n%s", s)
+	}
+	imp, err := readClaudeTranscript(l[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := formatTranscript(l[0], imp)
+	for _, want := range []string{"[1] user:\nhello", "[2] user:\nsecond", "ok"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("transcript missing %q:\n%s", want, s)
+		}
 	}
 }
 

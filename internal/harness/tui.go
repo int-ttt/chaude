@@ -178,6 +178,7 @@ var slashCmds = []slashCmd{
 	{"/model", "show or switch model: /model <name>"},
 	{"/resume", "list record topics, or show one: /resume [n|slug] (/resume claude: Claude Code sessions)"},
 	{"/import", "import a session: /import [id|latest]"},
+	{"/view", "view a Claude Code session's conversation: /view [id-prefix]"},
 	{"/rotate", "hand off to a fresh session"},
 	{"/usage", "plan usage and limits (from claude)"},
 	{"/cost", "usage / cost (from claude)"},
@@ -331,7 +332,9 @@ func (m *tuiModel) render() string {
 			out = append(out, dimSt.Render(wrap(b.text, 0)), "")
 		}
 	}
-	if fg, _ := m.r.tracker.counts(); fg > 0 && !m.gotText && m.perm == nil {
+	fg, _ := m.r.tracker.counts()
+	opus := m.r.tracker.opusRunning()
+	if (fg > 0 || opus) && (opus || !m.gotText) && m.perm == nil {
 		out = append(out, m.sp.View()+dimSt.Render(" "+m.mainStatusText()))
 	} else if m.busy && !m.gotText && m.perm == nil {
 		out = append(out, m.sp.View()+dimSt.Render(" "+m.mainStatusText()+" (esc to interrupt)"))
@@ -963,6 +966,30 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		}
 		m.vp.GotoBottom()
 		m.refresh()
+	case "/view":
+		l, msg := m.r.sessionList()
+		if msg != "" {
+			note(msg)
+			break
+		}
+		if len(f) == 1 {
+			note(formatSessionList(l))
+			break
+		}
+		ms := matchSessions(l, f[1])
+		switch {
+		case len(ms) == 0:
+			note("no session matching " + f[1])
+		case len(ms) > 1:
+			note("ambiguous prefix, matches:\n" + formatSessionList(ms))
+		default:
+			imp, err := readClaudeTranscript(ms[0].Path)
+			if err != nil {
+				note("view: " + err.Error())
+				break
+			}
+			note(formatTranscript(ms[0], imp))
+		}
 	case "/import":
 		m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
 		m.blocks = append(m.blocks, block{"user", line, false})
@@ -1014,8 +1041,7 @@ func (m *tuiModel) quit() (tea.Model, tea.Cmd) {
 }
 
 func (m *tuiModel) statusLine() string {
-	ctx := m.r.lastCtx
-	left := fmt.Sprintf(" %s · ctx %s/%s", m.r.a.Model, commas(ctx), commas(m.r.effectiveThreshold()))
+	left := " " + ctxBar(m.r.lastCtx, m.r.effectiveThreshold(), m.r.roleCtxSnap(), m.r.tracker.countRunningCoders())
 	if s, _ := m.r.rateStr.Load().(string); s != "" {
 		left += " · " + s
 	}
@@ -1312,5 +1338,19 @@ func agentStatusText(a *agentRec, sessionModel string) string {
 	if sum == "" {
 		sum = a.Prompt
 	}
+	if hasModelPrefix(name) {
+		return agentState(a) + "-" + name + "(" + sum + ")"
+	}
 	return agentState(a) + "-" + model + "-" + name + "(" + sum + ")"
+}
+
+// hasModelPrefix: name already starts with a model id (e.g. subagent_type "haiku-scout"), so the
+// model segment would double it.
+func hasModelPrefix(name string) bool {
+	for _, p := range []string{"haiku-", "opus-", "sonnet-", "fable-"} {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
 }

@@ -135,6 +135,89 @@ func commas(n int) string {
 	return string(out)
 }
 
+// fmtK: compact token count, 3 significant digits, truncated: 1234 -> "1.23k", 12345 -> "12.3k", 1234567 -> "1.23M".
+func fmtK(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	if n < 1000 {
+		return strconv.Itoa(n)
+	}
+	unit, div := "k", 1000
+	if n >= 1000000 {
+		unit, div = "M", 1000000
+	}
+	x := n / div
+	switch {
+	case x >= 100:
+		return fmt.Sprintf("%d%s", x, unit)
+	case x >= 10:
+		return fmt.Sprintf("%d.%d%s", x, (n/(div/10))%10, unit)
+	}
+	return fmt.Sprintf("%d.%02d%s", x, (n/(div/100))%100, unit)
+}
+
+// fmtLimit: limit label, whole thousands as "200k" (fmtK otherwise).
+func fmtLimit(n int) string {
+	if n >= 1000 && n%1000 == 0 {
+		return fmt.Sprintf("%dk", n/1000)
+	}
+	return fmtK(n)
+}
+
+// ctxBar: status-line context bar: main, P, T, C0 always; C1..C4 for running coders (activeCoders-1, max 4).
+func ctxBar(mainCtx, mainLim int, roles map[string]int, activeCoders int) string {
+	lim := fmtLimit(haikuThreshold)
+	parts := []string{"M " + fmtK(mainCtx) + "/" + fmtLimit(mainLim)}
+	for _, k := range []string{"P", "T", "C0"} {
+		parts = append(parts, k+" "+fmtK(roles[k])+"/"+lim)
+	}
+	top := activeCoders - 1
+	if top > 4 {
+		top = 4
+	}
+	for i := 1; i <= top; i++ {
+		k := fmt.Sprintf("C%d", i)
+		parts = append(parts, k+" "+fmtK(roles[k])+"/"+lim)
+	}
+	return strings.Join(parts, " ")
+}
+
+// setRoleCtx stores the latest context size of one role slot (P, T, C0..C4).
+func (r *Repl) setRoleCtx(k string, v int) {
+	r.roleMu.Lock()
+	defer r.roleMu.Unlock()
+	if r.roleCtx == nil {
+		r.roleCtx = map[string]int{}
+	}
+	r.roleCtx[k] = v
+}
+
+// roleCtxSnap copies the role context sizes (UI goroutine reads them for the status line).
+func (r *Repl) roleCtxSnap() map[string]int {
+	r.roleMu.Lock()
+	defer r.roleMu.Unlock()
+	c := make(map[string]int, len(r.roleCtx))
+	for k, v := range r.roleCtx {
+		c[k] = v
+	}
+	return c
+}
+
+// noteRoleCtx records the context size of a non-main assistant call whose agent is a prompter, tui or coder.
+func (r *Repl) noteRoleCtx(tk *agentTracker, ev event) {
+	if str(ev["type"]) != "assistant" || isMainEvent(ev) {
+		return
+	}
+	u := asMap(asMap(ev["message"])["usage"])
+	if len(u) == 0 {
+		return
+	}
+	if k := tk.roleSlot(str(ev["parent_tool_use_id"])); k != "" {
+		r.setRoleCtx(k, ctxTokens(u))
+	}
+}
+
 func trunc(s string, n int) string {
 	r := []rune(s)
 	if len(r) > n {
@@ -155,6 +238,8 @@ type Repl struct {
 	rotations       int
 	files           []string
 	lastCtx         int
+	roleMu          sync.Mutex     // guards roleCtx
+	roleCtx         map[string]int // latest context per status-bar role slot: P, T, C0..C4
 	rate            map[string]any
 	rateMu          sync.Mutex // guards rate, lastFiveHour, fiveHourSeen, rawRateLogged
 	rateStr         atomic.Value
@@ -323,6 +408,7 @@ func (r *Repl) idleEvent(s *Session, tk *agentTracker, ev event) {
 	}
 	r.idle.spend.onEvent(ev)
 	tk.onSubEvent(ev)
+	r.noteRoleCtx(tk, ev)
 	r.touchMain(ev, time.Now())
 	switch t := str(ev["type"]); {
 	case t == "control_request" && str(asMap(ev["request"])["subtype"]) == "can_use_tool":
@@ -545,6 +631,7 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 		r.spend.onEvent(ev)
 		t := str(ev["type"])
 		r.tracker.onSubEvent(ev)
+		r.noteRoleCtx(r.tracker, ev)
 		r.touchMain(ev, time.Now())
 		_, hasParent := ev["parent_tool_use_id"]
 		isMain := !hasParent || ev["parent_tool_use_id"] == nil || ev["parent_tool_use_id"] == ""

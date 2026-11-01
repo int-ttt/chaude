@@ -236,6 +236,16 @@ func (t *agentTracker) running() []*agentRec {
 	return l
 }
 
+// opusRunning: any running agent on the opus model (name prefix or model field).
+func (t *agentTracker) opusRunning() bool {
+	for _, a := range t.running() {
+		if strings.HasPrefix(a.Name, "opus-") || a.Model == "opus" {
+			return true
+		}
+	}
+	return false
+}
+
 // drain is an old session kept alive until its agents finish (or time out).
 type drain struct {
 	sess    *Session
@@ -299,4 +309,44 @@ func (t *agentTracker) sortedRunning() []*agentRec {
 		return l[i].Started.Before(l[j].Started)
 	})
 	return l
+}
+
+func isCoder(a *agentRec) bool { return strings.Contains(a.Name, "coder") }
+
+// countRunningCoders: running agents whose name contains "coder" (status line C1..C4).
+func (t *agentTracker) countRunningCoders() int {
+	n := 0
+	for _, a := range t.sortedRunning() {
+		if isCoder(a) {
+			n++
+		}
+	}
+	return n
+}
+
+// roleSlot maps a running agent to its status-line slot: "P" prompter, "T" tui, "C<i>" coder (i = place
+// among running coders, oldest first, i<=4); "" for unknown, finished or other agents.
+func (t *agentTracker) roleSlot(id string) string {
+	if id == "" {
+		return ""
+	}
+	coder := -1
+	for _, a := range t.sortedRunning() {
+		if isCoder(a) {
+			coder++
+		}
+		if a.ID != id {
+			continue
+		}
+		switch {
+		case strings.Contains(a.Name, "prompter"):
+			return "P"
+		case strings.Contains(a.Name, "tui"):
+			return "T"
+		case isCoder(a) && coder <= 4:
+			return fmt.Sprintf("C%d", coder)
+		}
+		return ""
+	}
+	return ""
 }

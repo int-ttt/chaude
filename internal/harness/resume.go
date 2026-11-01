@@ -120,3 +120,42 @@ func (r *Repl) resumeLine(args ...string) {
 	}
 	r.importSession(l[n-1].ID)
 }
+
+// shortID is the first 8 chars of a session id (whole id if shorter).
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+// formatSessionList renders one line per session plus a hint for /view.
+func formatSessionList(l []sessionInfo) string {
+	var b strings.Builder
+	for _, s := range l {
+		fmt.Fprintf(&b, "%s  %s  %3d turns  %s\n", shortID(s.ID), s.Mod.Format("01-02 15:04"), s.Turns, s.First)
+	}
+	b.WriteString("view one: /view <id-prefix>")
+	return b.String()
+}
+
+// matchSessions returns the sessions whose id starts with prefix.
+func matchSessions(l []sessionInfo, prefix string) []sessionInfo {
+	var out []sessionInfo
+	for _, s := range l {
+		if strings.HasPrefix(s.ID, prefix) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// formatTranscript renders every turn of one session in full (no truncation).
+func formatTranscript(s sessionInfo, imp *claudeImport) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "session %s  %s  %d turns", s.ID, s.Mod.Format("2006-01-02 15:04"), len(imp.Turns))
+	for i, t := range imp.Turns {
+		fmt.Fprintf(&b, "\n[%d] user:\n%s\n[%d] assistant:\n%s", i+1, t[0], i+1, t[1])
+	}
+	return b.String()
+}
