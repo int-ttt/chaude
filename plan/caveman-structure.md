@@ -50,14 +50,14 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 
 ### 2.1 쓰기·읽기 흐름 (261101, 사용자 요청 2·3)
 
-- 공통: 하위 에이전트(haiku-coder, haiku-batch-worker, haiku-scout, haiku-researcher)는 Agent 도구가 없어 haiku-tui를 직접 부를 수 없음. "opus와 haiku-tui에 전달" = 하위 반환은 호출자(opus)로 감 -> opus는 판단에 쓰고 같은 블록을 고치지 않고 R-decide의 relay 필드에 붙임 -> 메인(Haiku)은 relay를 그대로 haiku-tui에 넘김 -> haiku-tui 출력이 출력창에 표시됨. 메인이 직접 부른 작은 작업은 메인이 반환 블록을 그대로 haiku-tui에 넘김
+- 공통: 하위 에이전트(haiku-coder, haiku-batch-worker, haiku-scout, haiku-researcher)는 Agent 도구가 없어 haiku-tui를 직접 부를 수 없음. "opus와 haiku-tui에 전달" = 하위 반환은 호출자(opus)로 감 -> opus는 판단에 쓰고 같은 블록을 고치지 않고 R-decide의 relay 필드에 붙임 -> 메인(Opus)은 relay를 그대로 haiku-tui에 넘김 -> haiku-tui 출력이 출력창에 표시됨. 메인이 직접 부른 작은 작업은 메인이 반환 블록을 그대로 haiku-tui에 넘김
 - 쓰기 흐름: opus(작은 작업은 메인) -> haiku-coder(코드) 또는 haiku-batch-worker(문서·노트·일괄 수정) -> 반환 = 완료 여부(status) + 바꾼 부분(changed: <경로>: <바꾼 부분 한 줄>)만 -> opus + haiku-tui. diffstat·check·summary_ko는 반환에 넣지 않음. 검증은 haiku-checker가 따로 하고 그 결과(check: <명령> -> PASS|FAIL)도 relay로 전달
 - 쓰기 출력창: "<작업> 완료했습니다." 1줄 + 파일마다 "<경로>: <바꾼 부분>" 1줄 (+ 검증 결과 1줄). partial·fail·blocked이면 status와 reason을 그대로 알림
 - 읽기 흐름: opus -> haiku-scout(로컬 파일·과거 대화) 또는 haiku-researcher(웹) -> R-read(caveman, 3.2, 영어만; 한국어는 원문 인용 안에서만) -> opus + haiku-tui. 브리프·R-read·relay 모두 영어. opus는 claim·not_found·not_checked를 판단 근거로 쓰고 relay 문구는 고치지 않음
 - 읽기 출력창: 요약과 번역물만 표시. haiku-tui가 먼저 존댓말 1~3줄 요약, 이어서 claim마다 "- <경로>:<행> — <한국어 번역>" 목록. not_found는 "없음 확인", not_checked는 "미확인" 1줄. caveman 키 줄·영어 원문 문장은 표시하지 않음. TUI는 caveman 반환(status: + reason: 줄)의 도구 결과 미리보기를 숨김 (internal/harness/tui.go isCavemanBlock, 261101)
 - relay가 없을 때(opus가 판단만 하고 하위 작업이 없는 경우): 기존대로 R-decide의 summary_ko를 haiku-tui에 전달. haiku-runner 반환도 쓰기 흐름과 같은 형식(status + changed)으로 relay
 - relay 상한: 1500자. 넘으면 opus가 claim 줄을 줄이고 not_found·not_checked는 남기며 truncated: yes 표시
-- 메인(Haiku) 역할 변화 없음: 라우팅과 haiku-tui 호출만, 파일 직접 접근 불가 (main-thread-guard.py, CLAUDE.md:4)
+- 메인(Opus) 라우팅·haiku-tui 호출만, 파일 직접 접근 불가 (main-thread-guard.py, CLAUDE.md:4)
 - S6 전 과도기: 에이전트 파일은 아직 옛 R-write 정의. 쓰기 브리프 limits에 "return: status + changed(경로: 바꾼 부분) only" 명시
 
 ## 3. 메시지 형식 정의
@@ -214,7 +214,7 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 - R3: 정본과 에이전트 파일 사본 불일치. 완화: 10절 문자열 일치 확인
 - R4: summary_ko와 본문 내용 불일치(요약이 한정어 누락). 완화: summary_ko에도 C3 적용
 - R5: 감시 훅이 형식만 보고 내용 누락은 못 잡음 (6절 검사 불가 항목)
-- R6: 메인(Haiku)이 B형식 브리프를 잘못 쓰면 하위 전체가 형식을 벗어남. 완화: task·paths·limits·return·lang 5키만 필수, ctx는 맥락이 필요할 때만
+- R6: 메인(Opus)이 B형식 브리프를 잘못 쓰면 하위 전체가 형식을 벗어남. 완화: task·paths·limits·return·lang 5키만 필수, ctx는 맥락이 필요할 때만
 
 ## 12. 사용자만 답할 수 있는 질문
 
