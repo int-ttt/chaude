@@ -1,6 +1,6 @@
 # chaude
 
-`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.9이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
+`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.10이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
 
 ## 설치
 
@@ -89,6 +89,13 @@ chaude repl --threshold 200000   # 임계값 변경 (opus 메인에는 적용 �
 - `/resume`: 검색어 없이 입력하거나 결과가 여러 개면 기록 폴더 선택창을 엽니다(↑/↓, 휠로 이동, Enter로 불러오기, esc로 취소).
 - `/view`: 이 chaude 실행에서 만든 Claude Code 세션만 보여 줍니다. 이전 실행의 세션도 종료 핸드오프로 이어받습니다.
 - 종료 핸드오프: 종료할 때 이 실행의 세션 ID를 프로젝트 기록 폴더의 `.exit-handoff.json`에 저장하고, 같은 폴더에서 다시 시작하면 `/view` 목록에 반영합니다.
+
+### 0.9.10 변경
+
+- auto 권한 모드가 기본입니다. 드래그로 선택한 텍스트는 놓을 때 자동으로 복사됩니다.
+- 출력의 링크·경로에 색을 입히고, `/usage`는 전체 화면에서 스크롤해 볼 수 있습니다.
+- gen-settings 기본 경로, charcount BOM/CRLF 처리, claude-history·compress-archive 등 `-h`와 빈 출력, extract-transcript 경로 구분자를 고쳤습니다.
+- CI가 macOS·Linux·Windows 3개 OS에서 vet·test·빌드·스모크를 실행합니다.
 
 ### 0.9.9 변경
 

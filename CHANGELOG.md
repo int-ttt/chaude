@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.10
+- auto 권한 모드 기본: 권한 모드를 지정하지 않으면 auto로 시작합니다.
+- 드래그 선택: 출력 영역을 드래그해 선택하면 놓을 때 자동으로 클립보드에 복사합니다.
+- 링크·경로 색상: 출력의 링크와 파일 경로를 구분되는 색으로 표시합니다.
+- /usage 전체 화면: 사용량 보기가 전체 화면으로 열리고 스크롤할 수 있습니다.
+- Windows 회전 기호: 회전 표시 기호의 색을 Windows 터미널에서 맞게 고쳤습니다.
+- gen-settings: 기본 경로를 바로잡았습니다.
+- charcount: BOM과 CRLF 줄바꿈을 같은 방식으로 처리합니다.
+- claude-history·compress-archive 등: `-h` 도움말과 빈 출력 동작을 고쳤습니다.
+- extract-transcript: 경로 구분자를 OS에 맞게 처리합니다.
+- CI: macOS·Linux·Windows 3개 OS에서 vet·test·빌드·스모크를 돌립니다.
+- 버전 표기: cmd/chaude/main.go, docs/claude-lean/README.md, README.md를 0.9.10으로 갱신
+
 ## 0.9.9
 - Windows·Linux 지원: 릴리즈 빌드가 darwin/linux/windows × amd64·arm64 6개 플랫폼 아카이브와 checksums.txt를 만듭니다. `install.sh`가 Linux를 지원합니다.
 - Windows 대응: resume 경로 인코딩, claude 실행 경로 해석, 상주 소켓(Windows 전용 구현 분리)
