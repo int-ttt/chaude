@@ -2,6 +2,7 @@ package harness
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
@@ -73,15 +74,44 @@ func (b *inputBox) Delete() {
 	}
 }
 
+// isWordRune: letters (Hangul included), digits and '_' form a word; other punctuation/space separates.
+func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' }
+
+// DeleteWord (opt+delete) deletes the previous word; a newline before the cursor is deleted alone.
 func (b *inputBox) DeleteWord() {
-	e := b.pos
-	for b.pos > 0 && b.val[b.pos-1] == ' ' {
-		b.pos--
+	if b.pos == 0 {
+		return
 	}
-	for b.pos > 0 && b.val[b.pos-1] != ' ' && b.val[b.pos-1] != '\n' {
-		b.pos--
+	if b.val[b.pos-1] == '\n' {
+		b.Backspace()
+		return
 	}
-	b.val = append(b.val[:b.pos], b.val[e:]...)
+	i := b.pos
+	for i > 0 && b.val[i-1] != '\n' && !isWordRune(b.val[i-1]) {
+		i--
+	}
+	for i > 0 && b.val[i-1] != '\n' && isWordRune(b.val[i-1]) {
+		i--
+	}
+	b.val = append(b.val[:i], b.val[b.pos:]...)
+	b.pos = i
+}
+
+// KillToStart (cmd+delete) deletes from the cursor to the start of the logical line.
+func (b *inputBox) KillToStart() {
+	if b.pos == 0 {
+		return
+	}
+	if b.val[b.pos-1] == '\n' {
+		b.Backspace()
+		return
+	}
+	ls := b.pos
+	for ls > 0 && b.val[ls-1] != '\n' {
+		ls--
+	}
+	b.val = append(b.val[:ls], b.val[b.pos:]...)
+	b.pos = ls
 }
 
 func (b *inputBox) Left() {

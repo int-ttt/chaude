@@ -826,7 +826,11 @@ func (m *tuiModel) edit(k tea.KeyMsg) {
 	case tea.KeySpace:
 		m.in.Insert([]rune{' '})
 	case tea.KeyBackspace, tea.KeyCtrlH:
-		m.in.Backspace()
+		if k.Alt { // opt+delete
+			m.in.DeleteWord()
+		} else {
+			m.in.Backspace()
+		}
 	case tea.KeyDelete, tea.KeyCtrlD:
 		m.in.Delete()
 	case tea.KeyLeft:
@@ -841,8 +845,8 @@ func (m *tuiModel) edit(k tea.KeyMsg) {
 		m.in.DeleteWord()
 	case tea.KeyCtrlK:
 		m.in.KillToEnd()
-	case tea.KeyCtrlU:
-		m.in.SetValue("")
+	case tea.KeyCtrlU: // cmd+delete (terminal sends ^U)
+		m.in.KillToStart()
 	}
 }
 

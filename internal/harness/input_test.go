@@ -1,6 +1,10 @@
 package harness
 
-import "testing"
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 func TestInputWidthMixed(t *testing.T) {
 	b := &inputBox{width: 10}
@@ -62,5 +66,55 @@ func TestInputNewline(t *testing.T) {
 	b.End()
 	if _, c := b.Cursor(); c != 2 {
 		t.Fatal("end")
+	}
+}
+
+func TestInputKillToStart(t *testing.T) {
+	cases := []struct {
+		in, want string
+		pos      int // rune index of cursor
+	}{
+		{"hello world", "world", 6}, // mid-line: removes "hello "
+		{"ab\ncd", "ab\n", 5},       // end of 2nd line: removes "cd"
+		{"ab\ncd", "abcd", 3},       // line start: joins lines
+		{"abc", "abc", 0},           // pos 0: no-op
+	}
+	for _, c := range cases {
+		b := &inputBox{width: 20, val: []rune(c.in), pos: c.pos}
+		b.KillToStart()
+		if b.Value() != c.want {
+			t.Fatalf("in %q pos %d: got %q want %q", c.in, c.pos, b.Value(), c.want)
+		}
+	}
+}
+
+func TestInputDeleteWordPunct(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"hello, world", "hello, "},
+		{"hello, ", ""},
+		{"a.b.c", "a.b."},
+		{"안녕 하세요", "안녕 "},
+		{"x\nfoo bar", "x\nfoo "},
+		{"x\n", "x"},
+	}
+	for _, c := range cases {
+		b := &inputBox{width: 20, val: []rune(c.in), pos: len([]rune(c.in))}
+		b.DeleteWord()
+		if b.Value() != c.want {
+			t.Fatalf("in %q: got %q want %q", c.in, b.Value(), c.want)
+		}
+	}
+}
+
+func TestTUIAltBackspaceAndCtrlU(t *testing.T) {
+	m, _ := queueModel(t)
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello, world")})
+	m.Update(tea.KeyMsg{Type: tea.KeyBackspace, Alt: true})
+	if m.in.Value() != "hello, " {
+		t.Fatalf("alt+backspace: got %q", m.in.Value())
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	if m.in.Value() != "" {
+		t.Fatalf("ctrl+u on single line: got %q", m.in.Value())
 	}
 }
