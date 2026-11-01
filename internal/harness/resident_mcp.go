@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // residentMCPConfig returns the --mcp-config file that makes the main child run `chaude mcp-resident <sock>`.
@@ -22,17 +23,16 @@ func (r *Repl) residentMCPConfig() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	dir, err := os.MkdirTemp("", "chaude-mcp-")
+	dir, err := os.MkdirTemp(sockBaseDir(), "chaude-mcp-")
 	if err != nil {
 		return "", err
 	}
-	sock := filepath.Join(dir, "mcp.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, addr, err := listenMCP(filepath.Join(dir, "mcp.sock"))
 	if err != nil {
 		return "", err
 	}
 	cfg := map[string]any{"mcpServers": map[string]any{"chaude": map[string]any{
-		"command": exe, "args": []string{"mcp-resident", sock}}}}
+		"command": exe, "args": []string{"mcp-resident", addr}}}}
 	b, err := json.Marshal(cfg)
 	if err != nil {
 		ln.Close()
@@ -46,6 +46,19 @@ func (r *Repl) residentMCPConfig() (string, error) {
 	go r.serveMCP(ln)
 	r.mcpCfg = path
 	return path, nil
+}
+
+// listenMCP listens on the unix socket sock; if that fails (e.g. Windows without AF_UNIX) it listens on
+// 127.0.0.1:0 and returns "tcp:<addr>" so the bridge dials TCP instead.
+func listenMCP(sock string) (net.Listener, string, error) {
+	if ln, err := net.Listen("unix", sock); err == nil {
+		return ln, sock, nil
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, "", err
+	}
+	return ln, "tcp:" + ln.Addr().String(), nil
 }
 
 // serveMCP accepts bridge connections until the listener closes.
@@ -80,7 +93,11 @@ func MCPResidentBridge(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: chaude mcp-resident <socket>")
 		return 2
 	}
-	conn, err := net.Dial("unix", args[0])
+	network, addr := "unix", args[0]
+	if rest, ok := strings.CutPrefix(addr, "tcp:"); ok {
+		network, addr = "tcp", rest
+	}
+	conn, err := net.Dial(network, addr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "mcp-resident:", err)
 		return 1
@@ -92,8 +109,8 @@ func MCPResidentBridge(args []string) int {
 		close(done)
 	}()
 	_, _ = io.Copy(conn, os.Stdin)
-	if uc, ok := conn.(*net.UnixConn); ok {
-		_ = uc.CloseWrite() // EOF to the repl side: it closes after the last response
+	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+		_ = cw.CloseWrite() // EOF to the repl side: it closes after the last response
 	}
 	<-done
 	return 0

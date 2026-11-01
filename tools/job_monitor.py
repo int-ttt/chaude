@@ -23,7 +23,33 @@ ROOT = Path(__file__).resolve().parent.parent
 LOGS = ROOT / "logs"
 
 
+def win_pid_alive(pid):
+    # OpenProcess + GetExitCodeProcess via ctypes (no os.kill on Windows: signal 0 is not a probe there)
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    ERROR_ACCESS_DENIED = 5
+    STILL_ACTIVE = 259
+    h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not h:
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED  # exists but not ours
+    try:
+        code = wintypes.DWORD()
+        if not k32.GetExitCodeProcess(h, ctypes.byref(code)):
+            return True
+        return code.value == STILL_ACTIVE
+    finally:
+        k32.CloseHandle(h)
+
+
 def pid_alive(pid):
+    if os.name == "nt":
+        return win_pid_alive(pid)
     try:
         os.kill(pid, 0)
         return True
@@ -34,6 +60,8 @@ def pid_alive(pid):
 
 
 def proc_etime(pid):
+    if os.name == "nt":  # no ps on Windows
+        return ""
     try:
         r = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
                            capture_output=True, text=True, timeout=5)

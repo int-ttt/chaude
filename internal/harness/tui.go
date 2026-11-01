@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"chaude/internal/osenv"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -810,7 +812,7 @@ var usageSend = func(r *Repl, msg tea.Msg) { r.ui.send(msg) }
 
 // usageFetch runs /usage in a separate one-shot claude process so it never touches the busy session.
 var usageFetch = func(ctx int) string {
-	cmd := exec.Command("claude", "-p", "/usage", "--output-format", "json", "--no-session-persistence")
+	cmd := exec.Command(osenv.ResolveBin("claude"), "-p", "/usage", "--output-format", "json", "--no-session-persistence")
 	cmd.Env = cleanEnv(0)
 	cmd.Dir = os.TempDir()
 	out, err := cmd.Output()

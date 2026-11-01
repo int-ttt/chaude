@@ -2,9 +2,11 @@
 
 `claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.8이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
 
-## 설치 (macOS Apple Silicon 전용)
+## 설치
 
-릴리즈 바이너리는 darwin/arm64만 제공합니다. 비공개 저장소이므로 먼저 `gh auth login`이 필요합니다.
+릴리즈 바이너리는 darwin/linux(amd64·arm64), windows(amd64·arm64)용을 제공합니다. 비공개 저장소이므로 먼저 `gh auth login`이 필요합니다.
+
+### macOS / Linux
 
 ```sh
 gh api repos/int-ttt/chaude/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
@@ -12,10 +14,17 @@ gh api repos/int-ttt/chaude/contents/install.sh -H "Accept: application/vnd.gith
 chaude --version
 ```
 
-- 최신 릴리즈를 받아 체크섬을 확인한 뒤 `/usr/local/bin`(쓰기 가능 시) 또는 `~/.local/bin`에 설치합니다. PATH에 없으면 `~/.zshrc`에 추가합니다.
+- 최신 릴리즈를 받아 체크섬을 확인한 뒤 `/usr/local/bin`(쓰기 가능 시) 또는 `~/.local/bin`에 설치합니다. 체크섬은 `sha256sum` 또는 `shasum`으로 확인합니다.
+- PATH에 없으면 로그인 셸에 따라 추가합니다: zsh는 `~/.zshrc`, bash는 mac `~/.bash_profile`/linux `~/.bashrc`, 그 밖은 `~/.profile`.
 - 환경변수: `CHAUDE_VERSION=v0.9.5`(특정 버전), `CHAUDE_INSTALL_DIR=경로`, `CHAUDE_REPO=소유자/저장소`.
 
-소스에서 빌드하려면 Go 1.22+가 필요하고 `go build -o bin/chaude ./cmd/chaude`로 됩니다. 다른 OS는 `platform_setup/install.sh`(mac/linux) 또는 `platform_setup\install.ps1`(windows)이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
+### Windows
+
+Windows는 `install.sh`를 쓰지 않습니다. PowerShell에서 저장소를 받은 뒤 `platform_setup\install.ps1`을 실행합니다(Go 확인, 빌드, `.claude/settings.json` 생성). 릴리즈의 `chaude_<버전>_windows_<arch>.zip`을 직접 풀어 PATH에 넣어도 됩니다.
+
+### 소스에서 빌드
+
+Go 1.22+가 필요하고 `go build -o bin/chaude ./cmd/chaude`로 됩니다. mac/linux는 `platform_setup/install.sh`, windows는 `platform_setup\install.ps1`이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
 
 ## 사용
 
@@ -145,7 +154,7 @@ Claude Code 훅은 `.claude/hooks/*.py`(Python 3.8+)이며 `python3 .claude/hook
 ## 개발과 릴리즈
 
 - 테스트: `go test ./...` (실제 claude를 쓰는 테스트: `HARNESS_LIVE=1 go test ./internal/harness -v`)
-- 릴리즈: `v*` 태그를 push하면 GitHub Actions(`.github/workflows/release.yml`)가 `scripts/build-release.sh`로 darwin/arm64 아카이브와 `checksums.txt`를 빌드해 릴리즈를 만듭니다.
+- 릴리즈: `v*` 태그를 push하면 GitHub Actions(`.github/workflows/release.yml`)가 `scripts/build-release.sh`로 아카이브(darwin/linux amd64·arm64 `.tar.gz`, windows amd64·arm64 `.zip`)와 `checksums.txt`를 빌드해 릴리즈를 만듭니다. 대상은 `TARGETS` 환경변수로 바꿀 수 있습니다.
   ```sh
   git tag v0.9.5 && git push origin v0.9.5
   ```

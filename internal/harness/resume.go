@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
+
+// nonAlnum matches each character Claude Code turns into "-" in a project folder name (same as scripts/claude_history.go).
+var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]`)
 
 // sessionInfo summarizes one Claude Code transcript for the /resume list.
 type sessionInfo struct {
@@ -29,7 +33,7 @@ func claudeProjectDir(cwd string) (string, error) {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	proj := strings.NewReplacer("/", "-", ".", "-", "_", "-").Replace(cwd)
+	proj := nonAlnum.ReplaceAllString(cwd, "-")
 	return filepath.Join(home, ".claude", "projects", proj), nil
 }
 

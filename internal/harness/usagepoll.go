@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"chaude/internal/osenv"
 )
 
 // usagePollEvery throttles the live /usage poll (one claude process per poll).
@@ -51,7 +53,7 @@ func parseUsage(text string) (map[string]any, bool) {
 var usageRaw = func() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), usageRawTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "claude", "-p", "/usage", "--output-format", "json", "--no-session-persistence")
+	cmd := exec.CommandContext(ctx, osenv.ResolveBin("claude"), "-p", "/usage", "--output-format", "json", "--no-session-persistence")
 	cmd.Env = cleanEnv(0)
 	cmd.Dir = os.TempDir()
 	out, err := cmd.Output()

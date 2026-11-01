@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"chaude/internal/osenv"
 )
 
 // ChaudeVersion is the harness release version; cmd/chaude sets it from its own version.
@@ -23,7 +25,7 @@ func claudeVersion() string {
 		claudeVerStr = "unknown"
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, "claude", "--version").Output()
+		out, err := exec.CommandContext(ctx, osenv.ResolveBin("claude"), "--version").Output()
 		if err == nil {
 			if v := strings.TrimSpace(string(out)); v != "" {
 				claudeVerStr = v
