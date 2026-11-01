@@ -29,5 +29,5 @@
 ## State
 - Truth: `notes/FACTS.md`, `notes/DECISIONS.md` (agents read). `notes/DELIVERABLES.md` final files, `notes/OPEN.md` pending/deadlines, `notes/LESSONS.md` failures → pass the relevant one in briefs. `notes/LEDGER.md` = hook-written agent results.
 - Never suggest `/clear`/`/compact`. Reset = `/exit` then `claude`. Rotation: Opus main 200k, Haiku main 80k.
-- chaude TUI: output pane jumps to bottom on prompt input and any output update (notes/runs/scroll-bottom.md); keep.
+- chaude TUI: typing in the input box keeps the output pane's scroll position; a sent prompt or an output update while at bottom follows the tail (notes/runs/scroll-bottom.md); keep.
 - Compact instructions: keep only open workstreams (goal, next action), pending `추천:` default, active agent IDs + what each holds, final file paths, unresolved user requests. Drop agent outputs, resolved corrections, anything in notes/.

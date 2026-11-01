@@ -18,10 +18,14 @@ import (
 //go:embed rules/resident-prompter.md
 var prompterRule string
 
-// residentMaxWorkers is the worker cap used when --max-workers and CHAUDE_MAX_WORKERS are unset.
-// The resident slots are parked children and count against admit(); with the default 3 a spawn
-// would evict them.
+// residentMaxWorkers is the worker cap used when --max-workers and CHAUDE_MAX_WORKERS are unset (plus
+// extra_coders). The resident slots are parked children and count against admit(); with the default 3 a
+// spawn would evict them.
 const residentMaxWorkers = 8
+
+// extraCoderTTL is how long an extra coder (coder2...) may sit idle before it is ended. It is spawned on
+// demand by pickCoderRole, not at start.
+const extraCoderTTL = 270 * time.Second
 
 // beginBusy marks a resident child as handling a command: it shows as one running-list row until endBusy.
 func (c *liveChild) beginBusy(prompt string, now time.Time) {
@@ -82,37 +86,42 @@ type residentSlot struct {
 	NoSlash   bool   // --disable-slash-commands
 }
 
-// residentSlots returns main (the active child, on mainModel), prompter, tui, then coders haiku coder
-// slots (coder, coder2, ...; coders is clamped to 0-8, from coder_slots in settings). Coders are
-// resident sessions kept for long context. The prompter and tui are minimal: no tools, no MCP, no skills.
-func residentSlots(mainModel string, coders int) []residentSlot {
-	if coders < 0 {
-		coders = 0
-	}
-	if coders > settingsMaxCoderSlots {
-		coders = settingsMaxCoderSlots
-	}
-	slots := []residentSlot{
+// residentSlots returns the four always-on slots: main (the active child, on mainModel), prompter, tui and
+// coder (all haiku). The prompter and tui are minimal: no tools, no MCP, no skills.
+func residentSlots(mainModel string) []residentSlot {
+	return []residentSlot{
 		{Role: "main", Model: mainModel},
 		{Role: "prompter", Model: "haiku", Rule: prompterRule, Minimal: true},
 		{Role: "tui", Model: "haiku", Agent: "haiku-tui", Minimal: true},
+		coderSlot("coder"),
 	}
-	for i := 0; i < coders; i++ {
-		role := "coder"
-		if i > 0 {
-			role = fmt.Sprintf("coder%d", i+1)
-		}
-		slots = append(slots, residentSlot{Role: role, Model: "haiku", Agent: "haiku-coder", Tools: "Read,Edit,Write,Bash,Grep,Glob", StrictMCP: true, NoSlash: true})
-	}
-	return slots
 }
 
-// residentSlotByRole finds the slot with role in r.resident.
+// coderSlot is the definition of a haiku coder role: "coder" (always on) or "coder2".."coder9" (extra).
+func coderSlot(role string) residentSlot {
+	return residentSlot{Role: role, Model: "haiku", Agent: "haiku-coder", Tools: "Read,Edit,Write,Bash,Grep,Glob", StrictMCP: true, NoSlash: true}
+}
+
+// extraCoderRole is the role of extra coder i (0-based): coder2 for i=0.
+func extraCoderRole(i int) string {
+	return fmt.Sprintf("coder%d", i+2)
+}
+
+// isExtraCoder reports whether role is an extra coder (coder2...), which expires after extraCoderTTL idle.
+func isExtraCoder(role string) bool {
+	return strings.HasPrefix(role, "coder") && role != "coder"
+}
+
+// residentSlotByRole finds the slot with role in r.resident. Coder roles resolve even when not listed
+// (extra coders are not in r.resident).
 func (r *Repl) residentSlotByRole(role string) (residentSlot, bool) {
 	for _, s := range r.resident {
 		if s.Role == role {
 			return s, true
 		}
+	}
+	if strings.HasPrefix(role, "coder") {
+		return coderSlot(role), true
 	}
 	return residentSlot{}, false
 }

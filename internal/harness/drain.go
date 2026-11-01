@@ -24,6 +24,8 @@ type agentRec struct {
 	OutPath     string
 	Background  bool
 	Started     time.Time
+	ResultPath  string // durable result file, relative to cwd: notes/runs/<YYMMDD>-agent-<id>.md
+	ResultDone  bool   // the result block was appended to ResultPath (background agents)
 	Done        bool
 	Interrupted bool      // child gone before the agent finished (restored from disk or harness exit)
 	Restored    bool      // loaded from the agent store, not started in this process
@@ -68,6 +70,7 @@ type agentTracker struct {
 	agents map[string]*agentRec
 
 	store      *agentStore
+	cwd        string        // project dir: background results are appended under cwd/notes/runs (empty: off)
 	parent     func() string // session id of the child that owns this tracker
 	transcript func() string // that child's Claude Code transcript path
 	notify     func(string)  // receives one completion line per finished agent (nil: silent)
@@ -110,7 +113,7 @@ func (t *agentTracker) onToolUse(id, name string, input map[string]any, now time
 		sess = str(input["subagent_type"])
 	}
 	a := &agentRec{ID: id, Task: str(input["description"]), Prompt: firstLine(p), OutPath: outPathRe.FindString(p),
-		Model: str(input["model"]), Name: sess, Background: bg, Started: now}
+		Model: str(input["model"]), Name: sess, Background: bg, Started: now, ResultPath: agentResultRel(id, now)}
 	if st, err := os.Stat(a.OutPath); a.OutPath != "" && err == nil {
 		a.startMod, a.startSize = st.ModTime(), st.Size()
 	}
@@ -148,10 +151,14 @@ func (t *agentTracker) onNotification(text string) bool {
 	t.mu.Lock()
 	found := false
 	var lines []string
+	var wrote []*agentRec
 	for _, m := range notifIDRe.FindAllStringSubmatch(text, -1) {
 		if a := t.agents[m[1]]; a != nil {
 			if l := markDoneLocked(a); l != "" {
 				lines = append(lines, l)
+			}
+			if a.Background && !a.ResultDone {
+				wrote = append(wrote, a)
 			}
 			found = true
 		}
@@ -161,6 +168,7 @@ func (t *agentTracker) onNotification(text string) bool {
 	}
 	t.mu.Unlock()
 	t.emit(lines)
+	t.writeResults(wrote, text)
 	return found
 }
 
@@ -214,14 +222,19 @@ func (t *agentTracker) finishOldestBackground() {
 		}
 	}
 	var lines []string
+	var wrote []*agentRec
 	if old != nil {
 		if l := markDoneLocked(old); l != "" {
 			lines = append(lines, l)
+		}
+		if !old.ResultDone {
+			wrote = append(wrote, old)
 		}
 		t.persistLocked()
 	}
 	t.mu.Unlock()
 	t.emit(lines)
+	t.writeResults(wrote, "")
 }
 
 func (t *agentTracker) running() []*agentRec {

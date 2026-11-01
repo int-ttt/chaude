@@ -162,21 +162,17 @@ func (r *Repl) mcpReply(line []byte) []byte {
 	return b
 }
 
-// pickCoderRole returns the first coder slot that is idle (live and not busy, or not started yet).
-// Every coder slot busy -> error.
+// pickCoderRole returns the first idle coder: the always-on coder, then extra coders up to extraCoders
+// (not started yet counts as idle; they are spawned by the caller). Every coder busy -> error.
 func (r *Repl) pickCoderRole() (string, error) {
-	found := false
-	for _, s := range r.resident {
-		if !strings.HasPrefix(s.Role, "coder") {
-			continue
-		}
-		found = true
-		if c, live := r.residentChild(s.Role); !live || c.busyRec() == nil {
-			return s.Role, nil
-		}
+	roles := []string{"coder"}
+	for i := 0; i < r.extraCoders; i++ {
+		roles = append(roles, extraCoderRole(i))
 	}
-	if !found {
-		return "", errors.New("no resident coder slot (coder_slots is 0)")
+	for _, role := range roles {
+		if c, live := r.residentChild(role); !live || c.busyRec() == nil {
+			return role, nil
+		}
 	}
 	return "", errors.New("all resident coders are busy")
 }

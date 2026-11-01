@@ -46,13 +46,17 @@ func (r *Repl) sweepIdle(now time.Time) bool {
 		r.children.mu.Unlock()
 		for _, e := range list {
 			busy := e.c.Tracker != nil && len(e.c.Tracker.running()) > 0
+			ttl := deadline
+			if isExtraCoder(e.c.Role) && (ttl <= 0 || extraCoderTTL < ttl) {
+				ttl = extraCoderTTL
+			}
 			switch {
 			case childDead(e.c):
 				if c, ok := r.children.Take(e.k); ok {
 					go c.Sess.Close()
 					r.reg.MarkEnded(r.a.Cwd, c.Model, "child-exit", now)
 				}
-			case deadline > 0 && !busy && now.Sub(e.c.lastAPI()) >= deadline:
+			case ttl > 0 && !busy && now.Sub(e.c.lastAPI()) >= ttl:
 				if c, ok := r.children.Take(e.k); ok {
 					go c.Sess.Close()
 					r.reg.MarkEnded(r.a.Cwd, c.Model, "expired", now)

@@ -21,7 +21,7 @@ func stubSessions(t *testing.T) *int {
 func residentRepl(t *testing.T, maxWorkers int) *Repl {
 	t.Helper()
 	return &Repl{out: io.Discard, tr: &Transcript{path: t.TempDir() + "/t.jsonl"}, tracker: newAgentTracker(),
-		a: Args{Model: "haiku", Cwd: t.TempDir(), MaxWorkers: maxWorkers}, children: newChildSet(), resident: residentSlots("haiku", 1)}
+		a: Args{Model: "haiku", Cwd: t.TempDir(), MaxWorkers: maxWorkers}, children: newChildSet(), resident: residentSlots("haiku")}
 }
 
 func TestResidentSpawnsEager(t *testing.T) {
@@ -42,7 +42,7 @@ func TestResidentSpawnsEager(t *testing.T) {
 }
 
 func TestResidentSlotsFour(t *testing.T) {
-	s := residentSlots("opus", 1)
+	s := residentSlots("opus")
 	want := []string{"main", "prompter", "tui", "coder"}
 	if len(s) != len(want) {
 		t.Fatalf("slots %d, want %d", len(s), len(want))

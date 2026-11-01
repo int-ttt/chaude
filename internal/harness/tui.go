@@ -146,6 +146,7 @@ type tuiModel struct {
 	sig       int
 	mouse     bool
 	hist      inputHistory
+	histPath  string // <project>/.chaude/history.jsonl; "" = not persisted
 	rw        rewindState
 	lastEsc   time.Time
 	queue     []string // prompts typed while a foreground answer runs; merged into one turn when it ends
@@ -247,6 +248,21 @@ func newTUIModel(r *Repl, submit chan string) *tuiModel {
 	sp.Spinner = spinner.Spinner{Frames: []string{"✻", "✽", "✶", "✳", "✢", "·"}, FPS: time.Second / 8}
 	sp.Style = lipgloss.NewStyle().Foreground(orange)
 	return &tuiModel{r: r, submit: submit, sp: sp, mouse: true, imeShift: imeColShift()}
+}
+
+// loadHistory restores the recall list from <cwd>/.chaude/history.jsonl and enables saving there.
+func (m *tuiModel) loadHistory(cwd string) {
+	m.histPath = historyFileFor(cwd)
+	m.hist.items = loadInputHistory(m.histPath)
+	m.hist.idx = len(m.hist.items)
+}
+
+// recordHistory adds a submitted prompt to the recall list and saves it to the project history file.
+func (m *tuiModel) recordHistory(line string) {
+	m.hist.Add(line)
+	if m.histPath != "" {
+		_ = saveInputHistory(m.histPath, m.hist.items) // best effort: recall still works in memory
+	}
 }
 
 func (m *tuiModel) Init() tea.Cmd { return m.sp.Tick }
@@ -414,6 +430,10 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.busy && m.perm == nil && m.r.sweepIdle(time.Now()) {
 			m.busy, m.turnStart = true, time.Now()
 			m.submit <- "/idle-rotate" // rotate on the sender goroutine, like a user prompt
+		}
+		if !m.busy && m.perm == nil && m.r.deferredDue(time.Now()) {
+			m.busy, m.turnStart = true, time.Now()
+			m.submit <- "/rotate-deferred" // held rotation: background agents finished or timed out
 		}
 	case textMsg:
 		m.appendAsst(string(v))
@@ -659,21 +679,27 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "up", "down":
-		if n := len(m.suggestions()); n > 0 {
-			if k.String() == "up" {
-				m.sel = (m.sel + n - 1) % n
-			} else {
-				m.sel = (m.sel + 1) % n
-			}
-		} else if k.String() == "up" {
+		// The slash completer owns Up/Down only while open and no recalled prompt is shown.
+		// Up at its top item and any Up/Down on a recalled prompt go to history.
+		n := len(m.suggestions())
+		switch {
+		case n > 0 && !m.hist.Browsing() && k.String() == "down":
+			m.sel = (m.sel + 1) % n
+		case n > 0 && !m.hist.Browsing() && m.sel > 0:
+			m.sel--
+		case k.String() == "up":
 			if !m.in.MoveRow(-1) {
 				if v, ok := m.hist.Prev(m.in.Value()); ok {
 					m.in.SetValue(v)
+					m.sel = 0
 				}
 			}
-		} else if !m.in.MoveRow(1) && m.hist.Browsing() {
-			if v, ok := m.hist.Next(); ok {
-				m.in.SetValue(v)
+		default:
+			if !m.in.MoveRow(1) && m.hist.Browsing() {
+				if v, ok := m.hist.Next(); ok {
+					m.in.SetValue(v)
+					m.sel = 0
+				}
 			}
 		}
 		m.after()
@@ -725,14 +751,14 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(line, "/") {
 				if line == "/usage" { // allowed while thinking: separate one-shot claude call, popup
 					m.in.SetValue("")
-					m.hist.Add(line)
+					m.recordHistory(line)
 					m.after()
 					go func() { usageSend(m.r, usageMsg(usageFetch(m.r.lastCtx))) }()
 					return m, nil
 				}
 				if f := strings.Fields(line); busyOK[f[0]] { // read-only / UI-only: no conversation or session change
 					m.in.SetValue("")
-					m.hist.Add(line)
+					m.recordHistory(line)
 					m.after()
 					return m.runSlash(line)
 				}
@@ -741,14 +767,14 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.in.SetValue("")
-			m.hist.Add(line)
+			m.recordHistory(line)
 			m.queue = append(m.queue, line)
 			m.vp.GotoBottom()
 			m.after()
 			return m, nil
 		}
 		m.in.SetValue("")
-		m.hist.Add(line)
+		m.recordHistory(line)
 		if strings.HasPrefix(line, "/") {
 			if sg := m.suggestions(); len(sg) > 0 && sg[min(m.sel, len(sg)-1)].name != line {
 				c := sg[min(m.sel, len(sg)-1)].name
@@ -765,9 +791,10 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.sel = 0
+	if !m.vp.AtBottom() {
+		m.held = true // typing keeps the output scroll position away from the tail
+	}
 	m.edit(k)
-	m.held = false
-	m.vp.GotoBottom() // typing returns the transcript to the tail
 	m.after()
 	return m, nil
 }
@@ -1304,6 +1331,7 @@ func (r *Repl) runTUI() int {
 	}()
 	submit := make(chan string)
 	m := newTUIModel(r, submit)
+	m.loadHistory(r.a.Cwd)
 	cw := &cursorWriter{File: os.Stdout, w: os.Stdout, col: &m.curCol, up: &m.curUp}
 	lipgloss.SetHasDarkBackground(true) // skip the slow OSC background query at startup
 	go claudeVersion()                  // warm the /version cache off the UI goroutine
@@ -1318,6 +1346,8 @@ func (r *Repl) runTUI() int {
 				r.rotate("manual")
 			case line == "/idle-rotate":
 				r.idleRotateNow()
+			case line == "/rotate-deferred":
+				r.runDeferredRotate()
 			case line == "/clear":
 				r.clearWithHandoff()
 			case passthroughCmds[f[0]]:

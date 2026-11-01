@@ -92,9 +92,38 @@ func TestWheelScrollHoldsPosition(t *testing.T) {
 		t.Fatal("back at bottom must resume follow")
 	}
 	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: 5, Y: 2})
+	held := m.vp.YOffset
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
-	if m.held || !m.vp.AtBottom() {
-		t.Fatal("typing must resume follow")
+	if !m.held || m.vp.YOffset != held {
+		t.Fatal("typing must keep the scroll position")
+	}
+}
+
+// Typing alone never moves the output pane, whether or not the user scrolled away from the tail.
+func TestTypingKeepsScroll(t *testing.T) {
+	m, _ := avModel(t)
+	for i := 0; i < 80; i++ {
+		m.blocks = append(m.blocks, block{"note", "line", false})
+	}
+	m.refresh()
+	m.vp.GotoTop()
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("abc")})
+	if m.vp.YOffset != 0 || m.vp.AtBottom() {
+		t.Fatalf("unheld typing moved to %d", m.vp.YOffset)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if m.vp.YOffset != 0 {
+		t.Fatalf("typing again moved to %d", m.vp.YOffset)
+	}
+	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: 5, Y: 2})
+	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown, X: 5, Y: 2})
+	off := m.vp.YOffset
+	if !m.held || off == 0 {
+		t.Fatalf("wheel down away from bottom must hold, held=%v off=%d", m.held, off)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if !m.held || m.vp.YOffset != off {
+		t.Fatalf("held typing moved: held=%v off=%d want %d", m.held, m.vp.YOffset, off)
 	}
 }
 
@@ -109,8 +138,8 @@ func TestScrollBottomOnInputAndUpdate(t *testing.T) {
 	}
 	m.vp.GotoTop()
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
-	if !m.vp.AtBottom() {
-		t.Fatal("typing must scroll to bottom")
+	if m.vp.AtBottom() {
+		t.Fatal("typing must keep the scroll position")
 	}
 	m.vp.GotoBottom()
 	m.appendAsst("more")

@@ -50,32 +50,33 @@ func forwardRuleFor(model string) string {
 
 // Args mirrors the argparse flags.
 type Args struct {
-	Model            string
-	Cwd              string
-	Threshold        int
-	CompactWindow    int
-	MaxAutoRotations int // -1 = unlimited (python None)
-	Transcript       string
-	TailTurns        int
-	SnapshotChars    int
-	AutoAllow        bool
-	ShowRotation     bool
-	MetricsDir       string
-	AgentsFile       string        // persisted sub-agent state (empty=off)
-	NoValidate       bool          // disable handoff validation (safety guard off)
-	MaxDrain         int           // max concurrently draining old sessions
-	DrainTimeout     time.Duration // give up waiting for a draining session's agents
-	Cooldown         time.Duration // min gap after a failed rotation
-	FromClaude       string        // import a plain Claude Code transcript: session id | path | latest
-	ImportDry        bool          // with FromClaude: print the handoff stats and exit
-	NoCategoryRotate bool          // disable category-based rotation (no marker rule, no switch rotation)
-	NoDelegationRule bool          // do not append the haiku delegation rule to the child's system prompt
-	CacheTTL         string        // prompt cache TTL requested from claude: auto|1h|5m (see withCacheTTL)
-	IdleRotate       time.Duration // idle time after which a child is treated as cold; 0 = off
-	ClientsFile      string        // per-(cwd,model) client registry; empty = off
-	MaxWorkers       int           // cap on concurrent live worker sessions (see resolveMaxWorkers)
-	TaskBudgetUSD    float64       // per-task USD cap (--task-budget-usd); 0 = off
-	Orch             string        // orchestration mode m0|b|c|d|e|f (A/B test)
+	Model              string
+	Cwd                string
+	Threshold          int
+	CompactWindow      int
+	MaxAutoRotations   int // -1 = unlimited (python None)
+	Transcript         string
+	TailTurns          int
+	SnapshotChars      int
+	AutoAllow          bool
+	ShowRotation       bool
+	MetricsDir         string
+	AgentsFile         string        // persisted sub-agent state (empty=off)
+	NoValidate         bool          // disable handoff validation (safety guard off)
+	MaxDrain           int           // max concurrently draining old sessions
+	DrainTimeout       time.Duration // give up waiting for a draining session's agents
+	RotateDeferTimeout time.Duration // hold a rotation while background agents run, at most this long (0=rotate at once)
+	Cooldown           time.Duration // min gap after a failed rotation
+	FromClaude         string        // import a plain Claude Code transcript: session id | path | latest
+	ImportDry          bool          // with FromClaude: print the handoff stats and exit
+	NoCategoryRotate   bool          // disable category-based rotation (no marker rule, no switch rotation)
+	NoDelegationRule   bool          // do not append the haiku delegation rule to the child's system prompt
+	CacheTTL           string        // prompt cache TTL requested from claude: auto|1h|5m (see withCacheTTL)
+	IdleRotate         time.Duration // idle time after which a child is treated as cold; 0 = off
+	ClientsFile        string        // per-(cwd,model) client registry; empty = off
+	MaxWorkers         int           // cap on concurrent live worker sessions (see resolveMaxWorkers)
+	TaskBudgetUSD      float64       // per-task USD cap (--task-budget-usd); 0 = off
+	Orch               string        // orchestration mode m0|b|c|d|e|f (A/B test)
 }
 
 type kv struct {
@@ -250,6 +251,9 @@ type Repl struct {
 	spend           *turnSpend // subagent usage and spawns of the current turn
 	metrics         *Metrics
 	tracker         *agentTracker
+	deferMu         sync.Mutex  // guards deferredRot, deferSince
+	deferredRot     string      // reason of a rotation held while background agents run ("" = none)
+	deferSince      time.Time   // when the current hold started (zero = not holding)
 	agents          *agentStore // on-disk agent state (nil/empty path = off)
 	draining        []*drain
 	ownMu           sync.Mutex // guards owned
@@ -272,7 +276,8 @@ type Repl struct {
 	idle            idleTurn            // child-initiated turn being rendered (idle reader goroutine only)
 	reg             *clientRegistry     // per-(cwd,model) client registry; nil = off (old routing)
 	children        *childSet           // live child processes kept per (cwd,model); nil = off
-	resident        []residentSlot      // resident slots: main, prompter, tui, coder... (residentSlots)
+	resident        []residentSlot      // resident slots: main, prompter, tui, coder (residentSlots)
+	extraCoders     int                 // extra coder sessions (coder2...) on a 270s idle TTL, from settings extra_coders
 	prevOwned       map[string]bool     // session ids from the previous run's exit handoff (same cwd); /view lists them
 	mcpMu           sync.Mutex          // guards mcpCfg
 	mcpCfg          string              // --mcp-config file served to the main child ("" = not started)
@@ -374,6 +379,7 @@ func (r *Repl) start() error {
 	r.tracker = newAgentTracker()
 	tk := r.tracker
 	tk.notify = r.agentNotice
+	tk.cwd = r.a.Cwd
 	tk.store = r.agents
 	tk.parent = s.ID
 	tk.transcript = func() string {
@@ -835,6 +841,11 @@ func (r *Repl) buildSnapshot(note string) string {
 		n = "(empty)"
 	}
 	parts := []string{preamble, "## Handoff note (written by previous session)", n}
+	if r.tracker != nil {
+		if l := r.tracker.bgHandoffLines(); len(l) > 0 {
+			parts = append(parts, "## Background agents (results in notes/runs/)", strings.Join(l, "\n"))
+		}
+	}
 	if len(r.files) > 0 {
 		var l []string
 		for _, f := range r.files {
@@ -904,6 +915,9 @@ func (r *Repl) makeSnapshotN(reason string) (snap string, st snapState, attempts
 }
 
 func (r *Repl) rotate(reason string) {
+	if r.deferRotate(reason) {
+		return
+	}
 	old := r.sess.SessionID
 	t0 := time.Now()
 	if r.pendingSnapshot != "" {
@@ -1235,6 +1249,7 @@ func Main(args []string) int {
 	fs.BoolVar(&a.NoValidate, "no-handoff-validate", false, "disable handoff validation (safety guard)")
 	fs.IntVar(&a.MaxDrain, "max-drain", 3, "max concurrently draining old sessions (0=never drain)")
 	fs.DurationVar(&a.DrainTimeout, "drain-timeout", 60*time.Minute, "give up waiting for draining agents")
+	fs.DurationVar(&a.RotateDeferTimeout, "rotate-defer-timeout", 10*time.Minute, "hold a rotation while background agents run, at most this long (0=rotate at once)")
 	fs.DurationVar(&a.Cooldown, "rotate-cooldown", 2*time.Minute, "min gap after a failed rotation")
 	fs.BoolVar(&a.NoCategoryRotate, "no-category-rotate", false, "disable category-based session rotation")
 	fs.BoolVar(&a.NoDelegationRule, "no-delegation-rule", false, "do not append the haiku delegation rule to the child's system prompt")
@@ -1290,11 +1305,11 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	if !maxWorkersSet && strings.TrimSpace(os.Getenv("CHAUDE_MAX_WORKERS")) == "" && mw < residentMaxWorkers {
-		mw = residentMaxWorkers
+	if !maxWorkersSet && strings.TrimSpace(os.Getenv("CHAUDE_MAX_WORKERS")) == "" && mw < residentMaxWorkers+set.ExtraCoders {
+		mw = residentMaxWorkers + set.ExtraCoders // extra coders are parked children too: keep room for workers
 	}
 	a.MaxWorkers = mw
-	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1), resident: residentSlots(a.Model, set.CoderSlots)}
+	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1), resident: residentSlots(a.Model), extraCoders: set.ExtraCoders}
 	r.prevOwned = loadPrevOwned(recordDir(a.Cwd), a.Cwd)
 	_, _ = pruneRecordFiles(recordDir(a.Cwd), set.SessionRetentionDays, time.Now())
 	if st, err := os.Stdin.Stat(); err == nil {

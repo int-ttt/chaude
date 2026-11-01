@@ -50,7 +50,7 @@ func (m *tuiModel) closeSettings() {
 	if p == nil {
 		return
 	}
-	msg := "설정 저장: " + p.path + " · 보존 기간·상주 코더 수·메인 모델은 다음 세션 시작 시 적용"
+	msg := "설정 저장: " + p.path + " · 보존 기간·추가 coder 수·메인 모델은 다음 세션 시작 시 적용"
 	if p.path == "" {
 		msg = "설정 경로를 알 수 없음 (작업 폴더 없음)"
 	} else if err := saveChaudeSettings(p.path, p.s); err != nil {
@@ -73,8 +73,8 @@ func (p *settingsPick) change(dir int) {
 		n := len(settingsRetainChoices)
 		p.s.SessionRetentionDays = settingsRetainChoices[(i+dir+n)%n]
 	case 1:
-		n := settingsMaxCoderSlots + 1
-		p.s.CoderSlots = (p.s.CoderSlots + dir + n) % n
+		n := settingsMaxExtraCoders + 1
+		p.s.ExtraCoders = (p.s.ExtraCoders + dir + n) % n
 	case 2:
 		i := 0
 		for j, v := range settingsModelChoices {
@@ -94,7 +94,7 @@ func (m *tuiModel) settingsLines(h int) string {
 	l := []string{orangeSt.Render("Settings  (↑/↓ wheel move · ←/→ or enter change · esc save & close)")}
 	rows := []string{
 		fmt.Sprintf("session_retention_days  %d일 (0 = 영구 보존)", p.s.SessionRetentionDays),
-		fmt.Sprintf("coder_slots             %d (상주 haiku 코더 0-8)", p.s.CoderSlots),
+		fmt.Sprintf("extra_coders            %d (추가 coder (270초) 수, 0-8)", p.s.ExtraCoders),
 		fmt.Sprintf("main_model              %s", p.s.MainModel),
 	}
 	for i, r := range rows {

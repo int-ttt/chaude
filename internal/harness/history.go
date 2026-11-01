@@ -1,5 +1,13 @@
 package harness
 
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
 // inputHistory is the up/down prompt recall list (shell style). Pure state, no I/O.
 type inputHistory struct {
 	items []string
@@ -7,7 +15,64 @@ type inputHistory struct {
 	draft string
 }
 
-const maxHistory = 200
+const maxHistory = 500
+
+// historyFileFor is <project cwd>/.chaude/history.jsonl, one JSON string per line (oldest first).
+// An empty cwd means the process working directory, as settingsFileFor does.
+func historyFileFor(cwd string) string {
+	if cwd == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return ""
+		}
+		cwd = wd
+	}
+	return filepath.Join(cwd, ".chaude", "history.jsonl")
+}
+
+// loadInputHistory reads the saved prompts at path. Missing or undecodable lines are skipped; the
+// Add rules (dedupe consecutive, blanks, cap) apply. A missing file yields an empty list.
+func loadInputHistory(path string) []string {
+	if path == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	var h inputHistory
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		var s string
+		if json.Unmarshal([]byte(strings.TrimSpace(sc.Text())), &s) == nil {
+			h.Add(s)
+		}
+	}
+	return h.items
+}
+
+// saveInputHistory rewrites path with items through a tmp file and rename.
+func saveInputHistory(path string, items []string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	var sb strings.Builder
+	for _, s := range items {
+		b, err := json.Marshal(s)
+		if err != nil {
+			return err
+		}
+		sb.Write(b)
+		sb.WriteByte('\n')
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(sb.String()), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
 
 // Add records a submitted prompt (consecutive duplicates and blanks are skipped) and ends browsing.
 func (h *inputHistory) Add(s string) {

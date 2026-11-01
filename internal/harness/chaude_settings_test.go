@@ -3,13 +3,14 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestSettingsDefaultsWhenMissing(t *testing.T) {
 	s := loadChaudeSettings(filepath.Join(t.TempDir(), "none.json"))
-	want := chaudeSettings{SessionRetentionDays: 30, CoderSlots: 4, MainModel: "opus"}
+	want := chaudeSettings{SessionRetentionDays: 30, ExtraCoders: 4, MainModel: "opus"}
 	if s != want {
 		t.Fatalf("defaults %+v, want %+v", s, want)
 	}
@@ -19,18 +20,18 @@ func TestSettingsDefaultsWhenMissing(t *testing.T) {
 }
 
 func TestSettingsClamp(t *testing.T) {
-	s := chaudeSettings{SessionRetentionDays: -5, CoderSlots: 99, MainModel: "gpt"}.clamp()
-	if s.SessionRetentionDays != 0 || s.CoderSlots != 8 || s.MainModel != "opus" {
+	s := chaudeSettings{SessionRetentionDays: -5, ExtraCoders: 99, MainModel: "gpt"}.clamp()
+	if s.SessionRetentionDays != 0 || s.ExtraCoders != 8 || s.MainModel != "opus" {
 		t.Fatalf("clamp %+v", s)
 	}
-	if got := (chaudeSettings{CoderSlots: -1, MainModel: "sonnet"}).clamp(); got.CoderSlots != 0 || got.MainModel != "sonnet" {
+	if got := (chaudeSettings{ExtraCoders: -1, MainModel: "sonnet"}).clamp(); got.ExtraCoders != 0 || got.MainModel != "sonnet" {
 		t.Fatalf("clamp low %+v", got)
 	}
 }
 
 func TestSettingsSaveLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".chaude", "settings.json")
-	in := chaudeSettings{SessionRetentionDays: 0, CoderSlots: 2, MainModel: "fable"}
+	in := chaudeSettings{SessionRetentionDays: 0, ExtraCoders: 2, MainModel: "fable"}
 	if err := saveChaudeSettings(path, in); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ func TestSettingsPartialFileKeepsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := loadChaudeSettings(path)
-	if s.CoderSlots != 6 || s.SessionRetentionDays != 30 || s.MainModel != "opus" {
+	if s.ExtraCoders != 6 || s.SessionRetentionDays != 30 || s.MainModel != "opus" {
 		t.Fatalf("partial %+v", s)
 	}
 }
@@ -127,29 +128,32 @@ func TestExitHandoffWriteRead(t *testing.T) {
 	}
 }
 
-func TestResidentSlotsCoderCount(t *testing.T) {
-	roles := func(s []residentSlot) []string {
-		var r []string
-		for _, x := range s {
-			r = append(r, x.Role)
-		}
-		return r
+func TestResidentSlotsFixedFour(t *testing.T) {
+	var got []string
+	for _, x := range residentSlots("opus") {
+		got = append(got, x.Role)
 	}
-	got := roles(residentSlots("opus", 3))
-	want := []string{"main", "prompter", "tui", "coder", "coder2", "coder3"}
-	if len(got) != len(want) {
+	want := []string{"main", "prompter", "tui", "coder"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("roles %v, want %v", got, want)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("roles %v, want %v", got, want)
-		}
+}
+
+func TestLegacyCoderSlotsKey(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "old.json")
+	if err := os.WriteFile(legacy, []byte(`{"coder_slots": 2}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if n := len(residentSlots("opus", 99)); n != 3+settingsMaxCoderSlots {
-		t.Fatalf("clamped slots %d", n)
+	if s := loadChaudeSettings(legacy); s.ExtraCoders != 2 {
+		t.Fatalf("legacy coder_slots gave ExtraCoders %d, want 2", s.ExtraCoders)
 	}
-	if n := len(residentSlots("opus", 0)); n != 3 {
-		t.Fatalf("zero coders gave %d slots", n)
+	both := filepath.Join(dir, "both.json")
+	if err := os.WriteFile(both, []byte(`{"coder_slots": 2, "extra_coders": 5}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if s := loadChaudeSettings(both); s.ExtraCoders != 5 {
+		t.Fatalf("extra_coders should win, got %d", s.ExtraCoders)
 	}
 }
 
@@ -159,7 +163,7 @@ func TestSettingsFileIsPerProject(t *testing.T) {
 	if want := filepath.Join(projA, ".chaude", "settings.json"); pathA != want {
 		t.Fatalf("path %s, want %s", pathA, want)
 	}
-	inA := chaudeSettings{SessionRetentionDays: 7, CoderSlots: 2, MainModel: "sonnet"}
+	inA := chaudeSettings{SessionRetentionDays: 7, ExtraCoders: 2, MainModel: "sonnet"}
 	if err := saveChaudeSettings(pathA, inA); err != nil {
 		t.Fatal(err)
 	}

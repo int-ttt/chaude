@@ -6,19 +6,19 @@ import (
 	"path/filepath"
 )
 
-// chaudeSettings is ~/.chaude/settings.json. Changes to coder_slots and main_model apply on the next
+// chaudeSettings is <project>/.chaude/settings.json. Changes to extra_coders and main_model apply on the next
 // session start; session_retention_days applies at the next start (prune).
 type chaudeSettings struct {
 	SessionRetentionDays int    `json:"session_retention_days"` // 0 = keep forever
-	CoderSlots           int    `json:"coder_slots"`            // resident haiku coder slots, 0-8
+	ExtraCoders          int    `json:"extra_coders"`           // extra haiku coders (coder2...) on a 270s idle TTL, 0-8
 	MainModel            string `json:"main_model"`             // opus | sonnet | fable
 }
 
 const (
-	settingsMaxCoderSlots = 8
-	settingsDefaultRetain = 30
-	settingsDefaultCoders = 4
-	settingsDefaultModel  = "opus"
+	settingsMaxExtraCoders     = 8
+	settingsDefaultRetain      = 30
+	settingsDefaultExtraCoders = 4
+	settingsDefaultModel       = "opus"
 )
 
 // mainModelIDs maps the settings alias to the claude model id used for the main session.
@@ -30,19 +30,19 @@ var mainModelIDs = map[string]string{
 
 // defaultChaudeSettings returns the values used when the file is missing or a field is absent.
 func defaultChaudeSettings() chaudeSettings {
-	return chaudeSettings{SessionRetentionDays: settingsDefaultRetain, CoderSlots: settingsDefaultCoders, MainModel: settingsDefaultModel}
+	return chaudeSettings{SessionRetentionDays: settingsDefaultRetain, ExtraCoders: settingsDefaultExtraCoders, MainModel: settingsDefaultModel}
 }
 
-// clamp fixes out-of-range values: retention >= 0, coder slots 0-8, unknown main model -> opus.
+// clamp fixes out-of-range values: retention >= 0, extra coders 0-8, unknown main model -> opus.
 func (s chaudeSettings) clamp() chaudeSettings {
 	if s.SessionRetentionDays < 0 {
 		s.SessionRetentionDays = 0
 	}
-	if s.CoderSlots < 0 {
-		s.CoderSlots = 0
+	if s.ExtraCoders < 0 {
+		s.ExtraCoders = 0
 	}
-	if s.CoderSlots > settingsMaxCoderSlots {
-		s.CoderSlots = settingsMaxCoderSlots
+	if s.ExtraCoders > settingsMaxExtraCoders {
+		s.ExtraCoders = settingsMaxExtraCoders
 	}
 	if _, ok := mainModelIDs[s.MainModel]; !ok {
 		s.MainModel = settingsDefaultModel
@@ -69,7 +69,7 @@ func settingsFileFor(cwd string) string {
 }
 
 // loadChaudeSettings reads path. A missing or unreadable file yields the defaults; absent fields keep
-// their defaults; the result is clamped.
+// their defaults; the result is clamped. The 0.9.7 key coder_slots is read when extra_coders is absent.
 func loadChaudeSettings(path string) chaudeSettings {
 	s := defaultChaudeSettings()
 	if path == "" {
@@ -80,6 +80,13 @@ func loadChaudeSettings(path string) chaudeSettings {
 		return s
 	}
 	_ = json.Unmarshal(b, &s)
+	var keys struct {
+		ExtraCoders *int `json:"extra_coders"`
+		CoderSlots  *int `json:"coder_slots"` // legacy name
+	}
+	if json.Unmarshal(b, &keys) == nil && keys.ExtraCoders == nil && keys.CoderSlots != nil {
+		s.ExtraCoders = *keys.CoderSlots
+	}
 	return s.clamp()
 }
 

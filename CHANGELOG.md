@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.9.8
+- 프롬프트 기록: 입력 기록을 프로젝트별 `<프로젝트>/.chaude/history.jsonl`에 저장(최대 500개), 다시 시작해도 유지. 위 방향키로 이전 입력을 불러옵니다(슬래시 완성 목록이 열려 있으면 위아래는 목록 이동, 목록 맨 위에서 위 키를 누르면 이전 입력으로 넘어감)
+- 회전 보류: 백그라운드 에이전트가 실행 중이면 컨텍스트 회전을 보류(최대 10분, `--rotate-defer-timeout`, 0이면 바로 회전). 시간이 지나면 회전 후 `rotate_defer` 기록 남김
+- 에이전트 결과 보존: 백그라운드 에이전트가 끝나면 결과를 `notes/runs/<YYMMDD>-agent-<id>.md`에 덧붙여 저장
+- 상주 세션은 main, prompter, tui, coder 4개로 고정(0.9.7 이전과 동일, 설정으로 바꾸지 않음)
+- `/settings`: `coder_slots`를 `extra_coders`(추가 coder 수, 0-8, 기본 4)로 변경. 추가 coder(coder2...)는 호출 시 생성되고 270초 유휴 후 종료. 예전 `coder_slots` 키도 읽음
+- TUI: 입력창 타이핑은 출력 화면 스크롤 위치를 바꾸지 않음(프롬프트 전송이나 맨 아래에서의 출력 갱신만 따라감)
+- haiku-coder: 최종 결과 요약을 `notes/runs/`에 먼저 기록한 뒤 반환
+- 버전 표기: cmd/chaude/main.go, docs/claude-lean/README.md, README.md를 0.9.8로 갱신
+
 ## 0.9.7
 - `/settings`: 설정을 프로젝트 폴더별 `<프로젝트>/.chaude/settings.json`에 저장(전역 `~/.chaude/settings.json` 폐지). 파일이 없으면 기본값 사용, 프로젝트마다 독립
 - 메인 모델 전체 이름: `main_model`(opus/sonnet/fable)을 `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-fable-5-1`로 CLI에 전달, 예산 단가 계산도 전체 이름 인식(이전에는 0으로 계산)
