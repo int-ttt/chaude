@@ -9,7 +9,7 @@
 ### macOS / Linux
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | bash
+curl -fsSL -H "Authorization: Bearer $GH_TOKEN" https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | bash
 chaude --version
 ```
 
@@ -21,7 +21,8 @@ chaude --version
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
+# 사용자 확인 필요: 토큰 헤더를 붙이는 이 형식은 실행해 보지 않았습니다.
+$h = @{ Authorization = "Bearer $env:GH_TOKEN" }; irm -Headers $h https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
 chaude --version
 ```
 
@@ -30,19 +31,17 @@ chaude --version
 
 ### 비공개 저장소일 때
 
-비공개 저장소라서 위 raw URL은 로그인 없이는 404가 됩니다. 설치 스크립트는 릴리즈를 GitHub API로 받으며 토큰을 이 순서로 찾습니다: `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth token`(gh가 있을 때). 토큰이 없으면 공개 저장소로 시도하고 실패합니다.
+저장소가 비공개라서 raw URL은 토큰 헤더 없이는 404가 됩니다. 위 한 줄에서 `$GH_TOKEN`을 실제 토큰으로 설정해 두세요. 설치 스크립트는 릴리즈를 GitHub API로 받으며 토큰을 이 순서로 찾습니다: `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth token`(gh가 있을 때). 토큰이 없으면 공개 저장소로 시도하고 실패합니다.
 
-- `gh auth login` 후 스크립트를 받아 실행: `gh api repos/int-ttt/chaude/contents/install.sh -H "Accept: application/vnd.github.raw" | bash`
-- Windows: `gh api repos/int-ttt/chaude/contents/install.ps1 -H "Accept: application/vnd.github.raw" | Out-String | iex`
-- 또는 `GH_TOKEN=<토큰>`을 설정하고 위의 raw 한 줄을 그대로 쓰면 됩니다.
-
-저장소를 공개하면 위 raw 한 줄로 바로 설치됩니다.
+- `gh auth login`을 했다면 `GH_TOKEN` 없이도 `gh auth token`으로 토큰을 찾습니다.
+- 저장소를 공개하면 헤더 없이 raw 한 줄로 바로 설치됩니다.
 
 ## 개발자용
 
 ### 소스에서 빌드
 
-설치 스크립트는 소스 빌드를 하지 않습니다. 직접 빌드하려면 Go 1.22+가 필요하고 `cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude`로 됩니다(Go 모듈은 `src/main/intt`에 있습니다). mac/linux는 `platform_setup/install.sh`, windows는 `platform_setup\install.ps1`이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
+설치 스크립트(`install.sh`, `install.ps1`)는 릴리즈 바이너리만 받고 소스 빌드를 하지 않습니다. Go 코드는 `src/main/intt`에 있고 루트 `go.work`가 이 모듈을 가리킵니다. 직접 빌드하려면 Go 1.22+가 필요합니다: `cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude`. mac/linux는 `platform_setup/install.sh`, windows는 `platform_setup\install.ps1`이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
+- `.gitattributes`는 `*.sh`, `*.py`를 LF로 고정합니다.
 
 ## 사용
 
@@ -196,7 +195,7 @@ Claude Code 훅은 `.claude/hooks/*.py`(Python 3.8+)이며 `python3 .claude/hook
 
 ## 효율 테스트 (핑퐁 게임)
 
-**결과: 비용 -42.7% (plain Opus 대비 harness, 2회 평균).** 전체 토큰은 오히려 +73%입니다. Haiku 서브에이전트가 토큰을 많이 쓰지만 단가가 낮아 비용은 줄었습니다.
+**결과: 비용 -42.7% (plain Opus 대비 harness, 2회 평균).**
 
 - 설정: 같은 3개 프롬프트("터미널 핑퐁게임 만들어줘" → "공 속도 좀 빠르게 하고 점수 표시해" → "q 누르면 종료되게")로 curses 핑퐁 게임을 두 방식으로 각 2회 만들었습니다. 모델은 opus, `claude -p --output-format json`, 2·3번째 프롬프트는 `--resume`.
   - plain: 빈 임시 폴더, CLAUDE.md·.claude 없음
@@ -208,7 +207,7 @@ Claude Code 훅은 `.claude/hooks/*.py`(Python 3.8+)이며 `python3 .claude/hook
 | plain | 51 | 26,882 | 672,394 | 88,301 | 787,628 | - | 1.379 |
 | harness | 38 (Opus) / 93 (Haiku) | 6,828 / 60,842 | 410,413 / 728,079 | 65,332 / 91,305 | 482,610 | 880,318 | 0.791 |
 
-- 차이 (harness - plain, 평균 기준): 비용 -42.7%, Opus 토큰 합 -38.7%, Opus output -74.6%, 모델 전체 토큰 합 +73.0% (Haiku 서브에이전트 토큰 포함).
+- 차이 (harness - plain, 평균 기준): 비용 -42.7%.
 - 두 게임 모두 컴파일되고 실행되며 q로 종료됨을 확인했습니다 (pty 스모크 테스트). 게임 품질은 측정하지 않았습니다.
 - 주의점:
   - n=2라 표본이 매우 작습니다. 범위로 해석하고 일반화하지 않습니다.

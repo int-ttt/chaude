@@ -13,7 +13,7 @@ Never open with an apology or a recap. Never redo the whole output. Opus classif
 | B. Question taken as an order | ~할 수 있나?, ~아니야?, ~어때? | Answer (≤5 lines), no action. Facts needed → `haiku-researcher`/`haiku-scout`. If something was already done, say so in one line and offer to revert. |
 | C. Fact correction | 아 ~가 아니라 ~다, A가 아니라 B야 | `/fact <old> → <new>` (haiku-batch-worker): FACTS.md + every file. Report files fixed. |
 | D. Change missing | 안 바뀐 것 같은데, ~했어?, 바꾼거 맞아? | `/check` (haiku-checker) → send FAIL items to the same haiku-drafter/haiku-coder → report per target. |
-| E. Doubt/pushback (근데 …) | 근데 ~ 아니야?, ~같은데, 이상한데 | Opus judges. Need evidence → haiku-scout/haiku-checker (or `sonnet-analyst` for analysis results) first. Verdict first: `맞습니다 / 일부 맞습니다 / 아닙니다` + reason ≤3 lines. Don't flip just because of pushback. Change only if yes or the user insists. |
+| E. Doubt/pushback (근데 …) | 근데 ~ 아니야?, ~같은데, 이상한데 | Opus judges. Need evidence → haiku-scout/haiku-checker first. Verdict first: `맞습니다 / 일부 맞습니다 / 아닙니다` + reason ≤3 lines. Don't flip just because of pushback. Change only if yes or the user insists. |
 | F. Direction change | 아니면 ~, 그냥 ~해, A로 가자 | `haiku-batch-worker` appends one line to `notes/DECISIONS.md` (or include it in the next haiku-drafter brief). Drop the old plan; re-brief. |
 | G. Preference/tone | 너무 어려워, 딱딱하게, 내가 쓴 것처럼 | Relay to the haiku-drafter: record the rule in DECISIONS.md, then revise. |
 

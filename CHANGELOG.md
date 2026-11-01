@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+- 설치: 비공개 저장소용 토큰 헤더 안내를 README에 추가했습니다 (`curl -fsSL -H "Authorization: Bearer $GH_TOKEN" .../install.sh | bash`). 설치 스크립트 토큰 순서는 `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth token`입니다.
+- 설치: `install.sh`와 `install.ps1`은 릴리즈 바이너리만 받습니다. 소스 빌드 절차는 README "개발자용" 절로 옮겼습니다.
+- 소스: Go 코드 위치를 `src/main/intt`로 고쳐 적었습니다 (루트 `go.work`가 이 모듈을 가리킵니다).
+- 설정: `.gitattributes`로 `*.sh`, `*.py` 줄바꿈을 LF로 고정합니다.
+- 문서: 효율 수치는 비용(-42.7%)만 적고 토큰 절감으로 표현하지 않습니다. `docs/pingpong-bench.md` 요약에서 토큰 차이 줄을 뺐습니다. 원시 수치 표는 그대로입니다.
+- 문서: 스킬 `correction`에서 없는 `sonnet-analyst` 참조를 지웠습니다.
+
 ## 0.9.11
 - `chaude clean [dir]`: 프로젝트에서 claude-lean 하네스를 제거합니다. 기본은 dry-run으로 제거 대상만 보여 주고 아무것도 바꾸지 않습니다.
 - `--yes`: 바뀔 파일을 `.chaude-backup-<YYYYMMDD-HHMMSS>/`에 먼저 복사한 뒤 제거합니다.

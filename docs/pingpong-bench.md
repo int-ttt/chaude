@@ -37,10 +37,6 @@ harness all: total 1362927.5, cost 0.79055, turns 4.5, dur_s 103.2
 
 ## diff (harness vs plain, mean)
 cost USD: -42.7%
-opus total tokens: -38.7%
-opus output: -74.6%
-opus cache_read: -39.0%
-all-model total tokens: +73.0% (harness subagent haiku tokens add to total)
 
 ## verify (headless pty smoke, compile + run + q exit)
 games-r1-plain: compile OK, exit 0, score text found
