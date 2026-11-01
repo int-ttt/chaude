@@ -25,10 +25,53 @@ type sessView struct {
 	cur   int
 }
 
+// noteOwn records a claude child this process started; its session id is known once it has spoken.
+func (r *Repl) noteOwn(s *Session) {
+	r.ownMu.Lock()
+	defer r.ownMu.Unlock()
+	r.owned = append(r.owned, s)
+}
+
+// filterOwn keeps the sessions whose id is in ids (order kept).
+func filterOwn(l []sessionInfo, ids map[string]bool) []sessionInfo {
+	var out []sessionInfo
+	for _, s := range l {
+		if ids[s.ID] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// ownSessionList: the Claude Code sessions of this chaude process (main, rotations, resident slots).
+// Sub-agents have no session file of their own; their events are in the parent session's transcript.
+func (r *Repl) ownSessionList() ([]sessionInfo, string) {
+	l, msg := r.sessionList()
+	if msg != "" {
+		return nil, msg
+	}
+	r.ownMu.Lock()
+	ids := map[string]bool{}
+	for id := range r.prevOwned {
+		ids[id] = true
+	}
+	for _, s := range r.owned {
+		if id := s.ID(); id != "" {
+			ids[id] = true
+		}
+	}
+	r.ownMu.Unlock()
+	out := filterOwn(l, ids)
+	if len(out) == 0 {
+		return nil, "no Claude Code sessions from this chaude session yet"
+	}
+	return out, ""
+}
+
 // openSessView: "/view" lists the Claude Code sessions below the input box; "/view <id-prefix>" opens
 // that session's prompts directly. Returns a message to show when nothing opened.
 func (m *tuiModel) openSessView(arg string) string {
-	l, msg := m.r.sessionList()
+	l, msg := m.r.ownSessionList()
 	if msg != "" {
 		return msg
 	}
@@ -67,6 +110,16 @@ func (m *tuiModel) openSessPrompts(s sessionInfo) string {
 	}
 	m.sv.id, m.sv.turns, m.sv.cur = s.ID, prompts, 0
 	return ""
+}
+
+// wheelSel moves a picker cursor one row per wheel notch (wraps), shared by the /resume and /view pickers.
+func wheelSel(sel *int, n int, b tea.MouseButton) {
+	switch b {
+	case tea.MouseButtonWheelUp:
+		*sel = (*sel + n - 1) % n
+	case tea.MouseButtonWheelDown:
+		*sel = (*sel + 1) % n
+	}
 }
 
 // closeSessView leaves /view and returns the transcript to the tail (scroll-bottom rule).

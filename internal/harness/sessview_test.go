@@ -24,6 +24,8 @@ func svModel(t *testing.T) *tuiModel {
 	writeSess(t, dir, "sessbbb2", now.Add(-time.Hour), "older prompt")
 	r := &Repl{tracker: newAgentTracker()}
 	r.a.Cwd = cwd
+	r.noteOwn(&Session{SessionID: "sessaaa1"})
+	r.noteOwn(&Session{SessionID: "sessbbb2"})
 	m := newTUIModel(r, make(chan string, 1))
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
 	return m
@@ -87,5 +89,48 @@ func TestViewArgOpensSessionDirectly(t *testing.T) {
 	}
 	if msg := m.openSessView("nope"); msg == "" || m.sv != nil {
 		t.Fatal("unmatched prefix must not open /view")
+	}
+}
+
+// /view lists only the sessions this chaude process spawned; other Claude Code sessions on disk stay hidden.
+func TestViewListsOnlyOwnSessions(t *testing.T) {
+	m := svModel(t)
+	m.r.owned = nil // no child of this process yet
+	if _, msg := m.r.ownSessionList(); msg == "" {
+		t.Fatal("no spawned child yet: /view must not list foreign sessions")
+	}
+	m.r.noteOwn(&Session{SessionID: "sessaaa1"}) // this process main child; sessbbb2 is another run
+	l, msg := m.r.ownSessionList()
+	if msg != "" || len(l) != 1 || l[0].ID != "sessaaa1" {
+		t.Fatalf("own list = %d %q, want only sessaaa1", len(l), msg)
+	}
+	if msg := m.openSessView("sessbbb"); msg == "" || m.sv != nil {
+		t.Fatalf("foreign session must not open: %q", msg)
+	}
+	if msg := m.openSessView(""); msg != "" || len(m.sv.list) != 1 {
+		t.Fatalf("/view list = %d %q, want 1", len(m.sv.list), msg)
+	}
+	if v := m.View(); strings.Contains(v, "sessbbb2") {
+		t.Fatalf("foreign session drawn in /view list:\n%s", v)
+	}
+}
+
+// The /view session list takes the same wheel cursor as the /resume picker (wraps around).
+func TestViewWheelMovesSessionCursor(t *testing.T) {
+	m := svModel(t)
+	m.r.noteOwn(&Session{SessionID: "sessaaa1"})
+	m.r.noteOwn(&Session{SessionID: "sessbbb2"})
+	m.openSessView("")
+	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	if m.sv.sel != 1 {
+		t.Fatalf("wheel down: sel=%d, want 1", m.sv.sel)
+	}
+	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	if m.sv.sel != 0 {
+		t.Fatalf("wheel down past end: sel=%d, want 0 (wrap)", m.sv.sel)
+	}
+	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	if m.sv.sel != 1 {
+		t.Fatalf("wheel up: sel=%d, want 1", m.sv.sel)
 	}
 }

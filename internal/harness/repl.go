@@ -252,6 +252,8 @@ type Repl struct {
 	tracker         *agentTracker
 	agents          *agentStore // on-disk agent state (nil/empty path = off)
 	draining        []*drain
+	ownMu           sync.Mutex // guards owned
+	owned           []*Session // every claude child this process started (main, rotations, resident slots); /view lists only their sessions
 	lastReply       string
 	lastMeasure     string // "[측정] ..." line of the turn that just ended (saved by recordSave)
 	recTopic        string
@@ -270,7 +272,8 @@ type Repl struct {
 	idle            idleTurn            // child-initiated turn being rendered (idle reader goroutine only)
 	reg             *clientRegistry     // per-(cwd,model) client registry; nil = off (old routing)
 	children        *childSet           // live child processes kept per (cwd,model); nil = off
-	resident        []residentSlot      // the four resident slots (residentSlots)
+	resident        []residentSlot      // resident slots: main, prompter, tui, coder... (residentSlots)
+	prevOwned       map[string]bool     // session ids from the previous run's exit handoff (same cwd); /view lists them
 	mcpMu           sync.Mutex          // guards mcpCfg
 	mcpCfg          string              // --mcp-config file served to the main child ("" = not started)
 	residentUp      bool                // spawnResident ran (once, after the first successful start)
@@ -363,6 +366,7 @@ func (r *Repl) start() error {
 		return err
 	}
 	r.sess = s
+	r.noteOwn(s)
 	r.clockMu.Lock()
 	r.lastAPI = time.Time{} // new child: no API call yet (idleDue needs a turn)
 	r.clockMu.Unlock()
@@ -1145,6 +1149,7 @@ func (r *Repl) loop() int {
 	}
 	r.restoreAgents("")
 	defer func() {
+		r.saveExitHandoff()
 		r.markInterrupted()
 		r.closeDrains()
 		if r.sess != nil {
@@ -1263,8 +1268,11 @@ func Main(args []string) int {
 			modelSet = true
 		}
 	})
+	set := loadChaudeSettings(settingsFileFor(a.Cwd))
 	if dm := orchDefaultModel(mode); dm != "" && !modelSet {
 		a.Model = dm
+	} else if !modelSet {
+		a.Model = set.modelID()
 	}
 	applyOrchEnv(mode)
 	if _, err := parseCacheTTL(a.CacheTTL); err != nil {
@@ -1286,7 +1294,9 @@ func Main(args []string) int {
 		mw = residentMaxWorkers
 	}
 	a.MaxWorkers = mw
-	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1), resident: residentSlots(a.Model)}
+	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1), resident: residentSlots(a.Model, set.CoderSlots)}
+	r.prevOwned = loadPrevOwned(recordDir(a.Cwd), a.Cwd)
+	_, _ = pruneRecordFiles(recordDir(a.Cwd), set.SessionRetentionDays, time.Now())
 	if st, err := os.Stdin.Stat(); err == nil {
 		r.interactive = st.Mode()&os.ModeCharDevice != 0
 	}

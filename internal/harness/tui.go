@@ -128,6 +128,9 @@ type tuiModel struct {
 	perm      *permMsg
 	pick      []sessionGroup // non-nil while the /resume picker is open
 	pickSel   int
+	rpick     []recordProject // non-nil while the record /resume picker is open
+	rpickSel  int
+	stPick    *settingsPick // non-nil while the /settings picker is open
 	ready     bool
 	quitting  bool
 	sel       int
@@ -179,6 +182,7 @@ var slashCmds = []slashCmd{
 	{"/clear", "start a fresh session (handoff note carried over)"},
 	{"/status", "model, context tokens, session"},
 	{"/model", "show or switch model: /model <name>"},
+	{"/settings", "session retention, resident coder slots, main model (saved on esc; applies on next session start)"},
 	{"/resume", "list record topics, or show one: /resume [n|slug] (/resume claude [q]: Claude Code sessions, filtered by q)"},
 	{"/import", "import a session: /import [id|latest]"},
 	{"/view", "browse Claude Code sessions (↑/↓ enter, ←/→ prompts, esc back): /view [id-prefix]"},
@@ -481,6 +485,18 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		m.click(v)
+		if m.stPick != nil {
+			wheelSel(&m.stPick.sel, settingsRows, v.Button)
+			break
+		}
+		if m.rpick != nil {
+			wheelSel(&m.rpickSel, len(m.rpick), v.Button)
+			break
+		}
+		if m.sv != nil && m.sv.turns == nil && len(m.sv.list) > 0 { // /view session list: same cursor picker
+			wheelSel(&m.sv.sel, len(m.sv.list), v.Button)
+			break
+		}
 		if m.av == nil && m.perm == nil && m.panelWheel(v) {
 			break
 		}
@@ -560,6 +576,30 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.vp.GotoBottom()
 				m.refresh()
 				m.after()
+			}
+		}
+		return m, nil
+	}
+	if m.stPick != nil {
+		m.settingsKey(k.String())
+		return m, nil
+	}
+	if m.rpick != nil {
+		n := len(m.rpick)
+		switch k.String() {
+		case "up", "k":
+			m.rpickSel = (m.rpickSel + n - 1) % n
+		case "down", "j":
+			m.rpickSel = (m.rpickSel + 1) % n
+		case "esc", "ctrl+c", "q":
+			m.rpick = nil
+		case "enter":
+			p := m.rpick[m.rpickSel]
+			m.rpick = nil
+			m.loadRecordPick(p)
+		default:
+			if d := k.String(); len(d) == 1 && d[0] >= '1' && d[0] <= '9' && int(d[0]-'1') < n {
+				m.rpickSel = int(d[0] - '1')
 			}
 		}
 		return m, nil
@@ -734,7 +774,7 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // busyOK: slash commands that run while an answer is in flight (no conversation or session change).
 // /usage is handled before this check (separate one-shot claude call).
-var busyOK = map[string]bool{"/usage": true, "/version": true, "/help": true, "/status": true, "/mode": true, "/mouse": true, "/view": true}
+var busyOK = map[string]bool{"/usage": true, "/version": true, "/help": true, "/status": true, "/mode": true, "/mouse": true, "/view": true, "/settings": true}
 
 // busySlashMsg: shown when a conversation-affecting slash command is typed while an answer runs.
 const busySlashMsg = "생각 중에는 /usage, /version, /help, /status, /mode, /mouse, /view 만 사용할 수 있습니다. 답변이 끝난 뒤 다시 입력해 주세요."
@@ -923,6 +963,19 @@ func (m *tuiModel) after() {
 }
 
 // sendImport loads a /resume group (key: see sessionGroup.key) as the running session, showing the command.
+// loadRecordPick appends one record project's blocks to the transcript (Enter in the record /resume picker).
+func (m *tuiModel) loadRecordPick(p recordProject) {
+	entries, err := loadRecordProject(p.Dir)
+	if err != nil {
+		m.blocks = append(m.blocks, block{"note", err.Error(), false})
+	}
+	for _, e := range entries {
+		m.blocks = append(m.blocks, block{e.Kind, e.Text, true})
+	}
+	m.vp.GotoBottom()
+	m.refresh()
+}
+
 func (m *tuiModel) sendImport(key string) {
 	m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
 	m.blocks = append(m.blocks, block{"user", "/import " + key, false})
@@ -970,6 +1023,8 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.vp.GotoBottom()
 		m.refresh()
 		m.submit <- line
+	case "/settings":
+		m.openSettings()
 	case "/resume":
 		if terms, record := resumeTarget(m.r.a.Cwd, f[1:]); !record {
 			gs, msg := m.r.groupList(terms...)
@@ -985,6 +1040,15 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 				gs = gs[:30]
 			}
 			m.pick, m.pickSel = gs, 0
+			break
+		}
+		ps, err := recordPick(recordDir(m.r.a.Cwd), strings.Join(f[1:], " "))
+		if err != nil {
+			note(err.Error())
+			break
+		}
+		if ps != nil {
+			m.rpick, m.rpickSel = ps, 0
 			break
 		}
 		lines, blocks, err := recordResume(recordDir(m.r.a.Cwd), strings.Join(f[1:], " "))
@@ -1177,6 +1241,28 @@ func (m *tuiModel) View() string {
 		}
 		vv = strings.Join(l, "\n")
 	}
+	if m.stPick != nil {
+		vv = m.settingsLines(m.vp.Height)
+	}
+	if m.rpick != nil {
+		hh := m.vp.Height
+		from := max(0, min(m.rpickSel-hh/2, len(m.rpick)-(hh-2)))
+		l := []string{lipgloss.NewStyle().Foreground(orange).Render("Resume a project  (↑/↓ wheel or 1-9 select · enter load · esc cancel)")}
+		for i := from; i < len(m.rpick) && len(l) < hh-1; i++ {
+			p := m.rpick[i]
+			t := fmt.Sprintf("%2d) %s · 파일 %d개 · %s", i+1, p.Name, p.Files, p.Last.Format("2006-01-02"))
+			if i == m.rpickSel {
+				t = lipgloss.NewStyle().Foreground(orange).Render("> " + t)
+			} else {
+				t = dimSt.Render("  " + t)
+			}
+			l = append(l, ansiTrunc(t, m.w))
+		}
+		for len(l) < hh {
+			l = append(l, "")
+		}
+		vv = strings.Join(l, "\n")
+	}
 	if m.sv != nil && m.sv.turns != nil {
 		vv = m.svPromptLines(m.vp.Height)
 	}
@@ -1209,6 +1295,7 @@ func (r *Repl) runTUI() int {
 		return 1
 	}
 	defer func() {
+		r.saveExitHandoff()
 		if r.sess != nil {
 			r.closeDrains()
 			r.sess.Close()

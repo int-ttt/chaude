@@ -1,6 +1,9 @@
 package harness
 
-import "sync"
+import (
+	"strings"
+	"sync"
+)
 
 // budget is the per-task USD ledger (U9). cap<=0 = off. In memory only.
 // total_cost_usd from the claude CLI is cumulative per process, so charge books the delta vs last[s].
@@ -95,10 +98,22 @@ var priceTable = map[string]modelPrice{
 	"haiku":  {0.10, 0.125, 0.20, 0.01, 0.50},
 }
 
+// priceKey maps a full model id (claude-opus-5-5, claude-sonnet-5-5, ...) to its priceTable alias. Other
+// names are returned as-is.
+func priceKey(model string) string {
+	m := strings.ToLower(model)
+	for _, alias := range []string{"opus", "sonnet", "haiku"} {
+		if strings.Contains(m, alias) {
+			return alias
+		}
+	}
+	return model
+}
+
 // estimate is the planned cost of the next call: ctx tokens at the cache-read price (warm) or the
 // cache-write price for ttl ("1h" 2x input, else 1.25x), plus 4k output tokens. Unknown model = 0.
 func estimate(model string, ctx int, warm bool, ttl string) float64 {
-	p, ok := priceTable[model]
+	p, ok := priceTable[priceKey(model)]
 	if !ok {
 		return 0
 	}
@@ -114,7 +129,7 @@ func estimate(model string, ctx int, warm bool, ttl string) float64 {
 
 // midTurnEstimate is the in-flight cost guess from one main assistant usage event.
 func midTurnEstimate(model string, usage map[string]any) float64 {
-	p, ok := priceTable[model]
+	p, ok := priceTable[priceKey(model)]
 	if !ok {
 		return 0
 	}

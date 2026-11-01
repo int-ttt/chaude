@@ -170,7 +170,7 @@ func (m *tuiModel) panelClick(y int) *agentRec {
 }
 
 func (m *tuiModel) click(v tea.MouseMsg) {
-	if v.Action != tea.MouseActionPress || v.Button != tea.MouseButtonLeft || m.perm != nil || m.pick != nil || m.rw.open || m.sv != nil {
+	if v.Action != tea.MouseActionPress || v.Button != tea.MouseButtonLeft || m.perm != nil || m.pick != nil || m.rpick != nil || m.rw.open || m.sv != nil {
 		return
 	}
 	if a := m.panelClick(v.Y); a != nil {

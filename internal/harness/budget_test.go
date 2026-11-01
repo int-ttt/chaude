@@ -177,3 +177,15 @@ func TestReconcileParkedAliveChild(t *testing.T) {
 }
 
 func fakeCmdWithPID(pid int) *exec.Cmd { return &exec.Cmd{Process: &os.Process{Pid: pid}} }
+
+func TestBudgetFullModelIDPriced(t *testing.T) {
+	for alias, id := range map[string]string{"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5"} {
+		if a, f := estimate(alias, 1000, true, "1h"), estimate(id, 1000, true, "1h"); a == 0 || a != f {
+			t.Fatalf("estimate %s=%v, %s=%v: want equal and nonzero", alias, a, id, f)
+		}
+	}
+	usage := map[string]any{"input_tokens": 1000.0, "output_tokens": 100.0}
+	if got := midTurnEstimate("claude-opus-5-5", usage); got == 0 {
+		t.Fatal("midTurnEstimate for claude-opus-5-5 is 0; full id not priced")
+	}
+}

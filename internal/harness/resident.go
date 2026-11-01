@@ -82,16 +82,29 @@ type residentSlot struct {
 	NoSlash   bool   // --disable-slash-commands
 }
 
-// residentSlots returns the four resident slots: main (the active child, on mainModel), prompter, tui
-// and coder (all haiku). The coder is one resident session, kept for long context. The prompter and tui
-// are minimal: no tools, no MCP, no skills.
-func residentSlots(mainModel string) []residentSlot {
-	return []residentSlot{
+// residentSlots returns main (the active child, on mainModel), prompter, tui, then coders haiku coder
+// slots (coder, coder2, ...; coders is clamped to 0-8, from coder_slots in settings). Coders are
+// resident sessions kept for long context. The prompter and tui are minimal: no tools, no MCP, no skills.
+func residentSlots(mainModel string, coders int) []residentSlot {
+	if coders < 0 {
+		coders = 0
+	}
+	if coders > settingsMaxCoderSlots {
+		coders = settingsMaxCoderSlots
+	}
+	slots := []residentSlot{
 		{Role: "main", Model: mainModel},
 		{Role: "prompter", Model: "haiku", Rule: prompterRule, Minimal: true},
 		{Role: "tui", Model: "haiku", Agent: "haiku-tui", Minimal: true},
-		{Role: "coder", Model: "haiku", Agent: "haiku-coder", Tools: "Read,Edit,Write,Bash,Grep,Glob", StrictMCP: true, NoSlash: true},
 	}
+	for i := 0; i < coders; i++ {
+		role := "coder"
+		if i > 0 {
+			role = fmt.Sprintf("coder%d", i+1)
+		}
+		slots = append(slots, residentSlot{Role: role, Model: "haiku", Agent: "haiku-coder", Tools: "Read,Edit,Write,Bash,Grep,Glob", StrictMCP: true, NoSlash: true})
+	}
+	return slots
 }
 
 // residentSlotByRole finds the slot with role in r.resident.
@@ -125,6 +138,7 @@ func (r *Repl) spawnSlot(slot residentSlot) (*liveChild, error) {
 	if err != nil {
 		return nil, err
 	}
+	r.noteOwn(s)
 	c := &liveChild{Sess: s, Tracker: newAgentTracker(), Model: slot.Model, Role: slot.Role}
 	c.setLastAPI(time.Now())
 	c.parked.Store(true)
@@ -141,7 +155,8 @@ func residentRoleKey(role string) string {
 		return "P"
 	case "tui":
 		return "T"
-	case "coder":
+	}
+	if strings.HasPrefix(role, "coder") {
 		return "C"
 	}
 	return ""

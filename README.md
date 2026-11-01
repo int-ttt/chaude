@@ -1,6 +1,6 @@
 # chaude
 
-`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.6이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
+`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.7이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
 
 ## 설치 (macOS Apple Silicon 전용)
 
@@ -72,6 +72,14 @@ chaude repl --threshold 200000   # 임계값 변경 (opus 메인에는 적용 �
 - `/resume`: 프로젝트 폴더별로 Claude Code 세션을 묶어 보여 주고, 검색어(query)로 걸러서 이어받습니다.
 - `/version`: chaude 버전과 Claude Code 버전을 함께 보여 줍니다.
 - 응답 대기 중에도 `/version`, `/usage`, `/help`, `/mode`는 바로 실행됩니다. 대화를 바꾸는 명령(`/resume`, `/clear`, `/rotate`, `/model`, `/cost`)은 거부되고 세션에 전달되지 않습니다.
+
+### 0.9.7 변경
+
+- `/settings`: 보존 기간, 상주 코더 슬롯 수(기본 4), 메인 모델을 프로젝트 폴더별 `<프로젝트>/.chaude/settings.json`에 저장합니다. 파일이 없으면 기본값(보존 30일, 코더 4슬롯, `opus`)을 씁니다. 다른 프로젝트 설정과 서로 영향을 주지 않으며, 바꾼 값은 다음 세션 시작 시 적용됩니다.
+- 메인 모델: `main_model`은 `opus`, `sonnet`, `fable` 중 하나이고, claude CLI에는 `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-fable-5-1` 전체 이름으로 넘깁니다. 예산 단가 계산도 전체 이름을 인식합니다.
+- `/resume`: 검색어 없이 입력하거나 결과가 여러 개면 기록 폴더 선택창을 엽니다(↑/↓, 휠로 이동, Enter로 불러오기, esc로 취소).
+- `/view`: 이 chaude 실행에서 만든 Claude Code 세션만 보여 줍니다. 이전 실행의 세션도 종료 핸드오프로 이어받습니다.
+- 종료 핸드오프: 종료할 때 이 실행의 세션 ID를 프로젝트 기록 폴더의 `.exit-handoff.json`에 저장하고, 같은 폴더에서 다시 시작하면 `/view` 목록에 반영합니다.
 
 ## 기존 Claude Code 세션을 chaude로 옮기기
 

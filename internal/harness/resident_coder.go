@@ -9,9 +9,6 @@ import (
 	"time"
 )
 
-// coderRoles is the resident coder slot: one haiku coder, same session, kept for long context.
-var coderRoles = []string{"coder"}
-
 // residentCoderTimeout bounds one resident_coder call; the caller gets an error after it.
 var residentCoderTimeout = 30 * time.Minute
 
@@ -25,7 +22,6 @@ const coderRule = "For important files (main code, user documents) call the resi
 // runResidentCoder sends task to the resident coder and blocks until its reply. A coder that is not
 // running is spawned by this call. A busy coder is refused.
 func (r *Repl) runResidentCoder(task string) (out string, err error) {
-	role := coderRoles[0]
 	task = strings.TrimSpace(task)
 	if task == "" {
 		return "", errors.New("task is required")
@@ -38,16 +34,15 @@ func (r *Repl) runResidentCoder(task string) (out string, err error) {
 			r.stage("· coder 완료")
 		}
 	}()
-	def, ok := r.residentSlotByRole(role)
-	if !ok {
-		return "", fmt.Errorf("no resident slot %q", role)
-	}
-	if c, live := r.residentChild(role); live {
-		if c.busyRec() != nil {
-			return "", fmt.Errorf("resident coder %q is busy", role)
-		}
-	} else if _, err := r.spawnSlot(def); err != nil {
+	role, err := r.pickCoderRole()
+	if err != nil {
 		return "", err
+	}
+	def, _ := r.residentSlotByRole(role)
+	if _, live := r.residentChild(role); !live {
+		if _, err := r.spawnSlot(def); err != nil {
+			return "", err
+		}
 	}
 	ch, err := r.sendResident(role, task+coderReplyFormat, firstLine(task))
 	if err != nil {
@@ -165,4 +160,23 @@ func (r *Repl) mcpReply(line []byte) []byte {
 	}
 	b, _ := json.Marshal(resp)
 	return b
+}
+
+// pickCoderRole returns the first coder slot that is idle (live and not busy, or not started yet).
+// Every coder slot busy -> error.
+func (r *Repl) pickCoderRole() (string, error) {
+	found := false
+	for _, s := range r.resident {
+		if !strings.HasPrefix(s.Role, "coder") {
+			continue
+		}
+		found = true
+		if c, live := r.residentChild(s.Role); !live || c.busyRec() == nil {
+			return s.Role, nil
+		}
+	}
+	if !found {
+		return "", errors.New("no resident coder slot (coder_slots is 0)")
+	}
+	return "", errors.New("all resident coders are busy")
 }

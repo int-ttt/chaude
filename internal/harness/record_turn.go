@@ -147,3 +147,23 @@ func (r *Repl) recordSave(prompt string) {
 	}
 	r.recSplit = false
 }
+
+// recordPick returns the project folders the TUI /resume picker offers: every folder for an empty arg, the
+// hits for a multi-hit query. nil means arg loads one folder directly (or is a number, or fails in recordResume).
+func recordPick(root, arg string) ([]recordProject, error) {
+	projects, err := listRecordProjects(root)
+	if err != nil || len(projects) == 0 {
+		return nil, err
+	}
+	if arg == "" {
+		return projects, nil
+	}
+	if _, convErr := strconv.Atoi(arg); convErr == nil {
+		return nil, nil
+	}
+	matches, err := filterRecordProjects(projects, arg)
+	if err != nil || len(matches) < 2 {
+		return nil, err
+	}
+	return matches, nil
+}
