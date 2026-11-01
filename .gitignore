@@ -24,3 +24,4 @@ tests/e2e-rebuild/
 **/.DS_Store
 deprecated/chaude
 /src/main/intt/chaude
+.claude/lean-off
