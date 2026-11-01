@@ -41,7 +41,6 @@ type liveChild struct {
 	Tracker  *agentTracker
 	Model    string
 	Role     string
-	Lazy     bool // resident lazy slot: retired by sweepParked after residentLazyIdle parked
 	LastAPI  time.Time
 	LastCtx  int
 	Files    []string

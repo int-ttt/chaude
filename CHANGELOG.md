@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.4
+- 상주 세션 구성 고정: main(Opus 메인), prompter, tui(haiku-tui), coder 4개 슬롯으로 고정
+- 입력·응답 흐름 정리: 입력은 prompter를 거쳐 main으로, 응답은 haiku-tui를 거쳐 pane으로 전달
+- 에이전트 규칙을 슬롯별로 적용
+- 단계별(stage) 진행 줄 표시
+- 제거: `--resident` 옵션, 코더 C1~C4 라우팅(coder-spare-1..4), `resident_coders_status` MCP 도구
+- 버전 표기: cmd/chaude/main.go, docs/claude-lean/README.md를 0.9.4로 갱신
+
 ## 0.9.3
 - 상주 세션 표시: 상주(resident) 자식은 명령 처리 중(생각중)일 때만 실행 목록에 표시, 유휴 상태는 숨김(internal/harness/resident.go)
 - prompter 영문 요약 중계: 입력을 Opus 메인에 넘기기 전 상주 prompter가 영문 요약을 만들고 원문과 함께 전달(viaPrompter, 실패·시간 초과 시 원문 그대로)

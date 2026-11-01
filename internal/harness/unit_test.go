@@ -147,13 +147,10 @@ func TestFmtK(t *testing.T) {
 }
 
 func TestCtxBar(t *testing.T) {
-	if got := ctxBar(0, 200000, nil, 0); got != "M 0/200k P 0/80k T 0/80k C0 0/80k" {
+	if got := ctxBar(0, 200000, nil, 0); got != "M 0/200k P 0/80k T 0/80k C 0/80k" {
 		t.Errorf("empty: %q", got)
 	}
-	if got := ctxBar(12345, 200000, map[string]int{"P": 1000, "C1": 999}, 2); got != "M 12.3k/200k P 1.00k/80k T 0/80k C0 0/80k C1 999/80k" {
+	if got := ctxBar(12345, 200000, map[string]int{"P": 1000, "C": 999}, 2); got != "M 12.3k/200k P 1.00k/80k T 0/80k C 999/80k" {
 		t.Errorf("coder: %q", got)
-	}
-	if got := ctxBar(0, 200000, nil, 9); !strings.HasSuffix(got, " C4 0/80k") || strings.Contains(got, "C5") {
-		t.Errorf("cap: %q", got)
 	}
 }

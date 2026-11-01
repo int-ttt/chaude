@@ -115,6 +115,7 @@ type SessionOpts struct {
 	NoPermission  bool
 	CompactWindow int
 	CacheTTL      string // "auto" (default, env untouched), "1h", or "5m"
+	Agent         string // agent rules name: <Cwd>/.claude/agents/<Agent>.md, then ~/.claude/agents (see agentBody)
 }
 
 // Session is one `claude -p` child. Send() a user message, then Events() until result.
@@ -135,13 +136,9 @@ type Session struct {
 	dead      atomic.Bool   // stdout reached EOF: the child process is gone
 }
 
-func NewSession(o SessionOpts) (*Session, error) {
-	if o.Model == "" {
-		o.Model = "opus"
-	}
-	if o.ClaudeBin == "" {
-		o.ClaudeBin = "claude"
-	}
+// sessionArgs is the claude argv for o. o.Model must already be defaulted. An agent named in o.Agent
+// adds its body as --append-system-prompt; an unreadable agent file adds nothing (the caller notices).
+func sessionArgs(o SessionOpts) []string {
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json",
 		"--verbose", "--include-partial-messages", "--model", o.Model}
 	if !o.NoPermission {
@@ -151,7 +148,22 @@ func NewSession(o SessionOpts) (*Session, error) {
 		args = append(args, "--resume", o.Resume)
 	}
 	args = append(args, o.Extra...)
-	cmd := exec.Command(osenv.ResolveBin(o.ClaudeBin), args...)
+	if o.Agent != "" {
+		if body, err := agentBody(o.Cwd, o.Agent); err == nil {
+			args = append(args, "--append-system-prompt", body)
+		}
+	}
+	return args
+}
+
+func NewSession(o SessionOpts) (*Session, error) {
+	if o.Model == "" {
+		o.Model = "opus"
+	}
+	if o.ClaudeBin == "" {
+		o.ClaudeBin = "claude"
+	}
+	cmd := exec.Command(osenv.ResolveBin(o.ClaudeBin), sessionArgs(o)...)
 	cmd.Env = withCacheTTL(cleanEnv(o.CompactWindow), o.CacheTTL)
 	cmd.Dir = o.Cwd
 	cmd.Stderr = nil

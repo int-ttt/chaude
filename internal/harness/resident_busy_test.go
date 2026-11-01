@@ -7,7 +7,7 @@ import (
 )
 
 func TestResidentRunningListShowsOnlyBusySessions(t *testing.T) {
-	r := residentRepl(t, "fixed", 8)
+	r := residentRepl(t, 8)
 	s, _, _ := fakeSession()
 	c := &liveChild{Sess: s, Tracker: newAgentTracker(), Model: "haiku", Role: "tui"}
 	c.setLastAPI(time.Now())

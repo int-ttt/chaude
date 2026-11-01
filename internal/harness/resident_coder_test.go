@@ -58,10 +58,10 @@ type callRes struct {
 }
 
 // callCoderAsync runs runResidentCoder in the background.
-func callCoderAsync(r *Repl, slot, task string) <-chan callRes {
+func callCoderAsync(r *Repl, task string) <-chan callRes {
 	done := make(chan callRes, 1)
 	go func() {
-		s, err := r.runResidentCoder(slot, task)
+		s, err := r.runResidentCoder(task)
 		done <- callRes{s, err}
 	}()
 	return done
@@ -78,12 +78,12 @@ func waitCall(t *testing.T, done <-chan callRes) callRes {
 	return callRes{}
 }
 
-// Default slot is C0 (coder): the task reaches the coder child and the summary is returned.
-func TestResidentCoderDefaultsToC0(t *testing.T) {
+// The task reaches the resident coder child and the summary is returned.
+func TestResidentCoderReply(t *testing.T) {
 	spawned := stubCoderSessions(t)
-	r := residentRepl(t, "min", 6)
+	r := residentRepl(t, 8)
 	fc := spawnCoderSlot(t, r, spawned, "coder")
-	done := callCoderAsync(r, "", "fix parser")
+	done := callCoderAsync(r, "fix parser")
 	frame := answer(t, fc, "thinking\nstatus: done\nchanged: parser.go: fix nil check\nbye")
 	if !strings.Contains(frame, "fix parser") || !strings.Contains(frame, "status: done|partial|fail") {
 		t.Fatalf("frame = %s", frame)
@@ -92,18 +92,15 @@ func TestResidentCoderDefaultsToC0(t *testing.T) {
 	if res.err != nil || res.text != "status: done\nchanged: parser.go: fix nil check" {
 		t.Fatalf("res = %+v", res)
 	}
-	if _, err := r.runResidentCoder("tui", "x"); err == nil {
-		t.Fatal("tui is not a coder slot: want error")
-	}
 }
 
 // A second call to the same slot reuses the parked child: nothing is spawned.
 func TestResidentCoderSlotReuse(t *testing.T) {
 	spawned := stubCoderSessions(t)
-	r := residentRepl(t, "fixed", 8)
+	r := residentRepl(t, 8)
 	fc := spawnCoderSlot(t, r, spawned, "coder")
-	for i, slot := range []string{"", "coder"} {
-		done := callCoderAsync(r, slot, fmt.Sprintf("task %d", i))
+	for i := 0; i < 2; i++ {
+		done := callCoderAsync(r, fmt.Sprintf("task %d", i))
 		answer(t, fc, "status: done")
 		if res := waitCall(t, done); res.err != nil {
 			t.Fatalf("call %d: %v", i, res.err)
@@ -114,49 +111,14 @@ func TestResidentCoderSlotReuse(t *testing.T) {
 	}
 }
 
-// A spare slot that is not running is spawned on request, then used.
-func TestResidentCoderSpawnsSpare(t *testing.T) {
-	spawned := stubCoderSessions(t)
-	r := residentRepl(t, "fixed", 8)
-	spawnCoderSlot(t, r, spawned, "coder")
-	done := callCoderAsync(r, "coder-spare-2", "parallel docs")
-	fc := <-spawned
-	answer(t, fc, "status: done\nchanged: docs/a.md: add section")
-	if res := waitCall(t, done); res.err != nil || res.text != "status: done\nchanged: docs/a.md: add section" {
-		t.Fatalf("res = %+v", res)
-	}
-	if _, ok := r.residentChild("coder-spare-2"); !ok {
-		t.Fatal("spare must stay parked after its call")
-	}
-}
-
-// Summaries are kept per coder, last 3 only, and listed by resident_coders_status.
-func TestResidentCoderSummaryListedInStatus(t *testing.T) {
-	spawned := stubCoderSessions(t)
-	r := residentRepl(t, "fixed", 8)
-	fc := spawnCoderSlot(t, r, spawned, "coder")
-	for i := 1; i <= 4; i++ {
-		done := callCoderAsync(r, "", fmt.Sprintf("t%d", i))
-		answer(t, fc, fmt.Sprintf("status: done\nchanged: f%d.go: step %d", i, i))
-		waitCall(t, done)
-	}
-	st := r.coderStatus()
-	if strings.Contains(st, "step 1") || !strings.Contains(st, "step 2") || !strings.Contains(st, "step 4") {
-		t.Fatalf("status keeps last 3: %q", st)
-	}
-	if !strings.Contains(st, "coder (C0): idle") || !strings.Contains(st, "coder-spare-1 (C1): not started") {
-		t.Fatalf("status rows: %q", st)
-	}
-}
-
 // A busy coder refuses a second call instead of queueing it.
 func TestResidentCoderBusyRefuses(t *testing.T) {
 	spawned := stubCoderSessions(t)
-	r := residentRepl(t, "fixed", 8)
+	r := residentRepl(t, 8)
 	fc := spawnCoderSlot(t, r, spawned, "coder")
-	first := callCoderAsync(r, "", "long")
+	first := callCoderAsync(r, "long")
 	recv(t, fc.in)
-	if _, err := r.runResidentCoder("", "second"); err == nil || !strings.Contains(err.Error(), "busy") {
+	if _, err := r.runResidentCoder("second"); err == nil || !strings.Contains(err.Error(), "busy") {
 		t.Fatalf("second call err = %v, want busy", err)
 	}
 	fc.out <- `{"type":"result"}`
@@ -166,7 +128,7 @@ func TestResidentCoderBusyRefuses(t *testing.T) {
 // can_use_tool is approved for a busy coder only, inside cwd for Read/Edit/Write.
 func TestCoderPermissionOnlyWhenBusy(t *testing.T) {
 	spawned := stubCoderSessions(t)
-	r := residentRepl(t, "fixed", 8)
+	r := residentRepl(t, 8)
 	fc := spawnCoderSlot(t, r, spawned, "coder")
 	c, _ := r.residentChild("coder")
 	edit := func(path string) string {
@@ -201,7 +163,7 @@ func TestCoderPermissionOnlyWhenBusy(t *testing.T) {
 // MCP round trip over the bridge side of the socket: initialize, tools/list, tools/call x2.
 func TestMCPRoundTripFakeSession(t *testing.T) {
 	spawned := stubCoderSessions(t)
-	r := residentRepl(t, "fixed", 8)
+	r := residentRepl(t, 8)
 	fc := spawnCoderSlot(t, r, spawned, "coder")
 
 	srv, cli := net.Pipe()
@@ -227,7 +189,7 @@ func TestMCPRoundTripFakeSession(t *testing.T) {
 	if m := call(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`); m["result"] == nil {
 		t.Fatalf("initialize: %v", m)
 	}
-	if m := call(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`); !strings.Contains(fmt.Sprint(m), "resident_coders_status") {
+	if m := call(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`); !strings.Contains(fmt.Sprint(m), "resident_coder") || strings.Contains(fmt.Sprint(m), "resident_coders_status") {
 		t.Fatalf("tools/list: %v", m)
 	}
 
@@ -242,12 +204,6 @@ func TestMCPRoundTripFakeSession(t *testing.T) {
 		t.Fatalf("resident_coder result: %v", m)
 	}
 
-	// tools/call resident_coders_status lists the summary
-	m = call(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"resident_coders_status","arguments":{}}}`)
-	if text := fmt.Sprint(m["result"]); !strings.Contains(text, "README.md: add usage") {
-		t.Fatalf("status result: %v", m)
-	}
-
 	// notifications get no response
 	if r.mcpReply([]byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)) != nil {
 		t.Fatal("notification must not be answered")
@@ -256,7 +212,7 @@ func TestMCPRoundTripFakeSession(t *testing.T) {
 
 // The --mcp-config file points the main child at the bridge command with the listener socket.
 func TestResidentMCPConfigWritten(t *testing.T) {
-	r := residentRepl(t, "fixed", 8)
+	r := residentRepl(t, 8)
 	path, err := r.residentMCPConfig()
 	if err != nil {
 		t.Fatal(err)

@@ -29,6 +29,7 @@ type (
 	toolMsg       struct{ name, arg string }
 	toolResultMsg string
 	noteMsg       string
+	stageMsg      string // dim pipeline progress line ("· prompter 처리중"); shown as a note, keeps the spinner state
 	doneMsg       struct{}
 	importedMsg   struct{ turns [][2]string } // /import or /resume loaded a session: show its turns
 	permMsg       struct {
@@ -437,6 +438,9 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 	case noteMsg:
 		m.gotText = false
+		m.blocks = append(m.blocks, block{"note", string(v), false})
+		m.refresh()
+	case stageMsg:
 		m.blocks = append(m.blocks, block{"note", string(v), false})
 		m.refresh()
 	case permMsg:

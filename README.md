@@ -45,14 +45,15 @@ chaude repl --threshold 200000   # 임계값 변경
 
 전체 옵션은 `chaude repl -h`로 확인합니다.
 
-### 상주 세션과 코더 (0.9.3)
+### 상주 세션과 코더 (0.9.4)
 
-- 상주(resident) 자식 세션(prompter, tui, coder)은 명령을 처리 중(생각중)일 때만 실행 목록에 보이고, 유휴 상태는 숨깁니다.
-- prompter는 입력을 Opus 메인에 넘기기 전에 영문 요약을 만듭니다. 메인은 `[prompter summary EN]` 요약과 `[original input]` 원문을 함께 받으며, prompter가 응답하지 않으면 원문만 전달합니다.
-- MCP 도구:
-  - `resident_coder`: 상주 코더에 코드·문서 작업을 맡기고 변경 요약만 받습니다.
-  - `resident_coders_status`: 코더 슬롯 상태를 조회합니다. 라우팅 전에 확인합니다.
-- 코더 라우팅(C0~C4): 기본 슬롯은 C0(`coder`)이고, 맥락이 다른 병렬 작업에만 `coder-spare-1..4`(C1~C4)를 씁니다. 같은 맥락의 후속 작업은 같은 코더에 보냅니다. 단순 조회와 소규모 수정은 Task haiku 에이전트가 맡습니다.
+- 상주(resident) 자식 세션은 4개입니다: `main`(Opus 메인), `prompter`, `tui`(haiku-tui), `coder`. 명령을 처리 중(생각중)일 때만 실행 목록에 보이고, 유휴 상태는 숨깁니다.
+- 입력 흐름: 입력 → prompter → main. prompter가 영문 요약을 만들고, main은 `[prompter summary EN]` 요약과 `[original input]` 원문을 함께 받습니다. prompter가 응답하지 않으면 원문만 전달합니다.
+- 응답 흐름: reply → haiku-tui → pane. 응답은 haiku-tui가 존댓말로 렌더링해 화면 pane에 보입니다.
+- 에이전트 규칙은 슬롯별로 적용됩니다(prompter, tui, coder 각각의 규칙 파일).
+- 진행 표시: 단계별(stage) 진행 줄을 표시합니다.
+- MCP 도구 `resident_coder`: 상주 코더에 코드·문서 작업을 맡기고 변경 요약만 받습니다.
+- 코더는 `coder` 슬롯 하나를 씁니다. 같은 맥락의 후속 작업은 같은 코더에 보냅니다. 단순 조회와 소규모 수정은 Task haiku 에이전트가 맡습니다.
 - 상태 줄의 P, T, C 컨텍스트 바는 상주 prompter, tui, coder의 사용량으로 계산합니다.
 - `/view`: 세션 목록을 입력창 아래에 보여 줍니다. `/view <id-prefix>`로 해당 세션의 프롬프트를 엽니다(TUI 전용, esc로 한 단계 뒤로).
 

@@ -32,7 +32,6 @@ func (r *Repl) idleDue(now time.Time) bool {
 // should be rotated (the caller then sends the internal "/idle-rotate" line). UI goroutine, not busy.
 // A parked child with delegated agents still running is left alone until they finish.
 func (r *Repl) sweepIdle(now time.Time) bool {
-	r.sweepParked(now) // lazy resident slots first; every sweepIdle caller gets it
 	if r.children != nil {
 		deadline := idleDeadline(r.idleRotate, r.effTTL())
 		type kc struct {

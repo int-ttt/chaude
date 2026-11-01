@@ -165,25 +165,18 @@ func fmtLimit(n int) string {
 	return fmtK(n)
 }
 
-// ctxBar: status-line context bar: main, P, T, C0 always; C1..C4 for running coders (activeCoders-1, max 4).
-func ctxBar(mainCtx, mainLim int, roles map[string]int, activeCoders int) string {
+// ctxBar: status-line context bar: main, P, T, C always. activeCoders is unused (C is always shown);
+// tui.go still passes it.
+func ctxBar(mainCtx, mainLim int, roles map[string]int, _ int) string {
 	lim := fmtLimit(haikuThreshold)
 	parts := []string{"M " + fmtK(mainCtx) + "/" + fmtLimit(mainLim)}
-	for _, k := range []string{"P", "T", "C0"} {
-		parts = append(parts, k+" "+fmtK(roles[k])+"/"+lim)
-	}
-	top := activeCoders - 1
-	if top > 4 {
-		top = 4
-	}
-	for i := 1; i <= top; i++ {
-		k := fmt.Sprintf("C%d", i)
+	for _, k := range []string{"P", "T", "C"} {
 		parts = append(parts, k+" "+fmtK(roles[k])+"/"+lim)
 	}
 	return strings.Join(parts, " ")
 }
 
-// setRoleCtx stores the latest context size of one role slot (P, T, C0..C4).
+// setRoleCtx stores the latest context size of one role slot (P, T, C).
 func (r *Repl) setRoleCtx(k string, v int) {
 	r.roleMu.Lock()
 	defer r.roleMu.Unlock()
@@ -276,9 +269,7 @@ type Repl struct {
 	idle            idleTurn            // child-initiated turn being rendered (idle reader goroutine only)
 	reg             *clientRegistry     // per-(cwd,model) client registry; nil = off (old routing)
 	children        *childSet           // live child processes kept per (cwd,model); nil = off
-	resident        []residentSlot      // --resident preset slots; nil = off
-	coderMu         sync.Mutex          // guards coderSums
-	coderSums       map[string][]string // coder role -> last summaries (resident_coder)
+	resident        []residentSlot      // the four resident slots (residentSlots)
 	mcpMu           sync.Mutex          // guards mcpCfg
 	mcpCfg          string              // --mcp-config file served to the main child ("" = not started)
 	residentUp      bool                // spawnResident ran (once, after the first successful start)
@@ -624,21 +615,35 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	if show { // user-facing input only; the handoff prompt (show=false) goes to main as is
 		text = r.viaPrompter(text)
 	}
+	if show && len(r.resident) > 0 {
+		r.stage("· main 처리중")
+	}
 	_ = r.sess.Send(text)
 	var reply strings.Builder
 	var mf markerFilter
-	emit := func(txt string) {
-		if txt == "" {
-			return
-		}
+	// With residents, the pane shows only the tui's answer: main text is collected here and goes through viaTUI at the end.
+	routed := show && len(r.resident) > 0
+	var shown strings.Builder
+	put := func(txt string) {
 		if r.ui != nil {
 			r.ui.send(textMsg(txt))
 		} else {
 			r.p(txt, "")
 		}
 	}
+	emit := func(txt string) {
+		if txt == "" {
+			return
+		}
+		if routed {
+			shown.WriteString(txt)
+			return
+		}
+		put(txt)
+	}
 	var lastUsage map[string]any
 	var result event
+	agentTypes := map[string]string{} // Task/Agent tool_use id -> subagent_type while the call runs (stage lines)
 	budgetHit := false
 	handle := func(ev event) {
 		r.spend.onEvent(ev)
@@ -678,6 +683,10 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 				if str(b["type"]) == "tool_use" {
 					if n := str(b["name"]); n == "Agent" || n == "Task" {
 						r.delegs++
+						if id := str(b["id"]); show && len(r.resident) > 0 && agentTypes[id] == "" {
+							agentTypes[id] = subagentLabel(asMap(b["input"]))
+							r.stage("· agent " + agentTypes[id] + " 호출")
+						}
 					}
 					r.tracker.onToolUse(str(b["id"]), str(b["name"]), asMap(b["input"]), time.Now())
 				}
@@ -702,6 +711,14 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 			}
 		case t == "user" && isMain:
 			r.tracker.onUserEvent(ev) // tool_results + <task-notification>s arriving mid-turn
+			for _, bi := range asList(asMap(ev["message"])["content"]) {
+				if b := asMap(bi); str(b["type"]) == "tool_result" {
+					if typ, ok := agentTypes[str(b["tool_use_id"])]; ok {
+						delete(agentTypes, str(b["tool_use_id"]))
+						r.stage("· agent " + typ + " 완료")
+					}
+				}
+			}
 			if r.ui == nil || !show {
 				break
 			}
@@ -731,6 +748,12 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	}
 	if show && !r.a.NoCategoryRotate {
 		emit(mf.Flush())
+	}
+	if routed {
+		r.stage("· main 완료")
+		if out := r.viaTUI(shown.String()); out != "" {
+			put(out)
+		}
 	}
 	if show && r.ui != nil {
 		r.ui.send(textEndMsg{})
@@ -1222,9 +1245,6 @@ func Main(args []string) int {
 	fs.StringVar(&a.ClientsFile, "clients-file", defaultClientsFile(), "per-(cwd,model) client registry (empty=off)")
 	fs.IntVar(&a.MaxWorkers, "max-workers", DefaultMaxWorkers, "cap on concurrent live worker sessions (env CHAUDE_MAX_WORKERS when unset)")
 	fs.StringVar(&a.Orch, "orch", "m0", "orchestration mode m0|b|c|d|e|f (A/B test)")
-	var resident, residentMainModel string
-	fs.StringVar(&resident, "resident", "off", "resident slot preset off|min|fixed (env CHAUDE_RESIDENT when unset)")
-	fs.StringVar(&residentMainModel, "resident-main-model", "", "main slot model when --resident is not off (default: fixed=opus, min=haiku)")
 	if _, err := lean.ParseInterspersed(fs, args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
@@ -1265,29 +1285,11 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	residentSet := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "resident" {
-			residentSet = true
-		}
-	})
-	resName := resident
-	if env := strings.TrimSpace(os.Getenv("CHAUDE_RESIDENT")); !residentSet && env != "" {
-		resName = env
-	}
-	slots, residentCap, err := residentPreset(resName, residentMainModel)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 2
-	}
-	if residentCap > 0 && !maxWorkersSet && strings.TrimSpace(os.Getenv("CHAUDE_MAX_WORKERS")) == "" {
-		mw = residentCap
-	}
-	if len(slots) > 0 {
-		a.Model = slots[0].Model
+	if !maxWorkersSet && strings.TrimSpace(os.Getenv("CHAUDE_MAX_WORKERS")) == "" && mw < residentMaxWorkers {
+		mw = residentMaxWorkers
 	}
 	a.MaxWorkers = mw
-	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1), resident: slots}
+	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1), resident: residentSlots(a.Model)}
 	if st, err := os.Stdin.Stat(); err == nil {
 		r.interactive = st.Mode()&os.ModeCharDevice != 0
 	}

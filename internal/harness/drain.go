@@ -324,17 +324,13 @@ func (t *agentTracker) countRunningCoders() int {
 	return n
 }
 
-// roleSlot maps a running agent to its status-line slot: "P" prompter, "T" tui, "C<i>" coder (i = place
-// among running coders, oldest first, i<=4); "" for unknown, finished or other agents.
+// roleSlot maps a running agent to its status-line slot: "P" prompter, "T" tui, "C" coder;
+// "" for unknown, finished or other agents.
 func (t *agentTracker) roleSlot(id string) string {
 	if id == "" {
 		return ""
 	}
-	coder := -1
 	for _, a := range t.sortedRunning() {
-		if isCoder(a) {
-			coder++
-		}
 		if a.ID != id {
 			continue
 		}
@@ -343,8 +339,8 @@ func (t *agentTracker) roleSlot(id string) string {
 			return "P"
 		case strings.Contains(a.Name, "tui"):
 			return "T"
-		case isCoder(a) && coder <= 4:
-			return fmt.Sprintf("C%d", coder)
+		case isCoder(a):
+			return "C"
 		}
 		return ""
 	}
