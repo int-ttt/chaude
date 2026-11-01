@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.9
+- Windows·Linux 지원: 릴리즈 빌드가 darwin/linux/windows × amd64·arm64 6개 플랫폼 아카이브와 checksums.txt를 만듭니다. `install.sh`가 Linux를 지원합니다.
+- Windows 대응: resume 경로 인코딩, claude 실행 경로 해석, 상주 소켓(Windows 전용 구현 분리)
+- 효율 테스트: 핑퐁 게임 plain 대비 harness 비용 -42.7%(2회 평균, 전체 토큰 +73%, Haiku 포함). 결과와 주의점은 README의 "효율 테스트" 섹션, 장기 테스트 계획은 `docs/long-session-bench-plan.md`(미실행)
+- 버전 표기: cmd/chaude/main.go, docs/claude-lean/README.md, README.md를 0.9.9로 갱신
+
 ## 0.9.8
 - 프롬프트 기록: 입력 기록을 프로젝트별 `<프로젝트>/.chaude/history.jsonl`에 저장(최대 500개), 다시 시작해도 유지. 위 방향키로 이전 입력을 불러옵니다(슬래시 완성 목록이 열려 있으면 위아래는 목록 이동, 목록 맨 위에서 위 키를 누르면 이전 입력으로 넘어감)
 - 회전 보류: 백그라운드 에이전트가 실행 중이면 컨텍스트 회전을 보류(최대 10분, `--rotate-defer-timeout`, 0이면 바로 회전). 시간이 지나면 회전 후 `rotate_defer` 기록 남김
