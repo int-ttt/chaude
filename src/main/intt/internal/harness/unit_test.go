@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseSamples(t *testing.T) {
-	f, err := os.Open(filepath.Join("..", "..", "samples", "probe1.jsonl"))
+	f, err := os.Open(filepath.Join("..", "..", "..", "..", "..", "samples", "probe1.jsonl"))
 	if err != nil {
 		t.Skip(err)
 	}

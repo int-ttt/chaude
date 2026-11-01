@@ -60,12 +60,13 @@ echo "python: $(command -v python3) ($(python3 -V 2>&1))"
 
 cd "$root"
 mkdir -p bin
-CGO_ENABLED=0 "$GO" build -trimpath -o bin/chaude ./cmd/chaude
+# Go module lives in src/main/intt; outputs stay under the repo root (bin/ layout: <exe>/../.claude)
+CGO_ENABLED=0 "$GO" -C "$root/src/main/intt" build -trimpath -o "$root/bin/chaude" ./cmd/chaude
 if [ "$cross" = 1 ]; then
   mkdir -p dist
   for t in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
     ext=""; [ "${t%/*}" = windows ] && ext=".exe"
-    CGO_ENABLED=0 GOOS="${t%/*}" GOARCH="${t#*/}" "$GO" build -trimpath -o "dist/chaude-${t%/*}-${t#*/}${ext}" ./cmd/chaude
+    CGO_ENABLED=0 GOOS="${t%/*}" GOARCH="${t#*/}" "$GO" -C "$root/src/main/intt" build -trimpath -o "$root/dist/chaude-${t%/*}-${t#*/}${ext}" ./cmd/chaude
   done
   echo "cross builds: dist/"
 fi

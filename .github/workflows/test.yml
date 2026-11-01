@@ -17,23 +17,32 @@ jobs:
       - if: runner.os != 'macOS'
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: src/main/intt/go.mod
+          cache-dependency-path: src/main/intt/go.sum
       - if: runner.os == 'macOS'
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
+          cache-dependency-path: src/main/intt/go.sum
       - name: Vet
+        working-directory: src/main/intt
         run: go vet ./...
       - name: Test
+        working-directory: src/main/intt
         run: go test ./... -count=1
       - name: Build
-        run: go build ./cmd/chaude
+        working-directory: src/main/intt
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ../../../bin
+          go build -o ../../../bin/ ./cmd/chaude
       - name: Smoke
         shell: bash
         run: |
           set -euo pipefail
-          bin=./chaude
-          if [ -f ./chaude.exe ]; then bin=./chaude.exe; fi
+          bin=./bin/chaude
+          if [ -f ./bin/chaude.exe ]; then bin=./bin/chaude.exe; fi
 
           # every helper script answers -h with exit 0
           for s in charcount claude-history compress-archive export-history extract-transcript search-history usage-report; do

@@ -63,7 +63,9 @@ Push-Location $root
 try {
     $env:CGO_ENABLED = '0'
     New-Item -ItemType Directory -Force -Path bin | Out-Null
-    & $go build -trimpath -o bin\chaude.exe .\cmd\chaude
+    # Go module lives in src\main\intt; outputs stay under the repo root (bin\ layout: <exe>\..\.claude)
+    $mod = Join-Path $root 'src\main\intt'
+    & $go -C $mod build -trimpath -o (Join-Path $root 'bin\chaude.exe') .\cmd\chaude
     if ($LASTEXITCODE -ne 0) { throw 'go build failed' }
     if ($Cross) {
         New-Item -ItemType Directory -Force -Path dist | Out-Null
@@ -71,7 +73,7 @@ try {
             $os, $a = $t.Split('/')
             $ext = if ($os -eq 'windows') { '.exe' } else { '' }
             $env:GOOS = $os; $env:GOARCH = $a
-            & $go build -trimpath -o "dist\chaude-$os-$a$ext" .\cmd\chaude
+            & $go -C $mod build -trimpath -o (Join-Path $root "dist\chaude-$os-$a$ext") .\cmd\chaude
             if ($LASTEXITCODE -ne 0) { throw "cross build failed: $t" }
         }
         Remove-Item Env:GOOS, Env:GOARCH

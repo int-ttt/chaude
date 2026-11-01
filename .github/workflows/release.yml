@@ -13,7 +13,8 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: src/main/intt/go.mod
+          cache-dependency-path: src/main/intt/go.sum
       - name: Build archives
         run: sh scripts/build-release.sh "${GITHUB_REF_NAME}"
       - name: Release notes

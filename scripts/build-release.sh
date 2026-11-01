@@ -7,6 +7,7 @@ VERSION="${VERSION#v}"
 MAIN_PKG="${MAIN_PKG:-./cmd/chaude}"
 TARGETS="${TARGETS:-darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+MOD="$ROOT/src/main/intt"   # Go module root; go commands run here
 cd "$ROOT"
 rm -rf dist && mkdir -p dist
 for t in $TARGETS; do
@@ -14,8 +15,8 @@ for t in $TARGETS; do
   stage="dist/stage_${os}_${arch}"
   mkdir -p "$stage"
   bin=chaude; [ "$os" = windows ] && bin=chaude.exe
-  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-    -ldflags "-s -w -X main.version=${VERSION}" -o "$stage/$bin" "$MAIN_PKG"
+  (cd "$MOD" && CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION}" -o "$ROOT/$stage/$bin" "$MAIN_PKG")
   if [ "$os" = windows ]; then
     (cd "$stage" && zip -q -j "../chaude_${VERSION}_${os}_${arch}.zip" "$bin")
   else

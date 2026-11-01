@@ -24,7 +24,7 @@ Windows는 `install.sh`를 쓰지 않습니다. PowerShell에서 저장소를 �
 
 ### 소스에서 빌드
 
-Go 1.22+가 필요하고 `go build -o bin/chaude ./cmd/chaude`로 됩니다. mac/linux는 `platform_setup/install.sh`, windows는 `platform_setup\install.ps1`이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
+Go 1.22+가 필요하고 `cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude`로 됩니다(Go 모듈은 `src/main/intt`에 있습니다). mac/linux는 `platform_setup/install.sh`, windows는 `platform_setup\install.ps1`이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
 
 ## 사용
 
@@ -165,7 +165,7 @@ Claude Code 훅은 `.claude/hooks/*.py`(Python 3.8+)이며 `python3 .claude/hook
 
 ## 개발과 릴리즈
 
-- 테스트: `go test ./...` (실제 claude를 쓰는 테스트: `HARNESS_LIVE=1 go test ./internal/harness -v`)
+- 테스트: `cd src/main/intt && go test ./...` (실제 claude를 쓰는 테스트: `cd src/main/intt && HARNESS_LIVE=1 go test ./internal/harness -v`)
 - 릴리즈: `v*` 태그를 push하면 GitHub Actions(`.github/workflows/release.yml`)가 `scripts/build-release.sh`로 아카이브(darwin/linux amd64·arm64 `.tar.gz`, windows amd64·arm64 `.zip`)와 `checksums.txt`를 빌드해 릴리즈를 만듭니다. 대상은 `TARGETS` 환경변수로 바꿀 수 있습니다.
   ```sh
   git tag v0.9.5 && git push origin v0.9.5
