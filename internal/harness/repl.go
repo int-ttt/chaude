@@ -1310,6 +1310,7 @@ func Main(args []string) int {
 	}
 	a.MaxWorkers = mw
 	r := &Repl{a: a, out: os.Stdout, in: bufio.NewReaderSize(os.Stdin, 1<<20), intr: make(chan struct{}, 1), resident: residentSlots(a.Model), extraCoders: set.ExtraCoders}
+	r.mode.Store(int32(modeAuto)) // default permission mode is auto (same as claude --permission-mode auto)
 	r.prevOwned = loadPrevOwned(recordDir(a.Cwd), a.Cwd)
 	_, _ = pruneRecordFiles(recordDir(a.Cwd), set.SessionRetentionDays, time.Now())
 	if st, err := os.Stdin.Stat(); err == nil {

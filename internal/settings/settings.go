@@ -242,9 +242,18 @@ func hasStr(items []*node, s string) bool {
 	return false
 }
 
-// Main: gen-settings windows|mac|linux [--out FILE] [--src FILE] [--python CMD]  (default out: stdout).
+const genUsage = `usage: chaude gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]
+  .claude/settings.json(posix 원본)으로부터 OS별 설정을 생성한다.
+  OS 생략 시 현재 실행 OS (windows|mac|linux). --out 생략 시 표준출력.
+  --out FILE       결과를 이 파일에 쓴다
+  --src FILE       원본 설정 (기본: CLAUDE_PROJECT_DIR/.claude/settings.json 또는 bin/ 상위 폴더)
+  --python CMD     windows 훅 인터프리터 (기본: py -3 가 있으면 py -3, 아니면 python)`
+
+// Main: gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]  (OS default: current; out default: stdout).
 func Main(args []string) int {
 	fs := flag.NewFlagSet("gen-settings", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() { fmt.Fprintln(os.Stderr, genUsage) }
 	out := fs.String("out", "", "write here instead of stdout")
 	py := fs.String("python", "", "windows hook interpreter (default: py -3 if found, else python)")
 	exe, _ := os.Executable()
@@ -255,18 +264,25 @@ func Main(args []string) int {
 	src := fs.String("src", defSrc, "posix settings source")
 	pos, err := lean.ParseInterspersed(fs, args)
 	if err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
 		return 2
 	}
-	if len(pos) != 1 || (pos[0] != "windows" && pos[0] != "mac" && pos[0] != "linux") {
-		fmt.Fprintln(os.Stderr, "usage: chaude gen-settings windows|mac|linux [--out FILE] [--src FILE] [--python CMD]")
+	osName := osenv.Name()
+	if len(pos) > 1 || (len(pos) == 1 && pos[0] != "windows" && pos[0] != "mac" && pos[0] != "linux") {
+		fs.Usage()
 		return 2
+	}
+	if len(pos) == 1 {
+		osName = pos[0]
 	}
 	txt, err := os.ReadFile(*src)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "gen-settings: 원본 설정을 읽을 수 없습니다 (--src 로 지정): %v\n", err)
 		return 1
 	}
-	if pos[0] == "windows" {
+	if osName == "windows" {
 		if *py == "" {
 			*py = WindowsPython()
 		}

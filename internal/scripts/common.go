@@ -359,9 +359,54 @@ func absPath(p string) string {
 	return a
 }
 
+// helpText is the -h / usage text per script (shown on -h and on flag errors).
+var helpText = map[string]string{
+	"charcount": `usage: chaude charcount FILE [--section HEADING] [--limit N]
+  텍스트/마크다운 파일의 글자 수를 센다 (공백 포함·제외, 바이트). FILE 대신 - 를 주면 표준입력.
+  --section HEADING  해당 제목 아래 섹션만 센다
+  --limit N          N자 제한과 비교해 초과 여부를 출력`,
+	"claude-history": `usage: chaude claude-history [PROJECT_DIR]
+  프로젝트(기본: CLAUDE_PROJECT_DIR 또는 현재 폴더)의 Claude Code 대화 기록 폴더 경로를 출력한다.
+  기록 폴더는 ~/.claude/projects 아래에 있다. 찾지 못하면 오류 메시지를 stderr로 출력하고 종료 코드 1.`,
+	"compress-archive": `usage: chaude compress-archive DIR [DIR...]
+  DIR 아래(숨김 폴더 제외)의 .jsonl 대화 기록을 .jsonl.gz로 압축하고 원본을 지운다.
+  완료 후 기록 개수와 용량 변화(MB)를 출력한다. 인자 없이 실행하면 사용법을 출력한다.`,
+	"export-history": `usage: chaude export-history [--project DIR] [--file F] [--out DIR] [--width N] [--split-kb N] [--hook]
+  프로젝트 대화 기록을 읽기 좋은 텍스트 파일로 내보낸다.
+  --project DIR   대상 프로젝트 (기본: CLAUDE_PROJECT_DIR 또는 현재 폴더)
+  --file F        특정 세션 .jsonl 파일만 내보냄
+  --out DIR       출력 폴더
+  --width N       줄 너비 (기본 120)
+  --split-kb N    출력 파일 분할 크기 KB (기본 500)
+  --hook          Claude Code 훅 JSON을 표준입력에서 읽는다`,
+	"extract-transcript": `usage: chaude extract-transcript SOURCE [--out DIR] [--chunk N] [--reply-chars N]
+  SOURCE(.jsonl 파일, 프로젝트 경로, 또는 ~/.claude/projects 하위 폴더)의 대화를 조각 파일로 나눈다.
+  사용자/Claude 메시지만 추출하고, 긴 붙여넣기는 해시로 중복 제거한다.
+  --out DIR           출력 폴더 (기본 notes/distill); DIR/chunks/NNN.md 와 DIR/INDEX.md 생성
+  --chunk N           조각 크기 목표 글자 수 (기본 7000)
+  --reply-chars N     Claude 답변 자르기 글자 수 (기본 800)`,
+	"search-history": `usage: chaude search-history "<terms>" [--project DIR] [--since YYYY-MM-DD] [--who user|claude|all] [--limit N] [--width N]
+  프로젝트 대화 기록에서 검색어가 포함된 메시지를 찾아 최신순으로 출력한다.
+  --project DIR      대상 프로젝트 (기본: CLAUDE_PROJECT_DIR 또는 현재 폴더)
+  --since DATE       이 날짜 이후만 (YYYY-MM-DD)
+  --who user|claude|all  발화자 필터 (기본 all)
+  --limit N          표시 건수 (기본 12)
+  --width N          스니펫 너비 (기본 300)`,
+	"usage-report": `usage: chaude usage-report [PROJECTS_DIR] [--top N]
+  대화 기록(기본 ~/.claude/projects)의 모델별 요청·캐시·출력 토큰과 추정 비용을 집계한다.
+  --top N  비용 상위 세션 표시 개수 (기본 15)`,
+}
+
 func newFS(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	fs.Usage = func() {
+		if h, ok := helpText[name]; ok {
+			fmt.Fprintln(os.Stderr, h)
+		} else {
+			fmt.Fprintf(os.Stderr, "usage: chaude %s [args]\n", name)
+		}
+	}
 	return fs
 }
 

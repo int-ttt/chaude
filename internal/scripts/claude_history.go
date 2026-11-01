@@ -74,10 +74,26 @@ func HistoryDir(project string) string {
 }
 
 func claudeHistory(args []string) int {
-	if len(args) > 0 {
-		fmt.Println(HistoryDir(args[0]))
-	} else {
-		fmt.Println("")
+	fs := newFS("claude-history")
+	pos, rc := parseArgs(fs, args)
+	if rc >= 0 {
+		return rc
 	}
+	if len(pos) > 1 {
+		fs.Usage()
+		return 2
+	}
+	proj := os.Getenv("CLAUDE_PROJECT_DIR")
+	if proj == "" {
+		proj, _ = os.Getwd()
+	}
+	if len(pos) == 1 {
+		proj = pos[0]
+	}
+	d := HistoryDir(proj)
+	if d == "" {
+		return fail("기록 없음: %s 에 대한 대화 기록 폴더를 찾지 못했습니다 (확인 위치: %s)", absPath(proj), ProjectsRoot())
+	}
+	fmt.Println(d)
 	return 0
 }

@@ -58,7 +58,7 @@ func extractTranscript(args []string) int {
 		}
 	}
 	if len(files) == 0 {
-		return fail("대화 기록을 찾지 못했습니다: %s\n~/.claude/projects 아래 폴더를 직접 지정해 보세요.", src)
+		return fail("대화 기록을 찾지 못했습니다: %s\n~/.claude/projects 아래 폴더를 직접 지정해 보세요.", filepath.ToSlash(src))
 	}
 	var entries []entry
 	seenPaste := map[string]bool{}
@@ -137,6 +137,6 @@ func extractTranscript(args []string) int {
 	idx += fmt.Sprintf("- 기간: %s ~ %s\n", first, last)
 	idx += fmt.Sprintf("- 권장 배분: haiku-extractor 1개당 조각 4개 → %d개 병렬\n", par)
 	_ = os.WriteFile(filepath.Join(*out, "INDEX.md"), []byte(idx), 0o644)
-	fmt.Printf("세션 %d개 · 메시지 %d개 → 조각 %d개 (%s자) · %s/INDEX.md\n", len(files), len(entries), len(chunks), commaInt(total), *out)
+	fmt.Printf("세션 %d개 · 메시지 %d개 → 조각 %d개 (%s자) · %s\n", len(files), len(entries), len(chunks), commaInt(total), filepath.ToSlash(filepath.Join(*out, "INDEX.md")))
 	return 0
 }

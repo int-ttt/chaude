@@ -141,12 +141,16 @@ type Session struct {
 	dead      atomic.Bool   // stdout reached EOF: the child process is gone
 }
 
+// claudePermissionMode is passed to every claude child: chaude always launches claude in auto mode.
+// Values accepted by the claude CLI: acceptEdits, auto, bypassPermissions, manual, dontAsk, plan.
+const claudePermissionMode = "auto"
+
 // sessionArgs is the claude argv for o. o.Model must already be defaulted. The rules are o.Rule, else the
 // body of the agent named in o.Agent; Minimal passes them as --system-prompt, otherwise --append-system-prompt.
 // An unreadable agent file adds nothing (the caller notices).
 func sessionArgs(o SessionOpts) []string {
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json",
-		"--verbose", "--include-partial-messages", "--model", o.Model}
+		"--verbose", "--include-partial-messages", "--model", o.Model, "--permission-mode", claudePermissionMode}
 	if !o.NoPermission {
 		args = append(args, "--permission-prompt-tool", "stdio")
 	}

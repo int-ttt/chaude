@@ -154,11 +154,17 @@ type tuiModel struct {
 	queue     []string // prompts typed while a foreground answer runs; merged into one turn when it ends
 	curPrompt string   // prompt of the running turn (summary in the status row)
 	queueH    int
-	av        *agentView // non-nil while the read-only agent view is open
-	sv        *sessView  // non-nil while /view is open (session list, then one session's prompts)
-	svH       int        // session rows below the input box (/view list)
-	usage     string     // non-empty while the /usage popup is open
-	imeShift  int32      // column offset for terminals that draw IME preedit off the cursor (JediTerm: -1)
+	av        *agentView         // non-nil while the read-only agent view is open
+	sv        *sessView          // non-nil while /view is open (session list, then one session's prompts)
+	svH       int                // session rows below the input box (/view list)
+	usage     string             // non-empty while the /usage popup is open
+	imeShift  int32              // column offset for terminals that draw IME preedit off the cursor (JediTerm: -1)
+	lines     []string           // transcript lines of the last refresh (viewport content, split on \n)
+	selc      textSel            // drag selection in content coordinates (survives streaming output and scrolling)
+	dragging  bool               // left button held inside the transcript
+	clip      func(string) error // clipboard writer for a release copy (nil = copyToClipboard)
+	copyNote  string             // status note after a copy ("복사됨 (N자)"), cleared after 2s
+	copySeq   int                // identifies the current copyNote so an older timer does not clear it
 }
 
 // imeColShift: JediTerm (JetBrains) draws uncommitted IME text at cursorX+1 cells
@@ -247,7 +253,7 @@ var (
 
 func newTUIModel(r *Repl, submit chan string) *tuiModel {
 	sp := spinner.New()
-	sp.Spinner = spinner.Spinner{Frames: []string{"✻", "✽", "✶", "✳", "✢", "·"}, FPS: time.Second / 8}
+	sp.Spinner = spinner.Spinner{Frames: []string{"✻", "✽", "✶", "✲", "✢", "·"}, FPS: time.Second / 8}
 	sp.Style = lipgloss.NewStyle().Foreground(orange)
 	return &tuiModel{r: r, submit: submit, sp: sp, mouse: true, imeShift: imeColShift()}
 }
@@ -378,7 +384,9 @@ func (m *tuiModel) refresh() {
 		sig = sig*100003 + len(m.blocks[sig-1].text)
 	}
 	m.lastRun = m.runningN()
-	m.vp.SetContent(m.render())
+	body := m.render()
+	m.lines = strings.Split(body, "\n")
+	m.vp.SetContent(body)
 	if m.held && !atBottom {
 		if sig != m.sig {
 			m.unseen = true
@@ -530,10 +538,18 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
+		if ok, c := m.selectMouse(v); ok {
+			cmds = append(cmds, c)
+			break
+		}
 		var c tea.Cmd
 		m.vp, c = m.vp.Update(v)
 		m.held = !m.vp.AtBottom()
 		cmds = append(cmds, c)
+	case copyNoteMsg:
+		if v.seq == m.copySeq {
+			m.copyNote = ""
+		}
 	case tea.KeyMsg:
 		return m.key(v)
 	}
@@ -1169,6 +1185,9 @@ func (m *tuiModel) statusLine() string {
 	if m.perm != nil {
 		right = "y allow · n deny "
 	}
+	if m.copyNote != "" {
+		left += " · " + m.copyNote
+	}
 	gap := m.w - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		return dimSt.Render(trunc(left, m.w))
@@ -1233,7 +1252,7 @@ func (m *tuiModel) View() string {
 		}
 		pop = strings.Join(l, "\n") + "\n"
 	}
-	vv := m.vp.View()
+	vv := highlightView(m.vp.View(), m.lines, m.vp.YOffset, m.selc)
 	if m.rw.open {
 		hh := m.vp.Height
 		l := []string{lipgloss.NewStyle().Foreground(orange).Render("Rewind to a prompt  (↑/↓ select · enter rewind · esc cancel)")}

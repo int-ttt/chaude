@@ -13,9 +13,18 @@ import (
 func init() { register("compress-archive", compressArchive) }
 
 func compressArchive(args []string) int {
+	flags := newFS("compress-archive")
+	dirs, rc := parseArgs(flags, args)
+	if rc >= 0 {
+		return rc
+	}
+	if len(dirs) == 0 {
+		flags.Usage()
+		return 2
+	}
 	var before, after int64
 	n := 0
-	for _, d := range args {
+	for _, d := range dirs {
 		var files []string
 		_ = filepath.WalkDir(d, func(p string, de fs.DirEntry, err error) error {
 			if err != nil {
@@ -46,6 +55,8 @@ func compressArchive(args []string) int {
 	}
 	if n > 0 {
 		fmt.Printf("   압축: 기록 %d개 %.1fMB → %.1fMB\n", n, float64(before)/1e6, float64(after)/1e6)
+	} else {
+		fmt.Printf("   압축할 기록 없음: %s\n", strings.Join(dirs, ", "))
 	}
 	return 0
 }
