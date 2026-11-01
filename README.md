@@ -9,18 +9,29 @@
 ### macOS / Linux
 
 ```sh
-gh api repos/int-ttt/chaude/contents/install.sh -H "Accept: application/vnd.github.raw" | sh
-# 공개 저장소라면: curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | bash
 chaude --version
 ```
 
-- 최신 릴리즈를 받아 체크섬을 확인한 뒤 `/usr/local/bin`(쓰기 가능 시) 또는 `~/.local/bin`에 설치합니다. 체크섬은 `sha256sum` 또는 `shasum`으로 확인합니다.
-- PATH에 없으면 로그인 셸에 따라 추가합니다: zsh는 `~/.zshrc`, bash는 mac `~/.bash_profile`/linux `~/.bashrc`, 그 밖은 `~/.profile`.
-- 환경변수: `CHAUDE_VERSION=v0.9.5`(특정 버전), `CHAUDE_INSTALL_DIR=경로`, `CHAUDE_REPO=소유자/저장소`.
+- 최신 릴리즈(`CHAUDE_VERSION`으로 지정 가능)의 아카이브를 받아 `checksums.txt`로 검증한 뒤 `~/.local/bin/chaude`에 설치합니다. 검증할 체크섬이 없으면 설치하지 않습니다.
+- 이미 설치된 `chaude`가 있으면 `chaude.<이전버전>.bak`으로 백업한 뒤 덮어씁니다.
+- PATH에 없으면 힌트를 출력하고, 로그인 셸에 따라 rc 파일에 추가합니다: zsh는 `~/.zshrc`, bash는 mac `~/.bash_profile`/linux `~/.bashrc`, 그 밖은 `~/.profile`.
+- 필요 도구: `curl`, `tar`, `sha256sum` 또는 `shasum`. 환경변수: `CHAUDE_VERSION=v0.9.11`(특정 버전), `CHAUDE_INSTALL_DIR=경로`(기본 `~/.local/bin`), `CHAUDE_REPO=소유자/저장소`.
 
 ### Windows
 
-Windows는 `install.sh`를 쓰지 않습니다. PowerShell에서 저장소를 받은 뒤 `platform_setup\install.ps1`을 실행합니다(Go 확인, 빌드, `.claude/settings.json` 생성). 릴리즈의 `chaude_<버전>_windows_<arch>.zip`을 직접 풀어 PATH에 넣어도 됩니다.
+```powershell
+irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
+chaude --version
+```
+
+- `%USERPROFILE%\.local\bin\chaude.exe`에 설치하고 체크섬을 검증합니다. 설치 방식과 환경변수는 macOS / Linux와 같습니다(`CHAUDE_VERSION`, `CHAUDE_INSTALL_DIR`, `CHAUDE_REPO`).
+- PATH에 없으면 사용자 PATH에 추가하는 명령을 출력합니다.
+- 릴리즈의 `chaude_<버전>_windows_<arch>.zip`을 직접 풀어 PATH에 넣어도 됩니다.
+
+### 비공개 저장소일 때
+
+현재 저장소는 비공개라서 위 raw URL은 로그인 없이는 404가 됩니다. `gh auth login`을 한 뒤 `gh api repos/int-ttt/chaude/contents/install.sh -H "Accept: application/vnd.github.raw" | bash`(Windows는 `install.ps1`을 같은 방식으로)로 받으면, 설치 스크립트가 `gh`로 릴리즈를 받습니다. 저장소를 공개하면 위 한 줄로 바로 설치됩니다.
 
 ### 소스에서 빌드
 
