@@ -56,8 +56,10 @@ type liveChild struct {
 	mu       sync.Mutex  // guards LastAPI and the parked reply buffer
 	parked   atomic.Bool // true from unbindActive until bindChild; the idle callback branches on it
 	reply    strings.Builder
-	stream   bool // the parked reply arrived as text_delta events
-	sawNotif bool // a <task-notification> was seen since the last result
+	stream   bool        // the parked reply arrived as text_delta events
+	sawNotif bool        // a <task-notification> was seen since the last result
+	busy     *agentRec   // command in flight: one running-list row while set (nil = idle); guarded by mu
+	await    chan string // reply sink of the command in flight (sendResident); nil = nobody waits; guarded by mu
 }
 
 func (c *liveChild) lastAPI() time.Time {

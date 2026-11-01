@@ -11,7 +11,7 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 - C1: 자유 축약형 전체 caveman은 비채택. 한정어·검색 범위·잘림 여부가 먼저 사라짐 (notes/runs/261030-plan-caveman-relay-read-review.md:8, :14-15)
 - C2: 형식 고정 반환 스키마만 조건부 검토 대상 (notes/runs/261030-plan-caveman-relay-read.md:40-47, notes/runs/261030-plan-caveman-relay-flow.md:52)
 - C3: 한정어(only, except, not, unless, 미확인)는 압축 금지. 예: "36번만 해당" -> "36 해당"은 의미 변경 (read.md:20)
-- C4: 번역 전용 hop 추가 금지. scout가 같은 실행 안에서 한국어 요약을 직접 씀 (read.md:25). 중계 단계 3개 이상이면 절감 상쇄 가능성 높음 (flow.md:83)
+- C4: 번역 전용 hop 추가 금지. scout가 같은 실행 안에서 한국어 요약을 직접 씀 (read.md:25). 중계 단계 3개 이상이면 절감 상쇄 가능성 높음 (flow.md:83) (SUPERSEDED 2611: 상시 세션 라우팅 참조)
 - C5: opus-architect는 Agent 도구만 있어 [ws:<id>] 줄을 직접 낼 수 없음. 라우팅 주체는 메인 세션/하네스 (notes/runs/261030-plan-caveman-relay-flow-review.md:23)
 - C6: 서브에이전트는 부모 맥락을 기본 상속하지 않음(fork만 상속), Agent 호출 model 인자는 alias만 (notes/runs/261030-plan-caveman-relay-structure-review.md:5). 따라서 필요한 맥락은 브리프에 직접 적어야 함
 - C7: CLAUDE.md:4 "Korean, 존댓말."은 서브에이전트에도 적재됨. 에이전트 파일만 바꾸면 규칙 충돌 (notes/runs/261030-plan-caveman-relay-impl-review.md:8)
@@ -35,7 +35,7 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 
 | 층 | 경로 | 언어·형식 |
 |---|---|---|
-| L0 사용자 채널 | 입력: 사용자 -> haiku-prompter -> opus 세션 / 출력: haiku-tui -> 사용자 | haiku-tui 출력만 한국어 존댓말 자연문. haiku-prompter는 사용자 프롬프트를 opus 세션에 전달(사용자 원문 verbatim, 존댓말 규칙 비적용, 전달문 = 원문 + 요약, U8 = c 결정됨) |
+| L0 사용자 채널 | 입력: 사용자 -> haiku-prompter -> opus 세션 / 출력: haiku-tui -> 사용자 | haiku-tui 출력만 한국어 존댓말 자연문. haiku-prompter는 사용자 프롬프트를 opus 세션에 전달(사용자 원문 verbatim, 존댓말 규칙 비적용, 전달문 = 원문 + 요약, U8 = c 결정됨) (SUPERSEDED 2611: 상시 세션 라우팅 참조) |
 | L1 지휘 채널 | 메인 <-> opus-architect | caveman 브리프(B형식) / 결정 반환(R-decide) |
 | L2 작업 채널 | opus <-> haiku-* | caveman 브리프(B형식) / 읽기·쓰기 반환(R-read, R-write) |
 
@@ -264,6 +264,22 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
   - 선택지: (a) 구현 단계에 신설 (b) 기존 에이전트로 대체 (c) 별도 계획서로 분리
 - U10 (13장 신규): 현행 haiku-prompter(반복 루프 소유자)는 어떻게 하시겠습니까? [결정됨: (b)]
   - 선택지: (a) 새 정의로 대체 (b) 루프 역할 유지 + 전달 역할 추가 (c) 별도 에이전트로 분리
+
+## 상시 세션 라우팅 (2611 사용자 확정)
+
+사용자 원문 (2026-11-01, 수정 없음):
+> 사용자 입력은 prompter가 영어로 요약해서 메인 opus에게 전달, opus는 haiku 에이전트들을 통해 자료수집과 아주 간단한 파일 수정(수치 변경, 요약, 특정 부분을 사용자 요구대로 변경)을 하고, 중요 파일(메인 코드 및 사용자 문서 등)은 상시 세션인 haiku-coder에게 전달해 장기 컨텍스트를 통한 더 나은 코드 관리를 수행하도록
+
+| 단계 | 경로 | 역할·형식 |
+|---|---|---|
+| 입력 | 사용자 -> resident haiku-prompter -> Opus 메인 | haiku-prompter: 영어 요약 + 사용자 원문 첨부 |
+| 조회·간단 수정 | Opus 메인 -> Task haiku-scout / haiku-batch-worker | 자료수집, 수치 변경, 요약, 지정 부분 수정 |
+| 중요 파일 | Opus 메인 -> resident haiku-coder | 메인 코드, 사용자 문서 등. 같은 세션 유지, 장기 컨텍스트 |
+| 출력 | haiku-tui -> 사용자 | 한국어 존댓말 |
+
+harness 요구 (구현 전):
+- resident 세션(haiku-prompter, haiku-coder)은 busy 표시.
+- P/T/C ctx 표시는 resident usage로 갱신.
 
 ## 구현 점검 (실제 소스 기준)
 

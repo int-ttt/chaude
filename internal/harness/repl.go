@@ -277,6 +277,10 @@ type Repl struct {
 	reg             *clientRegistry     // per-(cwd,model) client registry; nil = off (old routing)
 	children        *childSet           // live child processes kept per (cwd,model); nil = off
 	resident        []residentSlot      // --resident preset slots; nil = off
+	coderMu         sync.Mutex          // guards coderSums
+	coderSums       map[string][]string // coder role -> last summaries (resident_coder)
+	mcpMu           sync.Mutex          // guards mcpCfg
+	mcpCfg          string              // --mcp-config file served to the main child ("" = not started)
 	residentUp      bool                // spawnResident ran (once, after the first successful start)
 	idleRotate      time.Duration       // idle deadline base (--idle-rotate); 0 = off
 	budget          *budget             // per-task USD ledger; nil = off
@@ -349,6 +353,12 @@ func (r *Repl) start() error {
 	}
 	if orr := orchRule(r.a.Orch); orr != "" {
 		rule = strings.TrimSpace(rule + " " + orr)
+	}
+	if len(r.resident) > 0 { // main child gets the resident_coder tools; only the main, never a coder
+		if cfg, err := r.residentMCPConfig(); err == nil {
+			opts.Extra = append(opts.Extra, "--mcp-config", cfg)
+			rule = strings.TrimSpace(rule + " " + coderRule)
+		}
 	}
 	if rule != "" {
 		opts.Extra = append(opts.Extra, "--append-system-prompt", rule)
@@ -611,6 +621,9 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 		return "", nil, nil
 	}
 	r.spend = newTurnSpend()
+	if show { // user-facing input only; the handoff prompt (show=false) goes to main as is
+		text = r.viaPrompter(text)
+	}
 	_ = r.sess.Send(text)
 	var reply strings.Builder
 	var mf markerFilter

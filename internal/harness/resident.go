@@ -3,9 +3,56 @@ package harness
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
+
+// beginBusy marks a resident child as handling a command: it shows as one running-list row until endBusy.
+func (c *liveChild) beginBusy(prompt string, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.busy = &agentRec{ID: c.Role, Name: c.Role, Model: c.Model, Prompt: firstLine(prompt), Started: now}
+}
+
+// endBusy clears the command marker; the child drops out of the running list.
+func (c *liveChild) endBusy() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.busy = nil
+}
+
+// busyRec returns the running-list row of a busy child, nil when idle.
+func (c *liveChild) busyRec() *agentRec {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.busy
+}
+
+// residentBusy: parked resident children that are handling a command, oldest first. Idle ones are not listed.
+func (r *Repl) residentBusy() []*agentRec {
+	if r.children == nil {
+		return nil
+	}
+	var l []*agentRec
+	r.children.mu.Lock()
+	for _, c := range r.children.m {
+		if c == nil {
+			continue
+		}
+		if b := c.busyRec(); b != nil {
+			l = append(l, b)
+		}
+	}
+	r.children.mu.Unlock()
+	sort.Slice(l, func(i, j int) bool {
+		if l[i].Started.Equal(l[j].Started) {
+			return l[i].Name < l[j].Name
+		}
+		return l[i].Started.Before(l[j].Started)
+	})
+	return l
+}
 
 // residentLazyIdle is how long a lazy resident child may stay parked unused before it is retired.
 const residentLazyIdle = 270 * time.Second
@@ -79,8 +126,86 @@ func (r *Repl) spawnSlot(slot residentSlot) (*liveChild, error) {
 	}
 	c := &liveChild{Sess: s, Tracker: newAgentTracker(), Model: slot.Model, Role: slot.Role, Lazy: slot.Lazy}
 	c.setLastAPI(time.Now())
+	c.parked.Store(true)
+	s.StartIdle(func(ev event) { r.parkedIdleEvent(c, ev) }) // parked children have no turn: read stdout here
 	r.children.Park(childKey(r.a.Cwd, slot.Model, slot.Role), c)
 	return c, nil
+}
+
+// residentRoleKey maps a resident role to its status-line slot: prompter P, tui T, coder C0, coder-spare-i Ci.
+// "" for roles without a slot (main, worker-N, opus-N).
+func residentRoleKey(role string) string {
+	switch {
+	case role == "prompter":
+		return "P"
+	case role == "tui":
+		return "T"
+	case role == "coder":
+		return "C0"
+	case strings.HasPrefix(role, "coder-spare-"):
+		return "C" + strings.TrimPrefix(role, "coder-spare-")
+	}
+	return ""
+}
+
+// residentChild returns the parked child of resident slot role, left in the set. False when absent or dead.
+func (r *Repl) residentChild(role string) (*liveChild, bool) {
+	slot, ok := r.residentSlotByRole(role)
+	if !ok || r.children == nil {
+		return nil, false
+	}
+	r.children.mu.Lock()
+	c := r.children.m[childKey(r.a.Cwd, slot.Model, role)]
+	r.children.mu.Unlock()
+	return c, c != nil && !childDead(c)
+}
+
+// sendResident writes msg to the parked resident child of role as one user message and marks it busy
+// with label until its result. The returned channel gets the reply text of that result (buffered, one value).
+func (r *Repl) sendResident(role, msg, label string) (<-chan string, error) {
+	c, ok := r.residentChild(role)
+	if !ok {
+		return nil, fmt.Errorf("no live resident %q", role)
+	}
+	s, ok := c.Sess.(*Session)
+	if !ok || s == nil {
+		return nil, fmt.Errorf("resident %q has no session", role)
+	}
+	ch := make(chan string, 1)
+	c.mu.Lock()
+	c.await = ch
+	c.mu.Unlock()
+	c.beginBusy(label, time.Now()) // before the write: the result may arrive right after it
+	if err := s.sendFrame(msg); err != nil {
+		c.endBusy()
+		c.mu.Lock()
+		c.await = nil
+		c.mu.Unlock()
+		return nil, err
+	}
+	return ch, nil
+}
+
+// prompterTimeout bounds the wait for the resident prompter's summary; on timeout the input goes unchanged.
+var prompterTimeout = 60 * time.Second
+
+// viaPrompter returns the text Opus main receives: the resident prompter's English summary, then the
+// original input. Without a live prompter, or when it does not answer in time, text is returned unchanged.
+func (r *Repl) viaPrompter(text string) string {
+	ask := "Summarize the following user input in English in a few sentences. Reply with the summary only.\n\n" + text
+	ch, err := r.sendResident("prompter", ask, text)
+	if err != nil {
+		return text
+	}
+	select {
+	case sum := <-ch:
+		if sum == "" {
+			return text
+		}
+		return "[prompter summary EN]\n" + sum + "\n\n[original input]\n" + text
+	case <-time.After(prompterTimeout):
+		return text
+	}
 }
 
 // spawnResident starts the eager non-main slots of the preset and parks them. Lazy slots wait for

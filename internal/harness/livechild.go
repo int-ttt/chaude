@@ -33,10 +33,20 @@ func (r *Repl) parkedIdleEvent(c *liveChild, ev event) {
 		c.Tracker.onSubEvent(ev)
 	}
 	t := str(ev["type"])
+	if k := residentRoleKey(c.Role); t == "assistant" && k != "" { // resident usage counts for its P/T/C slot, subagent or not
+		if u := asMap(asMap(ev["message"])["usage"]); len(u) > 0 {
+			r.setRoleCtx(k, ctxTokens(u))
+		}
+	}
 	switch {
 	case t == "control_request" && str(asMap(ev["request"])["subtype"]) == "can_use_tool":
 		if s, ok := c.Sess.(*Session); ok && s != nil {
-			_ = s.RespondPermission(str(ev["request_id"]), false, nil, "denied: session parked (another model is active)")
+			req := asMap(ev["request"])
+			if in := asMap(req["input"]); coderMayUse(c, r.a.Cwd, str(req["tool_name"]), in) {
+				_ = s.RespondPermission(str(ev["request_id"]), true, in, "")
+			} else {
+				_ = s.RespondPermission(str(ev["request_id"]), false, nil, "denied: session parked (another model is active)")
+			}
 		}
 	case t == "rate_limit_event":
 		r.setRate(asMap(ev["rate_limit_info"]))
@@ -76,7 +86,13 @@ func (r *Repl) parkedIdleEvent(c *liveChild, ev event) {
 		txt := strings.TrimSpace(c.reply.String())
 		c.reply.Reset()
 		c.stream = false
+		ask := c.await
+		c.await = nil
 		c.mu.Unlock()
+		c.endBusy()
+		if ask != nil {
+			ask <- txt // sendResident caller; buffered, one value
+		}
 		if !seen && txt != "" && c.Tracker != nil {
 			c.Tracker.finishOldestBackground() // same fallback as idleFinish: notice not visible on stdout
 		}
@@ -85,7 +101,7 @@ func (r *Repl) parkedIdleEvent(c *liveChild, ev event) {
 				r.budget.charge(s, tc)
 			}
 		}
-		if txt != "" {
+		if txt != "" && ask == nil {
 			r.addNotice(fmt.Sprintf("[parked %s background reply] %s", c.Model, trunc(txt, 300)))
 		}
 	}

@@ -199,6 +199,12 @@ func (s *Session) Send(text string) error {
 		s.bgTurn = false
 	}
 	s.mu.Unlock()
+	return s.sendFrame(text)
+}
+
+// sendFrame writes one user message frame. Send adds the turn bookkeeping; parked resident children
+// use this directly because nothing calls Events on them to release the idle reader.
+func (s *Session) sendFrame(text string) error {
 	return s.write(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}})
 }
 

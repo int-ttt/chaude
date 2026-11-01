@@ -148,6 +148,8 @@ type tuiModel struct {
 	curPrompt string   // prompt of the running turn (summary in the status row)
 	queueH    int
 	av        *agentView // non-nil while the read-only agent view is open
+	sv        *sessView  // non-nil while /view is open (session list, then one session's prompts)
+	svH       int        // session rows below the input box (/view list)
 	usage     string     // non-empty while the /usage popup is open
 	imeShift  int32      // column offset for terminals that draw IME preedit off the cursor (JediTerm: -1)
 }
@@ -178,7 +180,7 @@ var slashCmds = []slashCmd{
 	{"/model", "show or switch model: /model <name>"},
 	{"/resume", "list record topics, or show one: /resume [n|slug] (/resume claude: Claude Code sessions)"},
 	{"/import", "import a session: /import [id|latest]"},
-	{"/view", "view a Claude Code session's conversation: /view [id-prefix]"},
+	{"/view", "browse Claude Code sessions (↑/↓ enter, ←/→ prompts, esc back): /view [id-prefix]"},
 	{"/rotate", "hand off to a fresh session"},
 	{"/usage", "plan usage and limits (from claude)"},
 	{"/cost", "usage / cost (from claude)"},
@@ -334,7 +336,8 @@ func (m *tuiModel) render() string {
 	}
 	fg, _ := m.r.tracker.counts()
 	opus := m.r.tracker.opusRunning()
-	if (fg > 0 || opus) && (opus || !m.gotText) && m.perm == nil {
+	res := len(m.r.residentBusy()) > 0
+	if (fg > 0 || opus || res) && (opus || res || !m.gotText) && m.perm == nil {
 		out = append(out, m.sp.View()+dimSt.Render(" "+m.mainStatusText()))
 	} else if m.busy && !m.gotText && m.perm == nil {
 		out = append(out, m.sp.View()+dimSt.Render(" "+m.mainStatusText()+" (esc to interrupt)"))
@@ -351,7 +354,7 @@ func (m *tuiModel) refresh() {
 	if sig > 0 {
 		sig = sig*100003 + len(m.blocks[sig-1].text)
 	}
-	m.lastRun = len(m.r.tracker.running())
+	m.lastRun = m.runningN()
 	m.vp.SetContent(m.render())
 	if m.held && !atBottom {
 		if sig != m.sig {
@@ -368,7 +371,7 @@ func (m *tuiModel) refresh() {
 func (m *tuiModel) layout() {
 	m.fit()
 	m.inH = m.in.Height(maxInputRows)
-	vh := m.h - m.inH - 2 - 1 - m.popH - m.panelH - m.bgH - m.queueH // input box + status line + suggestions
+	vh := m.h - m.inH - 2 - 1 - m.popH - m.panelH - m.bgH - m.queueH - m.svH // input box + status line + suggestions
 	if vh < 1 {
 		vh = 1
 	}
@@ -400,7 +403,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var c tea.Cmd
 		m.sp, c = m.sp.Update(v)
 		cmds = append(cmds, c)
-		if n := len(m.r.tracker.running()); m.busy || n != m.lastRun {
+		if n := m.runningN(); m.busy || n != m.lastRun {
 			m.refresh()
 		}
 		if !m.busy && m.perm == nil && m.r.sweepIdle(time.Now()) {
@@ -531,6 +534,10 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.av != nil {
 		m.avKey(k)
+		return m, nil
+	}
+	if m.sv != nil {
+		m.svKey(k)
 		return m, nil
 	}
 	if m.rw.open {
@@ -893,8 +900,8 @@ func (m *tuiModel) syncCursor() {
 func (m *tuiModel) after() {
 	m.fit()
 	m.syncCursor()
-	if pn, bn, qn := len(m.panelLines()), len(m.bgLines()), len(m.queueLines()); pn != m.panelH || bn != m.bgH || qn != m.queueH {
-		m.panelH, m.bgH, m.queueH = pn, bn, qn
+	if pn, bn, qn, sn := len(m.panelLines()), len(m.bgLines()), len(m.queueLines()), len(m.sessLines()); pn != m.panelH || bn != m.bgH || qn != m.queueH || sn != m.svH {
+		m.panelH, m.bgH, m.queueH, m.svH = pn, bn, qn, sn
 		m.layout()
 		m.syncCursor()
 	}
@@ -971,28 +978,12 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.vp.GotoBottom()
 		m.refresh()
 	case "/view":
-		l, msg := m.r.sessionList()
-		if msg != "" {
+		arg := ""
+		if len(f) > 1 {
+			arg = f[1]
+		}
+		if msg := m.openSessView(arg); msg != "" {
 			note(msg)
-			break
-		}
-		if len(f) == 1 {
-			note(formatSessionList(l))
-			break
-		}
-		ms := matchSessions(l, f[1])
-		switch {
-		case len(ms) == 0:
-			note("no session matching " + f[1])
-		case len(ms) > 1:
-			note("ambiguous prefix, matches:\n" + formatSessionList(ms))
-		default:
-			imp, err := readClaudeTranscript(ms[0].Path)
-			if err != nil {
-				note("view: " + err.Error())
-				break
-			}
-			note(formatTranscript(ms[0], imp))
 		}
 	case "/import":
 		m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
@@ -1087,9 +1078,14 @@ func (m *tuiModel) View() string {
 	if len(bl) > 0 {
 		bgPanel = strings.Join(bl, "\n") + "\n"
 	}
+	sl := m.sessLines()
+	svPanel := ""
+	if len(sl) > 0 {
+		svPanel = strings.Join(sl, "\n") + "\n"
+	}
 	changed := len(pl) != m.panelH || len(bl) != m.bgH || len(ql) != prevQ
-	m.panelH, m.bgH, m.queueH = len(pl), len(bl), len(ql) // computed in the frame it is drawn: layout height always matches
-	if vh := max(1, m.h-m.inH-2-1-m.popH-m.panelH-m.bgH-m.queueH); m.h > 0 && vh != m.vp.Height {
+	m.panelH, m.bgH, m.queueH, m.svH = len(pl), len(bl), len(ql), len(sl) // computed in the frame it is drawn: layout height always matches
+	if vh := max(1, m.h-m.inH-2-1-m.popH-m.panelH-m.bgH-m.queueH-m.svH); m.h > 0 && vh != m.vp.Height {
 		atBottom := m.vp.AtBottom()
 		m.vp.Height = vh
 		if atBottom {
@@ -1159,6 +1155,9 @@ func (m *tuiModel) View() string {
 		}
 		vv = strings.Join(l, "\n")
 	}
+	if m.sv != nil && m.sv.turns != nil {
+		vv = m.svPromptLines(m.vp.Height)
+	}
 	if m.av != nil {
 		vv = m.agentViewLines(m.vp.Height)
 	}
@@ -1168,7 +1167,7 @@ func (m *tuiModel) View() string {
 	if m.unseen && m.vp.AtBottom() {
 		m.unseen = false
 	}
-	if m.unseen && m.av == nil && m.usage == "" {
+	if m.unseen && m.av == nil && m.usage == "" && m.sv == nil {
 		ls := strings.Split(vv, "\n")
 		tag := lipgloss.NewStyle().Foreground(orange).Render("↓ 새 메시지 (End: 맨 아래로)")
 		ls[len(ls)-1] = strings.Repeat(" ", max(0, m.w-lipgloss.Width(tag)-1)) + tag
@@ -1178,7 +1177,7 @@ func (m *tuiModel) View() string {
 	if len(ql) > 0 {
 		qv = strings.Join(ql, "\n") + "\n"
 	}
-	return vv + "\n" + pop + qv + box + "\n" + panel + bgPanel + m.statusLine()
+	return vv + "\n" + pop + qv + box + "\n" + panel + bgPanel + svPanel + m.statusLine()
 }
 
 // runTUI is the interactive entry: same Repl, rendered with bubbletea in the alt screen.
@@ -1246,6 +1245,9 @@ const (
 	minViewRows = 3
 )
 
+// runningN: running agents plus busy resident sessions (the running list's refresh key).
+func (m *tuiModel) runningN() int { return len(m.r.tracker.running()) + len(m.r.residentBusy()) }
+
 // panelLines: one row per running foreground delegated session (below the input box).
 func (m *tuiModel) panelLines() []string { return m.rows(false, 0) }
 
@@ -1263,6 +1265,9 @@ func (m *tuiModel) rowsA(bg bool, used int) ([]string, []*agentRec) {
 		if a.Background == bg {
 			l = append(l, a)
 		}
+	}
+	if !bg { // resident sessions handling a command, idle ones are not listed
+		l = append(l, m.r.residentBusy()...)
 	}
 	for _, a := range m.r.tracker.sortedRestored() {
 		if a.Background == bg {

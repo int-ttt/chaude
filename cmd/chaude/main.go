@@ -13,7 +13,7 @@ import (
 )
 
 // version is set at release time: -ldflags "-X main.version=X.Y.Z".
-var version = "0.9.2"
+var version = "0.9.3"
 
 const usage = `usage: chaude <command> [args]
   repl [flags]           terminal REPL over claude -p stream-json with session rotation (default with no command)
@@ -34,6 +34,8 @@ func main() {
 		os.Exit(harness.Main(args))
 	case "metrics":
 		os.Exit(harness.MetricsMain(args))
+	case "mcp-resident":
+		os.Exit(harness.MCPResidentBridge(args))
 	case "--from-claude", "--import-dry-run":
 		os.Exit(harness.Main(os.Args[1:]))
 	case "gen-settings":
