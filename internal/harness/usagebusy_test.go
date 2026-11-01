@@ -15,7 +15,7 @@ func TestUsageAllowedWhileBusy(t *testing.T) {
 	if len(m.blocks) == 0 || m.blocks[len(m.blocks)-1].text != busySlashMsg {
 		t.Fatalf("blocks=%v", m.blocks)
 	}
-	if busySlashMsg != "생각 중에는 /usage 외의 명령을 사용할 수 없습니다. 답변이 끝난 뒤 다시 입력해 주세요." {
+	if busySlashMsg != "생각 중에는 /usage, /version, /help, /status, /mode, /mouse, /view 만 사용할 수 있습니다. 답변이 끝난 뒤 다시 입력해 주세요." {
 		t.Fatal("message text")
 	}
 	select {

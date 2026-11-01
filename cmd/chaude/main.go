@@ -13,7 +13,7 @@ import (
 )
 
 // version is set at release time: -ldflags "-X main.version=X.Y.Z".
-var version = "0.9.5"
+var version = "0.9.6"
 
 const usage = `usage: chaude <command> [args]
   repl [flags]           terminal REPL over claude -p stream-json with session rotation (default with no command)
@@ -25,6 +25,7 @@ const usage = `usage: chaude <command> [args]
 `
 
 func main() {
+	harness.ChaudeVersion = version
 	if len(os.Args) < 2 {
 		os.Exit(harness.Main(nil))
 	}

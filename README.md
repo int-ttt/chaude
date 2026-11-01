@@ -1,6 +1,6 @@
 # chaude
 
-`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.5이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
+`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.6이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
 
 ## 설치 (macOS Apple Silicon 전용)
 
@@ -66,6 +66,12 @@ chaude repl --threshold 200000   # 임계값 변경 (opus 메인에는 적용 �
 - CLAUDE.md 분량을 절반으로 줄였습니다(약 8.8k → 4.4k 바이트). 매 턴 읽히는 규칙이라 줄인 만큼 맥락이 가벼워집니다.
 - `opus-architect`는 Haiku 메인(`--model haiku`)이 넘긴 일만 받습니다. Opus 메인은 `haiku-*`에 직접 위임하고, `opus로` 강제 경로는 없습니다.
 - 프로젝트 설정: `serena`와 `pyright-lsp` 플러그인을 끕니다(`.claude/settings.json`의 `enabledPlugins`).
+
+### 0.9.6 변경
+
+- `/resume`: 프로젝트 폴더별로 Claude Code 세션을 묶어 보여 주고, 검색어(query)로 걸러서 이어받습니다.
+- `/version`: chaude 버전과 Claude Code 버전을 함께 보여 줍니다.
+- 응답 대기 중에도 `/version`, `/usage`, `/help`, `/mode`는 바로 실행됩니다. 대화를 바꾸는 명령(`/resume`, `/clear`, `/rotate`, `/model`, `/cost`)은 거부되고 세션에 전달되지 않습니다.
 
 ## 기존 Claude Code 세션을 chaude로 옮기기
 

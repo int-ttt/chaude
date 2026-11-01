@@ -6,16 +6,66 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
 
+// clearCommandMark is the user-side marker Claude Code writes for /clear.
+const clearCommandMark = "<command-name>/clear</command-name>"
+
 // claudeImport is the result of reading a plain Claude Code transcript.
 type claudeImport struct {
-	Path  string
-	Turns [][2]string // user text, assistant text (final text blocks only)
-	Files []string
-	Reco  string
+	Path      string
+	Turns     [][2]string // user text, assistant text (final text blocks only)
+	Files     []string
+	Reco      string
+	Start     time.Time // first event timestamp (zero when absent)
+	Cwd, Name string    // working dir and the summary title (for the /resume query)
+	// Cleared: a user /clear command is in the file; ClearHead: it came before any turn (new session start).
+	Cleared, ClearHead bool
+}
+
+// loadImportArg resolves arg and reads that transcript. arg is one id/path/"latest", or a comma-separated
+// list (a /resume group): the files are merged in time order and the path returned is the newest one.
+func loadImportArg(arg, cwd string) (string, *claudeImport, error) {
+	var imps []*claudeImport
+	for _, a := range strings.Split(arg, ",") {
+		path, err := resolveClaudeTranscript(a, cwd)
+		if err != nil {
+			return "", nil, err
+		}
+		imp, err := readClaudeTranscript(path)
+		if err != nil {
+			return "", nil, err
+		}
+		imps = append(imps, imp)
+	}
+	if len(imps) == 1 {
+		return imps[0].Path, imps[0], nil
+	}
+	sort.SliceStable(imps, func(i, j int) bool { return imps[i].Start.Before(imps[j].Start) })
+	merged := &claudeImport{Start: imps[0].Start}
+	for _, imp := range imps {
+		merged.Turns = append(merged.Turns, imp.Turns...)
+		for _, f := range imp.Files {
+			if !contains(merged.Files, f) {
+				merged.Files = append(merged.Files, f)
+			}
+		}
+		if imp.Reco != "" {
+			merged.Reco = imp.Reco
+		}
+		if imp.Cwd != "" {
+			merged.Cwd = imp.Cwd
+		}
+		if imp.Name != "" {
+			merged.Name = imp.Name
+		}
+	}
+	newest := imps[len(imps)-1]
+	merged.Path = newest.Path
+	return newest.Path, merged, nil
 }
 
 // resolveClaudeTranscript maps "latest" / a session id / a path to a .jsonl file.
@@ -23,15 +73,10 @@ func resolveClaudeTranscript(arg, cwd string) (string, error) {
 	if strings.HasSuffix(arg, ".jsonl") || strings.Contains(arg, string(filepath.Separator)) {
 		return arg, nil
 	}
-	home, err := os.UserHomeDir()
+	dir, err := claudeProjectDir(cwd)
 	if err != nil {
 		return "", err
 	}
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	proj := strings.NewReplacer("/", "-", ".", "-", "_", "-").Replace(cwd)
-	dir := filepath.Join(home, ".claude", "projects", proj)
 	if arg != "latest" {
 		return filepath.Join(dir, arg+".jsonl"), nil
 	}
@@ -74,6 +119,21 @@ func readClaudeTranscript(path string) (*claudeImport, error) {
 			side, _ := ev["isSidechain"].(bool)
 			meta, _ := ev["isMeta"].(bool)
 			m := asMap(ev["message"])
+			if imp.Cwd == "" {
+				imp.Cwd = str(ev["cwd"])
+			}
+			if t == "summary" && imp.Name == "" {
+				imp.Name = str(ev["summary"])
+			}
+			if imp.Start.IsZero() {
+				if ts, err := time.Parse(time.RFC3339Nano, str(ev["timestamp"])); err == nil {
+					imp.Start = ts
+				}
+			}
+			if t == "user" && !side && strings.Contains(line, clearCommandMark) {
+				imp.Cleared = true
+				imp.ClearHead = imp.ClearHead || (len(imp.Turns) == 0 && curUser == "")
+			}
 			if !side && !meta && (t == "user" || t == "assistant") {
 				if t == "user" {
 					if s, ok := m["content"].(string); ok && strings.TrimSpace(s) != "" && !strings.HasPrefix(s, "<") {

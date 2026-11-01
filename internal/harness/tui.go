@@ -126,7 +126,7 @@ type tuiModel struct {
 	lastTool  string    // last tool call of the running turn, truncated to 40 chars
 	gotText   bool
 	perm      *permMsg
-	pick      []sessionInfo // non-nil while the /resume picker is open
+	pick      []sessionGroup // non-nil while the /resume picker is open
 	pickSel   int
 	ready     bool
 	quitting  bool
@@ -179,7 +179,7 @@ var slashCmds = []slashCmd{
 	{"/clear", "start a fresh session (handoff note carried over)"},
 	{"/status", "model, context tokens, session"},
 	{"/model", "show or switch model: /model <name>"},
-	{"/resume", "list record topics, or show one: /resume [n|slug] (/resume claude: Claude Code sessions)"},
+	{"/resume", "list record topics, or show one: /resume [n|slug] (/resume claude [q]: Claude Code sessions, filtered by q)"},
 	{"/import", "import a session: /import [id|latest]"},
 	{"/view", "browse Claude Code sessions (↑/↓ enter, ←/→ prompts, esc back): /view [id-prefix]"},
 	{"/rotate", "hand off to a fresh session"},
@@ -195,7 +195,7 @@ var slashCmds = []slashCmd{
 	{"/doctor", "check installation and config (runs a turn)"},
 	{"/mode", "permission mode: default|acceptEdits|plan|auto (shift+tab cycles)"},
 	{"/mouse", "toggle mouse wheel scroll (off = select text)"},
-	{"/version", "harness and claude versions"},
+	{"/version", "chaude and Claude Code versions"},
 	{"/exit", "exit"},
 	{"/quit", "exit"},
 }
@@ -574,13 +574,9 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "esc", "ctrl+c", "q":
 			m.pick = nil
 		case "enter":
-			id := m.pick[m.pickSel].ID
+			key := m.pick[m.pickSel].key()
 			m.pick = nil
-			m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
-			m.blocks = append(m.blocks, block{"user", "/import " + id, false})
-			m.vp.GotoBottom()
-			m.refresh()
-			m.submit <- "/import " + id
+			m.sendImport(key)
 		default:
 			if d := k.String(); len(d) == 1 && d[0] >= '1' && d[0] <= '9' && int(d[0]-'1') < n {
 				m.pickSel = int(d[0] - '1')
@@ -694,6 +690,12 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 					go func() { usageSend(m.r, usageMsg(usageFetch(m.r.lastCtx))) }()
 					return m, nil
 				}
+				if f := strings.Fields(line); busyOK[f[0]] { // read-only / UI-only: no conversation or session change
+					m.in.SetValue("")
+					m.hist.Add(line)
+					m.after()
+					return m.runSlash(line)
+				}
 				m.blocks = append(m.blocks, block{"note", busySlashMsg, false})
 				m.refresh()
 				return m, nil
@@ -730,8 +732,12 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// busySlashMsg: shown when a slash command other than /usage is typed while an answer runs.
-const busySlashMsg = "생각 중에는 /usage 외의 명령을 사용할 수 없습니다. 답변이 끝난 뒤 다시 입력해 주세요."
+// busyOK: slash commands that run while an answer is in flight (no conversation or session change).
+// /usage is handled before this check (separate one-shot claude call).
+var busyOK = map[string]bool{"/usage": true, "/version": true, "/help": true, "/status": true, "/mode": true, "/mouse": true, "/view": true}
+
+// busySlashMsg: shown when a conversation-affecting slash command is typed while an answer runs.
+const busySlashMsg = "생각 중에는 /usage, /version, /help, /status, /mode, /mouse, /view 만 사용할 수 있습니다. 답변이 끝난 뒤 다시 입력해 주세요."
 
 var usageSend = func(r *Repl, msg tea.Msg) { r.ui.send(msg) }
 
@@ -916,6 +922,15 @@ func (m *tuiModel) after() {
 	}
 }
 
+// sendImport loads a /resume group (key: see sessionGroup.key) as the running session, showing the command.
+func (m *tuiModel) sendImport(key string) {
+	m.busy, m.turnStart, m.lastTool = true, time.Now(), ""
+	m.blocks = append(m.blocks, block{"user", "/import " + key, false})
+	m.vp.GotoBottom()
+	m.refresh()
+	m.submit <- "/import " + key
+}
+
 func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 	f := strings.Fields(line)
 	note := func(s string) { m.blocks = append(m.blocks, block{"note", s, false}); m.refresh() }
@@ -956,16 +971,20 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.refresh()
 		m.submit <- line
 	case "/resume":
-		if len(f) > 1 && f[1] == "claude" {
-			l, msg := m.r.sessionList(f[2:]...)
+		if terms, record := resumeTarget(m.r.a.Cwd, f[1:]); !record {
+			gs, msg := m.r.groupList(terms...)
 			if msg != "" {
 				note(msg)
 				break
 			}
-			if len(l) > 30 {
-				l = l[:30]
+			if len(gs) == 1 {
+				m.sendImport(gs[0].key())
+				break
 			}
-			m.pick, m.pickSel = l, 0
+			if len(gs) > 30 {
+				gs = gs[:30]
+			}
+			m.pick, m.pickSel = gs, 0
 			break
 		}
 		lines, blocks, err := recordResume(recordDir(m.r.a.Cwd), strings.Join(f[1:], " "))
@@ -1007,8 +1026,7 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		}
 		m.setMode(p)
 	case "/version":
-		v, _ := exec.Command("claude", "--version").Output()
-		note("harness (Go REPL) · claude " + strings.TrimSpace(string(v)))
+		note("chaude " + ChaudeVersion + " · Claude Code " + claudeVersion())
 	case "/clear", "/rotate", "/usage", "/cost", "/context", "/compact", "/config", "/mcp", "/agents", "/init", "/review", "/doctor":
 		if f[0] == "/clear" {
 			m.blocks = nil
@@ -1201,6 +1219,7 @@ func (r *Repl) runTUI() int {
 	m := newTUIModel(r, submit)
 	cw := &cursorWriter{File: os.Stdout, w: os.Stdout, col: &m.curCol, up: &m.curUp}
 	lipgloss.SetHasDarkBackground(true) // skip the slow OSC background query at startup
+	go claudeVersion()                  // warm the /version cache off the UI goroutine
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithOutput(cw))
 	r.ui = &tuiBridge{p}
 	r.out = tuiWriter{r.ui}

@@ -65,20 +65,3 @@ func TestViewHelpers(t *testing.T) {
 		}
 	}
 }
-
-func TestResumeSourceArg(t *testing.T) {
-	for _, a := range [][]string{nil, {"claude"}, {"Claude"}} {
-		if m := resumeSourceMsg(a); m != "" {
-			t.Fatalf("%v rejected: %s", a, m)
-		}
-	}
-	for _, a := range [][]string{{"codex"}, {"claude", "x"}} {
-		if resumeSourceMsg(a) == "" {
-			t.Fatalf("%v accepted", a)
-		}
-	}
-	r := &Repl{}
-	if _, m := r.sessionList("other"); m == "" {
-		t.Fatal("sessionList must reject unknown source")
-	}
-}

@@ -26,34 +26,24 @@ type recordEntry struct {
 	Text  string
 }
 
-// recordTopic is one topic (slug) across all its record files, for the /resume list.
-type recordTopic struct {
-	Slug             string
-	Files            []string
-	First, Last      string // YYMMDD of the first and last file
-	Answers, LastNum int
-}
-
 const (
 	recordMaxBytes   = 200 << 10 // file cap: a new NNN file starts once a turn would exceed it
 	recordMaxAnswers = 100       // file cap: answers (asst blocks) per NNN file
 	recordLockName   = ".record.lock"
 	recordTailBytes  = 8 << 10 // bytes read from the end of a file to find its last rec number
-	recordShowMax    = 200     // blocks shown by /resume <topic>; older ones are cut with a note
 )
 
 var (
-	recordFileRe     = regexp.MustCompile(`^(\d{6})-(.+)-(\d{3,})\.md$`)
 	recordHeaderRe   = regexp.MustCompile(`(?m)^<!-- rec #(\d+) (\w+) (\S+) cat=(.*) -->\n`)
 	recordEscapeRe   = regexp.MustCompile(`(?m)^(\\*<!-- rec #)`)   // body line that looks like a header gets one more \
 	recordUnescapeRe = regexp.MustCompile(`(?m)^\\(\\*<!-- rec #)`) // and loses one \ when read back
 )
 
-// recordFile is one YYMMDD-<slug>-NNN.md file found in the record dir.
+// recordFile is one *.md file found in a project folder.
 type recordFile struct {
-	name, date, slug string
-	n                int
-	last             int // rec number of the last turn in the file (0 if none)
+	name string
+	last int       // rec number of the last turn in the file (0 if none)
+	mod  time.Time // file mod time
 }
 
 // recordDir is the record folder: HARNESS_RECORD_DIR if set, else <main checkout root>/record
@@ -78,10 +68,11 @@ func recordDir(cwd string) string {
 	return filepath.Join(cwd, "record")
 }
 
-// recordAppendTurn appends one turn (all blocks share one rec number) to the record dir with a single
-// O_APPEND write under the dir lock. now is the turn end time; its local date picks the file date.
-// A turn larger than the cap stays in one file (accepted: no splitting inside a turn).
-func recordAppendTurn(dir string, now time.Time, topic string, turn []recordBlock) error {
+// recordAppendTurn appends one turn (all blocks share one rec number) to the project folder dir with a
+// single O_APPEND write under the dir lock. The turn goes to the newest file of dir unless split is set
+// (a /clear) or that file is at a cap; then a new file named by now is started. A turn larger than the
+// cap stays in one file (accepted: no splitting inside a turn).
+func recordAppendTurn(dir string, now time.Time, topic string, turn []recordBlock, split bool) error {
 	if len(turn) == 0 {
 		return nil
 	}
@@ -95,24 +86,19 @@ func recordAppendTurn(dir string, now time.Time, topic string, turn []recordBloc
 	defer unlock()
 
 	now = now.Local()
-	date, slug := now.Format("060102"), slugify(topic)
 	files, err := listRecordFiles(dir)
 	if err != nil {
 		return err
 	}
 	num := 1
-	var last *recordFile // file holding the newest rec number
-	maxN := 0            // max NNN for this date+slug
+	var newest *recordFile // file holding the newest rec number
 	for i := range files {
 		f := &files[i]
 		if f.last+1 > num {
 			num = f.last + 1
 		}
-		if last == nil || f.last > last.last {
-			last = f
-		}
-		if f.date == date && f.slug == slug && f.n > maxN {
-			maxN = f.n
+		if newest == nil || f.last > newest.last {
+			newest = f
 		}
 	}
 	payload := recordRender(num, now, topic, turn)
@@ -123,11 +109,9 @@ func recordAppendTurn(dir string, now time.Time, topic string, turn []recordBloc
 		}
 	}
 
-	// New NNN = max NNN for date+slug, plus one. Append only to the file holding the newest turn, and
-	// only if it has the same date+slug and room; a topic re-entry (A-B-A) or a new date never reuses an old file.
-	name := fmt.Sprintf("%s-%s-%03d.md", date, slug, maxN+1)
-	if last != nil && last.last > 0 && last.date == date && last.slug == slug {
-		data, err := os.ReadFile(filepath.Join(dir, last.name))
+	name := fmt.Sprintf("%s-%04d.md", now.Format("060102-150405"), num)
+	if newest != nil && !split {
+		data, err := os.ReadFile(filepath.Join(dir, newest.name))
 		if err != nil {
 			return err
 		}
@@ -138,7 +122,7 @@ func recordAppendTurn(dir string, now time.Time, topic string, turn []recordBloc
 			}
 		}
 		if len(data)+len(payload) <= recordMaxBytes && have+answers <= recordMaxAnswers {
-			name = last.name
+			name = newest.name
 		}
 	}
 
@@ -170,7 +154,8 @@ func nextRecordNumber(dir string) (int, error) {
 	return n + 1, nil
 }
 
-// listRecordFiles returns record files in dir sorted by date, slug, NNN.
+// listRecordFiles returns the record files (*.md) in dir, oldest rec number first. Names are not parsed:
+// the rec number of the last turn in each file (lastRecordNum) gives the order.
 func listRecordFiles(dir string) ([]recordFile, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -181,28 +166,21 @@ func listRecordFiles(dir string) ([]recordFile, error) {
 	}
 	var out []recordFile
 	for _, e := range ents {
-		m := recordFileRe.FindStringSubmatch(e.Name())
-		if m == nil || e.IsDir() {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		n, _ := strconv.Atoi(m[3])
 		path := filepath.Join(dir, e.Name())
 		last, err := lastRecordNum(path)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, recordFile{name: e.Name(), date: m[1], slug: m[2], n: n, last: last})
+		info, err := e.Info()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, recordFile{name: e.Name(), last: last, mod: info.ModTime()})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if a.date != b.date {
-			return a.date < b.date
-		}
-		if a.slug != b.slug {
-			return a.slug < b.slug
-		}
-		return a.n < b.n
-	})
+	sort.SliceStable(out, func(i, j int) bool { return out[i].last < out[j].last })
 	return out, nil
 }
 
@@ -323,68 +301,6 @@ func recordTopicOf(reply, prev string) string {
 		return lastCat
 	}
 	return prev
-}
-
-// listRecordTopics groups record files by slug across dates. Topics are ordered by newest rec number first.
-func listRecordTopics(dir string) ([]recordTopic, error) {
-	files, err := listRecordFiles(dir)
-	if err != nil {
-		return nil, err
-	}
-	bySlug := map[string]*recordTopic{}
-	var out []*recordTopic
-	for _, f := range files {
-		t := bySlug[f.slug]
-		if t == nil {
-			t = &recordTopic{Slug: f.slug, First: f.date}
-			bySlug[f.slug] = t
-			out = append(out, t)
-		}
-		t.Files = append(t.Files, f.name)
-		t.Last = f.date
-		data, err := os.ReadFile(filepath.Join(dir, f.name))
-		if err != nil {
-			return nil, err
-		}
-		for _, e := range parseRecordEntries(string(data)) {
-			if e.Kind == "asst" {
-				t.Answers++
-			}
-			if e.Num > t.LastNum {
-				t.LastNum = e.Num
-			}
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].LastNum > out[j].LastNum })
-	res := make([]recordTopic, 0, len(out))
-	for _, t := range out {
-		res = append(res, *t)
-	}
-	return res, nil
-}
-
-// loadRecordTopic returns every block of one topic across its files, in rec-number order.
-func loadRecordTopic(dir, slug string) ([]recordEntry, error) {
-	files, err := listRecordFiles(dir)
-	if err != nil {
-		return nil, err
-	}
-	var out []recordEntry
-	for _, f := range files {
-		if f.slug != slug {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, f.name))
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, parseRecordEntries(string(data))...)
-	}
-	if out == nil {
-		return nil, fmt.Errorf("no record for topic %q", slug)
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Num < out[j].Num })
-	return out, nil
 }
 
 // slugify makes a file-name part from a topic: Korean kept; whitespace, control characters and

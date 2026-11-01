@@ -60,37 +60,43 @@ func (r *Repl) recordTopicFor(prompt string) (topic, text string) {
 	return r.recTopic, strings.TrimSpace(catRe.ReplaceAllString(reply, ""))
 }
 
-// recordResume answers /resume <arg>. An empty arg returns the topic list lines. Otherwise arg is a list
-// number or a slug, and the blocks of that topic are returned (the last recordShowMax, with a leading note when cut).
-func recordResume(dir, arg string) (lines []string, blocks []recordBlock, err error) {
-	topics, err := listRecordTopics(dir)
+// recordResume answers /resume <arg> over the record root (one folder per project). An empty arg lists the
+// project folders. A number picks that folder of the list; otherwise arg filters the folders by name or
+// content: one match loads all its files as one history (in time order), several match as a list.
+func recordResume(root, arg string) (lines []string, blocks []recordBlock, err error) {
+	projects, err := listRecordProjects(root)
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(topics) == 0 {
-		return nil, nil, fmt.Errorf("no record in %s", dir)
+	if len(projects) == 0 {
+		return nil, nil, fmt.Errorf("no record in %s", root)
 	}
 	if arg == "" {
-		lines = []string{"record topics (/resume <번호|slug> shows one):"}
-		for i, t := range topics {
-			lines = append(lines, fmt.Sprintf("%2d. %s · %s~%s · 파일 %d개 · 답변 %d개", i+1, t.Slug, t.First, t.Last, len(t.Files), t.Answers))
-		}
-		return lines, nil, nil
+		return recordProjectLines("record projects (/resume <번호|이름|검색어> opens one):", projects, true), nil, nil
 	}
-	slug := arg
+	picked := recordProject{}
 	if n, convErr := strconv.Atoi(arg); convErr == nil {
-		if n < 1 || n > len(topics) {
-			return nil, nil, fmt.Errorf("no topic %d (1-%d)", n, len(topics))
+		if n < 1 || n > len(projects) {
+			return nil, nil, fmt.Errorf("no project %d (1-%d)", n, len(projects))
 		}
-		slug = topics[n-1].Slug
+		picked = projects[n-1]
+	} else {
+		matches, err := filterRecordProjects(projects, arg)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch len(matches) {
+		case 0:
+			return nil, nil, fmt.Errorf("no project matches %q", arg)
+		case 1:
+			picked = matches[0]
+		default:
+			return recordProjectLines("record projects matching "+arg+" (/resume <이름> opens one):", matches, false), nil, nil
+		}
 	}
-	entries, err := loadRecordTopic(dir, slug)
+	entries, err := loadRecordProject(picked.Dir)
 	if err != nil {
 		return nil, nil, err
-	}
-	if len(entries) > recordShowMax {
-		blocks = append(blocks, recordBlock{"note", fmt.Sprintf("앞 %d개 생략 (최근 %d개만 표시)", len(entries)-recordShowMax, recordShowMax)})
-		entries = entries[len(entries)-recordShowMax:]
 	}
 	for _, e := range entries {
 		blocks = append(blocks, recordBlock{e.Kind, e.Text})
@@ -130,7 +136,14 @@ func (r *Repl) recordSave(prompt string) {
 	if r.lastMeasure != "" {
 		text += "\n\n" + r.lastMeasure
 	}
-	if err := recordAppendTurn(recordDir(r.a.Cwd), time.Now(), topic, []recordBlock{{"user", prompt}, {"asst", text}}); err != nil {
+	root := recordDir(r.a.Cwd)
+	if err := migrateRecordRoot(root); err != nil {
 		r.p("[record] "+err.Error(), "\n")
+		return
 	}
+	if err := recordAppendTurn(recordProjectDir(root, r.a.Cwd), time.Now(), topic, []recordBlock{{"user", prompt}, {"asst", text}}, r.recSplit); err != nil {
+		r.p("[record] "+err.Error(), "\n")
+		return
+	}
+	r.recSplit = false
 }

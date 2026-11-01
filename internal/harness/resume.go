@@ -15,6 +15,10 @@ type sessionInfo struct {
 	Mod         time.Time
 	Turns       int
 	First, Last string
+	Start       time.Time // first event time (zero: Mod is used)
+	Cwd, Name   string
+	Cleared     bool // a user /clear is in the file: the next file starts a new group
+	ClearHead   bool // the /clear is before the first turn: this file starts a new group
 }
 
 func claudeProjectDir(cwd string) (string, error) {
@@ -43,7 +47,8 @@ func listClaudeSessions(dir string) []sessionInfo {
 			continue
 		}
 		out = append(out, sessionInfo{ID: strings.TrimSuffix(filepath.Base(f), ".jsonl"), Path: f, Mod: st.ModTime(),
-			Turns: len(imp.Turns), First: oneLine(imp.Turns[0][0]), Last: oneLine(imp.Turns[len(imp.Turns)-1][0])})
+			Turns: len(imp.Turns), First: oneLine(imp.Turns[0][0]), Last: oneLine(imp.Turns[len(imp.Turns)-1][0]),
+			Start: imp.Start, Cleared: imp.Cleared, ClearHead: imp.ClearHead, Cwd: imp.Cwd, Name: imp.Name})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Mod.After(out[j].Mod) })
 	return out
@@ -55,18 +60,7 @@ func (s sessionInfo) label() string {
 	return fmt.Sprintf("%s  %3d turns  %s … %s", s.Mod.Format("2006-01-02 15:04"), s.Turns, trunc(s.First, 40), trunc(s.Last, 40))
 }
 
-// resumeSourceMsg validates the /resume argument: none or "claude" = Claude Code conversations (the only source).
-func resumeSourceMsg(args []string) string {
-	if len(args) == 0 || (len(args) == 1 && strings.EqualFold(args[0], "claude")) {
-		return ""
-	}
-	return "usage: /resume [claude]  (lists Claude Code conversations only)"
-}
-
-func (r *Repl) sessionList(args ...string) ([]sessionInfo, string) {
-	if m := resumeSourceMsg(args); m != "" {
-		return nil, m
-	}
+func (r *Repl) sessionList() ([]sessionInfo, string) {
 	dir, err := claudeProjectDir(r.a.Cwd)
 	if err != nil {
 		return nil, err.Error()
@@ -78,13 +72,25 @@ func (r *Repl) sessionList(args ...string) ([]sessionInfo, string) {
 	return l, ""
 }
 
-// importSession replaces the running session with the transcript (arg: id, number-less "latest", or path).
-func (r *Repl) importSession(arg string) {
-	path, err := resolveClaudeTranscript(arg, r.a.Cwd)
-	var imp *claudeImport
-	if err == nil {
-		imp, err = readClaudeTranscript(path)
+// resumeTarget decides what "/resume args..." means. record=true: answer from the record (no arg, or a
+// topic number/slug that exists; terms unused). Otherwise terms is the Claude Code session query
+// ("/resume claude <q>" or "/resume <q>"; no terms = all groups).
+func resumeTarget(cwd string, args []string) (terms []string, record bool) {
+	if len(args) == 0 {
+		return nil, true
 	}
+	if strings.EqualFold(args[0], "claude") {
+		return args[1:], false
+	}
+	if _, _, err := recordResume(recordDir(cwd), strings.Join(args, " ")); err == nil {
+		return nil, true
+	}
+	return args, false
+}
+
+// importSession replaces the running session with the transcript (arg: see loadImportArg).
+func (r *Repl) importSession(arg string) {
+	path, imp, err := loadImportArg(arg, r.a.Cwd)
 	if err != nil {
 		r.p(dim+"import failed: "+err.Error()+rst, "\n")
 		return
@@ -98,27 +104,37 @@ func (r *Repl) importSession(arg string) {
 		filepath.Base(path), len(imp.Turns), len(imp.Files), len([]rune(snap)), preserved), "\n")
 }
 
-// resumeLine handles "/resume" in the plain loop: list, read a number, import.
+// resumeLine handles "/resume" in the plain loop: record topics, or session groups (one match loads,
+// many = numbered list, read a number, import).
 func (r *Repl) resumeLine(args ...string) {
-	l, msg := r.sessionList(args...)
+	terms, record := resumeTarget(r.a.Cwd, args)
+	if record {
+		r.recordResumePlain(strings.Join(args, " "))
+		return
+	}
+	gs, msg := r.groupList(terms...)
 	if msg != "" {
 		r.p(msg, "\n")
 		return
 	}
-	if len(l) > 20 {
-		l = l[:20]
+	if len(gs) == 1 {
+		r.importSession(gs[0].key())
+		return
 	}
-	for i, s := range l {
-		r.p(fmt.Sprintf("%2d) %s", i+1, s.label()), "\n")
+	if len(gs) > 20 {
+		gs = gs[:20]
+	}
+	for i, g := range gs {
+		r.p(fmt.Sprintf("%2d) %s", i+1, g.label()), "\n")
 	}
 	r.p("number (empty=cancel): ", "")
 	in, _ := r.in.ReadString('\n')
 	var n int
-	if _, err := fmt.Sscanf(strings.TrimSpace(in), "%d", &n); err != nil || n < 1 || n > len(l) {
+	if _, err := fmt.Sscanf(strings.TrimSpace(in), "%d", &n); err != nil || n < 1 || n > len(gs) {
 		r.p("cancelled", "\n")
 		return
 	}
-	r.importSession(l[n-1].ID)
+	r.importSession(gs[n-1].key())
 }
 
 // shortID is the first 8 chars of a session id (whole id if shorter).

@@ -255,6 +255,7 @@ type Repl struct {
 	lastReply       string
 	lastMeasure     string // "[측정] ..." line of the turn that just ended (saved by recordSave)
 	recTopic        string
+	recSplit        bool // a /clear happened: the next saved turn starts a new file in the project folder
 	lastReco        string
 	lastRotFail     time.Time
 	notices         []string
@@ -1182,11 +1183,7 @@ func (r *Repl) loop() int {
 			continue
 		}
 		if f := strings.Fields(line); f[0] == "/resume" {
-			if len(f) > 1 && f[1] == "claude" {
-				r.resumeLine(f[2:]...)
-			} else {
-				r.recordResumePlain(strings.Join(f[1:], " "))
-			}
+			r.resumeLine(f[1:]...)
 			continue
 		} else if f[0] == "/import" {
 			a := "latest"
@@ -1349,6 +1346,8 @@ func (r *Repl) clearWithHandoff() {
 			snap = s
 		}
 	}
+	r.clearMark()
+	r.recSplit = true
 	r.clear()
 	if snap != "" {
 		r.pendingSnapshot = snap
