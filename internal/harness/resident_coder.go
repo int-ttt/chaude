@@ -94,7 +94,8 @@ func coderMayUse(c *liveChild, cwd, tool string, input map[string]any) bool {
 		if p == "" || cwd == "" {
 			return false
 		}
-		if !filepath.IsAbs(p) {
+		// "/x" is rooted, not relative: on Windows filepath.IsAbs is false for it, so it must not be joined under cwd.
+		if !filepath.IsAbs(p) && !strings.HasPrefix(p, "/") && !strings.HasPrefix(p, `\`) {
 			p = filepath.Join(cwd, p)
 		}
 		rel, err := filepath.Rel(cwd, p)

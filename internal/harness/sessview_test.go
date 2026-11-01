@@ -14,6 +14,7 @@ import (
 func svModel(t *testing.T) *tuiModel {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads USERPROFILE on Windows
 	cwd := "/work/proj"
 	dir := filepath.Join(home, ".claude", "projects", "-work-proj")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

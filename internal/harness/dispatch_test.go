@@ -42,9 +42,9 @@ func TestPickChild(t *testing.T) {
 	if got := pickChild(nil, reg, key, dir, "sonnet", limit, now, deadline); got != actStartNew {
 		t.Errorf("parked over limit: got %v, want actStartNew", got)
 	}
-	// Owned by another live process (pid 1 is always alive and is not this test process).
-	reg.Upsert(clientRec{Cwd: dir, Model: "sonnet", State: clientParked, SessionID: "s1", LastAPI: now, OwnerPID: 1})
-	if os.Getpid() != 1 {
+	// Owned by another live process: the parent of this test process (pid 1 does not exist on Windows).
+	if ppid := os.Getppid(); ppid > 0 && ppid != os.Getpid() {
+		reg.Upsert(clientRec{Cwd: dir, Model: "sonnet", State: clientParked, SessionID: "s1", LastAPI: now, OwnerPID: ppid})
 		if got := pickChild(nil, reg, key, dir, "sonnet", limit, now, deadline); got != actStartNew {
 			t.Errorf("owned by other live pid: got %v, want actStartNew", got)
 		}
