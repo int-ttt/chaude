@@ -24,7 +24,7 @@ def is_ping(text):
 
 def history_dir(project):
     """This project's Claude Code transcript folder (~/.claude/projects/<encoded>), or "" if none.
-    Same logic as `bin/chaude claude-history` (internal/scripts/claude_history.go): encoded name first,
+    Same logic as `bin/chaude claude-history` (src/main/intt/internal/scripts/claude_history.go): encoded name first,
     then the folder whose transcripts record this project as `cwd`."""
     import glob, json
     proj = os.path.abspath(os.path.expanduser(project))
