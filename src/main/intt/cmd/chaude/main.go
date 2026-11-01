@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"chaude/internal/clean"
 	"chaude/internal/harness"
 	"chaude/internal/scripts"
 	"chaude/internal/settings"
@@ -21,6 +22,7 @@ const usage = `usage: chaude <command> [args]
   --from-claude ID|latest|PATH [--import-dry-run]   start a repl from a plain Claude Code session
   --version              print version
   gen-settings <os>      print/write OS-specific .claude/settings.json (mac|linux|windows) [--out FILE]
+  clean [dir] [--yes]    remove the claude-lean harness from a project (dry-run; --yes backs up then removes)
   ` + scripts.Names + `   helper scripts (run with -h for flags)
 `
 
@@ -41,6 +43,8 @@ func main() {
 		os.Exit(harness.Main(os.Args[1:]))
 	case "gen-settings":
 		os.Exit(settings.Main(args))
+	case "clean":
+		os.Exit(clean.Main(args))
 	case "--version", "-v", "version":
 		fmt.Println("chaude " + version)
 	case "-h", "--help", "help":
