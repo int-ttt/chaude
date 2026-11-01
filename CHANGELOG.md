@@ -7,6 +7,7 @@
 - 설정: `.gitattributes`로 `*.sh`, `*.py` 줄바꿈을 LF로 고정합니다.
 - 문서: 효율 수치는 비용(-42.7%)만 적고 토큰 절감으로 표현하지 않습니다. `docs/pingpong-bench.md` 요약에서 토큰 차이 줄을 뺐습니다. 원시 수치 표는 그대로입니다.
 - 문서: 스킬 `correction`에서 없는 `sonnet-analyst` 참조를 지웠습니다.
+- 에이전트: `sonnet-analyst` 참조를 모두 없앴습니다. 판단·병합은 메인 Opus가 정하고 파일 작업은 `haiku-batch-worker`가 맡습니다. 추출은 `haiku-extractor`가 합니다. `/distill` 병합 단계와 설명 단계, `FRESH_START`, `APPLY_GUIDE`, `README`를 고쳤습니다.
 
 ## 0.9.11
 - `chaude clean [dir]`: 프로젝트에서 claude-lean 하네스를 제거합니다. 기본은 dry-run으로 제거 대상만 보여 주고 아무것도 바꾸지 않습니다.

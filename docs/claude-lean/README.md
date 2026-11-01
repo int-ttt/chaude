@@ -7,10 +7,10 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
 ## 어떻게 돌아가나
 1. 메인 Opus가 요청을 듣고 누구에게 맡길지 정합니다. 파일 읽기·쓰기, 검색, 명령 실행은 메인에서 훅으로 막혀 있어서 항상 에이전트가 합니다.
 2. 단순하고 기계적인 일(찾기, 변환, 일괄 수정, 확인, 장시간 작업 관리)은 Haiku 에이전트가 합니다.
-3. 판단이 필요한 일(종합, 설계, 여러 파일 코드, 긴 문서)은 Sonnet 에이전트가 먼저 범위를 보고, 어렵다고 판단되면 구현하지 않고 Opus 에이전트에게 넘깁니다. Sonnet·Opus 에이전트는 그 안의 단순 작업을 다시 Haiku에게 맡깁니다.
+3. 판단이 필요한 일(종합, 설계, 여러 파일 코드, 긴 문서)은 메인 Opus가 정합니다. 파일 작업은 Haiku에게 맡깁니다.
 4. 결과는 메인 Opus가 일반 Opus처럼 풀어서 설명합니다.
 
-에이전트 이름 앞부분이 실행 모델입니다(`haiku-scout`, `sonnet-analyst`, `opus-architect`).
+에이전트 이름 앞부분이 실행 모델입니다(`haiku-scout`, `opus-architect`).
 
 ## 설치
 | 환경 | 받을 파일 | 실행 |
@@ -43,7 +43,7 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
 |---|---|---|---|---|
 | Opus (메인) | 대화·판단·설명 | low (필요한 턴만 `ultrathink`) | 자동 압축 창 150k | 리셋 안내는 선택(기본 끔, 켜면 100k·120k에서 안내). 안내는 `/exit` 후 같은 터미널에서 `claude`로 압축 없이 가벼워지고 직전 대화가 이어짐. 150k에서 자동 압축 |
 | Haiku | `haiku-scout` 탐색 · `haiku-checker` 확인 · `haiku-batch-worker` 일괄 작업 · `haiku-runner` 장시간 작업 · `haiku-researcher` 웹 조사 · `haiku-drafter` 글 · `haiku-coder` 코드 · `haiku-extractor` 기록 추출 | low~medium | 자동 압축 창 100k | 자동으로 압축하고 계속 진행. 100k 창이라 Haiku 단가가 5배가 되는 100k를 넘기 전에 압축됨 |
-| Sonnet | `sonnet-analyst` 판단이 필요한 작업 · `sonnet-reviewer` 제출 전 검토 | medium | 자동 압축 창 100k | 자동으로 압축하고 계속 진행 |
+| Sonnet | `sonnet-reviewer` 제출 전 검토 | medium | 자동 압축 창 100k | 자동으로 압축하고 계속 진행 |
 | Opus (에이전트) | `opus-architect` Haiku 메인이 넘긴 일만 (`--model haiku` 릴레이 대상). Opus 메인은 `haiku-*`에 직접 위임하고 `opus-architect`를 부르지 않음 | high | 자동 압축 창 100k | 자동으로 압축하고 계속 진행 |
 
 | 공통 한도 | 값 | 이유 |

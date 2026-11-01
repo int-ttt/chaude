@@ -49,7 +49,7 @@ cd <프로젝트 폴더> && claude
 ```
 | 확인 | 기대 결과 |
 |---|---|
-| `/agents` | haiku-scout, haiku-researcher, haiku-drafter, haiku-checker, haiku-batch-worker, haiku-runner, haiku-coder, haiku-extractor (Haiku), sonnet-analyst, sonnet-reviewer (Sonnet), opus-architect (Opus, Haiku 메인 릴레이 전용) |
+| `/agents` | haiku-scout, haiku-researcher, haiku-drafter, haiku-checker, haiku-batch-worker, haiku-runner, haiku-coder, haiku-extractor (Haiku), sonnet-reviewer (Sonnet), opus-architect (Opus, Haiku 메인 릴레이 전용) |
 | `/hooks` | UserPromptSubmit 3개, PreToolUse 3개, SubagentStop 1개, SessionStart 1개, SessionEnd 1개, PreCompact 1개 |
 | `/context` | 고정 분량 확인 (안 쓰는 MCP 서버가 크면 `/mcp`에서 끄기) |
 | "README.md 첫 줄 알려줘" 입력 | Opus가 직접 읽지 않고 `haiku-scout`에게 맡김. 직접 읽으려 하면 훅이 차단 |
@@ -82,7 +82,7 @@ echo '{"tool_name":"Read"}' | python3 .claude/hooks/main-thread-guard.py  # deny
 | 다른 작업으로 넘어갈 때 | 그냥 이어서 입력 (`/clear` 불필요. 메인 대화가 150k 창 가까이 차면 자동 압축) |
 | 맥락이 커졌을 때 ("맥락 100k" 안내가 나오면) | `/exit` → 같은 터미널에서 `claude`. 압축 없이 가벼워지고, 대화는 화면에 남으며 직전 대화가 자동으로 이어짐 |
 | 오래 쉬었다 돌아올 때 | `claude`(새 세션)로 시작. `claude -c`보다 훨씬 쌈 (아래 참고) |
-| 맡길 모델을 직접 정하기 | 프롬프트에 `haiku로` / `sonnet으로` / `opus로`. 없으면 Opus가 정하고 응답 첫머리에 `[sonnet-analyst]`처럼 표시 |
+| 맡길 모델을 직접 정하기 | 프롬프트에 `haiku로` / `sonnet으로` / `opus로`. 없으면 Opus가 정하고 응답 첫머리에 `[haiku-scout]`처럼 표시 |
 | 어려운 설계를 Opus에게 | Sonnet이 어렵다고 보면 `ESCALATE`로 자동 전환, 처음부터는 `opus로`. 계획서가 나오면 "ㅇㅇ"으로 Sonnet 구현 진행, 바로 끝까지 하려면 "opus로 설계하고 바로 구현까지" |
 | 일반 모드로 쓰기 (Opus가 직접 작업) | `일반모드` 입력 (모델 호출 없음). 되돌리기는 `절약모드`. 이 프로젝트에서 되돌릴 때까지 유지 |
 | 에이전트가 어떤 모델로 돌았는지 | 이름 앞부분(`haiku-*`, `sonnet-*`)이 모델. 모델별 사용량은 `/usage` |
@@ -151,7 +151,7 @@ diff ~/usage-before.txt ~/usage-after.txt
 | Opus가 "도구가 차단됐다"며 멈춤 | 정상 동작. 계속 그러면 CLAUDE.md가 적용됐는지 확인 (`/memory`) |
 | 에이전트 작업이 결과 없이 끝남 | 0.4.10부터 에이전트는 맥락이 차면 자동 압축 후 계속합니다. 예전 버전이면 업그레이드 |
 | 메모로 빠지면 안 되는 말이 메모됨 | 끝에 `!` 붙여 재전송, 반복되면 `STYLE_INBOX=0` |
-| 답이 너무 짧아 이해가 어려움 | "자세히" 요청 → `sonnet-analyst`가 작성하고 `haiku-batch-worker`가 파일로 저장 |
+| 답이 너무 짧아 이해가 어려움 | "자세히" 요청 → 메인 Opus가 작성하고 `haiku-batch-worker`가 파일로 저장 |
 | 훅 오류 메시지 | `python3 .claude/hooks/<훅>.py` 직접 실행해 오류 확인, `/hooks`에서 등록 확인 |
 
 ## 8. 되돌리기
