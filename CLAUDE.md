@@ -1,13 +1,13 @@
-# Policy: Haiku main listens and routes; Opus (opus-architect) decides; Haiku agents do all work
+# Policy: Opus main (default) decides; Haiku main (`--model haiku` only) relays input; Haiku agents do all work
 
 ## Language
 Korean, 존댓말 for user-visible text only (haiku-tui output incl. L0); agent-to-agent briefs/returns use caveman format (docs/claude-lean/CAVEMAN_FORMAT.md). Main thread has no work tools (hook-enforced). Minimize main-thread tokens.
 
 ## Routing
-- Routing: Haiku main receives user input and forwards design/judgment (synthesis, design, multi-file code, long answers, diagnosis) to `opus-architect` (Opus, high effort, separate context; don't re-brief). Haiku agents execute: simple lookup/questions - "이거 뭐였는지 찾아" style search/query prompts → `haiku-scout` (effort high; `haiku-researcher` for web); bounded/mechanical edits → `haiku-coder`/`haiku-batch-worker`; long runs → `haiku-runner`. No router and no Sonnet tier. The user can force `haiku로` / `opus로`. Start every delegating reply with the route, e.g. `[haiku-scout]`, `[opus-architect]`. `haiku-checker` before anything is submitted or printed.
+- Routing: Opus main (default) decides design/judgment (synthesis, design, multi-file code, long answers, diagnosis) itself or delegates to `opus-architect` (Opus, high effort, separate context; don't re-brief). Haiku main (`--model haiku`) only relays user input to `opus-architect`; `haiku-tui` translates output. Haiku agents execute: simple lookup/questions - "이거 뭐였는지 찾아" style search/query prompts → `haiku-scout` (effort high; `haiku-researcher` for web); bounded/mechanical edits → `haiku-coder`/`haiku-batch-worker`; long runs → `haiku-runner`. Role mapping: haiku-쓰기용 = `haiku-batch-worker`/`haiku-coder`; haiku-읽기용 = `haiku-scout`/`haiku-researcher`. No router and no Sonnet tier. The user can force `haiku로` / `opus로`. Start every delegating reply with the route, e.g. `[haiku-scout]`, `[opus-architect]`. `haiku-checker` before anything is submitted or printed.
 
 ## Conductor
-- main = Haiku (`--model haiku`); user prompt -> `opus-architect` (R-decide) -> Haiku relays R-decide `relay`(없으면 summary_ko) via `haiku-tui`. Small tasks: Haiku agents directly. Forced `opus로` keeps an Opus main; Opus-main rules apply only then.
+- main = Opus (default); Opus main decides and delegates to Haiku agents. Haiku main only with `--model haiku`: user prompt -> `opus-architect` (R-decide) -> Haiku relays R-decide `relay`(없으면 summary_ko) via `haiku-tui`. Small tasks: Haiku agents directly. Forced `haiku로` gives a Haiku main; Opus-main rules apply otherwise.
 - 쓰기 흐름: opus(작은 작업은 메인) -> haiku-coder/haiku-batch-worker -> 반환은 완료 여부(status)와 바꾼 부분(`changed: <경로>: <바꾼 부분>`)만 -> opus 판단 + 같은 블록을 relay로 haiku-tui에 전달 -> 출력창. 검증은 haiku-checker가 따로 하고 결과(check -> PASS|FAIL)도 relay로 전달 (plan/caveman-structure.md 2.1절).
 - 읽기 흐름: opus -> haiku-scout/haiku-researcher -> R-read(caveman, 영어만) -> opus 판단 + 같은 블록을 relay로 haiku-tui에 전달 -> 출력창에는 haiku-tui의 존댓말 요약과 번역 항목만 표시 (caveman 줄은 표시 안 함, TUI가 caveman 도구 결과 미리보기를 숨김). 내부 브리프·반환은 영어. 메인은 라우팅과 haiku-tui 호출만 (파일 접근 불가 유지).
 

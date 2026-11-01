@@ -1183,7 +1183,7 @@ func parseCacheTTL(s string) (string, error) {
 func Main(args []string) int {
 	fs := flag.NewFlagSet("harness", flag.ContinueOnError)
 	var a Args
-	fs.StringVar(&a.Model, "model", "haiku", "")
+	fs.StringVar(&a.Model, "model", "opus", "")
 	fs.StringVar(&a.Cwd, "cwd", "", "")
 	fs.IntVar(&a.Threshold, "threshold", haikuThreshold, "rotate after an answer when context tokens >= this")
 	fs.IntVar(&a.CompactWindow, "compact-window", 400_000, "child-only CLAUDE_CODE_AUTO_COMPACT_WINDOW (keep > threshold; 0=off)")

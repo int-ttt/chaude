@@ -137,7 +137,7 @@ type Session struct {
 
 func NewSession(o SessionOpts) (*Session, error) {
 	if o.Model == "" {
-		o.Model = "haiku"
+		o.Model = "opus"
 	}
 	if o.ClaudeBin == "" {
 		o.ClaudeBin = "claude"

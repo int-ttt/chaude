@@ -140,6 +140,8 @@ reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
 | haiku-checker | B형식 | 3.6 머리 + check 줄 | 검증 결과도 relay로 haiku-tui에 전달 (2.1절) |
 | haiku-drafter | B형식 | R-write | 산출 문서 자체는 한국어 유지 (L0 산출물) |
 | haiku-extractor | 기존 | 기존 | 파일 출력 전용, 변경 없음 |
+
+- 역할 매핑 (261101): haiku-쓰기용 = haiku-batch-worker, haiku-coder / haiku-읽기용 = haiku-scout, haiku-researcher. 기본 메인 = Opus, Haiku 메인(`--model haiku`)은 입력 relay만.
 | haiku-prompter | 사용자 원문 | 원문 verbatim + 요약 (U8 = c) | 존댓말 검사 제외. 사용자 프롬프트를 opus 세션에 전달, 한국어 존댓말 비적용 (Q2 결정). 현행 반복 루프 역할 유지 + 전달 역할 추가 (U10 = b, 결정됨). B형식 브리프 필수 5키(task, paths, limits, return, lang), ctx 선택 (A2) |
 | haiku-tui | relay(하위 R-write·R-read 원문) 또는 R-* 반환 | L0 한국어 존댓말 자연문 | 사용자에게 답변하는 에이전트. 한국어 존댓말은 이 출력에만 적용 (Q2 결정). 에이전트 파일은 구현 단계에 신설 (U9 = a, 결정됨) 쓰기: 완료 + 바꾼 부분, 읽기: 요약 후 항목 표시 (2.1절) |
 
