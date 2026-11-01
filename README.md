@@ -186,4 +186,4 @@ Claude Code 훅은 `.claude/hooks/*.py`(Python 3.8+)이며 `python3 .claude/hook
   - harness 설정은 effortLevel이 low입니다. plain과 effort가 달라 품질 비교에는 쓸 수 없습니다.
   - plain 쪽은 Bash 명령이 거부된 적이 있어 실제 작업 조건이 harness와 다를 수 있습니다.
 - 장기 테스트 예정: 약 25개 프롬프트 긴 세션 비교 계획은 `docs/long-session-bench-plan.md`에 있습니다 (계획만, 미실행).
-- 원본 JSON과 상세 수치: `notes/runs/261101-pingpong-bench.md` (측정일 2026-11-01)
+- 원본 JSON과 상세 수치: `docs/pingpong-bench.md` (측정일 2026-11-01)
