@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"runtime"
 	"strings"
 )
 
@@ -35,11 +34,9 @@ func charcount(args []string) int {
 	if err != nil {
 		return fail("%v", err)
 	}
-	text := string(raw)
-	if pos[0] != "-" || runtime.GOOS == "windows" { // python: files and (windows) stdin use universal newlines
-		text = strings.ReplaceAll(text, "\r\n", "\n")
-		text = strings.ReplaceAll(text, "\r", "\n")
-	}
+	text := strings.TrimPrefix(string(raw), "\uFEFF") // utf-8-sig: a leading BOM is not a character
+	text = strings.ReplaceAll(text, "\r\n", "\n")     // universal newlines on every OS
+	text = strings.ReplaceAll(text, "\r", "\n")
 	if *section != "" {
 		re := regexp.MustCompile(`(?m)^(#+)` + wsClass + `*` + regexp.QuoteMeta(*section) + wsClass + `*$`)
 		m := re.FindStringSubmatchIndex(text)

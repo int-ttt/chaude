@@ -242,6 +242,30 @@ func hasStr(items []*node, s string) bool {
 	return false
 }
 
+// defaultSrc picks the posix source when --src is omitted, independent of the binary's location:
+// CLAUDE_PROJECT_DIR, else <exe>/../.claude (bin/ layout) if it exists, else <cwd>/.claude, else the exe form (missing -> error).
+func defaultSrc(projDir, cwd, exe string) string {
+	const rel = ".claude"
+	if projDir != "" {
+		return filepath.Join(projDir, rel, "settings.json")
+	}
+	exeSrc := filepath.Join(filepath.Dir(exe), "..", rel, "settings.json")
+	if fileExists(exeSrc) {
+		return exeSrc
+	}
+	if cwd != "" {
+		if p := filepath.Join(cwd, rel, "settings.json"); fileExists(p) {
+			return p
+		}
+	}
+	return exeSrc
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
 const genUsage = `usage: chaude gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]
   .claude/settings.json(posix 원본)으로부터 OS별 설정을 생성한다.
   OS 생략 시 현재 실행 OS (windows|mac|linux). --out 생략 시 표준출력.
@@ -257,11 +281,8 @@ func Main(args []string) int {
 	out := fs.String("out", "", "write here instead of stdout")
 	py := fs.String("python", "", "windows hook interpreter (default: py -3 if found, else python)")
 	exe, _ := os.Executable()
-	defSrc := filepath.Join(filepath.Dir(exe), "..", ".claude", "settings.json")
-	if r := os.Getenv("CLAUDE_PROJECT_DIR"); r != "" {
-		defSrc = filepath.Join(r, ".claude", "settings.json")
-	}
-	src := fs.String("src", defSrc, "posix settings source")
+	cwd, _ := os.Getwd()
+	src := fs.String("src", defaultSrc(os.Getenv("CLAUDE_PROJECT_DIR"), cwd, exe), "posix settings source")
 	pos, err := lean.ParseInterspersed(fs, args)
 	if err != nil {
 		if err == flag.ErrHelp {
