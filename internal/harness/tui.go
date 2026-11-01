@@ -157,7 +157,8 @@ type tuiModel struct {
 	av        *agentView         // non-nil while the read-only agent view is open
 	sv        *sessView          // non-nil while /view is open (session list, then one session's prompts)
 	svH       int                // session rows below the input box (/view list)
-	usage     string             // non-empty while the /usage popup is open
+	usage     string             // non-empty while the /usage full-screen view is open
+	usageTop  int                // first visible body line of the /usage view (kept across refreshes)
 	imeShift  int32              // column offset for terminals that draw IME preedit off the cursor (JediTerm: -1)
 	lines     []string           // transcript lines of the last refresh (viewport content, split on \n)
 	selc      textSel            // drag selection in content coordinates (survives streaming output and scrolling)
@@ -354,9 +355,9 @@ func (m *tuiModel) render() string {
 		case "user":
 			out = append(out, lipgloss.NewStyle().Foreground(grey).Render(indent(wrap(b.text, 2), "> ", "  ")), "")
 		case "asst":
-			out = append(out, indent(wrap(mdBold(b.text), 2), lipgloss.NewStyle().Foreground(orange).Render("● "), "  "), "")
+			out = append(out, indent(wrapLinked(mdBold(b.text), func(s string) string { return wrap(s, 2) }), lipgloss.NewStyle().Foreground(orange).Render("● "), "  "), "")
 		case "tool":
-			out = append(out, indent(wrap(b.text, 2), lipgloss.NewStyle().Foreground(lipgloss.Color("#5FAF87")).Render("● ")+"", "  "))
+			out = append(out, indent(wrapLinked(b.text, func(s string) string { return wrap(s, 2) }), lipgloss.NewStyle().Foreground(lipgloss.Color("#5FAF87")).Render("● ")+"", "  "))
 		case "result":
 			out = append(out, dimSt.Render(indent(wrap(b.text, 5), "  ⎿  ", "     ")), "")
 		case "note":
@@ -498,7 +499,11 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.busy {
 			m.gotText = false
 		}
+		if m.usage == "" {
+			m.usageTop = 0 // a fresh open starts at the top; a refresh keeps the scroll position
+		}
 		m.av, m.usage = nil, strings.TrimRight(string(v), "\n")
+		m.usageScroll(m.usageTop) // refreshed text may be shorter: clamp the kept offset
 	case doneMsg:
 		m.busy, m.gotText = false, false
 		m.r.tracker.finishForeground() // turn over: no foreground agent can still be running (esc/error)
@@ -512,6 +517,12 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 	case tea.MouseMsg:
 		if m.usage != "" {
+			switch v.Button {
+			case tea.MouseButtonWheelUp:
+				m.usageScroll(m.usageTop - 3)
+			case tea.MouseButtonWheelDown:
+				m.usageScroll(m.usageTop + 3)
+			}
 			break
 		}
 		m.click(v)
@@ -767,11 +778,11 @@ func (m *tuiModel) key(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if m.busy {
 			if strings.HasPrefix(line, "/") {
-				if line == "/usage" { // allowed while thinking: separate one-shot claude call, popup
+				if line == "/usage" { // allowed while thinking: separate one-shot claude call, full-screen view
 					m.in.SetValue("")
 					m.recordHistory(line)
 					m.after()
-					go func() { usageSend(m.r, usageMsg(usageFetch(m.r.lastCtx))) }()
+					m.openUsage()
 					return m, nil
 				}
 				if f := strings.Fields(line); busyOK[f[0]] { // read-only / UI-only: no conversation or session change
@@ -1136,7 +1147,9 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.setMode(p)
 	case "/version":
 		note("chaude " + ChaudeVersion + " · Claude Code " + claudeVersion())
-	case "/clear", "/rotate", "/usage", "/cost", "/context", "/compact", "/config", "/mcp", "/agents", "/init", "/review", "/doctor":
+	case "/usage": // never a conversation turn: one-shot claude call, shown in the full-screen view only
+		m.openUsage()
+	case "/clear", "/rotate", "/cost", "/context", "/compact", "/config", "/mcp", "/agents", "/init", "/review", "/doctor":
 		if f[0] == "/clear" {
 			m.blocks = nil
 		}
@@ -1318,7 +1331,7 @@ func (m *tuiModel) View() string {
 		vv = m.agentViewLines(m.vp.Height)
 	}
 	if m.usage != "" {
-		vv = m.usagePopup(m.vp.Height)
+		vv = m.usageLines(m.vp.Height)
 	}
 	if m.unseen && m.vp.AtBottom() {
 		m.unseen = false

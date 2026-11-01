@@ -210,12 +210,43 @@ func (m *tuiModel) agentViewLines(hh int) string {
 	return strings.Join(l[:hh], "\n")
 }
 
-// usagePopup renders the centered /usage box over a blank hh-line area.
-func (m *tuiModel) usagePopup(hh int) string {
-	body := lipgloss.NewStyle().Foreground(orange).Render("Usage") + dimSt.Render("  (esc/q/enter close)") + "\n\n" + m.usage
-	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(orange).Padding(0, 1).
-		MaxWidth(max(10, m.w-2)).Render(body)
-	return lipgloss.Place(m.w, hh, lipgloss.Center, lipgloss.Center, box)
+// openUsage shows the full-screen /usage view ("조회 중…" until the one-shot claude call answers).
+func (m *tuiModel) openUsage() {
+	m.usage, m.usageTop, m.av = "조회 중…", 0, nil
+	ctx := m.r.lastCtx
+	go func() { usageSend(m.r, usageMsg(usageFetch(ctx))) }()
+}
+
+// usageBody wraps the /usage text to the view width (one entry per screen row of body).
+func (m *tuiModel) usageBody() []string {
+	var body []string
+	for _, l := range strings.Split(m.usage, "\n") {
+		body = append(body, strings.Split(lipgloss.NewStyle().Width(max(10, m.w)).Render(l), "\n")...)
+	}
+	return body
+}
+
+// usageRoom is the number of body rows shown under the header line.
+func (m *tuiModel) usageRoom() int { return max(1, m.vp.Height-1) }
+
+// usageScroll sets the top body line, clamped so the last row can reach the bottom of the view.
+func (m *tuiModel) usageScroll(top int) {
+	m.usageTop = max(0, min(top, len(m.usageBody())-m.usageRoom()))
+}
+
+// usageLines renders /usage as a full-screen view of exactly hh lines that replaces the transcript (like /view).
+func (m *tuiModel) usageLines(hh int) string {
+	body := m.usageBody()
+	m.usageScroll(m.usageTop) // window size or content may have shrunk
+	room := m.usageRoom()
+	end := min(len(body), m.usageTop+room)
+	head := lipgloss.NewStyle().Foreground(orange).Render("Usage") +
+		dimSt.Render(fmt.Sprintf("  %d-%d/%d · ↑/↓ pgup/pgdn scroll · esc/q close", min(m.usageTop+1, end), end, len(body)))
+	l := append([]string{ansiTrunc(head, m.w)}, body[m.usageTop:end]...)
+	for len(l) < hh {
+		l = append(l, "")
+	}
+	return strings.Join(l[:hh], "\n")
 }
 
 func (m *tuiModel) usageKey(k tea.KeyMsg) {
@@ -223,6 +254,18 @@ func (m *tuiModel) usageKey(k tea.KeyMsg) {
 	case "esc", "q", "enter", "ctrl+c":
 		m.usage = ""
 		m.vp.GotoBottom()
+	case "up", "k":
+		m.usageScroll(m.usageTop - 1)
+	case "down", "j":
+		m.usageScroll(m.usageTop + 1)
+	case "pgup":
+		m.usageScroll(m.usageTop - m.usageRoom())
+	case "pgdown":
+		m.usageScroll(m.usageTop + m.usageRoom())
+	case "home":
+		m.usageScroll(0)
+	case "end":
+		m.usageScroll(len(m.usageBody()))
 	}
 }
 
