@@ -184,11 +184,21 @@ func (r *Repl) residentChild(role string) (*liveChild, bool) {
 }
 
 // sendResident writes msg to the parked resident child of role as one user message and marks it busy
-// with label until its result. The returned channel gets the reply text of that result (buffered, one value).
+// with label until its result. A missing or dead slot is respawned once before the send. The returned channel
+// gets the reply text of that result (buffered, one value).
 func (r *Repl) sendResident(role, msg, label string) (<-chan string, error) {
 	c, ok := r.residentChild(role)
 	if !ok {
-		return nil, fmt.Errorf("no live resident %q", role)
+		slot, known := r.residentSlotByRole(role)
+		if !known {
+			return nil, fmt.Errorf("no live resident %q", role)
+		}
+		if _, err := r.spawnSlot(slot); err != nil {
+			return nil, fmt.Errorf("no live resident %q, respawn failed: %w", role, err)
+		}
+		if c, ok = r.residentChild(role); !ok {
+			return nil, fmt.Errorf("no live resident %q after respawn", role)
+		}
 	}
 	s, ok := c.Sess.(*Session)
 	if !ok || s == nil {

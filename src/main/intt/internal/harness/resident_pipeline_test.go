@@ -9,6 +9,7 @@ import (
 
 // Stage (b): a prompter that fails to answer (no session, empty summary) shows a notice and sends the input unchanged.
 func TestViaPrompterFailureNotice(t *testing.T) {
+	failRespawn(t)
 	r := residentRepl(t, 8)
 	var out bytes.Buffer
 	r.out = &out
@@ -60,6 +61,7 @@ func TestViaTUITranslates(t *testing.T) {
 
 // Stage (c): without a live tui, or when it does not answer in time, the main reply is shown with a notice.
 func TestViaTUIFailureNotice(t *testing.T) {
+	failRespawn(t)
 	r := residentRepl(t, 8)
 	var out bytes.Buffer
 	r.out = &out
@@ -84,6 +86,7 @@ func TestViaTUIFailureNotice(t *testing.T) {
 
 // Stage (c): with residents, the pane gets only the tui's answer, not the raw main deltas; runTurn returns the raw main text.
 func TestRunTurnShowsTUIOutputOnly(t *testing.T) {
+	failRespawn(t)
 	r := residentRepl(t, 8)
 	var out bytes.Buffer
 	r.out = &out

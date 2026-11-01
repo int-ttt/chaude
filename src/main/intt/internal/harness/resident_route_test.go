@@ -163,6 +163,7 @@ func TestNeedOriginal(t *testing.T) {
 
 // Stage (b): without a live prompter, or when it does not answer in time, the input is unchanged and a notice says why.
 func TestViaPrompterFallsBack(t *testing.T) {
+	failRespawn(t)
 	r := residentRepl(t, 8)
 	var out bytes.Buffer
 	r.out = &out

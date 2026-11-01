@@ -1,6 +1,6 @@
 # chaude
 
-`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.11이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
+`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.12이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
 
 ## 설치
 
@@ -16,7 +16,7 @@ chaude --version
 - 최신 릴리즈(`CHAUDE_VERSION`으로 지정 가능)의 아카이브를 받아 `checksums.txt`로 검증한 뒤 `~/.local/bin/chaude`에 설치합니다. 검증할 체크섬이 없으면 설치하지 않습니다.
 - 이미 설치된 `chaude`가 있으면 `chaude.<이전버전>.bak`으로 백업한 뒤 덮어씁니다.
 - PATH에 없으면 힌트를 출력하고, 로그인 셸에 따라 rc 파일에 추가합니다: zsh는 `~/.zshrc`, bash는 mac `~/.bash_profile`/linux `~/.bashrc`, 그 밖은 `~/.profile`.
-- 필요 도구: `curl`, `tar`, `sha256sum` 또는 `shasum`. 환경변수: `CHAUDE_VERSION=v0.9.11`(특정 버전), `CHAUDE_INSTALL_DIR=경로`(기본 `~/.local/bin`), `CHAUDE_REPO=소유자/저장소`.
+- 필요 도구: `curl`, `tar`, `sha256sum` 또는 `shasum`. 환경변수: `CHAUDE_VERSION=v0.9.12`(특정 버전), `CHAUDE_INSTALL_DIR=경로`(기본 `~/.local/bin`), `CHAUDE_REPO=소유자/저장소`.
 
 ### Windows
 
@@ -106,6 +106,11 @@ chaude repl --threshold 200000   # 임계값 변경 (opus 메인에는 적용 �
 - `/resume`: 검색어 없이 입력하거나 결과가 여러 개면 기록 폴더 선택창을 엽니다(↑/↓, 휠로 이동, Enter로 불러오기, esc로 취소).
 - `/view`: 이 chaude 실행에서 만든 Claude Code 세션만 보여 줍니다. 이전 실행의 세션도 종료 핸드오프로 이어받습니다.
 - 종료 핸드오프: 종료할 때 이 실행의 세션 ID를 프로젝트 기록 폴더의 `.exit-handoff.json`에 저장하고, 같은 폴더에서 다시 시작하면 `/view` 목록에 반영합니다.
+
+### 0.9.12 변경
+
+- 상주 세션(prompter·tui·coder)이 꺼졌으면 요청할 때 한 번 다시 띄운 뒤 재시도합니다. 다시 띄우지 못하면 입력을 원문 그대로 메인에 보냅니다.
+- 문서에서 `sonnet-reviewer` 참조를 지웠습니다.
 
 ### 0.9.11 변경
 
