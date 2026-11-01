@@ -1,6 +1,6 @@
 # chaude
 
-`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.10이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
+`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.11이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
 
 ## 설치
 
@@ -90,6 +90,10 @@ chaude repl --threshold 200000   # 임계값 변경 (opus 메인에는 적용 �
 - `/view`: 이 chaude 실행에서 만든 Claude Code 세션만 보여 줍니다. 이전 실행의 세션도 종료 핸드오프로 이어받습니다.
 - 종료 핸드오프: 종료할 때 이 실행의 세션 ID를 프로젝트 기록 폴더의 `.exit-handoff.json`에 저장하고, 같은 폴더에서 다시 시작하면 `/view` 목록에 반영합니다.
 
+### 0.9.11 변경
+
+- `chaude clean [dir]`: 프로젝트에서 claude-lean 하네스를 제거합니다. 기본은 dry-run(대상만 출력, 변경 없음)이고, `--yes`를 주면 바뀔 파일을 `.chaude-backup-<YYYYMMDD-HHMMSS>/`에 먼저 백업한 뒤 제거합니다. `notes/`와 `record/`는 남깁니다.
+
 ### 0.9.10 변경
 
 - auto 권한 모드가 기본입니다. 드래그로 선택한 텍스트는 놓을 때 자동으로 복사됩니다.
@@ -159,6 +163,7 @@ chaude metrics --dir 폴더   # 다른 메트릭 폴더
 | `chaude metrics [--dir D] [--csv]` | 메트릭 요약/CSV |
 | `chaude gen-settings mac\|linux\|windows [--out 파일]` | OS별 `.claude/settings.json` 생성 |
 | `chaude search-history`, `charcount`, `export-history`, `extract-transcript`, `compress-archive`, `usage-report`, `claude-history` | 보조 스크립트(`-h`로 옵션 확인) |
+| `chaude clean [dir] [--yes]` | 프로젝트에서 claude-lean 하네스 제거. 기본은 dry-run, `--yes`는 백업 후 제거(`notes/`·`record/` 보존) |
 | `chaude --version` | 버전 출력 |
 
 Claude Code 훅은 `.claude/hooks/*.py`(Python 3.8+)이며 `python3 .claude/hooks/<이름>.py`로 실행됩니다. 훅 JSON은 stdin으로 받습니다.

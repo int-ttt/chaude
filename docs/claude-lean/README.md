@@ -1,6 +1,6 @@
 # Claude Lean
 
-**버전 0.9.10** · 버전별 변경 사항은 `CHANGELOG.md`
+**버전 0.9.11** · 버전별 변경 사항은 `CHANGELOG.md`
 
 Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 설정 묶음입니다. Opus는 대화를 듣고 판단하고 설명하는 일만 하고, 파일·웹·명령 작업은 하위 에이전트(Haiku, Sonnet, 필요할 때만 Opus)가 합니다. 프로젝트마다 설치합니다.
 
@@ -34,6 +34,9 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
   - 설치 직후 모드
 
 고른 값은 프로젝트에 저장되어 업그레이드해도 유지됩니다. 업그레이드는 새 버전으로 설치를 다시 실행하면 되고, 기존 설정은 백업한 뒤 병합합니다.
+
+## 제거 (`chaude clean`)
+`chaude clean [dir]`는 프로젝트에서 claude-lean 설치 파일을 제거합니다. 기본은 dry-run이라 제거 대상만 보여 주고 아무것도 바꾸지 않습니다. `chaude clean [dir] --yes`를 실행하면 바뀔 파일을 `.chaude-backup-<YYYYMMDD-HHMMSS>/`에 먼저 복사한 뒤 제거합니다. `.claude/{agents,hooks,skills}` 설치 파일, CLAUDE.md의 claude-lean 정책 블록, settings.json의 패키지 훅 항목이 대상입니다. `notes/`와 `record/`, 사용자 설정 키와 사용자 훅은 남깁니다.
 
 ## 모델별 역할과 한도
 | 모델 | 에이전트 | 생각 강도 | 맥락 한도 | 한도에 가까워지면 |

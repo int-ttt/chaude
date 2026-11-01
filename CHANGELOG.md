@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.11
+- `chaude clean [dir]`: 프로젝트에서 claude-lean 하네스를 제거합니다. 기본은 dry-run으로 제거 대상만 보여 주고 아무것도 바꾸지 않습니다.
+- `--yes`: 바뀔 파일을 `.chaude-backup-<YYYYMMDD-HHMMSS>/`에 먼저 복사한 뒤 제거합니다.
+- 제거 범위: `.claude/{agents,hooks,skills}` 설치 파일, CLAUDE.md의 claude-lean 정책 블록, settings.json의 패키지 훅 항목. `notes/`, `record/`, 매니페스트 밖 파일, settings.json의 사용자 키·사용자 훅은 건드리지 않습니다.
+- 버전 표기: cmd/chaude/main.go, docs/claude-lean/README.md, README.md를 0.9.11로 갱신
+
 ## 0.9.10
 - auto 권한 모드 기본: 권한 모드를 지정하지 않으면 auto로 시작합니다.
 - 드래그 선택: 출력 영역을 드래그해 선택하면 놓을 때 자동으로 클립보드에 복사합니다.
