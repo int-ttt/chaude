@@ -13,7 +13,7 @@ unzip ~/Downloads/claude-opus-lean.zip -d ~/claude-opus-lean
 
 **적용 전 기준값 저장** (나중에 효과 비교용):
 ```bash
-python3 ~/claude-opus-lean/scripts/usage_report.py > ~/usage-before.txt
+chaude usage-report > ~/usage-before.txt
 ```
 
 ## 1. 설치
@@ -138,7 +138,7 @@ echo '{"tool_name":"Read"}' | python3 .claude/hooks/main-thread-guard.py  # deny
 
 ## 6. 효과 확인 (적용 3~7일 후)
 ```bash
-python3 ~/claude-opus-lean/scripts/usage_report.py > ~/usage-after.txt
+chaude usage-report > ~/usage-after.txt
 diff ~/usage-before.txt ~/usage-after.txt
 ```
 - **요청당 평균 읽기**가 크게 줄었는지 (목표: 수십만 → 5만 이하)

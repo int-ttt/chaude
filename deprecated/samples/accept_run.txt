@@ -1,7 +1,0 @@
-> Remember this codeword: PELICAN-42. Reply with just: stored.
-stored.
-[2m[ctx 20,591 | in 2 cr 13,008 cc 7,581 out 5 | $0.0016 | 5h 0.02 | sess da2968d9 rot 0][0m
-[2m── context rotated #1 (ctx 20,591 > 100; da2968d9 → new) ──[0m
-> What was the codeword I asked you to remember? Reply with just the codeword.
-PELICAN-42
-[2m[ctx 21,444 | in 2 cr 13,008 cc 8,434 out 9 | $0.0018 | 5h 0.02 | sess c192ffc6 rot 1][0m

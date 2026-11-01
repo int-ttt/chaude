@@ -16,7 +16,7 @@ not_scope: 구현, 측정·튜닝·비용 재측정, 이전 조건 A/B/C 비교 
 - C6: 서브에이전트는 부모 맥락을 기본 상속하지 않음(fork만 상속), Agent 호출 model 인자는 alias만 (notes/runs/261030-plan-caveman-relay-structure-review.md:5). 따라서 필요한 맥락은 브리프에 직접 적어야 함
 - C7: CLAUDE.md:4 "Korean, 존댓말."은 서브에이전트에도 적재됨. 에이전트 파일만 바꾸면 규칙 충돌 (notes/runs/261030-plan-caveman-relay-impl-review.md:8)
 - C8: 차단형 훅은 실행 중 세션·코딩 작업을 막을 수 있음. allowlist 밖 전부 차단 금지, 구현은 별도 worktree에서만, stash 금지 (impl-review.md:5, :10, :15, :38)
-- C9: 비용 근거는 조건 A 1회뿐 (total_cost_usd=0.5437, output=6196; notes/deprecated/261030-run-caveman-relay.md:5). B·C 미실행, 모델 단가는 billing.md에 없음 (같은 파일 :9). 따라서 본 구조의 절감량은 미확인
+- C9: 비용 근거는 조건 A 1회뿐 (total_cost_usd=0.5437, output=6196; notes/deprecated/261030-run-caveman-relay.md:5, 삭제됨). B·C 미실행, 모델 단가는 billing.md에 없음 (같은 파일 :9). 따라서 본 구조의 절감량은 미확인
 - C10: 현 구조는 이미 "메인 -> opus-architect(Agent만) -> haiku-*" 패턴 (structure-review.md:22). 새 구조는 이 골격을 유지하고 메시지 형식만 바꿈
 - C11: 현 에이전트 파일 11개에는 이미 "Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean." 규칙이 있고, 최종 반환 메시지는 "Korean 존댓말"로 정해져 있음 (.claude/agents/*.md 약 14-25행, 행 번호는 파일마다 다름). CLAUDE.md:4는 범위 한정 없이 "Korean, 존댓말.". 즉 파일 출력은 이미 축약형이고, 새 구조가 바꾸는 대상은 에이전트 간 브리프와 반환 메시지임
 - C12: 4000자 반환 상한 때문에 scout가 문맥을 생략하고 Doubts에만 적은 관측 있음 (read-review.md:16). 잘림은 필드로 드러나야 함
@@ -73,7 +73,7 @@ return: R-read | R-write | R-decide, <상한(자 또는 줄)>
 lang: caveman | ko   (ko = summary_ko 필수, rule_4)
 ```
 
-- ctx의 E<n> 근거 행 형식은 이전 정의를 재사용 (notes/deprecated/261030-plan-caveman-relay.md:16-19)
+- ctx의 E<n> 근거 행 형식은 이전 정의를 재사용 (notes/deprecated/261030-plan-caveman-relay.md:16-19, 삭제됨)
 - 사용자 원문·한국어 값은 ctx 안에서도 verbatim
 
 ### 3.2 읽기 반환 R-read
