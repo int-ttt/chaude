@@ -10,6 +10,11 @@
     "LEAN_RESET_AT": "0",
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "2"
   },
+  "enabledPlugins": {
+    "serena@claude-plugins-official": false,
+    "pyright-lsp@claude-plugins-official": false,
+    "session-report@claude-plugins-official": true
+  },
   "permissions": {
     "allow": [
       "Bash(bin/chaude search-history:*)"

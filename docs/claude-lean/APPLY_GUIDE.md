@@ -49,7 +49,7 @@ cd <프로젝트 폴더> && claude
 ```
 | 확인 | 기대 결과 |
 |---|---|
-| `/agents` | haiku-scout, haiku-researcher, haiku-drafter, haiku-checker, haiku-batch-worker, haiku-runner, haiku-coder, haiku-extractor (Haiku), sonnet-analyst, sonnet-reviewer (Sonnet), opus-architect (Opus) |
+| `/agents` | haiku-scout, haiku-researcher, haiku-drafter, haiku-checker, haiku-batch-worker, haiku-runner, haiku-coder, haiku-extractor (Haiku), sonnet-analyst, sonnet-reviewer (Sonnet), opus-architect (Opus, Haiku 메인 릴레이 전용) |
 | `/hooks` | UserPromptSubmit 3개, PreToolUse 3개, SubagentStop 1개, SessionStart 1개, SessionEnd 1개, PreCompact 1개 |
 | `/context` | 고정 분량 확인 (안 쓰는 MCP 서버가 크면 `/mcp`에서 끄기) |
 | "README.md 첫 줄 알려줘" 입력 | Opus가 직접 읽지 않고 `haiku-scout`에게 맡김. 직접 읽으려 하면 훅이 차단 |

@@ -80,7 +80,7 @@ if kind in BLOCKED:
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                       "permissionDecisionReason": f"Built-in {kind} agent is blocked (large default prompt). Use haiku-scout "
                                                   "(search), haiku-coder / haiku-batch-worker (edits), "
-                                                  "opus-architect (design, judgment)."}}))
+                                                  "design/judgment: decide in the main thread (Haiku main only: opus-architect)."}}))
     sys.exit(0)
 asked = inp.get("model")
 if kind.startswith(("haiku-", "opus-")):

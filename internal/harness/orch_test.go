@@ -56,4 +56,9 @@ func TestOrchRule(t *testing.T) {
 	if !strings.Contains(orchRule("c"), orchRuleB) {
 		t.Errorf("orchRule(c) does not contain orchRuleB")
 	}
+	for _, mode := range []string{"b", "c", "d", "f"} { // Opus main modes: never route to opus-architect
+		if strings.Contains(orchRule(mode), "opus-architect") {
+			t.Errorf("orchRule(%q) names opus-architect; Opus main delegates only to haiku-*", mode)
+		}
+	}
 }

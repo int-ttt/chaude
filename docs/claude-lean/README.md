@@ -1,6 +1,6 @@
 # Claude Lean
 
-**버전 0.9.4** · 버전별 변경 사항은 `CHANGELOG.md`
+**버전 0.9.5** · 버전별 변경 사항은 `CHANGELOG.md`
 
 Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 설정 묶음입니다. Opus는 대화를 듣고 판단하고 설명하는 일만 하고, 파일·웹·명령 작업은 하위 에이전트(Haiku, Sonnet, 필요할 때만 Opus)가 합니다. 프로젝트마다 설치합니다.
 
@@ -41,7 +41,7 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
 | Opus (메인) | 대화·판단·설명 | low (필요한 턴만 `ultrathink`) | 자동 압축 창 150k | 리셋 안내는 선택(기본 끔, 켜면 100k·120k에서 안내). 안내는 `/exit` 후 같은 터미널에서 `claude`로 압축 없이 가벼워지고 직전 대화가 이어짐. 150k에서 자동 압축 |
 | Haiku | `haiku-scout` 탐색 · `haiku-checker` 확인 · `haiku-batch-worker` 일괄 작업 · `haiku-runner` 장시간 작업 · `haiku-researcher` 웹 조사 · `haiku-drafter` 글 · `haiku-coder` 코드 · `haiku-extractor` 기록 추출 | low~medium | 자동 압축 창 100k | 자동으로 압축하고 계속 진행. 100k 창이라 Haiku 단가가 5배가 되는 100k를 넘기 전에 압축됨 |
 | Sonnet | `sonnet-analyst` 판단이 필요한 작업 · `sonnet-reviewer` 제출 전 검토 | medium | 자동 압축 창 100k | 자동으로 압축하고 계속 진행 |
-| Opus (에이전트) | `opus-architect` Sonnet이 넘긴 일, `opus로`, 이미 실패한 일 | high | 자동 압축 창 100k | 자동으로 압축하고 계속 진행 |
+| Opus (에이전트) | `opus-architect` Haiku 메인이 넘긴 일만 (`--model haiku` 릴레이 대상). Opus 메인은 `haiku-*`에 직접 위임하고 `opus-architect`를 부르지 않음 | high | 자동 압축 창 100k | 자동으로 압축하고 계속 진행 |
 
 | 공통 한도 | 값 | 이유 |
 |---|---|---|

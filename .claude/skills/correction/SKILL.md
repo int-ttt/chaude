@@ -18,7 +18,7 @@ Never open with an apology or a recap. Never redo the whole output. Opus classif
 | G. Preference/tone | 너무 어려워, 딱딱하게, 내가 쓴 것처럼 | Relay to the haiku-drafter: record the rule in DECISIONS.md, then revise. |
 
 ## Same item corrected twice or more
-Stop delegating. Opus replies with a requirement checklist (≤5 bullets, user's own words) and asks for a one-word confirmation (`ㅇㅇ` / wrong item number). Then send one brief; if the corrected work needed judgment, send it to `opus-architect`.
+Stop delegating. Opus replies with a requirement checklist (≤5 bullets, user's own words) and asks for a one-word confirmation (`ㅇㅇ` / wrong item number). Then send one brief; if the corrected work needed judgment, Opus decides it first (Haiku main: `opus-architect`).
 
 ## Reply after a correction
 `이해: …` (A/C/F only) → agent's changed parts only → files touched → (C/D) every place fixed.

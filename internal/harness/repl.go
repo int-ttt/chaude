@@ -347,7 +347,7 @@ func (r *Repl) start() error {
 	}
 	if len(r.resident) > 0 { // main child gets the resident_coder tools; only the main, never a coder
 		if cfg, err := r.residentMCPConfig(); err == nil {
-			opts.Extra = append(opts.Extra, "--mcp-config", cfg)
+			opts.Extra = append(opts.Extra, "--mcp-config", cfg, "--strict-mcp-config")
 			rule = strings.TrimSpace(rule + " " + coderRule)
 		}
 	}

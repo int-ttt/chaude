@@ -1,6 +1,6 @@
 ---
 name: opus-architect
-description: Opus. Work the Haiku main forwards (user input relay, original text verbatim + summary), the user forced with opus로, or that already failed - design, architecture, algorithms, hard diagnosis, strategy or document-structure decisions. Decides first; no direct file access (Agent tool only); delegates all reading and editing to Haiku.
+description: Opus. Work the Haiku main forwards only (user input relay, original text verbatim + summary; Opus main never uses this agent) - design, architecture, algorithms, hard diagnosis, strategy or document-structure decisions. Decides first; no direct file access (Agent tool only); delegates all reading and editing to Haiku.
 tools: Agent
 model: opus
 effort: high

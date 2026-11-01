@@ -116,6 +116,11 @@ type SessionOpts struct {
 	CompactWindow int
 	CacheTTL      string // "auto" (default, env untouched), "1h", or "5m"
 	Agent         string // agent rules name: <Cwd>/.claude/agents/<Agent>.md, then ~/.claude/agents (see agentBody)
+	Minimal       bool   // no tools, MCP or skills; Rule (or Agent body) replaces the default system prompt. no --bare: it skips OAuth (subscription login fails)
+	Rule          string // inline rules body; used instead of the Agent body when set
+	Tools         string // non-empty: --tools <Tools>
+	StrictMCP     bool   // --strict-mcp-config: only the MCP config given in Extra
+	NoSlash       bool   // --disable-slash-commands
 }
 
 // Session is one `claude -p` child. Send() a user message, then Events() until result.
@@ -136,8 +141,9 @@ type Session struct {
 	dead      atomic.Bool   // stdout reached EOF: the child process is gone
 }
 
-// sessionArgs is the claude argv for o. o.Model must already be defaulted. An agent named in o.Agent
-// adds its body as --append-system-prompt; an unreadable agent file adds nothing (the caller notices).
+// sessionArgs is the claude argv for o. o.Model must already be defaulted. The rules are o.Rule, else the
+// body of the agent named in o.Agent; Minimal passes them as --system-prompt, otherwise --append-system-prompt.
+// An unreadable agent file adds nothing (the caller notices).
 func sessionArgs(o SessionOpts) []string {
 	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json",
 		"--verbose", "--include-partial-messages", "--model", o.Model}
@@ -147,9 +153,30 @@ func sessionArgs(o SessionOpts) []string {
 	if o.Resume != "" {
 		args = append(args, "--resume", o.Resume)
 	}
+	if o.Minimal {
+		args = append(args, "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--setting-sources", "")
+	} else {
+		if o.Tools != "" {
+			args = append(args, "--tools", o.Tools)
+		}
+		if o.StrictMCP {
+			args = append(args, "--strict-mcp-config")
+		}
+		if o.NoSlash {
+			args = append(args, "--disable-slash-commands")
+		}
+	}
 	args = append(args, o.Extra...)
-	if o.Agent != "" {
-		if body, err := agentBody(o.Cwd, o.Agent); err == nil {
+	body := o.Rule
+	if body == "" && o.Agent != "" {
+		if b, err := agentBody(o.Cwd, o.Agent); err == nil {
+			body = b
+		}
+	}
+	if body != "" {
+		if o.Minimal {
+			args = append(args, "--system-prompt", body)
+		} else {
 			args = append(args, "--append-system-prompt", body)
 		}
 	}

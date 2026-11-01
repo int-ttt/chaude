@@ -35,9 +35,9 @@ func applyOrchEnv(mode string) {
 	_ = os.Setenv("CHAUDE_ORCH", mode)
 }
 
-const orchRuleB = "[orch B] Opus main decides inline. ALL file reads/writes go through haiku-scout/haiku-coder/haiku-batch-worker. opus-architect only for judgment over >=3 sources or >~8k tokens of material; no relay hop. One haiku-scout call per decision (batch all reads), RETURN cap 4000 chars. Merge would-be short spawns (<=3 msgs) into one brief. Reuse the same haiku-coder instance per workstream."
+const orchRuleB = "[orch B] Opus main decides inline and delegates directly to haiku-*. ALL file reads/writes go through haiku-scout/haiku-coder/haiku-batch-worker; no relay hop. One haiku-scout call per decision (batch all reads), RETURN cap 4000 chars. Merge would-be short spawns (<=3 msgs) into one brief. Reuse the same haiku-coder instance per workstream."
 
-const orchRuleC = orchRuleB + " [orch C] haiku-scout returns a structured digest (key: value, <=4000 chars); decide from the digest. opus-architect only on escalation or after Haiku fails twice."
+const orchRuleC = orchRuleB + " [orch C] haiku-scout returns a structured digest (key: value, <=4000 chars); decide from the digest. After Haiku fails twice, Opus main decides itself."
 
 const orchRuleD = "[orch D] Write one task brief, then issue ALL Haiku calls (scout reads, coder edits on disjoint files, checker) in ONE message in parallel. No intermediate agent, no sequential ping-pong. Coder briefs must name disjoint file sets; sum of RETURN caps <= 8000 chars per round; max 2 rounds per task; second round only on FAIL."
 

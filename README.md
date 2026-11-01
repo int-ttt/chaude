@@ -1,6 +1,6 @@
 # chaude
 
-`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.6.6이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
+`claude` CLI(stream-json)를 감싸는 터미널 드라이버입니다. 컨텍스트가 임계값을 넘으면 핸드오프 스냅샷을 만들어 세션을 자동으로 교체(회전)합니다. 개인용이며 배포 대상이 아닙니다. 현재 버전은 0.9.5이고, claude-lean(0.5.3)의 후속입니다. 변경 내역은 `CHANGELOG.md`를 보세요.
 
 ## 설치 (macOS Apple Silicon 전용)
 
@@ -13,7 +13,7 @@ chaude --version
 ```
 
 - 최신 릴리즈를 받아 체크섬을 확인한 뒤 `/usr/local/bin`(쓰기 가능 시) 또는 `~/.local/bin`에 설치합니다. PATH에 없으면 `~/.zshrc`에 추가합니다.
-- 환경변수: `CHAUDE_VERSION=v0.6.6`(특정 버전), `CHAUDE_INSTALL_DIR=경로`, `CHAUDE_REPO=소유자/저장소`.
+- 환경변수: `CHAUDE_VERSION=v0.9.5`(특정 버전), `CHAUDE_INSTALL_DIR=경로`, `CHAUDE_REPO=소유자/저장소`.
 
 소스에서 빌드하려면 Go 1.22+가 필요하고 `go build -o bin/chaude ./cmd/chaude`로 됩니다. 다른 OS는 `platform_setup/install.sh`(mac/linux) 또는 `platform_setup\install.ps1`(windows)이 Go 설치 확인, 빌드, OS별 `.claude/settings.json` 생성을 처리합니다.
 
@@ -21,8 +21,8 @@ chaude --version
 
 ```sh
 chaude                           # 인자 없이 실행하면 REPL 시작 (chaude repl과 동일)
-chaude repl                      # REPL 시작 (기본 모델 haiku, haiku 임계값 80000 토큰, opus·sonnet 270000)
-chaude repl --threshold 200000   # 임계값 변경
+chaude repl                      # REPL 시작 (기본 모델 opus, opus 임계값 200000 토큰, 그 외 모델 80000 토큰)
+chaude repl --threshold 200000   # 임계값 변경 (opus 메인에는 적용 안 됨)
 ```
 
 - 답변이 끝났을 때 컨텍스트 토큰이 `--threshold` 이상이면 핸드오프를 만들어 새 세션으로 넘어갑니다.
@@ -30,15 +30,15 @@ chaude repl --threshold 200000   # 임계값 변경
 
 | 옵션 | 기본값 | 설명 |
 |---|---|---|
-| `--model` | haiku | 모델 |
+| `--model` | opus | 모델 (`haiku`로 지정하면 Haiku 메인) |
 | `--cwd` | 현재 디렉터리 | 작업 디렉터리 |
-| `--threshold` | 80000 (haiku; opus·sonnet 270000) | 이 토큰 수 이상이면 회전 |
+| `--threshold` | 80000 (opus는 200000 고정, 이 옵션 무시) | 이 토큰 수 이상이면 회전 |
 | `--compact-window` | 400000 | 자식 프로세스 전용 자동 compact 창(0이면 끔, threshold보다 커야 함) |
 | `--max-auto-rotations` | 무제한 | 자동 회전 횟수 상한 |
 | `--tail-turns` | 4 | 스냅샷에 넣는 최근 대화 턴 수 |
 | `--snapshot-chars` | 24000 | 스냅샷 최대 글자 수 |
 | `--show-rotation` | 끔 | 회전 시 한 줄 표시 |
-| `--metrics-dir` | `notes/metrics` | 턴별 메트릭 폴더(빈 값이면 끔) |
+| `--metrics-dir` | `auto` (`record/metrics`) | 턴별 메트릭 폴더(빈 값이면 끔) |
 | `--no-handoff-validate` | 끔 | 핸드오프 검증 끄기 |
 | `--max-drain` | 3 | 동시에 마무리 중인 옛 세션 수(0이면 안 기다림) |
 | `--no-delegation-rule` | 끔 | 시스템 프롬프트에 haiku 위임 규칙을 붙이지 않음 |
@@ -48,7 +48,7 @@ chaude repl --threshold 200000   # 임계값 변경
 ### 상주 세션과 코더 (0.9.4)
 
 - 상주(resident) 자식 세션은 4개입니다: `main`(Opus 메인), `prompter`, `tui`(haiku-tui), `coder`. 명령을 처리 중(생각중)일 때만 실행 목록에 보이고, 유휴 상태는 숨깁니다.
-- 입력 흐름: 입력 → prompter → main. prompter가 영문 요약을 만들고, main은 `[prompter summary EN]` 요약과 `[original input]` 원문을 함께 받습니다. prompter가 응답하지 않으면 원문만 전달합니다.
+- 입력 흐름: 입력 → prompter → main. prompter는 caveman 영문 요약을 `[prompter summary]`로 만들고, 원문은 요약이 의미를 잃을 때만 `[original]`로 덧붙입니다. prompter가 응답하지 않으면 원문만 전달합니다.
 - 응답 흐름: reply → haiku-tui → pane. 응답은 haiku-tui가 존댓말로 렌더링해 화면 pane에 보입니다.
 - 에이전트 규칙은 슬롯별로 적용됩니다(prompter, tui, coder 각각의 규칙 파일).
 - 진행 표시: 단계별(stage) 진행 줄을 표시합니다.
@@ -56,6 +56,16 @@ chaude repl --threshold 200000   # 임계값 변경
 - 코더는 `coder` 슬롯 하나를 씁니다. 같은 맥락의 후속 작업은 같은 코더에 보냅니다. 단순 조회와 소규모 수정은 Task haiku 에이전트가 맡습니다.
 - 상태 줄의 P, T, C 컨텍스트 바는 상주 prompter, tui, coder의 사용량으로 계산합니다.
 - `/view`: 세션 목록을 입력창 아래에 보여 줍니다. `/view <id-prefix>`로 해당 세션의 프롬프트를 엽니다(TUI 전용, esc로 한 단계 뒤로).
+
+### 0.9.5 변경
+
+- P/T 최소 세션: prompter와 tui는 도구, MCP, 스킬, 설정 파일을 모두 끈 최소 세션입니다(`--tools ""`, `--strict-mcp-config`, `--setting-sources ""`). 규칙은 각자 짧은 규칙 본문을 `--system-prompt`로 받습니다.
+- 코더 도구 제한: coder는 `Read,Edit,Write,Bash,Grep,Glob`만 쓰고 MCP는 지정한 설정만 씁니다(`--strict-mcp-config`). 슬래시 명령은 끕니다.
+- main MCP 엄격 모드: 메인 세션도 지정한 MCP 설정만 읽습니다.
+- prompter 요약: `[prompter summary]`는 caveman 영문 요약, `[original]`는 원문입니다. 원문은 prompter가 `NEED_ORIGINAL`로 답하거나 인용·코드·경로·숫자·정정 문장처럼 요약이 의미를 잃을 수 있을 때만 붙습니다. 예전 `[prompter summary EN]`·`[original input]` 표기는 없어졌습니다.
+- CLAUDE.md 분량을 절반으로 줄였습니다(약 8.8k → 4.4k 바이트). 매 턴 읽히는 규칙이라 줄인 만큼 맥락이 가벼워집니다.
+- `opus-architect`는 Haiku 메인(`--model haiku`)이 넘긴 일만 받습니다. Opus 메인은 `haiku-*`에 직접 위임하고, `opus로` 강제 경로는 없습니다.
+- 프로젝트 설정: `serena`와 `pyright-lsp` 플러그인을 끕니다(`.claude/settings.json`의 `enabledPlugins`).
 
 ## 기존 Claude Code 세션을 chaude로 옮기기
 
@@ -90,7 +100,7 @@ chaude repl --threshold 200000   # 임계값 변경
 
 ## 메트릭
 
-`chaude repl`은 턴마다 비용, 소요 시간, 회전 수, 위임 수 등을 `notes/metrics`에 JSONL로 남깁니다.
+`chaude repl`은 턴마다 비용, 소요 시간, 회전 수, 위임 수 등을 `record/metrics`에 JSONL로 남깁니다.
 
 ```sh
 chaude metrics              # 요약
@@ -117,5 +127,5 @@ Claude Code 훅은 `.claude/hooks/*.py`(Python 3.8+)이며 `python3 .claude/hook
 - 테스트: `go test ./...` (실제 claude를 쓰는 테스트: `HARNESS_LIVE=1 go test ./internal/harness -v`)
 - 릴리즈: `v*` 태그를 push하면 GitHub Actions(`.github/workflows/release.yml`)가 `scripts/build-release.sh`로 darwin/arm64 아카이브와 `checksums.txt`를 빌드해 릴리즈를 만듭니다.
   ```sh
-  git tag v0.6.6 && git push origin v0.6.6
+  git tag v0.9.5 && git push origin v0.9.5
   ```

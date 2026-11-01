@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -69,25 +70,94 @@ func TestSpawnSlotParksReadingChild(t *testing.T) {
 	}
 }
 
-// Stage (b): the prompter's English summary goes to main together with the original input.
-func TestViaPrompterSummaryThenOriginal(t *testing.T) {
+// runViaPrompter sends input through viaPrompter with a fake prompter that answers reply; it returns what main gets.
+func runViaPrompter(t *testing.T, input, reply string) string {
+	t.Helper()
 	r := residentRepl(t, 8)
 	_, out, in := parkResident(t, r, "prompter")
 	done := make(chan string, 1)
-	go func() { done <- r.viaPrompter("버그 고쳐줘") }()
-	if got := recv(t, in); !strings.Contains(got, "버그 고쳐줘") {
-		t.Fatalf("prompter did not get the input: %s", got)
+	go func() { done <- r.viaPrompter(input) }()
+	if got := recv(t, in); !strings.Contains(got, input) {
+		t.Fatalf("prompter did not get the input as-is: %s", got)
 	}
-	out <- `{"type":"assistant","message":{"content":[{"type":"text","text":"Fix the parser bug."}]}}`
+	out <- `{"type":"assistant","message":{"content":[{"type":"text","text":` + jsonString(reply) + `}]}}`
 	out <- `{"type":"result"}`
 	select {
 	case got := <-done:
-		want := "[prompter summary EN]\nFix the parser bug.\n\n[original input]\n버그 고쳐줘"
-		if got != want {
-			t.Fatalf("routed input = %q, want %q", got, want)
-		}
+		return got
 	case <-time.After(2 * time.Second):
 		t.Fatal("viaPrompter did not return")
+		return ""
+	}
+}
+
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// Stage (b): a plain summary goes to main; the original is added only when needOriginal says so.
+func TestViaPrompterSummaryOnly(t *testing.T) {
+	got := runViaPrompter(t, "버그 고쳐줘", "Fix the parser bug.")
+	if want := "[prompter summary]\nFix the parser bug."; got != want {
+		t.Fatalf("routed input = %q, want %q", got, want)
+	}
+}
+
+// The prompter's OK line is dropped; a plain input gets no original.
+func TestViaPrompterOKNoOriginal(t *testing.T) {
+	got := runViaPrompter(t, "로그인 버그 고쳐줘", "OK\nfix login")
+	if want := "[prompter summary]\nfix login"; got != want {
+		t.Fatalf("routed input = %q, want %q", got, want)
+	}
+}
+
+// NEED_ORIGINAL from the prompter adds the original even for plain input.
+func TestViaPrompterNeedOriginalFlag(t *testing.T) {
+	got := runViaPrompter(t, "로그인 버그 고쳐줘", "NEED_ORIGINAL\nfix login")
+	if want := "[prompter summary]\nfix login\n\n[original]\n로그인 버그 고쳐줘"; got != want {
+		t.Fatalf("routed input = %q, want %q", got, want)
+	}
+}
+
+// Without a flag line the heuristic decides: a file path in the input adds the original.
+func TestViaPrompterNoFlagHeuristic(t *testing.T) {
+	got := runViaPrompter(t, "main.go 봐줘", "Review main.go.")
+	if want := "[prompter summary]\nReview main.go.\n\n[original]\nmain.go 봐줘"; got != want {
+		t.Fatalf("routed input = %q, want %q", got, want)
+	}
+}
+
+// Only a flag line with an empty summary falls back to the input unchanged.
+func TestViaPrompterEmptySummaryReturnsText(t *testing.T) {
+	if got := runViaPrompter(t, "로그인 버그 고쳐줘", "OK"); got != "로그인 버그 고쳐줘" {
+		t.Fatalf("routed input = %q, want input unchanged", got)
+	}
+}
+
+func TestNeedOriginal(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"로그인 버그 고쳐줘", false},
+		{"아니 그거 말고", true},
+		{"main.go 봐줘", true},
+		{`"안녕" 번역해줘`, true},
+		{"3번 반복", true},
+		{"a\nb\nc\nd", true},
+		{"ok", false},
+		{"translate this", true},
+		{"```go\nx\n```", true},
+		{"~/x/y 확인", true},
+	}
+	for _, c := range cases {
+		if got := needOriginal(c.in); got != c.want {
+			t.Errorf("needOriginal(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+	if !needOriginal(strings.Repeat("가", 401)) {
+		t.Error("needOriginal(401 runes) = false, want true")
 	}
 }
 

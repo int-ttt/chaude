@@ -1,14 +1,22 @@
 package harness
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
+
+// prompterRule is the resident prompter's rules: its system prompt (Minimal slot, no tools).
+//
+//go:embed rules/resident-prompter.md
+var prompterRule string
 
 // residentMaxWorkers is the worker cap used when --max-workers and CHAUDE_MAX_WORKERS are unset.
 // The resident slots are parked children and count against admit(); with the default 3 a spawn
@@ -64,19 +72,25 @@ func (r *Repl) residentBusy() []*agentRec {
 // residentSlot is one named child of the resident set. All slots are spawned with the REPL and parked.
 // The "main" slot is the active child.
 type residentSlot struct {
-	Role  string
-	Model string
-	Agent string // agent rules file name (haiku-prompter, ...); "" for none
+	Role      string
+	Model     string
+	Agent     string // agent rules file name (haiku-tui, ...); "" for none
+	Rule      string // inline rules body; used instead of Agent when set
+	Minimal   bool   // no tools, MCP or skills; the rules replace the default system prompt
+	Tools     string // non-empty: --tools <Tools>
+	StrictMCP bool   // --strict-mcp-config
+	NoSlash   bool   // --disable-slash-commands
 }
 
 // residentSlots returns the four resident slots: main (the active child, on mainModel), prompter, tui
-// and coder (all haiku). The coder is one resident session, kept for long context.
+// and coder (all haiku). The coder is one resident session, kept for long context. The prompter and tui
+// are minimal: no tools, no MCP, no skills.
 func residentSlots(mainModel string) []residentSlot {
 	return []residentSlot{
 		{Role: "main", Model: mainModel},
-		{Role: "prompter", Model: "haiku", Agent: "haiku-prompter"},
-		{Role: "tui", Model: "haiku", Agent: "haiku-tui"},
-		{Role: "coder", Model: "haiku", Agent: "haiku-coder"},
+		{Role: "prompter", Model: "haiku", Rule: prompterRule, Minimal: true},
+		{Role: "tui", Model: "haiku", Agent: "haiku-tui", Minimal: true},
+		{Role: "coder", Model: "haiku", Agent: "haiku-coder", Tools: "Read,Edit,Write,Bash,Grep,Glob", StrictMCP: true, NoSlash: true},
 	}
 }
 
@@ -100,13 +114,14 @@ func (r *Repl) spawnSlot(slot residentSlot) (*liveChild, error) {
 		return nil, err
 	}
 	agent := slot.Agent
-	if agent != "" {
+	if agent != "" && slot.Rule == "" {
 		if _, err := agentBody(r.a.Cwd, agent); err != nil {
 			r.notice("에이전트 규칙 없음(" + agent + "): 기본 세션으로 시작")
 			agent = ""
 		}
 	}
-	s, err := newSessionFn(SessionOpts{Model: slot.Model, Cwd: r.a.Cwd, CompactWindow: r.a.CompactWindow, CacheTTL: r.a.CacheTTL, Agent: agent})
+	s, err := newSessionFn(SessionOpts{Model: slot.Model, Cwd: r.a.Cwd, CompactWindow: r.a.CompactWindow, CacheTTL: r.a.CacheTTL,
+		Agent: agent, Rule: slot.Rule, Minimal: slot.Minimal, Tools: slot.Tools, StrictMCP: slot.StrictMCP, NoSlash: slot.NoSlash})
 	if err != nil {
 		return nil, err
 	}
@@ -228,32 +243,79 @@ func (r *Repl) notice(s string) {
 	r.p(dim+s+rst, "\n")
 }
 
-// viaPrompter returns the text Opus main receives: the resident prompter's English summary, then the
-// original input. Without a live prompter, or when it does not answer in time, text is returned unchanged
-// and a notice says why. With no residents configured the text is returned without a notice.
+// viaPrompter returns the text Opus main receives: the resident prompter's summary, and the original
+// input when the prompter asks for it or needOriginal(text) says the summary could lose meaning. Without a
+// live prompter, or when it does not answer in time, text is returned unchanged and a notice says why.
+// With no residents configured the text is returned without a notice.
 func (r *Repl) viaPrompter(text string) string {
 	if len(r.resident) == 0 {
 		return text
 	}
-	ask := "Summarize the following user input in English in a few sentences. Reply with the summary only.\n\n" + text
 	r.stage("· prompter 처리중")
-	ch, err := r.sendResident("prompter", ask, text)
+	ch, err := r.sendResident("prompter", text, text)
 	if err != nil {
 		r.notice("prompter 실패(오류: " + err.Error() + "): 원문 그대로 메인에 보냄")
 		return text
 	}
 	select {
-	case sum := <-ch:
-		if sum == "" {
+	case reply := <-ch:
+		if reply == "" {
 			r.notice("prompter 실패(빈 응답): 원문 그대로 메인에 보냄")
 			return text
 		}
+		flag, sum := parsePrompterReply(reply)
+		if sum == "" {
+			return text
+		}
 		r.stage("· prompter 완료")
-		return "[prompter summary EN]\n" + sum + "\n\n[original input]\n" + text
+		out := "[prompter summary]\n" + sum
+		if flag || needOriginal(text) {
+			out += "\n\n[original]\n" + text
+		}
+		return out
 	case <-time.After(prompterTimeout):
 		r.notice(fmt.Sprintf("prompter 실패(%g초 시간초과): 원문 그대로 메인에 보냄", prompterTimeout.Seconds()))
 		return text
 	}
+}
+
+// parsePrompterReply splits the prompter reply: a first non-empty line NEED_ORIGINAL (flag set) or OK is
+// dropped; any other reply is the summary whole. The summary is trimmed; "" when nothing is left.
+func parsePrompterReply(reply string) (bool, string) {
+	s := strings.TrimSpace(reply)
+	head, rest, _ := strings.Cut(s, "\n")
+	switch strings.TrimSpace(head) {
+	case "NEED_ORIGINAL":
+		return true, strings.TrimSpace(rest)
+	case "OK":
+		return false, strings.TrimSpace(rest)
+	}
+	return false, s
+}
+
+var (
+	needPathRe  = regexp.MustCompile(`(?:[~.]?/?[\w.-]+/[\w./-]+)|\b[\w-]+\.(?:go|py|md|js|ts|tsx|json|ya?ml|toml|sh|txt|rs|java|c|h|cpp|html|css)\b`)
+	needDigitRe = regexp.MustCompile(`[0-9]`)
+	needQuotes  = "`\"“”「『"
+	needWords   = []string{"아니", "근데", "말고", "정정", "다시 말", "번역", "translate", "문구", "표현", "말투", "어투", "wording", "문장", "그대로", "원문"}
+)
+
+// needOriginal reports whether input is too exact for a summary alone: quotes or code, many lines or
+// long text, digits, file paths, a correction, or a translation/wording request.
+func needOriginal(s string) bool {
+	if strings.ContainsAny(s, needQuotes) || strings.Count(s, "\n") >= 3 || utf8.RuneCountInString(s) > 400 {
+		return true
+	}
+	if needDigitRe.MatchString(s) || needPathRe.MatchString(s) {
+		return true
+	}
+	lower := strings.ToLower(s)
+	for _, w := range needWords {
+		if strings.Contains(lower, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // viaTUI turns the main reply into the Korean answer the user sees, through the resident tui (haiku-tui).
