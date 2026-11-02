@@ -110,7 +110,7 @@ echo '{"tool_name":"Read"}' | python3 .claude/hooks/main-thread-guard.py  # deny
 ## 5. 조절 손잡이 (`.claude/settings.json`)
 | 설정 | 기본값 | 바꾸는 경우 |
 |---|---|---|
-| `effortLevel` | `low` | 의도를 자주 잘못 알아들으면 `medium` |
+| `effortLevel` | `medium` | 비용을 더 줄이려면 `low` |
 | `env.LEAN_RESET_AT` | `0` | 리셋 안내를 띄우는 메인 맥락 크기. `0`은 끔. 켜려면 `100000` 또는 `120000` |
 | `autoCompactWindow` | `150000` | 비용을 더 줄이려면 `100000` (압축이 더 잦아짐) |
 | `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | `2` | 메인 → Sonnet/Opus → Haiku 연계 깊이. `1`이면 연계 끔 (메인이 `[haiku] steps`를 대신 배분) |

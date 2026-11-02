@@ -15,7 +15,7 @@
   - plain: 하네스 없이 Opus 단독 (`claude` 직접 실행, CLAUDE.md·.claude 없음)
   - harness: chaude 하네스 (Opus main + haiku 서브에이전트)
 - 공통 조건:
-  - 같은 `effortLevel` 값을 두 방식에 지정 (harness 설정의 low 값과 맞춤)
+  - 같은 `effortLevel` 값을 두 방식에 지정 (harness 설정 값과 맞춤, 현재 medium)
   - 같은 permission mode, Bash 허용을 두 방식 모두에 적용 (이전 테스트에서 plain은 Bash가 거부된 적이 있어 반드시 확인)
   - `CLAUDE_CONFIG_DIR`을 실행마다 격리된 빈 폴더로 지정 (전역 설정·캐시 오염 방지)
 - 반복: 방식별 3회씩 실행합니다. 실행 사이 캐시 상태 차이를 줄이기 위해 실행 순서를 번갈아 바꿉니다.

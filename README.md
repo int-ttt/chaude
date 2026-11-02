@@ -217,7 +217,7 @@ Claude Code 훅은 `.claude/hooks/*.py`(Python 3.8+)이며 `python3 .claude/hook
 - 주의점:
   - n=2라 표본이 매우 작습니다. 범위로 해석하고 일반화하지 않습니다.
   - 비용은 cache read가 지배하므로 캐시 상태에 따라 크게 달라집니다.
-  - harness 설정은 effortLevel이 low입니다. plain과 effort가 달라 품질 비교에는 쓸 수 없습니다.
+  - 측정 당시 harness 설정은 effortLevel이 low였습니다 (현재 기본은 medium). plain과 effort가 달라 품질 비교에는 쓸 수 없습니다.
   - plain 쪽은 Bash 명령이 거부된 적이 있어 실제 작업 조건이 harness와 다를 수 있습니다.
 - 장기 테스트 예정: 약 25개 프롬프트 긴 세션 비교 계획은 `docs/long-session-bench-plan.md`에 있습니다 (계획만, 미실행).
 - 원본 JSON과 상세 수치: `docs/pingpong-bench.md` (측정일 2026-11-01)

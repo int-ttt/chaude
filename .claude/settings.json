@@ -1,6 +1,6 @@
 {
   "model": "opus",
-  "effortLevel": "low",
+  "effortLevel": "medium",
   "autoCompactWindow": 150000,
   "env": {
     "CLAUDE_CODE_SUBAGENT_MODEL": "haiku",
