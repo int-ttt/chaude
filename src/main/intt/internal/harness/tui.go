@@ -276,6 +276,19 @@ func (m *tuiModel) recordHistory(line string) {
 
 func (m *tuiModel) Init() tea.Cmd { return m.sp.Tick }
 
+// importBlocks turns imported [user, assistant] pairs into view blocks; only the last 100 are shown.
+func importBlocks(turns [][2]string) []block {
+	var bl []block
+	if len(turns) > 100 {
+		bl = append(bl, block{"note", fmt.Sprintf("(%d earlier turns not shown)", len(turns)-100), false})
+		turns = turns[len(turns)-100:]
+	}
+	for _, t := range turns {
+		bl = append(bl, block{"user", t[0], false}, block{"asst", t[1], false})
+	}
+	return bl
+}
+
 func (m *tuiModel) welcome() string {
 	cwd := m.r.a.Cwd
 	if cwd == "" {
@@ -484,15 +497,7 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refresh()
 	case importedMsg:
 		m.gotText = false
-		m.blocks = nil
-		turns := v.turns
-		if len(turns) > 100 {
-			m.blocks = append(m.blocks, block{"note", fmt.Sprintf("(%d earlier turns not shown)", len(turns)-100), false})
-			turns = turns[len(turns)-100:]
-		}
-		for _, t := range turns {
-			m.blocks = append(m.blocks, block{"user", t[0], false}, block{"asst", t[1], false})
-		}
+		m.blocks = importBlocks(v.turns)
 		m.refresh()
 		m.vp.GotoBottom()
 	case usageMsg:
@@ -1366,6 +1371,9 @@ func (r *Repl) runTUI() int {
 	submit := make(chan string)
 	m := newTUIModel(r, submit)
 	m.loadHistory(r.a.Cwd)
+	if len(r.startView) > 0 { // --from-claude: show the imported transcript
+		m.blocks = importBlocks(r.startView)
+	}
 	cw := &cursorWriter{File: os.Stdout, w: os.Stdout, col: &m.curCol, up: &m.curUp}
 	lipgloss.SetHasDarkBackground(true) // skip the slow OSC background query at startup
 	go claudeVersion()                  // warm the /version cache off the UI goroutine

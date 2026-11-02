@@ -277,9 +277,9 @@ func (r *Repl) notice(s string) {
 	r.p(dim+s+rst, "\n")
 }
 
-// viaPrompter returns the text Opus main receives: the resident prompter's summary, and the original
-// input when the prompter asks for it or needOriginal(text) says the summary could lose meaning. Without a
-// live prompter, or when it does not answer in time, text is returned unchanged and a notice says why.
+// viaPrompter returns the text Opus main receives: the resident prompter's summary followed by the original
+// input, always (U8=c). Without a live prompter, or when it does not answer in time, text is returned unchanged
+// and a notice says why.
 // With no residents configured the text is returned without a notice.
 func (r *Repl) viaPrompter(text string) string {
 	if len(r.resident) == 0 {
@@ -297,16 +297,12 @@ func (r *Repl) viaPrompter(text string) string {
 			r.notice("prompter 실패(빈 응답): 원문 그대로 메인에 보냄")
 			return text
 		}
-		flag, sum := parsePrompterReply(reply)
+		_, sum := parsePrompterReply(reply)
 		if sum == "" {
 			return text
 		}
 		r.stage("· prompter 완료")
-		out := "[prompter summary]\n" + sum
-		if flag || needOriginal(text) {
-			out += "\n\n[original]\n" + text
-		}
-		return out
+		return "[prompter summary]\n" + sum + "\n\n[original]\n" + text
 	case <-time.After(prompterTimeout):
 		r.notice(fmt.Sprintf("prompter 실패(%g초 시간초과): 원문 그대로 메인에 보냄", prompterTimeout.Seconds()))
 		return text
@@ -358,7 +354,7 @@ func (r *Repl) viaTUI(reply string) string {
 	if reply == "" {
 		return ""
 	}
-	prompt := "Opus 메인 반환입니다. relay 필드가 있으면 relay를, 없으면 summary_ko(없으면 본문)를 근거로 사용자에게 보일 한국어 존댓말 답변만 출력하세요. 새 사실을 더하지 마세요.\n\n" + reply
+	prompt := "Opus main return follows. Use the relay field if present, else summary_ko (else the body), as the basis. Output only the answer for the user, in polite Korean (존댓말). Add no new facts.\n\n" + reply
 	r.stage("· tui 번역중")
 	ch, err := r.sendResident("tui", prompt, "tui")
 	if err != nil {

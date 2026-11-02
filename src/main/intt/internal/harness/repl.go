@@ -38,7 +38,7 @@ const (
 		"Log each delegation (agent, tokens, duration, outcome, retries)."
 )
 
-const forwardRule = "[forward] You are the Haiku main: you receive the user's input first. Forward design, judgment, diagnosis, planning and multi-step implementation to the opus-architect agent in ONE foreground call; the brief carries the user's original text verbatim plus a short summary, in caveman B format (docs/claude-lean/CAVEMAN_FORMAT.md 3.1). Simple lookups go to haiku-scout, repeat/loop requests to haiku-prompter. Relay the result to the user in Korean 존댓말; do not decide design yourself."
+const forwardRule = "[forward] You are the Haiku main: you receive the user's input first. Forward design, judgment, diagnosis, planning and multi-step implementation to the opus-architect agent in ONE foreground call; the brief carries the user's original text verbatim plus a short summary, in caveman B format (docs/claude-lean/CAVEMAN_FORMAT.md 3.1). Simple lookups go to haiku-scout, repeat/loop requests to haiku-prompter. Relay the result to the user (haiku-tui renders it in polite Korean); do not decide design yourself."
 
 // forwardRuleFor returns the forward rule for a child on model; an Opus main already has the judgment, so no rule.
 func forwardRuleFor(model string) string {
@@ -229,6 +229,7 @@ type Repl struct {
 	tr              *Transcript
 	sess            *Session
 	pendingSnapshot string
+	startView       [][2]string // --from-claude: full imported transcript, shown when the TUI starts
 	rotations       int
 	files           []string
 	lastCtx         int

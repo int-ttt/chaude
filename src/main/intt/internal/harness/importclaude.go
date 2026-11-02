@@ -17,7 +17,9 @@ const clearCommandMark = "<command-name>/clear</command-name>"
 // claudeImport is the result of reading a plain Claude Code transcript.
 type claudeImport struct {
 	Path      string
-	Turns     [][2]string // user text, assistant text (final text blocks only)
+	Turns     [][2]string // user text, assistant text (final text blocks only): the snapshot input
+	View      [][2]string // the whole transcript for display: + thinking, tool calls/results, subagent messages
+	Subagents int         // subagent transcripts rendered into View
 	Files     []string
 	Reco      string
 	Start     time.Time // first event timestamp (zero when absent)
@@ -48,6 +50,8 @@ func loadImportArg(arg, cwd string) (string, *claudeImport, error) {
 	merged := &claudeImport{Start: imps[0].Start}
 	for _, imp := range imps {
 		merged.Turns = append(merged.Turns, imp.Turns...)
+		merged.View = append(merged.View, imp.View...)
+		merged.Subagents += imp.Subagents
 		for _, f := range imp.Files {
 			if !contains(merged.Files, f) {
 				merged.Files = append(merged.Files, f)
@@ -111,10 +115,12 @@ func readClaudeTranscript(path string) (*claudeImport, error) {
 		}
 		curUser, asst = "", nil
 	}
+	vb := newViewBuilder(path)
 	for {
 		line, rerr := br.ReadString('\n')
 		if strings.TrimSpace(line) != "" {
 			ev := parseEvent(line)
+			vb.consume(ev)
 			t := str(ev["type"])
 			side, _ := ev["isSidechain"].(bool)
 			meta, _ := ev["isMeta"].(bool)
@@ -180,6 +186,8 @@ func readClaudeTranscript(path string) (*claudeImport, error) {
 	if len(imp.Turns) == 0 {
 		return nil, fmt.Errorf("no user/assistant turns in %s", path)
 	}
+	imp.View = vb.finish()
+	imp.Subagents = vb.nSub
 	return imp, nil
 }
 
@@ -196,9 +204,10 @@ func (r *Repl) importFromClaude() (int, bool) {
 		return 1, true
 	}
 	snap, preserved := r.applyImport(imp, path)
+	r.startView = imp.View // TUI start: the full transcript is shown (see runTUI)
 	if r.a.ImportDry {
-		fmt.Printf("import dry-run: %s\nturns=%d files=%d snapshot_chars=%d snapshot_bytes=%d\nreco_found=%v reco_preserved=%v reco_bytes=%d\n",
-			path, len(imp.Turns), len(imp.Files), len([]rune(snap)), len(snap), imp.Reco != "", preserved, len(imp.Reco))
+		fmt.Printf("import dry-run: %s\nturns=%d view_turns=%d subagents=%d files=%d snapshot_chars=%d snapshot_bytes=%d\nreco_found=%v reco_preserved=%v reco_bytes=%d\n",
+			path, len(imp.Turns), len(imp.View), imp.Subagents, len(imp.Files), len([]rune(snap)), len(snap), imp.Reco != "", preserved, len(imp.Reco))
 		if !preserved {
 			return 1, true
 		}

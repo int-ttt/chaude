@@ -102,7 +102,7 @@ func (r *Repl) importSession(arg string) {
 	r.clear()
 	snap, preserved := r.applyImport(imp, path)
 	if r.ui != nil {
-		r.ui.send(importedMsg{imp.Turns}) // TUI: show the imported conversation, not only the status note
+		r.ui.send(importedMsg{imp.View}) // TUI: show the imported conversation, not only the status note
 	}
 	r.p(fmt.Sprintf("import: %s turns=%d files=%d snapshot_chars=%d reco_preserved=%v (sent with your next message)",
 		filepath.Base(path), len(imp.Turns), len(imp.Files), len([]rune(snap)), preserved), "\n")

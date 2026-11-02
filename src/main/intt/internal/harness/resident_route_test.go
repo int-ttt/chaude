@@ -96,18 +96,18 @@ func jsonString(s string) string {
 	return string(b)
 }
 
-// Stage (b): a plain summary goes to main; the original is added only when needOriginal says so.
+// The summary goes to main with the original always attached (U8=c).
 func TestViaPrompterSummaryOnly(t *testing.T) {
 	got := runViaPrompter(t, "버그 고쳐줘", "Fix the parser bug.")
-	if want := "[prompter summary]\nFix the parser bug."; got != want {
+	if want := "[prompter summary]\nFix the parser bug.\n\n[original]\n버그 고쳐줘"; got != want {
 		t.Fatalf("routed input = %q, want %q", got, want)
 	}
 }
 
-// The prompter's OK line is dropped; a plain input gets no original.
+// The prompter's OK line is dropped; the original is still attached.
 func TestViaPrompterOKNoOriginal(t *testing.T) {
 	got := runViaPrompter(t, "로그인 버그 고쳐줘", "OK\nfix login")
-	if want := "[prompter summary]\nfix login"; got != want {
+	if want := "[prompter summary]\nfix login\n\n[original]\n로그인 버그 고쳐줘"; got != want {
 		t.Fatalf("routed input = %q, want %q", got, want)
 	}
 }
@@ -120,7 +120,7 @@ func TestViaPrompterNeedOriginalFlag(t *testing.T) {
 	}
 }
 
-// Without a flag line the heuristic decides: a file path in the input adds the original.
+// Without a flag line the original is still attached, with a file path in the input.
 func TestViaPrompterNoFlagHeuristic(t *testing.T) {
 	got := runViaPrompter(t, "main.go 봐줘", "Review main.go.")
 	if want := "[prompter summary]\nReview main.go.\n\n[original]\nmain.go 봐줘"; got != want {

@@ -278,5 +278,5 @@ func (r *Repl) withDesignPath(model, snap string) string {
 		_ = r.metrics.Log(map[string]any{"stage": "design_path", "missing": true, "path": rec.DesignPath})
 		return snap
 	}
-	return snap + "\n\n설계 파일: " + rec.DesignPath + " (먼저 읽고 이어서 진행)"
+	return snap + "\n\nDesign file: " + rec.DesignPath + " (read first, then continue)"
 }
