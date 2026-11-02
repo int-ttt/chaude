@@ -1,7 +1,9 @@
 # chaude installer (Windows amd64 + arm64). Standalone: installs prebuilt release binaries only
 # (no source build, no repo checkout, so git and go are not needed). Public repo: no token required.
 #   irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
-# Env: CHAUDE_VERSION (default latest, e.g. v0.9.13), CHAUDE_INSTALL_DIR (default %USERPROFILE%\.local\bin), CHAUDE_REPO.
+# Installs to %LOCALAPPDATA%\Programs\chaude\chaude.exe and adds that folder to the user PATH (registry, once).
+# Env: CHAUDE_VERSION (default latest, e.g. v0.9.13), CHAUDE_REPO. CHAUDE_TEST_ROOT: tests only (prefix for LOCALAPPDATA/USERPROFILE).
+# Migration: removes an old %USERPROFILE%\.local\bin install (chaude.exe, chaude.*.bak).
 # Optional token (only for rate limits or private forks): GH_TOKEN, else GITHUB_TOKEN, else `gh auth token`.
 # A rejected token is dropped and the request is retried anonymously.
 # Runs through iex, so no `exit` or `param` here: errors are caught and printed, the shell stays open.
@@ -42,7 +44,10 @@ function Install-Chaude {
 
     $repo = if ($env:CHAUDE_REPO) { $env:CHAUDE_REPO } else { 'int-ttt/chaude' }
     $version = if ($env:CHAUDE_VERSION) { $env:CHAUDE_VERSION } else { 'latest' }
-    $dir = if ($env:CHAUDE_INSTALL_DIR) { $env:CHAUDE_INSTALL_DIR } else { Join-Path $env:USERPROFILE '.local\bin' }
+    # CHAUDE_TEST_ROOT (tests only) replaces LOCALAPPDATA and USERPROFILE with a temp root
+    $localApp = if ($env:CHAUDE_TEST_ROOT) { Join-Path $env:CHAUDE_TEST_ROOT 'AppData\Local' } else { $env:LOCALAPPDATA }
+    $userHome = if ($env:CHAUDE_TEST_ROOT) { Join-Path $env:CHAUDE_TEST_ROOT 'home' } else { $env:USERPROFILE }
+    $dir = Join-Path $localApp 'Programs\chaude'
 
     $pa = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
     $arch = switch ($pa) {
@@ -117,10 +122,25 @@ function Install-Chaude {
         }
         Copy-Item -Force $src $dest
 
-        $onPath = ($env:Path -split ';') -contains $dir
-        if (-not $onPath) {
-            Write-Host "PATH hint: $dir is not in PATH. Add it for your user account, then open a new terminal:"
-            Write-Host "  [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ';$dir', 'User')"
+        # user PATH (registry, HKCU\Environment): add the folder once; an existing entry is left alone
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        $entries = @()
+        if ($userPath) { $entries = @($userPath -split ';' | Where-Object { $_ -ne '' }) }
+        if (-not ($entries | Where-Object { $_.TrimEnd('\') -ieq $dir.TrimEnd('\') })) {
+            $newPath = if ($userPath) { $userPath.TrimEnd(';') + ';' + $dir } else { $dir }
+            [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+            Write-Host "PATH: added $dir to the user PATH. Open a new terminal to use it."
+        }
+        if (-not (($env:Path -split ';') -contains $dir)) { $env:Path = "$env:Path;$dir" }
+
+        # old installer (%USERPROFILE%\.local\bin): remove the binary and its .bak files
+        $legacy = Join-Path $userHome '.local\bin'
+        $old = @(Join-Path $legacy 'chaude.exe') + @(Get-ChildItem -Path $legacy -Filter 'chaude.*.bak' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        foreach ($f in $old) {
+            if (Test-Path $f) {
+                try { Remove-Item -Force $f; Write-Host "removed old install: $f" }
+                catch { Write-Host "warning: could not remove old install $f ($($_.Exception.Message))" -ForegroundColor Yellow }
+            }
         }
 
         Write-Host "installed: $dest"

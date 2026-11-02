@@ -3,13 +3,15 @@
 # (no source build, no repo checkout, so git and go are not needed). Public repo: no token required.
 #   curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | bash
 # Windows: install.ps1 (irm ... | iex).
-# Env: CHAUDE_VERSION (default latest, e.g. v0.9.13), CHAUDE_INSTALL_DIR (default ~/.local/bin), CHAUDE_REPO.
+# Installs to /usr/local/bin/chaude (sudo only for the copy, when that dir is not writable; dir is created if missing).
+# Env: CHAUDE_VERSION (default latest, e.g. v0.9.13), CHAUDE_REPO. CHAUDE_TEST_ROOT: tests only (prefix for the install dir).
+# Migration: removes an old ~/.local/bin install (chaude, chaude.exe, chaude.*.bak) and the exact PATH line the old installer added.
 # Optional token (only for rate limits or private forks): GH_TOKEN, else GITHUB_TOKEN, else `gh auth token`.
 # A rejected token is dropped and the request is retried anonymously.
 set -eu
 REPO="${CHAUDE_REPO:-int-ttt/chaude}"
 VERSION="${CHAUDE_VERSION:-latest}"
-DIR="${CHAUDE_INSTALL_DIR:-$HOME/.local/bin}"
+DIR="${CHAUDE_TEST_ROOT:-}/usr/local/bin"
 API="https://api.github.com"
 
 for t in curl tar awk sed install mktemp; do
@@ -94,30 +96,43 @@ got="$(sha256 "${tmp}/${name}")"
 [ "$want" = "$got" ] || { echo "checksum mismatch for ${name}" >&2; exit 1; }
 tar -xzf "${tmp}/${name}" -C "$tmp" chaude
 
-mkdir -p "$DIR"
+# sudo only when the target (or, if missing, its nearest existing parent) is not writable
+SUDO=""
+t="$DIR"
+while [ ! -d "$t" ]; do t="$(dirname "$t")"; done
+[ -w "$t" ] || SUDO=sudo
+[ -d "$DIR" ] || $SUDO mkdir -p "$DIR"
 if [ -e "${DIR}/chaude" ]; then
   old="$("${DIR}/chaude" --version 2>/dev/null | sed -n 's/^chaude \(.*\)$/\1/p' | head -n1 | tr -d '\n' | tr -c 'A-Za-z0-9._-' '_')"
   old="${old:-unknown}"
-  mv -f "${DIR}/chaude" "${DIR}/chaude.${old}.bak"
+  $SUDO mv -f "${DIR}/chaude" "${DIR}/chaude.${old}.bak"
   echo "backed up previous binary to ${DIR}/chaude.${old}.bak"
 fi
-install -m 755 "${tmp}/chaude" "${DIR}/chaude"
-[ "$os" = darwin ] && xattr -d com.apple.quarantine "${DIR}/chaude" 2>/dev/null || true
+$SUDO install -m 755 "${tmp}/chaude" "${DIR}/chaude"
+[ "$os" = darwin ] && $SUDO xattr -d com.apple.quarantine "${DIR}/chaude" 2>/dev/null || true
+[ -n "$SUDO" ] && echo "copied with sudo: ${DIR} is not writable by this user"
+
+# old installer (~/.local/bin + rc PATH line): remove the binary, its .bak files and the exact PATH line it appended
+legacy="$HOME/.local/bin"
+found=""
+for f in "${legacy}/chaude" "${legacy}/chaude.exe" "${legacy}"/chaude.*.bak; do
+  if [ -e "$f" ]; then rm -f "$f"; found=1; echo "removed old install: $f"; fi
+done
+if [ -n "$found" ]; then
+  line="export PATH=\"${legacy}:\$PATH\""
+  for rc in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile"; do
+    if [ -f "$rc" ] && grep -qxF "$line" "$rc"; then
+      { grep -vxF "$line" "$rc" || true; } > "${rc}.chaude-tmp"
+      cat "${rc}.chaude-tmp" > "$rc"
+      rm -f "${rc}.chaude-tmp"
+      echo "removed old PATH line from ${rc}"
+    fi
+  done
+fi
 
 case ":$PATH:" in
   *":${DIR}:"*) ;;
-  *)
-    # rc file by login shell: zsh -> ~/.zshrc; bash -> ~/.bash_profile (mac) or ~/.bashrc (linux); other -> ~/.profile
-    case "${SHELL:-}" in
-      */zsh) rc="$HOME/.zshrc" ;;
-      */bash) if [ "$os" = darwin ]; then rc="$HOME/.bash_profile"; else rc="$HOME/.bashrc"; fi ;;
-      *) rc="$HOME/.profile" ;;
-    esac
-    line="export PATH=\"${DIR}:\$PATH\""
-    grep -qsF "$line" "$rc" || printf '\n# chaude\n%s\n' "$line" >> "$rc"
-    echo "PATH hint: ${DIR} is not in PATH. Added to ${rc} (open a new terminal, or run: . ${rc})"
-    PATH="${DIR}:$PATH"
-    ;;
+  *) echo "warning: ${DIR} is not on PATH. Add it to your shell profile, then open a new terminal." >&2 ;;
 esac
 
 echo "installed: ${DIR}/chaude"

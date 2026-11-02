@@ -31,9 +31,12 @@ curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | 
 
 - OS와 CPU에 맞는 `chaude_<버전>_<os>_<arch>.tar.gz`를 받습니다. `x86_64`는 amd64로, `aarch64`는 arm64로 봅니다.
 - `checksums.txt`로 아카이브를 검증합니다. 체크섬 파일을 받지 못하면 설치하지 않습니다.
-- `CHAUDE_INSTALL_DIR`(기본 `~/.local/bin`)에 `chaude`를 둡니다. 이미 있으면 `chaude.<이전버전>.bak`으로 백업합니다.
+- `/usr/local/bin/chaude`에 둡니다. 폴더가 없으면 만듭니다. 이미 있으면 `chaude.<이전버전>.bak`으로 백업합니다.
+- 폴더에 쓸 수 없으면 `sudo`는 복사할 때만 씁니다.
+<!-- TODO(haiku-tui): EN: sudo is used only for the copy, and only when /usr/local/bin is not writable by this user. -->
+- 이전 설치(`~/.local/bin/chaude`, `chaude.exe`, `chaude.*.bak`)가 있으면 지우고, 그 설치가 rc 파일에 넣었던 `export PATH="~/.local/bin:$PATH"` 줄 하나를 뺍니다.
 - macOS에서는 다운로드 격리 속성(quarantine)을 지웁니다.
-- 설치 폴더가 PATH에 없으면 `export PATH="<폴더>:$PATH"` 줄을 rc 파일에 추가합니다. 파일은 `SHELL` 값으로 정합니다. zsh는 `~/.zshrc`, bash는 macOS `~/.bash_profile`, linux `~/.bashrc`입니다. 그 밖의 셸은 `~/.profile`입니다. 추가된 줄 앞에는 `# chaude` 주석이 붙습니다.
+- 설치 폴더가 PATH에 없으면 경고만 출력합니다. rc 파일은 바꾸지 않습니다.
 - 필요한 도구는 `curl`, `tar`, `sha256sum` 또는 `shasum`입니다. 없으면 어떤 도구가 없는지 알려 주고 멈춥니다. `git`과 `go`는 필요 없습니다.
 - `claude`가 PATH에 없으면 경고를 출력합니다. `chaude` 실행에는 Claude Code가 필요합니다.
 
@@ -46,10 +49,10 @@ irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
 chaude --version
 ```
 
-- 기본 설치 폴더는 `%USERPROFILE%\.local\bin`이고, 실행 파일은 `chaude.exe`입니다.
+- 설치 폴더는 `%LOCALAPPDATA%\Programs\chaude`이고, 실행 파일은 `chaude.exe`입니다. 이 폴더를 사용자 PATH(레지스트리)에 한 번 추가합니다. 이미 있으면 그대로 둡니다.
 - 아카이브는 `chaude_<버전>_windows_<arch>.zip`입니다. `checksums.txt`로 검증합니다.
 - 기존 `chaude.exe`는 `chaude.<이전버전>.bak`으로 백업합니다.
-- 설치 폴더가 PATH에 없으면 안내 메시지를 출력합니다. 스크립트가 직접 PATH를 바꾸지는 않습니다.
+- 이전 설치(`%USERPROFILE%\.local\bin\chaude.exe`, `chaude.*.bak`)가 있으면 지웁니다.
 - 오류가 나도 PowerShell 창을 닫지 않도록 오류를 잡아서 메시지로 보여 줍니다.
 
 ### 설치 환경변수
@@ -57,7 +60,6 @@ chaude --version
 | 이름 | 기본값 | 설명 |
 |---|---|---|
 | `CHAUDE_VERSION` | 최신 릴리즈 | 설치할 버전(예: `v0.9.13`) |
-| `CHAUDE_INSTALL_DIR` | macOS/Linux `~/.local/bin`, Windows `%USERPROFILE%\.local\bin` | 설치 폴더 |
 | `CHAUDE_REPO` | `int-ttt/chaude` | `소유자/저장소` 형식의 저장소 |
 | `GH_TOKEN` | 없음 | 선택. API 요청 한도(403)를 피할 때 쓰는 토큰 |
 | `GITHUB_TOKEN` | 없음 | `GH_TOKEN`이 없을 때 쓰는 토큰 |
@@ -65,7 +67,7 @@ chaude --version
 ### 업데이트와 제거
 
 - 업데이트는 설치 명령을 다시 실행하면 됩니다. 기존 바이너리는 `.bak`으로 남습니다.
-- 제거는 설치 폴더에서 `chaude`(Windows는 `chaude.exe`)를 지우면 됩니다. 백업 파일과 PATH 줄은 직접 지웁니다.
+- 제거는 `/usr/local/bin/chaude`(Windows는 `%LOCALAPPDATA%\Programs\chaude\chaude.exe`)를 지우면 됩니다. 백업 파일은 직접 지웁니다. Windows에서 사용자 PATH에 넣은 `%LOCALAPPDATA%\Programs\chaude` 항목도 직접 뺍니다.
 
 ## 명령 한눈에 보기
 
@@ -324,7 +326,7 @@ chaude usage-report [PROJECTS_DIR] [--top N]
 | `LOCALAPPDATA` | 상태 폴더 | Windows에서 `%LOCALAPPDATA%\claude-harness`를 상태 폴더로 씁니다 |
 | `XDG_STATE_HOME` | 상태 폴더 | Linux에서 `$XDG_STATE_HOME/claude-harness`를 상태 폴더로 씁니다. 없으면 `~/.local/state/claude-harness` |
 | `CHAUDE_ORCH` | chaude 내부 | `--orch` 값을 chaude가 시작할 때 설정합니다. 사용자가 직접 설정하는 값이 아닙니다 |
-| `GH_TOKEN`, `GITHUB_TOKEN`, `CHAUDE_VERSION`, `CHAUDE_INSTALL_DIR`, `CHAUDE_REPO` | 설치 스크립트 | [설치](#설치)를 보세요 |
+| `GH_TOKEN`, `GITHUB_TOKEN`, `CHAUDE_VERSION`, `CHAUDE_REPO` | 설치 스크립트 | [설치](#설치)를 보세요 |
 | `HARNESS_LIVE`, `HARNESS_LIVE_USAGE` | 테스트 | `1`이면 실제 `claude`를 쓰는 테스트를 켭니다. 일반 사용과는 무관합니다 |
 
 - macOS의 상태 폴더는 `~/.claude-harness`입니다.
