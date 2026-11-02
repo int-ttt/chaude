@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a problem with chaude. / chaude 오류를 신고합니다.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: chaude version
+      description: "Run `chaude --version`. / `chaude --version` 결과를 붙여 넣으세요."
+      placeholder: "e.g. chaude 0.9.13"
+    validations:
+      required: true
+  - type: input
+    id: os-arch
+    attributes:
+      label: OS and architecture
+      description: "e.g. macOS 15 arm64, Ubuntu 24.04 amd64, Windows 11 amd64. / OS와 CPU 구조를 적어 주세요."
+      placeholder: "e.g. macOS 15 arm64"
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal app
+      description: "e.g. Terminal.app, iTerm2, Windows Terminal, VS Code terminal. / 사용 중인 터미널 앱입니다."
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      description: "How you installed chaude. / chaude를 설치한 방법입니다."
+      options:
+        - install.sh (macOS / Linux)
+        - install.ps1 (Windows)
+        - Built from source / 소스에서 빌드
+        - Other / 기타
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: "Numbered steps that reproduce the problem. / 문제를 재현하는 단계를 번호 순서로 적어 주세요."
+      placeholder: |
+        1. Run `chaude repl`
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: "What you expected to happen. / 기대한 동작입니다."
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: "What happened instead. / 실제로 일어난 동작입니다."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: >-
+        Paste relevant output. Remove local paths such as /Users/<name>/ and any tokens or API keys before posting.
+        / 관련 출력을 붙여 넣으세요. 게시하기 전에 /Users/ 경로와 토큰, API 키를 지워 주세요.
+      render: shell
+    validations:
+      required: false

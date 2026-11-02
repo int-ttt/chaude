@@ -199,6 +199,8 @@ Go 1.22 이상으로 `src/main/intt`에서 빌드하고 테스트합니다:
 cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude && go test ./...
 ```
 
+이슈: 버그 제보와 기능 제안은 [GitHub Issues](https://github.com/int-ttt/chaude/issues)에 남겨 주세요.
+
 기여 가이드라인: 아직 공개되지 않았습니다.
 
 ## 라이선스

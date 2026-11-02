@@ -198,6 +198,8 @@ Build (Go 1.22 or later) and test from `src/main/intt`:
 cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude && go test ./...
 ```
 
+Issues: report bugs and request features on [GitHub Issues](https://github.com/int-ttt/chaude/issues).
+
 Contribution guidelines: not published yet.
 
 ## License

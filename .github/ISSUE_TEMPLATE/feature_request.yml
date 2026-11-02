@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a new feature or change. / 새 기능이나 변경을 제안합니다.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: "What problem are you trying to solve? / 어떤 불편이나 문제를 해결하려는지 적어 주세요."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: "What you want chaude to do. / chaude가 어떻게 동작하면 좋을지 적어 주세요."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: "Other ways you tried or thought about. / 다른 방법이나 대안이 있다면 적어 주세요."
+    validations:
+      required: false
