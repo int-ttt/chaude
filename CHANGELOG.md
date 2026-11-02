@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.13
+- 메인 Opus 기본 effort를 medium으로 바꿨습니다 (`설정: 메인 Opus 기본 effort를 medium으로 변경`).
+- 효율: 핑퐁 벤치 effort 재측정(unset/low/medium, 2회 평균)을 추가했습니다. 비용은 unset 0.861 / low 0.689 / medium 0.786 USD(plain 1.379 대비 -37.5% / -50.0% / -43.0%)입니다. 이번 측정에서 low가 가장 쌌고 medium이 그 다음입니다. 표본이 2회라 순서를 확정할 수 없습니다. 상세는 `docs/pingpong-bench.md`입니다.
+- 버전 표기: cmd/chaude/main.go, docs/claude-lean/README.md, README.md를 0.9.13으로 갱신
+
 ## 0.9.12
 - 상주 세션: 꺼졌거나 없는 prompter·tui·coder 슬롯을 요청할 때 한 번 다시 띄운 뒤 재시도합니다. 다시 띄우지 못하면 입력을 원문 그대로 메인에 보냅니다.
 - 문서: README와 APPLY_GUIDE에서 `sonnet-reviewer` 참조를 지웠습니다. 이 항목의 CHANGELOG 기록은 그대로 둡니다.
