@@ -33,7 +33,6 @@ curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | 
 - `checksums.txt`로 아카이브를 검증합니다. 체크섬 파일을 받지 못하면 설치하지 않습니다.
 - `/usr/local/bin/chaude`에 둡니다. 폴더가 없으면 만듭니다. 이미 있으면 `chaude.<이전버전>.bak`으로 백업합니다.
 - 폴더에 쓸 수 없으면 `sudo`는 복사할 때만 씁니다.
-<!-- TODO(haiku-tui): EN: sudo is used only for the copy, and only when /usr/local/bin is not writable by this user. -->
 - 이전 설치(`~/.local/bin/chaude`, `chaude.exe`, `chaude.*.bak`)가 있으면 지우고, 그 설치가 rc 파일에 넣었던 `export PATH="~/.local/bin:$PATH"` 줄 하나를 뺍니다.
 - macOS에서는 다운로드 격리 속성(quarantine)을 지웁니다.
 - 설치 폴더가 PATH에 없으면 경고만 출력합니다. rc 파일은 바꾸지 않습니다.
@@ -78,7 +77,7 @@ chaude --from-claude ID|latest|경로 [--import-dry-run]
 chaude metrics [--dir D] [--csv]
 chaude gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]
 chaude clean [dir] [--yes]
-chaude update                   최신 릴리스를 확인해 더 새 버전이면 교체합니다 (EN: same as /update in the REPL)
+chaude update                   최신 릴리스를 확인해 더 새 버전이면 교체합니다 (REPL의 /update와 같습니다)
 chaude mcp-resident <소켓>      내부용 브리지
 chaude <도우미 스크립트> [인자]  아래 "도우미 스크립트" 참고
 chaude --version | -v | version
@@ -183,19 +182,6 @@ chaude clean            # 대상만 출력(dry-run)
 chaude clean ~/my-project --yes
 ```
 
-## update
-
-<!-- TODO(haiku-tui): translate this section to Korean. English draft below. -->
-
-Checks GitHub for the latest release and compares it with the running version.
-If a newer one exists, it downloads the same `.tar.gz` / `.zip` that `install.sh` / `install.ps1` use, verifies it against `checksums.txt` (required), and replaces the running binary. The old binary is kept only on Windows as `chaude.exe.old` and removed on the next start.
-
-```sh
-chaude update
-```
-
-Output is `chaude updated: vOLD -> vNEW (...). Restart chaude to use it.`, or `up to date`. On macOS/Linux, if the directory of the running binary is not writable, it prints `run: sudo chaude update` and changes nothing. Windows replaces the running `.exe` in place the same way. If GitHub cannot be reached, it fails with an offline message and changes nothing. `GH_TOKEN` is used when set, and dropped if GitHub rejects it.
-
 | 옵션 | 설명 |
 |---|---|
 | `[dir]` | 대상 프로젝트 폴더 |
@@ -204,6 +190,21 @@ Output is `chaude updated: vOLD -> vNEW (...). Restart chaude to use it.`, or `u
 - 지우는 대상은 CLAUDE.md의 claude-lean 정책 블록(마커 사이), `.claude/agents`, `.claude/hooks`, `.claude/skills`의 설치 파일, `.claude/settings.json`의 훅 항목입니다.
 - `notes/`, `record/`, 목록에 없는 파일, 사용자 설정 키와 사용자 훅은 건드리지 않습니다.
 - CLAUDE.md에 남는 내용이 없으면 파일을 지웁니다.
+
+## update
+
+GitHub에서 최신 릴리스를 확인하고, 실행 중인 버전보다 새 버전이면 실행 파일을 교체합니다.
+
+```sh
+chaude update
+```
+
+- 설치 스크립트(`install.sh`, `install.ps1`)가 쓰는 것과 같은 `.tar.gz` / `.zip` 아카이브를 받습니다. `checksums.txt`로 검증하며, 이 검증은 필수입니다.
+- 출력은 `chaude updated: vOLD -> vNEW (...). Restart chaude to use it.` 또는 `up to date`입니다. 교체한 뒤에는 chaude를 다시 시작해야 합니다.
+- macOS/Linux에서 실행 파일이 있는 폴더에 쓸 수 없으면 `run: sudo chaude update`를 출력하고 아무것도 바꾸지 않습니다.
+- Windows는 실행 중인 `chaude.exe`를 같은 방식으로 제자리에서 바꿉니다. 이전 파일은 `chaude.exe.old`로 남기고, 다음 실행 때 지웁니다.
+- GitHub에 연결할 수 없으면 오프라인 메시지와 함께 실패하고 아무것도 바꾸지 않습니다.
+- `GH_TOKEN`이 설정되어 있으면 그 토큰을 씁니다. GitHub가 토큰을 거부하면 토큰을 빼고 다시 시도합니다.
 
 ## mcp-resident
 
