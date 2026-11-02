@@ -8,7 +8,7 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
     except Exception:
         pass
 
-# 감시 대상 목록 (plan:174, 이곳 1곳에서 관리)
+# watched agents (plan:174; manage the list here only)
 TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "opus-architect", "haiku-tui", "haiku-prompter"}  # S4: extend here only
 REQUIRED = {                                    # 3.2~3.4 keys (status header 3.6 is checked for every fmt)
     "R-read": ["claim", "searched", "not_found", "not_checked", "truncated"],
@@ -17,7 +17,7 @@ REQUIRED = {                                    # 3.2~3.4 keys (status header 3.
 }
 STATUS_KEYS = ["status", "reason"]
 STATUS_VALUES = {"done", "partial", "fail", "blocked"}
-B_KEYS = ("task", "paths", "limits", "return", "lang")  # plan:160 B형식 필수 키
+B_KEYS = ("task", "paths", "limits", "return", "lang")  # plan:160 required B-format keys
 
 
 def resp_text(r):
@@ -66,15 +66,16 @@ def check(prompt, text, fmt):
 
 
 def check_jondaetmal(text):
-    text = re.sub(r"```.*?```", "", text, flags=re.S)  # 코드블록 내용 제외
+    text = re.sub(r"```.*?```", "", text, flags=re.S)  # skip code blocks
     for s in re.split(r"[.!?\n]+", text):
         s = s.strip()
+        # Korean plain ending (-다, not -니다) = 존댓말 violation (haiku-tui replies are polite form)
         if s and s[-1] == "다" and (len(s) < 2 or s[-2] != "니"):
             return ["존댓말"]
     return []
 
 
-def check_caveman_leak(text):                   # S2: caveman 반환 키가 haiku-tui 응답에 새어 나왔는지
+def check_caveman_leak(text):                   # S2: caveman return keys leaked into a haiku-tui reply
     text = re.sub(r"```.*?```", "", text, flags=re.S)
     if re.search(r"^\s*(status|reason|claim|searched|not_found|not_checked|truncated|omitted|summary_ko):\s", text, re.M):
         return ["caveman_leak"]
@@ -98,9 +99,9 @@ def main():
         return
     resp = resp_text(data.get("tool_response"))
     m = re.search(r"^return:\s*(R-read|R-write|R-decide)", prompt, re.M)
-    if agent == "haiku-tui":                    # 존댓말 검사만, return: 필터 무시 (plan:160)
+    if agent == "haiku-tui":                    # polite-form check only; return: filter ignored (plan:160)
         fmt, missing = "tui", check_jondaetmal(resp) + check_caveman_leak(resp)
-    elif agent == "haiku-prompter":             # 전달문: B형식 키 검사, 존댓말 검사 제외 (plan:160)
+    elif agent == "haiku-prompter":             # brief: B-format key check; polite-form check skipped (plan:160)
         fmt, missing = "prompter", check_brief(prompt)
         if m:
             missing += check(prompt, resp, m.group(1))
@@ -127,7 +128,7 @@ def main():
         pass
     if mode == "warn":
         out = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
-               "additionalContext": f"필수 필드 누락: {', '.join(missing)}, 재요청"}}
+               "additionalContext": f"missing required fields: {', '.join(missing)}, re-request"}}
         print(json.dumps(out, ensure_ascii=False))
 
 

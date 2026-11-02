@@ -127,7 +127,7 @@ class CavemanFormatHookTest(unittest.TestCase):
         out = self.run_hook(payload(response=resp), guard="warn")
         data = json.loads(out)
         ctx = data["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("필수 필드 누락", ctx)
+        self.assertIn("missing required fields", ctx)
         self.assertIn("truncated", ctx)
         self.assertEqual(len(self.rows()), 1)
 
@@ -198,7 +198,7 @@ class CavemanFormatHookTest(unittest.TestCase):
     def test_l_warn_tui_violation_exit0_with_context(self):
         out = self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response="작업 완료했다."), guard="warn")
         ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("필수 필드 누락", ctx)
+        self.assertIn("missing required fields", ctx)
         self.assertIn("존댓말", ctx)
         self.assertEqual(len(self.rows()), 1)
 

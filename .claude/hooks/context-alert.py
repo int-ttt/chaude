@@ -55,6 +55,6 @@ try:
 except OSError:
     pass
 k = used // 1000
-print(f"[ctx {k}k] After your reply, add exactly one line: "
-      f"\"맥락 {k}k — /exit 후 같은 터미널에서 claude로 다시 시작하면 압축 없이 가벼워집니다 (대화는 화면과 logs/history에 남고 이어집니다).\"")
+print(f"[ctx {k}k] After your reply, add exactly one line in Korean (polite form): "
+      "suggest /exit, then claude in the same terminal, to restart without compaction (history stays on screen and in logs/history).")
 sys.exit(0)

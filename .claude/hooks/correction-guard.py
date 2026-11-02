@@ -21,6 +21,9 @@ except Exception:
 prompt = (data.get("prompt") or "").strip()
 sid = re.sub(r"[^\w-]", "", data.get("session_id") or "default")
 
+# Korean regexes match user input. Types: C fact, D missing change, F direction, A misread, E pushback, B question.
+# Message text is English; literals kept on purpose: '이해: ...' (misread restatement) and 맞습니다/일부/아닙니다
+# (pushback verdict) are output formats documented in .claude/skills/correction/SKILL.md.
 RULES = [
     ("C", r"(이|가)? ?아니라 .+(이다|야|이야|거든|였어|이고)|^아 .*(이다|이야|거든)[.!]?$", "fact -> /fact <old> → <new>"),
     ("D", r"안 ?바뀐|안 ?바꼈|바꾼 ?거 ?맞|했어\?|했지\?|어디 ?갔|빠졌", "missing change -> /check, FAILs to the same haiku-drafter/haiku-coder"),

@@ -15,8 +15,8 @@ from _lean import lean_off
 data = json.load(sys.stdin) if not sys.stdin.isatty() else {}
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 upd = ""
-_NOTE = ("CLAUDE.md·에이전트는 Claude Code를 새로 시작할 때 적용됩니다. 지금 세션 안에서 /resume으로 온 것이라면 "
-         "/exit 후 claude -c 로 다시 여세요.")
+_NOTE = ("CLAUDE.md and agents apply only when Claude Code starts. If this session was reached via /resume, "
+         "/exit, then claude -c to restart.")
 
 
 def _session_start_ts(path):
@@ -67,13 +67,13 @@ if data.get("source", "startup") in ("startup", "resume"):   # compaction keeps 
             _last = ""
         if data.get("source") == "resume":
             if not _old and _vt(_last) and _vt(_last) < _vt(_v):   # only a real upgrade, not a downgrade/other-session newer version; resumed under a new session id: no per-session record, use the project's last
-                upd = f"claude-lean {_v}로 업데이트됨 (이전 {_last}). {_NOTE}"
+                upd = f"claude-lean {_v} updated (was {_last}). {_NOTE}"
             elif _vt(_old) and _vt(_old) < _vt(_v):
-                upd = f"claude-lean {_v}로 업데이트됨 (이전 {_old}). {_NOTE}"
+                upd = f"claude-lean {_v} updated (was {_old}). {_NOTE}"
             elif not _old:                           # session predates the version record (0.4.11 and older)
                 _t0 = _session_start_ts(data.get("transcript_path") or "")
                 if _t0 is not None and os.path.getmtime(_vf) > _t0:
-                    upd = f"claude-lean {_v}로 업데이트됨 (이 대화는 이전 버전에서 시작). {_NOTE}"
+                    upd = f"claude-lean {_v} updated (this conversation started on an older version). {_NOTE}"
         os.makedirs(os.path.join(root, "logs"), exist_ok=True)
         open(_f, "w").write(_v)
         open(_lf, "w").write(_v)

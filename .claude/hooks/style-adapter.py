@@ -98,6 +98,7 @@ if now_off:
     sys.exit(0)
 
 # 1. Status fast path: zero model tokens.
+# Korean status phrases (진행상황, 끝났어?, 지금은, 로그 ...): answered from logs/*.status.
 STATUS = r"^(지금까지 |지금 )?(진행 ?상황|상태)( 보고해| 다시| 알려줘)?[?.]?$|^(작업 |처리 |다 )?(끝났|됐)(어|나|니|는지 확인해(봐)?)[?.]?$|^지금은[?.]?$|^로그( 확인해(봐)?)?[?.]?$"
 if re.match(STATUS, prompt):
     files = sorted(glob.glob(os.path.join(root, "logs", "*.status")), key=os.path.getmtime, reverse=True)
@@ -113,12 +114,16 @@ if re.match(STATUS, prompt):
         block("\n".join(out) + "\n(모델 호출 없이 표시. 분석이 필요하면 끝에 ? 를 붙여 다시 보내세요)")
 
 # 2. Inbox: information statements wait for the next instruction.
+# Korean correction openers (아니 no, 근데 but, 아 hey, 그게 아니 not that, 아니면 otherwise, 그냥 just): never inbox-only.
 CORRECTION = r"^(아니|근데|아 |그게 아니|아니면|그냥)"
 # Any instruction or question anywhere in the message sends it to the model.
+# Korean imperatives/requests (해, 해줘, 바꿔, 확인, 분석 ...) anywhere in the message send it to the model.
 IMPERATIVE = (r"(해|해봐|해줘|해라|해놔|돌려|넘겨|바꿔|만들어|넣어|빼|줄여|늘려|옮겨|올려|고쳐|써|줘|찾아|봐|봐야|가자|하자|시켜|"
               r"채워|지워|맞춰|나눠|합쳐|붙여|둬|놔|보내|열어|잖아|라고|라니깐|해야지|해야|하고)(?=[\s.,!~]|$)"
               r"|확인|비교|분석|정리|검토|조사|작성|수정|추가|삭제|변경|포함|있을거야|있을텐데")
+# Korean question markers (아니야?, 나요, 는지, 왜, 뭐, 어디, 몇 ...).
 QUESTION = r"\?|아니야|아냐|않아|않나|나요|까요|는지|는데$|ㄴ데$|건가|일까|할까|아니면|왜|뭐|어디|어느|언제|어떻게|몇|무슨|누가"
+# Korean statement endings (거야, 이야, 였어, 임 ...): plain info, eligible for the inbox.
 DECLARATIVE = r"(거야|이야|이다|거든|그래|였어|었어|았어|상태|상태였어|임|음)[.~]?$"
 if (os.environ.get("STYLE_INBOX", "1") != "0" and 8 <= len(prompt) <= 120 and "\n" not in prompt
         and prompt.count(".") <= 1 and not prompt.endswith("!") and not re.match(CORRECTION, prompt)
@@ -164,7 +169,7 @@ if installed and loaded and loaded != installed:
         done = False
     if not done:
         tags.append(f"[update] claude-lean {installed} was installed while this session was open; this session still runs the old rules, agents and settings. "
-              "Add exactly one line to your reply telling the user: 새 버전이 설치됐습니다. /exit 후 claude -c (또는 claude --resume)로 이 대화를 이어가면 적용됩니다. "
+              "Add exactly one line to your reply (in Korean, polite form) telling the user the new version is installed: /exit, then claude -c (or claude --resume) in this conversation applies it. "
               "Do not apply or restate the new policy now.")
         try:
             os.makedirs(os.path.dirname(ver_state), exist_ok=True)
@@ -188,9 +193,10 @@ if len(prompt) > 1500 or prompt.count("\n") > 20 or "<pasted_content" in prompt:
 
 # 4. One-line routing tags for short prompts.
 p = prompt.rstrip(".!~ ")
+# Short approvals/refinements (ㅇㅇ, 응, 진행, 맞아, 넣어 ...) -> [ack] tag.
 if re.fullmatch(r"ㅇㅇ|ㅇㅋ|응|어|그래|좋아|오케이?|ok|[AB12]|[AB](안)?(으로|로) ?(가자|가|해)?|그렇게 해|그대로 (가|해)|(전부 |다 )?맞아|진행해|진행|해|해봐|수행해|전부 수행해|넣어|일단 넣어|바꿔|계속해?|ㄱㄱ?", p, re.I):
     tags.append("[ack] = approve the default in the `추천:` list of your last reply (first item). Execute it in one delegation round; reply ≤2 lines; no re-analysis.")
-elif re.match(r"^(다시|재시도|재시작)", p):
+elif re.match(r"^(다시|재시도|재시작)", p):  # Korean retry words: again / retry / restart
     tags.append("[retry] re-run the last brief on the same agent; failed/unfinished items only.")
 elif len(p) < 30 and not re.search(QUESTION, prompt) and not re.match(CORRECTION, prompt) and not pending:
     tags.append("[frag] answers your last question, else relay verbatim to the active agent.")

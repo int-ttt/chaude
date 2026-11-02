@@ -6,6 +6,8 @@ argument-hint: "[project folder, or its transcript folder inside .claude/project
 
 # Distill old sessions into notes (main thread orchestrates; agents do all reading)
 
+Think and write in English; only haiku-tui writes Korean to the user.
+
 Goal: notes good enough that the old transcripts are never needed again. Cost target: Haiku for reading, one Opus merge decision, a few short main-thread turns.
 
 1. **Chunks.** If `notes/distill/chunks/` already exists, use it. Otherwise `haiku-batch-worker`: run `bin/chaude extract-transcript $ARGUMENTS --out notes/distill` and return the INDEX line.
@@ -20,7 +22,7 @@ Goal: notes good enough that the old transcripts are never needed again. Cost ta
    - Final message: ≤3 lines, no item lists, no file contents.
 4. **Verify (`haiku-checker`).** Count the items (`- ` lines with text) in each of the 5 notes files and REVIEW.md, and check every path in DELIVERABLES.md exists. These counts are the official ones.
 5. **Reply** (≤5 lines): haiku-checker's counts, missing deliverables, REVIEW question count. Never relay item lists; point to the files.
-   `추천:` 줄 + 목록 `- `: `notes/*.md`의 REVIEW.md 질문에 번호별로 답하면 haiku-batch-worker가 반영합니다.
+   `Recommendation:` line + list of `- ` items: "Answer the REVIEW.md questions in `notes/*.md` by number; haiku-batch-worker will apply them."
 After step 4, `haiku-batch-worker` deletes `notes/distill/chunks/` (the originals stay, gzipped, in the claude-archive folder).
 Explanations of the items, if asked: Opus main writes the explanation text and one `haiku-batch-worker` saves it as `notes/runs/distill-explain.md`; reply with the path only.
 6. After the user answers: `haiku-batch-worker` applies answers to notes/; if the user agrees, moves (old) deliverables to `archive/` and removes the old content below the policy section in CLAUDE.md (it now lives in notes/).

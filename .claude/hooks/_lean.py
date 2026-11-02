@@ -13,6 +13,7 @@ def lean_off():
 
 
 import re
+# Korean/English bare status pings (진행상황, 뭐해, 끝났어, ㅇㅇ, 응 ...): not worth recording.
 _PING = re.compile(r"(진행\s*상황|상황|뭐\s*해\??|끝났어\??|다\s*됐어\??|ㅇㅇ|ㅇㅋ|네|응|ok|yes)[\s?!.]*", re.I)
 
 

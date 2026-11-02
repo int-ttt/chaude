@@ -5,6 +5,8 @@ description: Migrate an already very large Claude Code session (hundreds of turn
 
 # Migrate an oversized session
 
+Think and write in English; only haiku-tui writes Korean to the user.
+
 The session is ALREADY large. Every extra turn here re-processes the whole context, so finish the migration in as few turns as possible and start no new work.
 
 Division of labor: only Opus has the conversation history, so Opus composes the content of FACTS / DECISIONS / HANDOFF (terse lines, no prose) and hands it to `haiku-batch-worker` to write to disk. Everything that reads or writes the disk goes to Haiku.
@@ -20,9 +22,9 @@ If the session mixed several workstreams (e.g. separate documents, features, ana
 ## 3. Write the handoff files
 `notes/FACTS.md` — confirmed facts the user stated or corrected (activities, awards, roles, dates, hardware, numbers). One line each. This is the most valuable output: it prevents repeated corrections.
 
-Scan the session for corrections (아니/근데/아 …): every corrected fact → FACTS.md; every corrected interpretation or preference → DECISIONS.md as a rule ("세션 = 면접 1회 단위, 질문은 섞어서 배치" 같은 형태).
+Scan the session for corrections (아니 "no" / 근데 "but" / 아 "oh" …): every corrected fact → FACTS.md; every corrected interpretation or preference → DECISIONS.md as a rule (e.g. "session = one interview round; mix questions per batch").
 
-`notes/DECISIONS.md` — chosen versions (e.g. "A안 채택"), tone/style rules, banned phrases, format rules (font size, char limits, file formats). One line each.
+`notes/DECISIONS.md` — chosen versions (e.g. "option A adopted"), tone/style rules, banned phrases, format rules (font size, char limits, file formats). One line each.
 
 `SESSION_HANDOFF.md` (template in `templates/`) — per open workstream:
 - Goal + acceptance criteria (limits, deadlines)

@@ -84,7 +84,7 @@ if not model:                         # fall back to the configured model in the
     try:
         cfg = open(os.path.join(os.environ.get("CLAUDE_PROJECT_DIR", "."), ".claude", "agents", kind + ".md"), encoding="utf-8").read()
         m = re.search(r"^model:\s*(\w+)", cfg, re.M)
-        model = m.group(1) + "(설정)" if m else ""
+        model = m.group(1) + "(config)" if m else ""  # "(config)": from the agent file, not observed in the transcript
     except OSError:
         pass
 tag = kind
@@ -92,7 +92,7 @@ if model:
     tag += " · " + model
     want = kind.split("-", 1)[0]
     if want in ("haiku", "sonnet", "opus") and want not in model:
-        tag += " ⚠ 이름과 다름"
+        tag += " ⚠ name mismatch"
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 rec = os.environ.get("HARNESS_RECORD_DIR") or os.path.join(root, "record")
 path = os.path.join(rec, "LEDGER.md")

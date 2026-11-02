@@ -26,7 +26,7 @@ sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 FILE_TOOLS = ("Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Grep", "Glob")
 SHELL_TOOLS = ("Bash", "PowerShell")
 ALLOW_IO = ("haiku-",)
-DENY_MSG = "opus/비-haiku 에이전트는 파일·셸 직접 접근 금지 (v0.8.2). haiku-scout(읽기)/haiku-batch-worker(쓰기)/haiku-coder(코드)에 위임하세요."
+DENY_MSG = "Opus/non-haiku agents may not access files or shell directly (v0.8.2). Delegate to haiku-scout (read), haiku-batch-worker (write), or haiku-coder (code)."
 
 
 def deny(reason):

@@ -2,12 +2,13 @@
 
 ## Roles
 - Opus main decides and delegates only to `haiku-*`: no file/web/Bash access (hook-enforced). Tests, builds, reviews, edits → Haiku. Never `opus-architect`.
-- Haiku main (`--model haiku`/`haiku로` only): user prompt verbatim → `opus-architect` (R-decide) → `haiku-tui` relays `relay` (else summary_ko). User can force `haiku로`/`opus로`. No router, no Sonnet.
-- Map: lookup → `haiku-scout` (RETURN: verbatim <=4000 chars), web → `haiku-researcher` (= haiku-읽기용); edits → `haiku-coder`/`haiku-batch-worker` (= haiku-쓰기용); prose → `haiku-drafter`; long jobs → `haiku-runner`; `haiku-checker` before anything is submitted/printed; user output → `haiku-tui`. Design, multi-file code, diagnosis: Opus main decides itself, then briefs `haiku-*` (D11).
+- Haiku main (`--model haiku`/`haiku로` only): user prompt verbatim → `opus-architect` (R-decide) → `haiku-tui` relays `relay` (else summary_ko). User can force `haiku로`/`opus로`. No router. Sonnet appears only if `main_model` is set to sonnet/fable (settings picker); the default Haiku-main flow never uses Sonnet.
+- Map: lookup → `haiku-scout` (RETURN: verbatim <=4000 chars), web → `haiku-researcher` (= haiku-read role); edits → `haiku-coder`/`haiku-batch-worker` (= haiku-write role); prose → `haiku-drafter`; long jobs → `haiku-runner`; `haiku-checker` before anything is submitted/printed; user output → `haiku-tui`. Design, multi-file code, diagnosis: Opus main decides itself, then briefs `haiku-*` (D11).
 - Agent names carry their model (`haiku-*`/`opus-*`); never pass `model` (hook strips). Start each delegating reply with the route, e.g. `[haiku-scout]`.
 
 ## Language
-- User-visible: Korean 존댓말 (via haiku-tui, L0). Briefs/returns: English caveman (docs/claude-lean/CAVEMAN_FORMAT.md). Returns (R-read, R-write `changed: <path>: <what>`, `check -> PASS|FAIL`) go as relay to haiku-tui; caveman lines hidden (plan/caveman-structure.md 2.1).
+- All sessions (main and every agent) think, brief, return and write in English. Only haiku-tui writes Korean 존댓말, for the user (L0); main's user-visible reply = haiku-tui output.
+- Briefs/returns: English caveman (docs/claude-lean/CAVEMAN_FORMAT.md). Returns (R-read, R-write `changed: <path>: <what>`, `check -> PASS|FAIL`) go as relay to haiku-tui; caveman lines hidden (plan/caveman-structure.md 2.1).
 
 ## Flow
 - Idle until a user prompt; then ONE delegation round (all calls in one message, foreground), ONE final reply, idle. No interim text, no chaining agents through main; agents self-verify.
@@ -20,14 +21,14 @@
 - No file/web work needed: Opus answers itself (explanations, opinions, conversation nuance, trade-off/pushback calls); documents the user keeps (plans, researched comparisons) → Opus writes the content, `haiku-batch-worker`/`haiku-drafter` saves it verbatim; relay.
 
 ## Reply
-- Final answer content in full in the TUI reply; never only a path, never written to a file. `notes/runs/` = agent hand-off only.
-- Opus to a colleague, natural Korean: what/why/mechanism plainly, no analogies. Results: goal, what changed, numbers (say what each counts), doubts, next + why. No internal IDs/file names unless needed. No preamble/repetition/apology; headers/bullets only when they help; length follows content.
-- Proposing/asking → last line `추천:` + markdown list of Korean sentences (action + target): `- 문장` or `1. … 2. …`, no indent; item 1 = default for ㅇㅇ. List only steps needing the user (or remaining ones).
+- Final answer content in full in the TUI reply (haiku-tui renders it in Korean 존댓말; main writes English); never only a path, never written to a file. `notes/runs/` = agent hand-off only.
+- Opus to a colleague, plain English (haiku-tui renders Korean): what/why/mechanism plainly, no analogies. Results: goal, what changed, numbers (say what each counts), doubts, next + why. No internal IDs/file names unless needed. No preamble/repetition/apology; headers/bullets only when they help; length follows content.
+- Proposing/asking → last line `추천:` + markdown list of short English sentences (action + target): `- sentence` or `1. … 2. …`, no indent; item 1 = default for ㅇㅇ (haiku-tui renders to Korean). List only steps needing the user (or remaining ones).
 - Revisions/"아니…": relay user's exact words + ≤1 line. Follow hook tag + `correction` skill; same item corrected twice → ≤5-bullet checklist, confirm, one brief.
 - Hook tags (`[ack]` `[retry]` `[frag]` `[inbox]` `[paste]` `[ctx]` `[normal]` `[lean]`) carry their instruction: follow, don't re-plan.
 
 ## State
-- Truth: `notes/FACTS.md`, `notes/DECISIONS.md` (agents read). `notes/DELIVERABLES.md` final files, `notes/OPEN.md` pending/deadlines, `notes/LESSONS.md` failures → pass the relevant one in briefs. `notes/LEDGER.md` = hook-written agent results.
+- Truth: `notes/FACTS.md`, `notes/DECISIONS.md` (agents read). `notes/DELIVERABLES.md` final files, `notes/OPEN.md` pending/deadlines, `notes/LESSONS.md` failures → pass the relevant one in briefs. `record/LEDGER.md` = hook-written agent results.
 - Never suggest `/clear`/`/compact`. Reset = `/exit` then `claude`. Rotation: Opus main 200k, Haiku main 80k.
 - chaude TUI: typing in the input box keeps the output pane's scroll position; a sent prompt or an output update while at bottom follows the tail (notes/runs/scroll-bottom.md); keep.
 - Compact instructions: keep only open workstreams (goal, next action), pending `추천:` default, active agent IDs + what each holds, final file paths, unresolved user requests. Drop agent outputs, resolved corrections, anything in notes/.

@@ -33,19 +33,19 @@ if data.get("tool_name") in ("Agent", "Task") and data.get("agent_id"):
     _target = str((data.get("tool_input") or {}).get("subagent_type") or "")
     if _target == "haiku-prompter":
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                          "permissionDecisionReason": "haiku-prompter는 메인 스레드에서만 호출할 수 있습니다 (재귀 금지)."}}, ensure_ascii=False))
+                          "permissionDecisionReason": "haiku-prompter can only be called from the main thread (no recursion)."}}, ensure_ascii=False))
         sys.exit(0)
     if data.get("agent_type") == "haiku-prompter":
         if _target == "opus-architect" or (_target.startswith("haiku-") and _target != "haiku-prompter"):
             sys.exit(0)
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                          "permissionDecisionReason": "haiku-prompter는 opus-architect/haiku-* 만 호출할 수 있습니다."}}, ensure_ascii=False))
+                          "permissionDecisionReason": "haiku-prompter may only call opus-architect or haiku-*."}}, ensure_ascii=False))
         sys.exit(0)
 if data.get("tool_name") in ("Agent", "Task") and data.get("agent_id") and data.get("agent_type") in SUB_CALLERS:
     target = str((data.get("tool_input") or {}).get("subagent_type") or "")
     if not target.startswith("haiku-"):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                          "permissionDecisionReason": "opus 서브에이전트는 haiku-* 에이전트만 호출할 수 있습니다 (v0.8.2)."}}, ensure_ascii=False))
+                          "permissionDecisionReason": "opus subagents may only call haiku-* agents (v0.8.2)."}}, ensure_ascii=False))
         sys.exit(0)
 if lean_off() or data.get("tool_name") not in ("Agent", "Task"):
     sys.exit(0)

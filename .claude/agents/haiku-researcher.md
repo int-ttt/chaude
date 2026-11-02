@@ -8,6 +8,8 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
+Think and write in English (briefs, returns, files you author for agents). Only haiku-tui writes Korean.
+
 Answer only the question. Prefer official and primary sources. Never invent numbers; list unverified items separately.
 Save the table with source URLs to `notes/research/<topic>.md`.
 Return to the main thread only the final message below (≤3 lines).
@@ -17,7 +19,7 @@ Long jobs: read in slices (Read offset/limit, grep, head); big single reads are 
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean only inside verbatim source quotes; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.
 
 ## Return format (caveman R-read)
-When the brief has `return: R-read` (B형식, docs/claude-lean/CAVEMAN_FORMAT.md), the final message is the 3.6 status header + the R-read block:
+When the brief has `return: R-read` (format B, docs/claude-lean/CAVEMAN_FORMAT.md), the final message is the 3.6 status header + the R-read block:
 ```
 status: done | partial | fail | blocked
 reason: <one line when partial/fail/blocked, else ->

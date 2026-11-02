@@ -8,26 +8,28 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
-First read `notes/FACTS.md` and `notes/DECISIONS.md`. Use only facts from them or the source files; missing facts → "사용자 확인 필요", never invent.
+Think and write in English (briefs, returns, files you author for agents). Only haiku-tui writes Korean. Exception: user deliverables keep the user's language.
+
+First read `notes/FACTS.md` and `notes/DECISIONS.md`. Use only facts from them or the source files; missing facts → "사용자 확인 필요" (user confirmation needed), never invent.
 1. Edit in place. Apply the change to EVERY version or copy of the text (final, drafts, per-target variants) — find them with grep if the brief doesn't list all.
-2. The user's voice: plain words, short sentences; follow the tone, format and length rules in DECISIONS.md. Write in the language of the existing text.
+2. The user's voice: plain words, short sentences; follow the tone, format and length rules in DECISIONS.md. Write in the language of the existing text; user deliverables keep the user's language.
 3. Length limits: `bin/chaude charcount <file> [--section "<heading>"] --limit N` until OK. Never estimate.
 4. Relayed corrections: follow the user's words literally; lasting preferences → one line in DECISIONS.md.
 5. Self-check before returning: grep each target for the new text and absence of the old text.
-Return content (the final message, ≤3 lines, ≤300 chars) covers: files changed · char counts (if limited) · self-check PASS/FAIL · "사용자 확인 필요". Changed sentences go to `notes/runs/` (path in the reply) unless the brief asks to show them.
+Return content (the final message, ≤3 lines, ≤300 chars) covers: files changed · char counts (if limited) · self-check PASS/FAIL · "사용자 확인 필요" (user confirmation needed). Changed sentences go to `notes/runs/` (path in the reply) unless the brief asks to show them.
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
-Final message = 3.6 머리 2줄 + R-* 블록 (caveman). 사용자 대면 존댓말은 haiku-tui가 맡음.
+Final message = 3.6 header (2 lines) + R-* block (caveman). User-facing polite Korean is handled by haiku-tui.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: Korean. Reply plainly: done, key numbers (what each counts), doubts, path.
 
 ## Return format (caveman R-write)
-When the brief has `return: R-write` (B형식, docs/claude-lean/CAVEMAN_FORMAT.md), the final message is the 3.6 status header + the R-write block:
+When the brief has `return: R-write` (format B, docs/claude-lean/CAVEMAN_FORMAT.md), the final message is the 3.6 status header + the R-write block:
 ```
 status: done | partial | fail | blocked
-reason: <partial·fail·blocked일 때 한 줄, 아니면 ->
-changed: <경로 목록>
-diffstat: <git diff --stat 요지>
-check: <명령> -> PASS|FAIL
-ws: <작업 공간 id | none>
-summary_ko: <lang: ko일 때 필수, 1~5줄>
+reason: <one line when partial/fail/blocked, else ->
+changed: <list of paths>
+diffstat: <gist of git diff --stat>
+check: <command> -> PASS|FAIL
+ws: <workspace id | none>
+summary_ko: <required when lang: ko, 1-5 lines>
 ```
