@@ -25,7 +25,11 @@ os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
 case "$os" in
   darwin|linux) ;;
-  mingw*|msys*|cygwin*) echo "error: Windows is not handled here. Use install.ps1 (PowerShell)." >&2; exit 1 ;;
+  mingw*|msys*|cygwin*)
+    # Git Bash / MSYS / Cygwin: hand off to the Windows installer through powershell.exe (CHAUDE_* env is inherited)
+    command -v powershell.exe >/dev/null 2>&1 || { echo "error: powershell.exe not found. Run install.ps1 in PowerShell instead." >&2; exit 1; }
+    echo "Windows detected: running install.ps1 through PowerShell" >&2
+    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex" ;;
   *) echo "error: unsupported OS: ${os}" >&2; exit 1 ;;
 esac
 case "$arch" in

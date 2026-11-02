@@ -19,6 +19,8 @@ function Save-ReleaseAsset {
     try {
         $req = New-Object System.Net.Http.HttpRequestMessage -ArgumentList ([System.Net.Http.HttpMethod]::Get), $Url
         $req.Headers.Accept.ParseAdd('application/octet-stream')
+        # GitHub API rejects requests without a User-Agent (HTTP 403); .NET HttpClient sends none by default
+        $req.Headers.UserAgent.ParseAdd('chaude-installer')
         if ($Token) { $req.Headers.Authorization = New-Object System.Net.Http.Headers.AuthenticationHeaderValue -ArgumentList 'Bearer', $Token }
         $resp = $client.SendAsync($req).GetAwaiter().GetResult()
         $code = [int]$resp.StatusCode
