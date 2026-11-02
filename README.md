@@ -1,5 +1,3 @@
-A chat-style wrapper for the Claude Code CLI (unofficial)
-
 # chaude
 
 [![Latest release](https://img.shields.io/github/v/release/int-ttt/chaude)](https://github.com/int-ttt/chaude/releases/latest)

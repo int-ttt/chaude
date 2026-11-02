@@ -1,7 +1,3 @@
-A chat-style wrapper for the Claude Code CLI (unofficial)
-
-Claude Code CLI를 채팅 화면처럼 쓸 수 있게 감싼 비공식 도구입니다.
-
 # chaude
 
 [![Latest release](https://img.shields.io/github/v/release/int-ttt/chaude)](https://github.com/int-ttt/chaude/releases/latest)
