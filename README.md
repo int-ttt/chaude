@@ -218,6 +218,7 @@ Claude Code 훅은 `.claude/hooks/*.py`(Python 3.8+)이며 `python3 .claude/hook
   - n=2라 표본이 매우 작습니다. 범위로 해석하고 일반화하지 않습니다.
   - 비용은 cache read가 지배하므로 캐시 상태에 따라 크게 달라집니다.
   - 측정 당시 harness 설정은 effortLevel이 low였습니다 (현재 기본은 medium). plain과 effort가 달라 품질 비교에는 쓸 수 없습니다.
+- effort별 재측정 (2026-11-02, harness만 재측정, 2회 평균, plain은 재사용): 비용은 unset 0.861 / low 0.689 / medium 0.786 USD (plain 1.379 대비 -37.5% / -50.0% / -43.0%). 총 토큰(Haiku 포함)은 unset 1,272,448 / low 1,083,215 / medium 1,078,181 (plain 787,628 대비 +61.6% / +37.5% / +36.9%). 이번 측정에서는 low가 가장 쌌고 medium이 그 다음이며, 표본이 2회라 순서를 확정할 수 없습니다. 상세: `docs/pingpong-bench.md`의 effort 재측정 절.
   - plain 쪽은 Bash 명령이 거부된 적이 있어 실제 작업 조건이 harness와 다를 수 있습니다.
 - 장기 테스트 예정: 약 25개 프롬프트 긴 세션 비교 계획은 `docs/long-session-bench-plan.md`에 있습니다 (계획만, 미실행).
 - 원본 JSON과 상세 수치: `docs/pingpong-bench.md` (측정일 2026-11-01)

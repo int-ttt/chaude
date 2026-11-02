@@ -52,3 +52,45 @@ cost depends on cache state (cache_read dominates cost)
 harness settings include effortLevel low and subagent haiku; plain has no CLAUDE.md
 game quality not measured beyond smoke test
 score-text check is a regex, crude
+
+## effort 재측정 (2026-11-02): harness 메인 Opus effort unset / low / medium
+date: 2026-11-02
+scope: harness만 재측정 (2 runs x 3 prompts per level). plain 수치는 위 2026-11-01 결과 재사용 (plain 방식 변경 없음)
+method: 동일 프롬프트·동일 run 수·동일 flags. harness 복사본(/tmp/bench-harness)의 .claude/settings.json에서 effortLevel만 바꿈 (unset = 키 삭제). 저장소 .claude/settings.json은 medium 그대로 (변경 없음)
+raw: notes/runs/pingpong-raw/effort-{unset,low,medium}-r{1,2}-p{1,2,3}.json, games: notes/runs/pingpong-raw/games-effort-{level}-r{n}/pong.py
+log: notes/runs/261102-effort-pingpong.md, status: logs/pingpong-effort.status
+sums: 기존과 같음 (3 claude calls per run, modelUsage 합, total_cost_usd, num_turns, duration_ms)
+
+## per-level means (n=2, 3프롬프트 합)
+| effort | Opus 토큰 합 | Haiku 토큰 합 | 총 토큰 (Haiku 포함) | 비용 USD | turns | duration s |
+|---|---|---|---|---|---|---|
+| unset | 460,764 | 811,684 | 1,272,448 | 0.861 | 5.0 | 140.8 |
+| low | 405,140 | 678,075 | 1,083,215 | 0.689 | 5.0 | 110.8 |
+| medium | 501,455 | 576,726 | 1,078,181 | 0.786 | 4.5 | 93.2 |
+| plain (2026-11-01, 재사용) | 787,628 (Opus only) | - | 787,628 | 1.379 | 22 | 120.2 |
+
+per-run cost USD: unset 0.9544 / 0.7684, low 0.6894 / 0.6881, medium 0.7493 / 0.8229
+per-run turns: unset 4 / 6, low 6 / 4, medium 6 / 3
+per-run duration s: unset 101.6 / 180.0, low 137.2 / 84.5, medium 164.2 / 22.3
+
+## diff vs plain (mean)
+cost: unset -37.5%, low -50.0%, medium -43.0%
+total tokens (incl Haiku): unset +61.6%, low +37.5%, medium +36.9%
+
+## reading
+- 이번 측정에서 가장 싼 것은 low였습니다. medium은 기존 측정(low, 비용 0.791)과 거의 같은 비용이었고, low 재측정(0.689)과도 차이가 작습니다.
+- unset이 세 설정 중 비용·총 토큰 모두 가장 큽니다 (n=2라 확정 불가).
+- 비용 분산이 큽니다 (medium r2 0.823 vs r1 0.749). 차이 해석은 표본이 작아 조심해야 합니다.
+- 재측정 low의 cost (0.689) vs 2026-11-01 low (0.791): 같은 설정인데 약 15% 차이. 캐시 상태 영향으로 보입니다.
+
+## quality / smoke (static, not pty)
+games-effort-{level}-r{n}: 6개 모두 py_compile OK, q 종료 키 문자열 있음.
+score 표시: 넓은 검색(score|점수)은 medium-r2 를 제외한 5개에서 줄이 잡혔고, 엄격한 검색(addstr에 score 표시)은 unset-r2, medium-r1 만 잡혔습니다. medium-r2 는 score|점수 텍스트가 0줄입니다. 점수 표시 충족 여부는 pty 확인이 필요합니다.
+permission_denials: unset 3 + 7, low 6 + 4, medium 6 + 0. 기존 harness: r1 0, r2 10. 실행 중 Bash 등이 거부된 횟수라 작업 조건이 실제와 다를 수 있습니다.
+
+## doubts
+n=2 per level, 범위로만 해석
+cache 상태에 따라 비용이 크게 움직입니다 (같은 low가 0.79 vs 0.69)
+plain은 재측정하지 않았습니다 (재사용)
+score 확인은 정규식이라 부정확합니다. pty 스모크는 이번에 하지 않았습니다.
+
