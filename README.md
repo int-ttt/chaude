@@ -7,6 +7,17 @@
 
 **English** | [한국어](README.ko.md)
 
+## Effect
+
+Ping-pong game benchmark (3 prompts), chaude vs plain Opus:
+
+- **Cost: -42.7%** vs plain Opus (USD, mean of 2 runs, 2026-11-01).
+- **Cost range: -37.5% to -50.0%** across effort settings (unset, low, medium; re-run 2026-11-02).
+- **Total tokens: +73.0%** with Haiku included (2026-11-01). Cost still fell; cache reads dominate the cost.
+- **Sample: 2 runs per method, 3 prompts each.** Small sample, so read these as a rough range.
+
+Source: [docs/pingpong-bench.md](docs/pingpong-bench.md).
+
 `chaude` wraps the `claude` CLI in a chat-style terminal screen. Run `chaude` with no arguments to open the REPL. When the context gets large, it writes a handoff note and continues the conversation in a new session.
 
 ## Features
@@ -187,7 +198,7 @@ Build (Go 1.22 or later) and test from `src/main/intt`:
 cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude && go test ./...
 ```
 
-Contribution guidelines: not published yet (user confirmation needed).
+Contribution guidelines: not published yet.
 
 ## License
 
