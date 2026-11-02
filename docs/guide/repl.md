@@ -126,6 +126,7 @@ chaude
 | `/mouse` | 마우스 휠 스크롤을 켜거나 끕니다 |
 | `/usage` | 플랜 사용량과 한도를 전체 화면으로 보여 줍니다 |
 | `/version` | chaude와 Claude Code 버전을 보여 줍니다 |
+| `/update` | GitHub 최신 릴리스를 확인해 더 새 버전이면 이 바이너리를 교체합니다. 재시작해야 적용됩니다. (EN: check the latest release and replace this binary if newer; restart chaude to use it. On unix, if the binary dir is not writable it prints `run: sudo chaude update` and changes nothing.) |
 | `/cost` | 사용량과 비용을 `claude`에 물어 보여 줍니다 |
 | `/context` | 카테고리별 컨텍스트 사용량을 `claude`에 물어 보여 줍니다 |
 | `/compact` | `claude`의 컨텍스트를 압축합니다 |

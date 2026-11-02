@@ -11,6 +11,7 @@ import (
 	"chaude/internal/harness"
 	"chaude/internal/scripts"
 	"chaude/internal/settings"
+	"chaude/internal/update"
 )
 
 // version is set at release time: -ldflags "-X main.version=X.Y.Z".
@@ -23,11 +24,13 @@ const usage = `usage: chaude <command> [args]
   --version              print version
   gen-settings <os>      print/write OS-specific .claude/settings.json (mac|linux|windows) [--out FILE]
   clean [dir] [--yes]    remove the claude-lean harness from a project (dry-run; --yes backs up then removes)
+  update                 check GitHub for a newer release and replace this binary (same as /update in the REPL)
   ` + scripts.Names + `   helper scripts (run with -h for flags)
 `
 
 func main() {
 	harness.ChaudeVersion = version
+	update.CleanupOld()
 	if len(os.Args) < 2 {
 		os.Exit(harness.Main(nil))
 	}
@@ -45,6 +48,8 @@ func main() {
 		os.Exit(settings.Main(args))
 	case "clean":
 		os.Exit(clean.Main(args))
+	case "update":
+		os.Exit(update.Main(version, args))
 	case "--version", "-v", "version":
 		fmt.Println("chaude " + version)
 	case "-h", "--help", "help":

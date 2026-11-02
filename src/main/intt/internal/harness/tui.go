@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"chaude/internal/osenv"
+	"chaude/internal/update"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -210,6 +212,7 @@ var slashCmds = []slashCmd{
 	{"/mode", "permission mode: default|acceptEdits|plan|auto (shift+tab cycles)"},
 	{"/mouse", "toggle mouse wheel scroll (off = select text)"},
 	{"/version", "chaude and Claude Code versions"},
+	{"/update", "check for a newer chaude and install it (restart chaude to use it)"},
 	{"/exit", "exit"},
 	{"/quit", "exit"},
 }
@@ -1152,6 +1155,9 @@ func (m *tuiModel) runSlash(line string) (tea.Model, tea.Cmd) {
 		m.setMode(p)
 	case "/version":
 		note("chaude " + ChaudeVersion + " · Claude Code " + claudeVersion())
+	case "/update": // network and binary replace: runs off the UI goroutine, result arrives as a note
+		note("checking for updates...")
+		go func() { m.r.ui.send(noteMsg(update.Text(context.Background(), ChaudeVersion))) }()
 	case "/usage": // never a conversation turn: one-shot claude call, shown in the full-screen view only
 		m.openUsage()
 	case "/clear", "/rotate", "/cost", "/context", "/compact", "/config", "/mcp", "/agents", "/init", "/review", "/doctor":

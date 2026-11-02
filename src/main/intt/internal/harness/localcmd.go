@@ -1,8 +1,11 @@
 package harness
 
 import (
+	"context"
 	"fmt"
 	"strings"
+
+	"chaude/internal/update"
 )
 
 // localCmd answers the plain REPL's local commands (/help, /status) without sending anything to the child.
@@ -17,6 +20,8 @@ func localCmd(r *Repl, line string) (string, bool) {
 		return localHelp(), true
 	case "/status":
 		return r.localStatus(), true
+	case "/update":
+		return update.Text(context.Background(), ChaudeVersion), true
 	}
 	return "", false
 }

@@ -76,6 +76,7 @@ chaude --from-claude ID|latest|경로 [--import-dry-run]
 chaude metrics [--dir D] [--csv]
 chaude gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]
 chaude clean [dir] [--yes]
+chaude update                   최신 릴리스를 확인해 더 새 버전이면 교체합니다 (EN: same as /update in the REPL)
 chaude mcp-resident <소켓>      내부용 브리지
 chaude <도우미 스크립트> [인자]  아래 "도우미 스크립트" 참고
 chaude --version | -v | version
@@ -179,6 +180,19 @@ chaude gen-settings windows --out .claude/settings.windows.json
 chaude clean            # 대상만 출력(dry-run)
 chaude clean ~/my-project --yes
 ```
+
+## update
+
+<!-- TODO(haiku-tui): translate this section to Korean. English draft below. -->
+
+Checks GitHub for the latest release and compares it with the running version.
+If a newer one exists, it downloads the same `.tar.gz` / `.zip` that `install.sh` / `install.ps1` use, verifies it against `checksums.txt` (required), and replaces the running binary. The old binary is kept only on Windows as `chaude.exe.old` and removed on the next start.
+
+```sh
+chaude update
+```
+
+Output is `chaude updated: vOLD -> vNEW (...). Restart chaude to use it.`, or `up to date`. On macOS/Linux, if the directory of the running binary is not writable, it prints `run: sudo chaude update` and changes nothing. Windows replaces the running `.exe` in place the same way. If GitHub cannot be reached, it fails with an offline message and changes nothing. `GH_TOKEN` is used when set, and dropped if GitHub rejects it.
 
 | 옵션 | 설명 |
 |---|---|
