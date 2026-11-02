@@ -25,3 +25,4 @@ tests/e2e-rebuild/
 deprecated/chaude
 /src/main/intt/chaude
 .claude/lean-off
+e2e/results/

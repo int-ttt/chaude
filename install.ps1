@@ -1,8 +1,9 @@
 # chaude installer (Windows amd64 + arm64). Standalone: installs prebuilt release binaries only
-# (no source build, no repo checkout).
+# (no source build, no repo checkout, so git and go are not needed). Public repo: no token required.
 #   irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
-# Env: CHAUDE_VERSION (default latest, e.g. v0.9.11), CHAUDE_INSTALL_DIR (default %USERPROFILE%\.local\bin), CHAUDE_REPO.
-# Auth (private repo): GH_TOKEN, else GITHUB_TOKEN, else `gh auth token`, else anonymous (public repo only).
+# Env: CHAUDE_VERSION (default latest, e.g. v0.9.13), CHAUDE_INSTALL_DIR (default %USERPROFILE%\.local\bin), CHAUDE_REPO.
+# Optional token (only for rate limits or private forks): GH_TOKEN, else GITHUB_TOKEN, else `gh auth token`.
+# A rejected token is dropped and the request is retried anonymously.
 # Runs through iex, so no `exit` or `param` here: errors are caught and printed, the shell stays open.
 # Keep this file ASCII-only (irm may decode non-ASCII text incorrectly on Windows PowerShell 5.1).
 
@@ -36,6 +37,7 @@ function Save-ReleaseAsset {
 function Install-Chaude {
     $ErrorActionPreference = 'Stop'
     $ProgressPreference = 'SilentlyContinue'
+    if ($PSVersionTable.PSVersion.Major -lt 5) { throw "PowerShell 5.1 or later is required (found $($PSVersionTable.PSVersion)). Install WMF 5.1 or PowerShell 7 and run again." }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
     $repo = if ($env:CHAUDE_REPO) { $env:CHAUDE_REPO } else { 'int-ttt/chaude' }
@@ -61,10 +63,18 @@ function Install-Chaude {
     if ($token) { $headers['Authorization'] = "Bearer $token" }
 
     $relUrl = if ($version -eq 'latest') { "https://api.github.com/repos/$repo/releases/latest" } else { "https://api.github.com/repos/$repo/releases/tags/$version" }
-    try {
-        $rel = Invoke-RestMethod -Uri $relUrl -Headers $headers -UseBasicParsing
-    } catch {
-        throw "cannot read release $version of $repo (private repo? set GH_TOKEN or run: gh auth login)"
+    $rel = $null
+    if ($token) {
+        try { $rel = Invoke-RestMethod -Uri $relUrl -Headers $headers -UseBasicParsing }
+        catch {
+            Write-Host 'warning: GitHub rejected the token; retrying without it'
+            $token = ''
+            $headers = @{ Accept = 'application/vnd.github+json' }
+        }
+    }
+    if (-not $rel) {
+        try { $rel = Invoke-RestMethod -Uri $relUrl -Headers $headers -UseBasicParsing }
+        catch { throw "cannot read release $version of $repo. Check the version name and your network. If GitHub rate-limited you (HTTP 403), set GH_TOKEN and run again." }
     }
     $tag = $rel.tag_name
     if (-not $tag) { throw "could not resolve release tag of $repo" }
@@ -115,6 +125,9 @@ function Install-Chaude {
 
         Write-Host "installed: $dest"
         & $dest --version
+        if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+            Write-Host 'warning: claude (Claude Code CLI) not found on PATH. chaude needs it to run. Install Claude Code and open a new terminal.' -ForegroundColor Yellow
+        }
     } finally {
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     }
