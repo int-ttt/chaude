@@ -5,6 +5,7 @@
 pub mod bar;
 pub mod commands;
 pub mod edit;
+pub mod overlay;
 pub mod render;
 
 use std::io::{self, BufRead, IsTerminal, Write};
@@ -69,6 +70,8 @@ pub struct App {
     // Mouse wheel scrolling (/mouse). When off, the terminal keeps the mouse for text selection.
     mouse: bool,
     last_esc: Option<Instant>,
+    // Selected row of the slash menu (overlay::slash_popup). Reset when the input changes.
+    sugg_sel: usize,
 }
 
 impl App {
@@ -91,6 +94,7 @@ impl App {
             unseen: false,
             mouse: true,
             last_esc: None,
+            sugg_sel: 0,
         }
     }
 
@@ -234,6 +238,7 @@ impl App {
             }
             KeyCode::Char(c) if !ctrl => {
                 self.editor.insert_char(c);
+                self.sugg_sel = 0;
                 Action::Continue
             }
             KeyCode::Enter if alt => {
@@ -255,6 +260,7 @@ impl App {
             }
             KeyCode::Backspace => {
                 self.editor.backspace();
+                self.sugg_sel = 0;
                 Action::Continue
             }
             KeyCode::Delete => {
@@ -299,6 +305,24 @@ impl App {
             }
             KeyCode::Down if shift => {
                 self.scroll(1);
+                Action::Continue
+            }
+            KeyCode::Up if !self.suggest().is_empty() => {
+                self.sugg_sel = self.sugg_sel.saturating_sub(1);
+                Action::Continue
+            }
+            KeyCode::Down if !self.suggest().is_empty() => {
+                let last = self.suggest().len() - 1;
+                self.sugg_sel = (self.sugg_sel + 1).min(last);
+                Action::Continue
+            }
+            KeyCode::Tab if !self.suggest().is_empty() => {
+                let text = self.editor.text();
+                if let Some(done) = commands::complete(&text, self.sugg_sel, self.busy, false) {
+                    self.editor.clear();
+                    self.editor.insert_str(&done);
+                }
+                self.sugg_sel = 0;
                 Action::Continue
             }
             KeyCode::Up => {
@@ -431,6 +455,11 @@ impl App {
         b
     }
 
+    // Slash menu rows for the current input (empty when no menu applies).
+    fn suggest(&self) -> Vec<&'static commands::SlashCmd> {
+        commands::suggestions(&self.editor.text(), self.busy, false)
+    }
+
     // The input row text and the cursor column inside it.
     fn input_line(&self, width: usize) -> (String, usize) {
         let pw = UnicodeWidthStr::width(PROMPT);
@@ -454,7 +483,10 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
     }
     let (input, _) = app.input_line(width);
     let chrome = [bar::clip(&top, width), input, bar::clip(&status, width)];
-    let body_h = h.saturating_sub(CHROME);
+    // The slash menu sits right above the running row and never takes the last row of the body.
+    let menu_max = h.saturating_sub(CHROME + 1);
+    let menu = overlay::slash_popup(&app.suggest(), app.sugg_sel, width, menu_max);
+    let body_h = h.saturating_sub(CHROME + menu.len());
     let mut rows = Vec::with_capacity(h);
     if body_h > 0 {
         let body = app.body(width);
@@ -463,6 +495,7 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
             rows.push(body.get(start + i).cloned().unwrap_or_default());
         }
     }
+    rows.extend(menu);
     // Too short for the whole chrome: keep the bottom rows, input line included.
     rows.extend(chrome.into_iter().skip(CHROME - h.min(CHROME)));
     rows
@@ -673,6 +706,48 @@ mod tests {
 
     fn chrome(top: &str) -> Vec<String> {
         vec![top.into(), "> ".into(), "no status yet".into()]
+    }
+
+    fn type_str(app: &mut App, s: &str) {
+        for c in s.chars() {
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE), Instant::now());
+        }
+    }
+
+    #[test]
+    fn slash_menu_sits_above_the_running_row_and_the_cursor_stays_on_input() {
+        let mut app = App::new(30, 8);
+        type_str(&mut app, "/mo");
+        let rows = frame(&app, 30, 8);
+        assert_eq!(rows.len(), 8);
+        assert!(rows[2].starts_with("> /model "));
+        assert!(rows[3].starts_with("  /mode "));
+        assert!(rows[4].starts_with("  /mouse "));
+        assert_eq!(rows[5], "idle");
+        assert_eq!(rows[6], "> /mo");
+        assert_eq!(rows[7], "no status yet");
+        assert_eq!(cursor(&app, 30, 8), (5, 6));
+    }
+
+    #[test]
+    fn down_moves_the_menu_selection_and_tab_completes_it() {
+        let mut app = App::new(30, 8);
+        type_str(&mut app, "/mo");
+        app.on_key(key(KeyCode::Down, KeyModifiers::NONE), Instant::now());
+        assert!(frame(&app, 30, 8)[3].starts_with("> /mode"));
+        app.on_key(key(KeyCode::Tab, KeyModifiers::NONE), Instant::now());
+        assert_eq!(app.editor.text(), "/mode ");
+        assert!(frame(&app, 30, 8).iter().all(|r| !r.contains("/mouse")));
+    }
+
+    #[test]
+    fn no_menu_without_a_slash_word_and_up_still_walks_history() {
+        let mut app = App::new(30, 8);
+        type_str(&mut app, "hi");
+        assert_eq!(frame(&app, 30, 8).len(), 8);
+        assert_eq!(frame(&app, 30, 8)[5], "idle");
+        app.on_key(key(KeyCode::Up, KeyModifiers::NONE), Instant::now());
+        assert_eq!(app.editor.text(), "hi");
     }
 
     #[test]
