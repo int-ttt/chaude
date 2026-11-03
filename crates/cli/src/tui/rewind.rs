@@ -6,7 +6,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::bar::clip;
-use super::render::{DIM_ON, FG_OFF, ORANGE_ON};
+use super::render::{DIM_ON, FG_OFF, ORANGE_ON, RESET};
 
 // I28: shown when Esc Esc finds no prompt to rewind to.
 pub const NOTHING: &str = "nothing to rewind to";
@@ -114,7 +114,7 @@ impl Rewind {
                     clip(&row, width.saturating_sub(2))
                 )
             } else {
-                format!("{DIM_ON}  {}{FG_OFF}", clip(&row, width.saturating_sub(2)))
+                format!("{DIM_ON}  {}{RESET}", clip(&row, width.saturating_sub(2)))
             };
             out.push(row);
             i += 1;
