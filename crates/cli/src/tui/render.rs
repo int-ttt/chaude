@@ -702,6 +702,162 @@ pub fn wrap_linked(text: &str, wrap: impl Fn(&str) -> String) -> String {
         .join("\n")
 }
 
+// ---- Selection (selection.go) ----
+
+// Splits s at cell column `at`. The first part holds escapes and cells before `at`; the second holds the rest.
+fn split_cells(s: &str, at: usize) -> (String, String) {
+    let mut col = 0;
+    let mut i = 0;
+    while i < s.len() {
+        if col >= at {
+            break;
+        }
+        if let Some(n) = csi_len(s.as_bytes(), i) {
+            i += n;
+            continue;
+        }
+        let c = cur_char(s, i);
+        col += c.width().unwrap_or(0);
+        i += c.len_utf8();
+    }
+    (s[..i].to_string(), s[i..].to_string())
+}
+
+// Visible text of cells [from, to) of s, without escapes (selection.go Cut + Strip).
+fn cell_slice(s: &str, from: usize, to: usize) -> String {
+    let (_, rest) = split_cells(s, from);
+    let (mid, _) = split_cells(&rest, to - from);
+    strip_sgr(&mid)
+}
+
+// R20 textPos/textSel (selection.go:18-25): content coordinates, so a selection stays on its text while
+// output streams in and the view scrolls. `col` is a cell column.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextPos {
+    pub line: usize,
+    pub col: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextSel {
+    pub set: bool,
+    pub anchor: TextPos,
+    pub head: TextPos,
+}
+
+impl TextSel {
+    // ordered (selection.go:28): start and end, in either drag direction.
+    fn ordered(&self) -> (TextPos, TextPos) {
+        let (a, b) = (self.anchor, self.head);
+        if b.line < a.line || (b.line == a.line && b.col < a.col) {
+            (b, a)
+        } else {
+            (a, b)
+        }
+    }
+
+    // empty (selection.go:37): no selection, or press and release on the same cell.
+    pub fn empty(&self) -> bool {
+        let (a, b) = self.ordered();
+        !self.set || a == b
+    }
+
+    // span (selection.go:44): selected cell range [from, to) on content line i of cell width w.
+    pub fn span(&self, i: usize, w: usize) -> Option<(usize, usize)> {
+        if self.empty() {
+            return None;
+        }
+        let (a, b) = self.ordered();
+        if i < a.line || i > b.line {
+            return None;
+        }
+        let from = if i == a.line { a.col.min(w) } else { 0 };
+        let to = if i == b.line { b.col.min(w) } else { w };
+        (from < to).then_some((from, to))
+    }
+
+    // text (selection.go:63): plain text under the selection, one line per content line.
+    pub fn text(&self, lines: &[String]) -> String {
+        if self.empty() {
+            return String::new();
+        }
+        let (a, b) = self.ordered();
+        let mut out = Vec::new();
+        for i in a.line..=b.line {
+            let Some(line) = lines.get(i) else {
+                break;
+            };
+            out.push(match self.span(i, cell_width(line)) {
+                Some((from, to)) => cell_slice(line, from, to),
+                None => String::new(),
+            });
+        }
+        out.join("\n")
+    }
+}
+
+// highlightLine (selection.go:81): cells [from, to) in reverse video; styling outside the range is kept.
+pub fn highlight_line(line: &str, from: usize, to: usize) -> String {
+    let w = cell_width(line);
+    if from >= to || from >= w {
+        return line.to_string();
+    }
+    let to = to.min(w);
+    let (pre, rest) = split_cells(line, from);
+    let (mid, post) = split_cells(&rest, to - from);
+    format!("{pre}\x1b[7m{}\x1b[27m{post}", strip_sgr(&mid))
+}
+
+// highlightView (selection.go:92): screen row r shows content line y_offset + r, so the highlight is
+// recomputed from content coordinates on every frame.
+pub fn highlight_view(frame: &str, lines: &[String], y_offset: usize, s: &TextSel) -> String {
+    if s.empty() {
+        return frame.to_string();
+    }
+    frame
+        .split('\n')
+        .enumerate()
+        .map(|(r, row)| {
+            let i = y_offset + r;
+            match lines.get(i).and_then(|l| s.span(i, cell_width(l))) {
+                Some((from, to)) => highlight_line(row, from, to),
+                None => row.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// ---- Input box (input.go, tui.go) ----
+
+// I32 placeholder (tui.go:879): idle hint shown in the empty input box.
+pub fn input_placeholder(busy: bool) -> &'static str {
+    if busy {
+        "생각중 - 추가 입력은 한 번에 합쳐 처리"
+    } else {
+        "대기 - 프롬프트 입력"
+    }
+}
+
+// I30 cells (input.go:24): cell column of byte index `pos` within one visual row.
+pub fn input_cursor_cells(row: &str, pos: usize) -> usize {
+    cell_width(&row[..pos])
+}
+
+// I33 View (input.go:211-248): the row with a reverse-video cell at the cursor. A cursor past the end
+// draws a reverse space after the text. `None` means the cursor is on another row.
+pub fn input_view_row(row: &str, cursor: Option<usize>) -> String {
+    let Some(pos) = cursor else {
+        return row.to_string();
+    };
+    if pos >= row.len() {
+        return format!("{row}\x1b[7m \x1b[27m");
+    }
+    let c = cur_char(row, pos);
+    let next = pos + c.len_utf8();
+    format!("{}\x1b[7m{c}\x1b[27m{}", &row[..pos], &row[next..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1072,5 +1228,67 @@ mod tests {
         assert_eq!(commas(150_000), "150,000");
         assert_eq!(commas(999), "999");
         assert_eq!(commas(-1234), "-1,234");
+    }
+    fn sel(a: (usize, usize), h: (usize, usize)) -> TextSel {
+        TextSel {
+            set: true,
+            anchor: TextPos {
+                line: a.0,
+                col: a.1,
+            },
+            head: TextPos {
+                line: h.0,
+                col: h.1,
+            },
+        }
+    }
+    fn lines_of(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+    #[test]
+    fn selection_text_multi_line_and_reversed() {
+        // selection_test.go TestSelectionMultiLineAndReversedOrder
+        let lines = lines_of(&["one", "two", "three"]);
+        assert_eq!(sel((2, 2), (0, 1)).text(&lines), "ne\ntwo\nth");
+        assert_eq!(sel((0, 1), (0, 1)).text(&lines), "");
+    }
+    #[test]
+    fn selection_anchor_stays_on_content_after_append() {
+        // selection_test.go TestSelectionAnchorStaysOnContentAfterAppend
+        let mut lines = lines_of(&["alpha", "beta gamma", "delta"]);
+        let s = sel((1, 0), (1, 4));
+        assert_eq!(s.text(&lines), "beta");
+        lines.extend(lines_of(&[
+            "streamed one",
+            "streamed two",
+            "streamed three",
+        ]));
+        assert_eq!(s.text(&lines), "beta");
+        let out = highlight_view(&lines[1..3].join("\n"), &lines, 1, &s);
+        let rows: Vec<&str> = out.split('\n').collect();
+        assert!(
+            rows[0].contains("\x1b[7m") && !rows[1].contains("\x1b[7m"),
+            "{out:?}"
+        );
+        let out = highlight_view(&lines[0..2].join("\n"), &lines, 0, &s);
+        let rows: Vec<&str> = out.split('\n').collect();
+        assert!(
+            !rows[0].contains("\x1b[7m") && rows[1].contains("\x1b[7m"),
+            "{out:?}"
+        );
+    }
+    #[test]
+    fn input_cursor_cells_and_view() {
+        // input_test.go TestInputWidthMixed: cursor before 글 in "ab한글cd" is cell 4.
+        assert_eq!(input_cursor_cells("ab한글cd", 5), 4);
+        assert_eq!(input_cursor_cells("ab글cd", 2), 2);
+        assert_eq!(input_view_row("abc", Some(1)), "a\x1b[7mb\x1b[27mc");
+        assert_eq!(input_view_row("abc", Some(3)), "abc\x1b[7m \x1b[27m");
+        assert_eq!(input_view_row("abc", None), "abc");
+        assert_eq!(input_placeholder(false), "대기 - 프롬프트 입력");
+        assert_eq!(
+            input_placeholder(true),
+            "생각중 - 추가 입력은 한 번에 합쳐 처리"
+        );
     }
 }
