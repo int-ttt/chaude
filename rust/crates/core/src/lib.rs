@@ -1,7 +1,10 @@
 //! chaude core: OS helpers, argument parsing and the settings generator, shared by the CLI and the GUI.
 
+pub mod api;
+pub mod event;
 pub mod lean;
 pub mod osenv;
+pub mod proc;
 pub mod settings;
 
 #[cfg(test)]

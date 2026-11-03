@@ -14,3 +14,4 @@ publish = false
 [workspace.dependencies]
 # preserve_order keeps the key order of settings.json when it is rewritten.
 serde_json = { version = "1", features = ["preserve_order"] }
+serde = { version = "1", features = ["derive"] }
