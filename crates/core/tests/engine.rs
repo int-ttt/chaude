@@ -622,3 +622,23 @@ fn tool_result_text_and_background_agent_flag_are_emitted() {
     );
     h.shutdown();
 }
+
+// rate_limit_event carries the raw rate_limit_info object (Go setRate) for the TUI.
+#[test]
+fn rate_limit_event_emits_raw_info() {
+    let _g = lock();
+    let f = fake("rate", &["bg_turn_live.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("rate limit");
+    let evs = until_idle(&rx);
+    let info = evs
+        .iter()
+        .find_map(|e| match e {
+            UiEvent::RateLimit { info } => Some(info.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no RateLimit: {evs:?}"));
+    assert_eq!(info["rateLimitType"], "five_hour");
+    assert_eq!(info["unifiedWindows"]["five_hour"]["utilization"], 0.38);
+    h.shutdown();
+}

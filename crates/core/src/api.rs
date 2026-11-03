@@ -100,6 +100,10 @@ pub enum UiEvent {
     },
     // The running turn ended after an interrupt (before its TurnEnd).
     Interrupted,
+    // Raw rate_limit_info object from a rate_limit_event (Go livechild.go setRate: rateLimitType, unifiedWindows, ...).
+    RateLimit {
+        info: Value,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -478,7 +482,12 @@ impl State {
                     "permission denied for {tool}: no prompt handler"
                 )));
             }
-            Event::RateLimitEvent(_) | Event::Unknown => {}
+            Event::RateLimitEvent(ev) => {
+                if let Some(info) = ev.rate_limit_info {
+                    self.emit(UiEvent::RateLimit { info });
+                }
+            }
+            Event::Unknown => {}
         }
     }
 
