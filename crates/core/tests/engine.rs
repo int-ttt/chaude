@@ -278,21 +278,57 @@ fn interrupt_is_logged_with_source_and_sent_only_when_busy() {
 }
 
 #[test]
-fn can_use_tool_request_is_denied_with_error() {
+fn can_use_tool_in_default_mode_asks_ui_and_sends_answer() {
     let _g = lock();
     let f = fake("perm", &["permission_turn.jsonl"]);
     let (h, rx) = Engine::start(config(&f));
     h.submit("rm it");
     let evs = until_idle(&rx);
     assert!(
+        evs.contains(&UiEvent::PermissionRequest {
+            id: "perm-1".into(),
+            tool: "Bash".into(),
+            summary: "rm -rf x".into(),
+        }),
+        "{evs:?}"
+    );
+    h.answer_permission("perm-1", true);
+    let log = wait_for(&f.dir.join("stdin.log"), "control_response");
+    assert!(log.contains(r#""request_id":"perm-1""#), "{log}");
+    assert!(log.contains(r#""behavior":"allow""#), "{log}");
+    assert!(log.contains("rm -rf x"), "{log}");
+    h.shutdown();
+}
+
+#[test]
+fn plan_mode_denies_bash_without_prompt_and_unknown_mode_is_reported() {
+    let _g = lock();
+    let f = fake("perm-plan", &["permission_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.set_mode("bogus");
+    h.set_mode("plan");
+    h.submit("rm it");
+    let evs = until_idle(&rx);
+    assert!(
         evs.contains(&UiEvent::Error(
-            "permission denied for Bash: no prompt handler".into()
+            "unknown mode bogus (default | acceptEdits | plan | auto)".into()
         )),
         "{evs:?}"
     );
+    assert!(
+        evs.contains(&UiEvent::ModeChanged {
+            mode: "plan".into()
+        }),
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::PermissionRequest { .. })),
+        "{evs:?}"
+    );
     let log = wait_for(&f.dir.join("stdin.log"), "control_response");
-    assert!(log.contains(r#""request_id":"perm-1""#), "{log}");
     assert!(log.contains(r#""behavior":"deny""#), "{log}");
+    assert!(log.contains("plan mode: do not modify anything"), "{log}");
     h.shutdown();
 }
 

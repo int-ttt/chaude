@@ -3,6 +3,7 @@
 pub mod api;
 pub mod event;
 pub mod lean;
+pub mod mode;
 pub mod osenv;
 pub mod proc;
 pub mod settings;

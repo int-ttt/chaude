@@ -13,6 +13,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::Value;
 
 use crate::event::{Block, Content, Delta, Event, StreamInner, parse_line};
+use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, SpawnOpts};
 
@@ -104,6 +105,17 @@ pub enum UiEvent {
     RateLimit {
         info: Value,
     },
+    // Permission prompt for a can_use_tool request the mode did not decide (Go ui.ask).
+    // Answer with EngineHandle::answer_permission(id, allow).
+    PermissionRequest {
+        id: String,
+        tool: String,
+        summary: String,
+    },
+    // Harness permission mode changed (Go modeLine). The start state is not announced.
+    ModeChanged {
+        mode: String,
+    },
     // Per-turn measurement, emitted just before TurnEnd (Go record_turn.go measureLine keys).
     // cost_turn_usd = this turn's share of the session cost; cost_usd = cumulative session cost;
     // ctx = context tokens from the last assistant usage; delegations = Agent/Task calls in the turn.
@@ -155,6 +167,9 @@ impl Default for Config {
 enum Cmd {
     Submit(String),
     Interrupt(InterruptSource),
+    // Mode name as typed ("next" cycles); parsed by the actor so unknown names are reported as UiEvent::Error.
+    SetMode(String),
+    Permission { id: String, allow: bool },
     Shutdown,
 }
 
@@ -181,6 +196,19 @@ impl EngineHandle {
 
     pub fn interrupt(&self, source: InterruptSource) {
         let _ = self.tx.send(Input::Cmd(Cmd::Interrupt(source)));
+    }
+
+    // Go /mode: "next" cycles, otherwise default | acceptEdits | plan | auto (case-insensitive).
+    pub fn set_mode(&self, name: &str) {
+        let _ = self.tx.send(Input::Cmd(Cmd::SetMode(name.to_string())));
+    }
+
+    // Answers a UiEvent::PermissionRequest. allow=false denies with the Go empty-message reply.
+    pub fn answer_permission(&self, id: &str, allow: bool) {
+        let _ = self.tx.send(Input::Cmd(Cmd::Permission {
+            id: id.to_string(),
+            allow,
+        }));
     }
 
     // Stops the child and joins the actor thread.
@@ -241,6 +269,10 @@ struct State {
     // Session cost when the running turn started, and Agent/Task calls made in it (for TurnStats).
     turn_cost_base: f64,
     delegations: u32,
+    // Harness permission mode (Go permMode); decides can_use_tool before any prompt.
+    mode: PermMode,
+    // can_use_tool requests waiting for a UI answer, keyed by request_id, with the tool input to echo back.
+    pending_perm: HashMap<String, Value>,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -271,6 +303,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         stray_results: 0,
         turn_cost_base: 0.0,
         delegations: 0,
+        mode: PermMode::Default,
+        pending_perm: HashMap::new(),
     };
     match proc::spawn(&opts, self_tx, Input::Proc) {
         Ok(p) => st.proc = Some(p),
@@ -295,6 +329,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
             Input::Cmd(Cmd::Shutdown) => break,
             Input::Cmd(Cmd::Submit(text)) => st.submit(text),
             Input::Cmd(Cmd::Interrupt(src)) => st.interrupt(src),
+            Input::Cmd(Cmd::SetMode(name)) => st.set_mode(&name),
+            Input::Cmd(Cmd::Permission { id, allow }) => st.answer_permission(&id, allow),
             Input::Proc(ProcMsg::Line(line)) => st.on_line(&line),
             Input::Proc(ProcMsg::Eof) => st.on_eof(),
         }
@@ -487,17 +523,29 @@ impl State {
                     return;
                 }
                 let tool = c.request.tool_name.unwrap_or_default();
-                let msg = "chaude E1 engine has no permission prompt";
-                let res = match self.proc.as_mut() {
-                    Some(p) => p.write_permission(&c.request_id, false, Value::Null, msg),
-                    None => Ok(()),
-                };
-                if let Err(e) = res {
-                    self.emit(UiEvent::Error(format!("permission reply failed: {e}")));
+                let input = c.request.input.unwrap_or(Value::Null);
+                match mode::decide(self.mode, &tool) {
+                    Verdict::Allow => self.respond_permission(&c.request_id, true, input, ""),
+                    Verdict::Deny(msg) => {
+                        self.respond_permission(&c.request_id, false, Value::Null, msg)
+                    }
+                    // Go askPerm idle path: no turn running means no prompt can be answered.
+                    Verdict::Ask if !self.busy => self.respond_permission(
+                        &c.request_id,
+                        false,
+                        Value::Null,
+                        "denied: no interactive prompt available between turns",
+                    ),
+                    Verdict::Ask => {
+                        let summary = tool_summary(&input);
+                        self.pending_perm.insert(c.request_id.clone(), input);
+                        self.emit(UiEvent::PermissionRequest {
+                            id: c.request_id,
+                            tool,
+                            summary,
+                        });
+                    }
                 }
-                self.emit(UiEvent::Error(format!(
-                    "permission denied for {tool}: no prompt handler"
-                )));
             }
             Event::RateLimitEvent(ev) => {
                 if let Some(info) = ev.rate_limit_info {
@@ -505,6 +553,46 @@ impl State {
                 }
             }
             Event::Unknown => {}
+        }
+    }
+
+    // Go /mode. Unknown names are reported with the Go message; the mode is unchanged.
+    fn set_mode(&mut self, name: &str) {
+        let next = if name.trim() == "next" {
+            Some(self.mode.next())
+        } else {
+            PermMode::parse(name)
+        };
+        match next {
+            Some(m) => {
+                self.mode = m;
+                self.emit(UiEvent::ModeChanged {
+                    mode: m.as_str().to_string(),
+                });
+            }
+            None => self.emit(UiEvent::Error(format!(
+                "unknown mode {name} (default | acceptEdits | plan | auto)"
+            ))),
+        }
+    }
+
+    // Go RespondPermission for a pending UI prompt. An id that is not pending is reported, not sent.
+    fn answer_permission(&mut self, id: &str, allow: bool) {
+        match self.pending_perm.remove(id) {
+            Some(input) => self.respond_permission(id, allow, input, ""),
+            None => self.emit(UiEvent::Error(format!(
+                "no pending permission request {id}"
+            ))),
+        }
+    }
+
+    fn respond_permission(&mut self, id: &str, allow: bool, input: Value, msg: &str) {
+        let res = match self.proc.as_mut() {
+            Some(p) => p.write_permission(id, allow, input, msg),
+            None => Ok(()),
+        };
+        if let Err(e) = res {
+            self.emit(UiEvent::Error(format!("permission reply failed: {e}")));
         }
     }
 
