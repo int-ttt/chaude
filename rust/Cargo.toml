@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/cli", "crates/gui"]
+# gui is a Tauri placeholder (phase 5): built only when asked for by name.
+default-members = ["crates/core", "crates/cli"]
+# prototype/chaude-rs is the stream-json spike kept for reference; it has its own Cargo.lock.
+exclude = ["prototype/chaude-rs"]
+
+[workspace.package]
+version = "0.9.14"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+# preserve_order keeps the key order of settings.json when it is rewritten.
+serde_json = { version = "1", features = ["preserve_order"] }
