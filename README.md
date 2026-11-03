@@ -27,9 +27,10 @@ Source: [docs/pingpong-bench.md](docs/pingpong-bench.md).
 - Opus main decides; Haiku agents do lookups, small edits, and checks.
 - Four permission modes (`default`, `acceptEdits`, `plan`, `auto`), switched with `shift+tab`.
 - Cost, 5-hour usage, and rotation count in the status line. `/usage` shows plan usage and limits.
+- Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing (0.9.14).
 - Prompt history per project, saved in `.chaude/history.jsonl`. Search it with `chaude search-history`.
 - Import Claude Code sessions with `/import`, `/resume claude`, or `chaude --from-claude`.
-- Prebuilt binaries for macOS, Linux, and Windows (amd64, arm64). The installers check `checksums.txt` before installing.
+- Prebuilt binaries: macOS Apple Silicon (arm64), Linux (amd64, arm64), Windows (amd64; arm64 PCs run it through x64 emulation). Intel Macs are not supported. The installers check `checksums.txt` before installing.
 
 ## Install
 
@@ -40,11 +41,13 @@ curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | 
 chaude --version
 ```
 
+Supported: macOS on Apple Silicon (arm64) and Linux (amd64, arm64). Intel Macs (darwin/amd64) are not supported and the installer exits with an error.
+
 Installs to `/usr/local/bin/chaude`. The directory is created if missing. `sudo` is used only for the copy, and only when the directory is not writable. An existing `chaude` is kept as `chaude.<old version>.bak`.
 
 To pin a version, set `CHAUDE_VERSION`:
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.9.13 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.9.14 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -55,6 +58,8 @@ Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shas
 irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
 chaude --version
 ```
+
+On Windows on ARM64, the installer downloads the amd64 build (x64 emulation) and prints a note.
 
 Installs to `%LOCALAPPDATA%\Programs\chaude\chaude.exe`. The installer adds that folder to your user `PATH` once. Open a new terminal after installing.
 

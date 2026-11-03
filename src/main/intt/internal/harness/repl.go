@@ -18,6 +18,7 @@ import (
 
 	"chaude/internal/lean"
 	"chaude/internal/osenv"
+	"chaude/internal/settings"
 )
 
 const (
@@ -1314,6 +1315,14 @@ func Main(args []string) int {
 	r.mode.Store(int32(modeAuto)) // default permission mode is auto (same as claude --permission-mode auto)
 	r.prevOwned = loadPrevOwned(recordDir(a.Cwd), a.Cwd)
 	_, _ = pruneRecordFiles(recordDir(a.Cwd), set.SessionRetentionDays, time.Now())
+	ensureCwd := a.Cwd
+	if ensureCwd == "" {
+		ensureCwd, _ = os.Getwd()
+	}
+	home, _ := os.UserHomeDir()
+	if _, err := settings.EnsureProjectSettings(ensureCwd, home); err != nil {
+		fmt.Fprintln(os.Stderr, "project settings:", err)
+	}
 	if st, err := os.Stdin.Stat(); err == nil {
 		r.interactive = st.Mode()&os.ModeCharDevice != 0
 	}

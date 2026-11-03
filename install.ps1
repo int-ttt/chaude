@@ -1,4 +1,4 @@
-# chaude installer (Windows amd64 + arm64). Standalone: installs prebuilt release binaries only
+# chaude installer (Windows amd64; arm64 machines get the amd64 build via x64 emulation). Standalone: installs prebuilt release binaries only
 # (no source build, no repo checkout, so git and go are not needed). Public repo: no token required.
 #   irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
 # Installs to %LOCALAPPDATA%\Programs\chaude\chaude.exe and adds that folder to the user PATH (registry, once).
@@ -54,9 +54,10 @@ function Install-Chaude {
     $pa = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
     $arch = switch ($pa) {
         'AMD64' { 'amd64' }
-        'ARM64' { 'arm64' }
+        'ARM64' { 'amd64' }
         default { throw "unsupported architecture: $pa" }
     }
+    if ($pa -eq 'ARM64') { Write-Host 'note: no arm64 build is published for Windows; installing the windows/amd64 build (runs through x64 emulation).' }
     if ($version -ne 'latest' -and $version -notlike 'v*') { $version = "v$version" }
 
     $token = $env:GH_TOKEN

@@ -2,11 +2,14 @@ package clean
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"chaude/internal/settings"
 )
 
 // installFixture writes a project as the old install step left it: package files, CLAUDE.md policy block
@@ -15,7 +18,15 @@ func installFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, rel := range pkgFiles {
-		writeTest(t, filepath.Join(dir, filepath.FromSlash(rel)), "pkg "+rel)
+		body := "pkg " + rel
+		if strings.HasPrefix(rel, hooksDir) {
+			b, ok := settings.EmbeddedHook(path.Base(rel))
+			if !ok {
+				t.Fatalf("no embedded copy of %s", rel)
+			}
+			body = string(b) // package copy: clean removes it
+		}
+		writeTest(t, filepath.Join(dir, filepath.FromSlash(rel)), body)
 	}
 	writeTest(t, filepath.Join(dir, "CLAUDE.md"), markStart+"\npolicy\n"+markEnd+"\n\n# my project\nkeep me\n")
 	writeTest(t, filepath.Join(dir, ".claude", "settings.json"), `{
@@ -37,6 +48,88 @@ func installFixture(t *testing.T) string {
 	writeTest(t, filepath.Join(dir, "record", "keep.jsonl"), "record")
 	writeTest(t, filepath.Join(dir, ".claude", "user-file.txt"), "user")
 	return dir
+}
+
+// useHookFn replaces the package hook lookup for one test (nil-returning fn: no package copies).
+func useHookFn(t *testing.T, fn func(string) ([]byte, bool)) {
+	t.Helper()
+	old := pkgHookFn
+	pkgHookFn = fn
+	t.Cleanup(func() { pkgHookFn = old })
+}
+
+func noPkgHook(string) ([]byte, bool) { return nil, false }
+
+// TestApplyKeepsUserModifiedHook: a hook file that differs from the package copy is left alone; identical ones go.
+func TestApplyKeepsUserModifiedHook(t *testing.T) {
+	dir := installFixture(t)
+	const edited = ".claude/hooks/main-thread-guard.py"
+	writeTest(t, filepath.Join(dir, filepath.FromSlash(edited)), "my own guard edit")
+	p, err := MakePlan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsStr(p.Kept(), edited) {
+		t.Fatalf("modified hook not reported as kept: %v", p.Kept())
+	}
+	if _, err := p.Apply(time.Date(2026, 11, 1, 9, 30, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(edited)))
+	if err != nil || string(b) != "my own guard edit" {
+		t.Fatalf("modified hook changed or removed: %q %v", b, err)
+	}
+	if exists(filepath.Join(dir, ".claude", "hooks", "ledger.py")) {
+		t.Error("unmodified package hook was not removed")
+	}
+	s, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
+	if !strings.Contains(string(s), "main-thread-guard.py") {
+		t.Errorf("settings entry of the kept hook was removed:\n%s", s)
+	}
+	if strings.Contains(string(s), "ledger.py") {
+		t.Errorf("settings entry of the removed hook stayed:\n%s", s)
+	}
+}
+
+// TestApplyKeepsHooksWithoutPackageCopy: with no package hook folder nothing can be proven identical, so hooks stay.
+func TestApplyKeepsHooksWithoutPackageCopy(t *testing.T) {
+	dir := installFixture(t)
+	useHookFn(t, noPkgHook)
+	p, err := MakePlan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hooks int
+	for _, rel := range pkgFiles {
+		if strings.HasPrefix(rel, hooksDir) {
+			hooks++
+		}
+	}
+	if len(p.Kept()) != hooks || hooks == 0 {
+		t.Fatalf("kept=%d want all %d hook files", len(p.Kept()), hooks)
+	}
+	if _, err := p.Apply(time.Date(2026, 11, 1, 9, 30, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range p.Kept() {
+		if !exists(filepath.Join(dir, filepath.FromSlash(rel))) {
+			t.Errorf("kept hook removed: %s", rel)
+		}
+	}
+	for _, rel := range pkgFiles {
+		if !strings.HasPrefix(rel, hooksDir) && exists(filepath.Join(dir, filepath.FromSlash(rel))) {
+			t.Errorf("non-hook manifest file still present: %s", rel)
+		}
+	}
+}
+
+func containsStr(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func writeTest(t *testing.T, p, body string) {

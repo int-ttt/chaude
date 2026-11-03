@@ -27,9 +27,10 @@
 - Opus 메인이 판단하고, Haiku 에이전트가 조회, 작은 수정, 검증을 맡습니다.
 - 권한 모드 네 가지(`default`, `acceptEdits`, `plan`, `auto`)를 `shift+tab`으로 바꿉니다.
 - 상태 줄에 비용, 5시간 사용량, 세션 교체 횟수를 보여 줍니다. `/usage`는 요금제 사용량과 한도를 보여 줍니다.
+- 세션을 시작하면 `.claude/settings.json`이 없을 때 가드 훅이 들어간 파일을 만듭니다 (0.9.14).
 - 프로젝트별 입력 기록을 `.chaude/history.jsonl`에 저장합니다. `chaude search-history`로 찾을 수 있습니다.
 - `/import`, `/resume claude`, `chaude --from-claude`로 Claude Code 세션을 가져옵니다.
-- macOS, Linux, Windows용 빌드 파일(amd64, arm64)을 제공합니다. 설치 스크립트는 설치 전에 `checksums.txt`를 확인합니다.
+- 빌드 파일: macOS Apple Silicon(arm64), Linux(amd64, arm64), Windows(amd64; arm64 PC는 x64 에뮬레이션으로 실행합니다). Intel Mac은 지원하지 않습니다. 설치 스크립트는 설치 전에 `checksums.txt`를 확인합니다.
 
 ## 설치
 
@@ -40,11 +41,13 @@ curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | 
 chaude --version
 ```
 
+지원 대상은 Apple Silicon(arm64) macOS와 Linux(amd64, arm64)입니다. Intel Mac(darwin/amd64)은 지원하지 않으며 설치 스크립트가 오류로 끝납니다.
+
 `/usr/local/bin/chaude`에 설치합니다. 폴더가 없으면 만듭니다. `sudo`는 폴더에 쓸 권한이 없을 때만, 복사할 때만 씁니다. 기존 `chaude`는 `chaude.<이전 버전>.bak`로 남깁니다.
 
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.9.13 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.9.14 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -55,6 +58,8 @@ curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | 
 irm https://raw.githubusercontent.com/int-ttt/chaude/master/install.ps1 | iex
 chaude --version
 ```
+
+Windows on ARM64에서는 설치 프로그램이 amd64 빌드(x64 에뮬레이션)를 받고 안내를 출력합니다.
 
 `%LOCALAPPDATA%\Programs\chaude\chaude.exe`에 설치합니다. 설치 프로그램이 이 폴더를 사용자 `PATH`에 한 번 추가합니다. 설치 후에는 새 터미널을 여세요.
 
