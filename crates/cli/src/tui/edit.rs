@@ -5,7 +5,6 @@
 
 // This is a binary crate, and mod.rs does not call every method here yet (delete_word, kill_to_start,
 // kill_to_end, move_row, backslash_newline, load_history are waiting for key wiring in mod.rs).
-#![allow(dead_code)]
 
 use std::fs;
 use std::io::{self, Write};
