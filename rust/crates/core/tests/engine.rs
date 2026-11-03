@@ -337,3 +337,112 @@ fn background_agent_replay_has_no_agent_end_for_async_launch() {
     );
     h.shutdown();
 }
+
+// Fake whose first user frame prints `first`, sleeps `gap` seconds, then prints `second`.
+fn fake_gap(name: &str, first: &str, second: &str, gap: &str) -> Fake {
+    let dir = temp_dir(name);
+    fs::write(dir.join("turn1a.jsonl"), first).unwrap();
+    fs::write(dir.join("turn1b.jsonl"), second).unwrap();
+    let script = r#"#!/bin/sh
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> 'DIR/stdin.log'
+  case "$line" in
+    *'"type":"user"'*)
+      cat 'DIR/turn1a.jsonl'
+      sleep GAP
+      cat 'DIR/turn1b.jsonl'
+      ;;
+  esac
+done
+"#
+    .replace("DIR", &dir.display().to_string())
+    .replace("GAP", gap);
+    let bin = dir.join("claude");
+    fs::write(&bin, script).unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    Fake {
+        bin: bin.display().to_string(),
+        dir,
+    }
+}
+
+// agent_turn.jsonl split after its first line: the Agent tool_use, then everything else (incl. its result).
+fn agent_turn_split() -> (String, String) {
+    let all = fs::read_to_string(fixture("agent_turn.jsonl")).unwrap();
+    let (head, tail) = all.split_once('\n').unwrap();
+    (format!("{head}\n"), tail.to_string())
+}
+
+#[test]
+fn slow_agent_result_is_delivered_and_timer_is_paused_without_interrupt() {
+    let _g = lock();
+    let (head, tail) = agent_turn_split();
+    // Timeout 1 s, result arrives after 2.5 s (2x the timeout): the Agent tool_use is open, so the timer must stay paused.
+    let f = fake_gap("slow-agent", &head, &tail, "2.5");
+    let cfg = Config {
+        inactivity_timeout: Duration::from_millis(1000),
+        log_path: Some(f.dir.join("interrupt.log")),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("scan");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.contains(&UiEvent::ToolEnd {
+            id: "toolu_agent1".into(),
+            ok: true
+        }),
+        "{evs:?}"
+    );
+    assert!(
+        evs.contains(&UiEvent::TurnEnd { duration_ms: 7 }),
+        "late reply must complete the turn: {evs:?}"
+    );
+    assert!(matches!(evs.last(), Some(UiEvent::Busy(false))), "{evs:?}");
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::Error(m) if m.contains("still running"))),
+        "timer must not fire while a tool_use is open: {evs:?}"
+    );
+    let stdin = fs::read_to_string(f.dir.join("stdin.log")).unwrap();
+    assert!(!stdin.contains("interrupt"), "{stdin}");
+    assert!(!f.dir.join("interrupt.log").exists());
+    h.shutdown();
+}
+
+#[test]
+fn silent_turn_emits_still_running_notice_and_never_interrupts() {
+    let _g = lock();
+    // No output for 2.5 s with no open tool_use: the 1 s timer fires, notices, and leaves the turn alone.
+    let f = fake_gap(
+        "silent",
+        "",
+        &fs::read_to_string(fixture("text_turn.jsonl")).unwrap(),
+        "2.5",
+    );
+    let cfg = Config {
+        inactivity_timeout: Duration::from_millis(1000),
+        log_path: Some(f.dir.join("interrupt.log")),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("hi");
+    let evs = until_idle(&rx);
+    let notices = evs
+        .iter()
+        .filter(|e| matches!(e, UiEvent::Error(m) if m.starts_with("still running")))
+        .count();
+    assert!(notices >= 1, "{evs:?}");
+    assert!(
+        evs.contains(&UiEvent::TextDelta {
+            role: Role::Main,
+            text: "Hel".into()
+        }),
+        "late output must still arrive: {evs:?}"
+    );
+    assert!(matches!(evs.last(), Some(UiEvent::Busy(false))), "{evs:?}");
+    let stdin = fs::read_to_string(f.dir.join("stdin.log")).unwrap();
+    assert!(!stdin.contains("interrupt"), "{stdin}");
+    assert!(!f.dir.join("interrupt.log").exists());
+    h.shutdown();
+}

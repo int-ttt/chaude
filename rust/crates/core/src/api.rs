@@ -6,9 +6,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
@@ -102,6 +102,9 @@ pub struct Config {
     pub context_window: u64,
     // Interrupt log sink: one text line per interrupt, with its InterruptSource. None disables logging.
     pub log_path: Option<PathBuf>,
+    // Quiet time with no claude output before a "still running" notice. Paused while any tool_use lacks its
+    // result (a subagent may be silent for minutes). The notice never interrupts; late results are normal events.
+    pub inactivity_timeout: Duration,
 }
 
 impl Default for Config {
@@ -115,6 +118,7 @@ impl Default for Config {
             compact_window: 0,
             context_window: 200_000,
             log_path: None,
+            inactivity_timeout: Duration::from_secs(300),
         }
     }
 }
@@ -197,6 +201,10 @@ struct State {
     tools: HashSet<String>,
     // Agent tool_use id -> start time, for AgentEnd elapsed_ms.
     agents: HashMap<String, Instant>,
+    // tool_use ids still waiting for their tool_result; the inactivity timer is paused while non-empty.
+    open_tools: HashSet<String>,
+    // Last claude line or turn start; the inactivity timer measures from here.
+    last_activity: Instant,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -221,12 +229,28 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         cost_usd: 0.0,
         tools: HashSet::new(),
         agents: HashMap::new(),
+        open_tools: HashSet::new(),
+        last_activity: Instant::now(),
     };
     match proc::spawn(&opts, self_tx, Input::Proc) {
         Ok(p) => st.proc = Some(p),
         Err(e) => st.emit(UiEvent::Error(format!("claude spawn failed: {e}"))),
     }
-    while let Ok(input) = rx.recv() {
+    loop {
+        let input = match st.wait_budget() {
+            Some(d) => match rx.recv_timeout(d) {
+                Ok(i) => i,
+                Err(RecvTimeoutError::Timeout) => {
+                    st.on_quiet();
+                    continue;
+                }
+                Err(RecvTimeoutError::Disconnected) => break,
+            },
+            None => match rx.recv() {
+                Ok(i) => i,
+                Err(_) => break,
+            },
+        };
         match input {
             Input::Cmd(Cmd::Shutdown) => break,
             Input::Cmd(Cmd::Submit(text)) => st.submit(text),
@@ -269,6 +293,7 @@ impl State {
         match p.write_user(text) {
             Ok(()) => {
                 self.turn_started = Some(Instant::now());
+                self.last_activity = Instant::now();
                 true
             }
             Err(e) => {
@@ -310,6 +335,7 @@ impl State {
     }
 
     fn on_eof(&mut self) {
+        self.open_tools.clear();
         self.emit(UiEvent::Error("claude exited".to_string()));
         if let Some(mut p) = self.proc.take() {
             p.kill();
@@ -323,6 +349,7 @@ impl State {
     }
 
     fn on_line(&mut self, line: &str) {
+        self.last_activity = Instant::now();
         match parse_line(line) {
             Ok(ev) => self.on_event(ev),
             Err(e) => self.emit(UiEvent::Error(format!("bad stream line: {e}"))),
@@ -431,6 +458,7 @@ impl State {
         if !self.tools.insert(id.clone()) {
             return;
         }
+        self.open_tools.insert(id.clone());
         let summary = tool_summary(&input);
         self.emit(UiEvent::ToolStart {
             id: id.clone(),
@@ -458,6 +486,7 @@ impl State {
     }
 
     fn on_tool_result(&mut self, id: String, content: Option<Value>, is_error: bool) {
+        self.open_tools.remove(&id);
         self.emit(UiEvent::ToolEnd {
             id: id.clone(),
             ok: !is_error,
@@ -475,9 +504,40 @@ impl State {
         }
     }
 
+    // How long the actor may block before the inactivity timer must be checked. None means block until input.
+    // Idle, or any tool_use without its result, pauses the timer.
+    fn wait_budget(&self) -> Option<Duration> {
+        if !self.busy || !self.open_tools.is_empty() {
+            return None;
+        }
+        let left = self
+            .cfg
+            .inactivity_timeout
+            .saturating_sub(self.last_activity.elapsed());
+        Some(left.max(Duration::from_millis(1)))
+    }
+
+    // Inactivity notice. Informational only: the turn is never interrupted, and the clock restarts so the
+    // notice repeats once per quiet period rather than on every wakeup.
+    fn on_quiet(&mut self) {
+        if !self.busy || !self.open_tools.is_empty() {
+            return;
+        }
+        let quiet = self.last_activity.elapsed();
+        if quiet < self.cfg.inactivity_timeout {
+            return;
+        }
+        self.last_activity = Instant::now();
+        self.emit(UiEvent::Error(format!(
+            "still running: no output for {:.1}s (not interrupted)",
+            quiet.as_secs_f64()
+        )));
+    }
+
     // Finishes the running turn and starts the next queued one, if any.
     fn end_turn(&mut self, duration_ms: u64) {
         self.turn_started = None;
+        self.open_tools.clear();
         self.emit(UiEvent::TurnEnd { duration_ms });
         match self.queue.pop_front() {
             Some(next) => {
