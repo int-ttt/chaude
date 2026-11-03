@@ -894,18 +894,17 @@ impl State {
         self.interrupted_at = None;
         self.open_tools.clear();
         self.emit(UiEvent::TurnEnd { duration_ms });
-        match self.queue.pop_front() {
-            Some(next) => {
-                self.emit(UiEvent::Queued(self.queue.len()));
-                if !self.send_turn(&next) {
-                    self.busy = false;
-                    self.emit(UiEvent::Busy(false));
-                }
-            }
-            None => {
-                self.busy = false;
-                self.emit(UiEvent::Busy(false));
-            }
+        // Go doneMsg / mergePrompts: everything queued meanwhile goes out as ONE turn, joined by a blank line.
+        if self.queue.is_empty() {
+            self.busy = false;
+            self.emit(UiEvent::Busy(false));
+            return;
+        }
+        let next = self.queue.drain(..).collect::<Vec<_>>().join("\n\n");
+        self.emit(UiEvent::Queued(0));
+        if !self.send_turn(&next) {
+            self.busy = false;
+            self.emit(UiEvent::Busy(false));
         }
     }
 

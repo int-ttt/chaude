@@ -188,6 +188,50 @@ fn submit_while_busy_queues_and_never_interrupts() {
 }
 
 #[test]
+fn queued_prompts_go_out_as_one_merged_turn_on_done() {
+    let _g = lock();
+    let f = fake("merge", &["text_turn.jsonl", "text_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("first");
+    h.submit("second");
+    h.submit("third");
+    let evs = until_idle(&rx);
+    assert_eq!(
+        control(&evs),
+        vec![
+            UiEvent::Busy(true),
+            UiEvent::Queued(1),
+            UiEvent::Queued(2),
+            UiEvent::TurnEnd { duration_ms: 42 },
+            UiEvent::Queued(0),
+            UiEvent::TurnEnd { duration_ms: 42 },
+            UiEvent::Busy(false),
+        ]
+    );
+    let log = wait_for(&f.dir.join("stdin.log"), r"second\n\nthird");
+    assert_eq!(log.matches(r#""type":"user""#).count(), 2, "{log}");
+    assert!(log.contains(r"second\n\nthird"), "{log}");
+    h.shutdown();
+}
+
+#[test]
+fn background_only_agent_does_not_queue_next_prompt() {
+    let _g = lock();
+    let f = fake("bgonly", &["bg_turn_live.jsonl", "text_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("run in background");
+    until_idle(&rx);
+    h.submit("now");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::Queued(_))),
+        "{evs:?}"
+    );
+    assert_eq!(control(&evs)[0], UiEvent::Busy(true), "{evs:?}");
+    h.shutdown();
+}
+
+#[test]
 fn agent_tool_maps_to_agent_start_and_end_and_hides_subagent_tools() {
     let _g = lock();
     let f = fake("agent", &["agent_turn.jsonl"]);
