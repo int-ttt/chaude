@@ -12,13 +12,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use crate::event::{Block, Content, Delta, Event, StreamInner, parse_line};
+use crate::budget::{self, Budget};
+use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, SpawnOpts};
 
 // Text tool results of background agents say this; the agent keeps running after the tool result.
 const ASYNC_AGENT_MARK: &str = "Async agent launched";
+// The engine runs one child, so the cumulative cost total is kept under one baseline key (Go keys by Session).
+const CHILD_PROC: u64 = 0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Role {
@@ -126,6 +129,16 @@ pub enum UiEvent {
         ctx: u64,
         delegations: u32,
     },
+    // Budget ledger after a turn's charge (Go budget.Spent vs cap). Only sent when a cap is set.
+    BudgetStatus {
+        spent_usd: f64,
+        cap_usd: f64,
+    },
+    // The cap was reached (Go budgetStop): the running turn is interrupted, or the next prompt is refused.
+    BudgetStop {
+        spent_usd: f64,
+        cap_usd: f64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +160,8 @@ pub struct Config {
     pub interrupt_grace: Duration,
     // Go --auto-allow (testing): every ask is allowed without a UI prompt. Mode verdicts still apply first.
     pub auto_allow: bool,
+    // Go --task-budget-usd: USD cap per prompt (the ledger resets on each prompt). Zero = off.
+    pub task_budget_usd: f64,
 }
 
 impl Default for Config {
@@ -163,6 +178,7 @@ impl Default for Config {
             inactivity_timeout: Duration::from_secs(300),
             interrupt_grace: Duration::from_secs(20),
             auto_allow: false,
+            task_budget_usd: 0.0,
         }
     }
 }
@@ -276,6 +292,12 @@ struct State {
     mode: PermMode,
     // can_use_tool requests waiting for a UI answer, keyed by request_id, with the tool input to echo back.
     pending_perm: HashMap<String, Value>,
+    // Per-prompt USD ledger (Go budget); None when --task-budget-usd is off.
+    budget: Option<Budget>,
+    // Last main assistant API response, for the warm-cache test of the next-call estimate.
+    last_api: Option<Instant>,
+    // Set when a main usage event's in-flight estimate reached the cap; the turn is interrupted once.
+    budget_hit: bool,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -286,8 +308,10 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         cwd: cfg.cwd.clone(),
         cache_ttl: cfg.cache_ttl.clone(),
         compact_window: cfg.compact_window,
+        max_budget_usd: cfg.task_budget_usd,
     };
     let model = cfg.model.clone();
+    let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));
     let mut st = State {
         cfg,
         proc: None,
@@ -308,6 +332,9 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         delegations: 0,
         mode: PermMode::Default,
         pending_perm: HashMap::new(),
+        budget,
+        last_api: None,
+        budget_hit: false,
     };
     match proc::spawn(&opts, self_tx, Input::Proc) {
         Ok(p) => st.proc = Some(p),
@@ -366,6 +393,16 @@ impl State {
 
     // Writes one user frame and starts the turn clock. Returns false if the write failed.
     fn send_turn(&mut self, text: &str) -> bool {
+        // Go handle/runTurn: each prompt starts a fresh ledger, and is refused when its next call would exceed the cap.
+        if let Some(b) = self.budget.as_mut() {
+            b.reset();
+        }
+        self.budget_hit = false;
+        let est = self.estimate_next();
+        if self.budget.as_ref().is_some_and(|b| !b.allow(est)) {
+            self.emit_budget_stop();
+            return false;
+        }
         let Some(p) = self.proc.as_mut() else {
             return false;
         };
@@ -382,6 +419,49 @@ impl State {
                 false
             }
         }
+    }
+
+    // Go estNext: planned cost of the next call. Warm while the last API response is inside the cache TTL
+    // (Go idleDeadline, capped at 290 s for the 5m cache and 1 h for the 1h cache; no idle-rotate setting here).
+    fn estimate_next(&self) -> f64 {
+        let ttl = self.cfg.cache_ttl.as_str();
+        let window = if ttl == "1h" {
+            Duration::from_secs(3600)
+        } else {
+            Duration::from_secs(290)
+        };
+        let warm = self.last_api.is_some_and(|t| t.elapsed() < window);
+        budget::estimate(&self.model, self.ctx_tokens, warm, ttl)
+    }
+
+    fn emit_budget_stop(&self) {
+        if let Some(b) = &self.budget {
+            self.emit(UiEvent::BudgetStop {
+                spent_usd: b.spent(),
+                cap_usd: b.cap(),
+            });
+        }
+    }
+
+    // Go runTurn assistant case: a main usage event whose in-flight estimate reaches the cap interrupts the turn once.
+    fn budget_mid_turn(&mut self, u: &Usage) {
+        if self.budget_hit {
+            return;
+        }
+        let est = budget::mid_turn_estimate(&self.model, u);
+        let Some(b) = self.budget.as_mut() else {
+            return;
+        };
+        if !b.over(est) {
+            return;
+        }
+        self.budget_hit = true;
+        if let Some(p) = self.proc.as_mut()
+            && let Err(e) = p.write_interrupt()
+        {
+            self.emit(UiEvent::Error(format!("interrupt write failed: {e}")));
+        }
+        self.interrupted_at.get_or_insert_with(Instant::now);
     }
 
     fn interrupt(&mut self, src: InterruptSource) {
@@ -470,6 +550,8 @@ impl State {
                 }
                 if let Some(u) = &env.message.usage {
                     self.ctx_tokens = u.context_tokens();
+                    self.last_api = Some(Instant::now());
+                    self.budget_mid_turn(u);
                     self.emit_status(self.cost_usd);
                 }
                 if let Some(Content::Blocks(blocks)) = env.message.content {
@@ -507,6 +589,9 @@ impl State {
                 }
                 if let Some(c) = r.total_cost_usd {
                     self.cost_usd = c;
+                    if let Some(b) = self.budget.as_mut() {
+                        b.charge(CHILD_PROC, c);
+                    }
                 }
                 if r.is_error == Some(true) {
                     let msg = r
@@ -519,6 +604,12 @@ impl State {
                     .duration_ms
                     .unwrap_or_else(|| elapsed_ms(self.turn_started));
                 self.emit_status(self.cost_usd);
+                if let Some(b) = &self.budget {
+                    self.emit(UiEvent::BudgetStatus {
+                        spent_usd: b.spent(),
+                        cap_usd: b.cap(),
+                    });
+                }
                 self.end_turn(duration_ms);
             }
             Event::ControlRequest(c) => {
@@ -725,6 +816,9 @@ impl State {
     fn end_turn(&mut self, duration_ms: u64) {
         if self.interrupted_at.is_some() {
             self.emit(UiEvent::Interrupted);
+        }
+        if self.budget_hit {
+            self.emit_budget_stop();
         }
         self.emit(UiEvent::TurnStats {
             duration_ms,

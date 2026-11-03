@@ -804,3 +804,92 @@ fn pending_permission_is_dropped_when_turn_is_abandoned() {
     );
     h.shutdown();
 }
+
+#[test]
+fn budget_interrupts_turn_once_when_in_flight_estimate_reaches_cap() {
+    let _g = lock();
+    let f = fake("budget-mid", &["budget_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.task_budget_usd = 0.1;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("big");
+    let evs = until_idle(&rx);
+    let stop = evs
+        .iter()
+        .position(|e| matches!(e, UiEvent::BudgetStop { .. }))
+        .unwrap_or_else(|| panic!("no BudgetStop: {evs:?}"));
+    let UiEvent::BudgetStop { spent_usd, cap_usd } = &evs[stop] else {
+        unreachable!()
+    };
+    assert!(
+        (spent_usd - 0.5).abs() < 1e-9 && (cap_usd - 0.1).abs() < 1e-9,
+        "{evs:?}"
+    );
+    assert!(
+        matches!(evs.get(stop + 1), Some(UiEvent::TurnStats { .. })),
+        "BudgetStop must precede TurnStats: {evs:?}"
+    );
+    assert!(
+        matches!(evs.get(stop + 2), Some(UiEvent::TurnEnd { .. })),
+        "TurnStats must precede TurnEnd: {evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, UiEvent::Interrupted)),
+        "{evs:?}"
+    );
+    let log = wait_for(&f.dir.join("stdin.log"), "interrupt");
+    assert_eq!(
+        log.matches(r#""request":{"subtype":"interrupt"}"#).count(),
+        1,
+        "{log}"
+    );
+    h.shutdown();
+}
+
+#[test]
+fn budget_refuses_prompt_whose_next_call_estimate_exceeds_cap() {
+    let _g = lock();
+    let f = fake("budget-refuse", &["agent_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.task_budget_usd = 0.01;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("hi");
+    thread::sleep(Duration::from_millis(400));
+    let evs: Vec<UiEvent> = rx.try_iter().collect();
+    assert!(
+        evs.iter().any(|e| matches!(e, UiEvent::BudgetStop { .. })),
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::Busy(true))),
+        "refused prompt must not start a turn: {evs:?}"
+    );
+    let log = fs::read_to_string(f.dir.join("stdin.log")).unwrap_or_default();
+    assert!(!log.contains("\"type\":\"user\""), "{log}");
+    h.shutdown();
+}
+
+#[test]
+fn budget_status_reports_spent_and_cap_after_each_turn() {
+    let _g = lock();
+    let f = fake("budget-status", &["agent_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.task_budget_usd = 10.0;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("scan");
+    let evs = until_idle(&rx);
+    let got = evs.iter().find_map(|e| match e {
+        UiEvent::BudgetStatus { spent_usd, cap_usd } => Some((*spent_usd, *cap_usd)),
+        _ => None,
+    });
+    let (spent, cap) = got.unwrap_or_else(|| panic!("no BudgetStatus: {evs:?}"));
+    assert!(
+        (spent - 0.02).abs() < 1e-9 && (cap - 10.0).abs() < 1e-9,
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::BudgetStop { .. })),
+        "{evs:?}"
+    );
+    h.shutdown();
+}

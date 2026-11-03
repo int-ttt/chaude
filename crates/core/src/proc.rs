@@ -32,6 +32,17 @@ pub struct SpawnOpts {
     pub cache_ttl: String,
     // Non-zero sets CLAUDE_CODE_AUTO_COMPACT_WINDOW for the child only.
     pub compact_window: u32,
+    // Go --task-budget-usd; zero leaves the child without --max-budget-usd.
+    pub max_budget_usd: f64,
+}
+
+// Go --task-budget-usd also passes --max-budget-usd to the child as a backstop. Zero adds nothing.
+pub fn budget_args(cap: f64) -> Vec<String> {
+    if cap > 0.0 {
+        vec!["--max-budget-usd".to_string(), cap.to_string()]
+    } else {
+        Vec::new()
+    }
 }
 
 pub fn build_args(model: &str, resume: Option<&str>) -> Vec<String> {
@@ -91,6 +102,7 @@ pub fn spawn<T: Send + 'static>(
 ) -> io::Result<ClaudeProc> {
     let mut cmd = Command::new(&opts.claude_bin);
     cmd.args(build_args(&opts.model, opts.resume.as_deref()))
+        .args(budget_args(opts.max_budget_usd))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -202,6 +214,12 @@ fn new_request_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn budget_args_only_when_cap_is_set() {
+        assert!(budget_args(0.0).is_empty());
+        assert_eq!(budget_args(0.5), ["--max-budget-usd", "0.5"]);
+    }
 
     #[test]
     fn args_match_go_session_defaults() {
