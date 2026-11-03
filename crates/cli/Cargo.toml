@@ -13,3 +13,6 @@ chaude-core = { path = "../core" }
 serde_json.workspace = true
 crossterm = "0.29"
 unicode-width = "0.2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -304,8 +304,16 @@ impl App {
                 self.transcript.push(format!("{GREY_ON}{note}{FG_OFF}"));
                 self.transcript.push(String::new());
             }
-            // Variants added after the TUI wiring (non_exhaustive in core) render nothing yet
-            // (RateLimit: fmtRateStatus needs local time, not available in this crate).
+            // Go repl.go setRate: the status-line rate text is recomputed on every rate_limit_event.
+            UiEvent::RateLimit { info } => {
+                self.bar.rate = rate_status(&info, unix_now()).filter(|s| !s.is_empty());
+            }
+            // Go repl.go budgetStop: one dim line in the transcript (no blank row after it).
+            UiEvent::BudgetStop { spent_usd, cap_usd } => {
+                let notice = bar::budget_notice(spent_usd, cap_usd);
+                self.transcript.push(format!("{GREY_ON}{notice}{FG_OFF}"));
+            }
+            // Variants added after the TUI wiring (non_exhaustive in core) render nothing yet.
             _ => {}
         }
         if content && !self.follow {
@@ -1097,6 +1105,75 @@ fn plain(cfg: Config) -> io::Result<()> {
     Ok(())
 }
 
+// Go ratestatus.go rateNum: a JSON number, or a numeric string.
+fn rate_num(v: &serde_json::Value) -> Option<f64> {
+    match v {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => s.parse().ok(),
+        _ => None,
+    }
+}
+
+// Go ratestatus.go fmtRateStatus: "now/reset · N%" from the five-hour window; None when no percent is known.
+// Top-level fields only count for the five_hour window (rateLimitType is "" or "five_hour").
+fn rate_status(info: &serde_json::Value, now: i64) -> Option<String> {
+    let w = &info["unifiedWindows"]["five_hour"];
+    let top = info["rateLimitType"].as_str().unwrap_or("");
+    let top_is_5h = top.is_empty() || top == "five_hour";
+    let mut v = rate_num(&w["utilization"]).or_else(|| {
+        if top_is_5h {
+            rate_num(&info["utilization"])
+        } else {
+            None
+        }
+    })?;
+    if v < 1.0 {
+        v *= 100.0; // fraction scale (0.37 -> 37%)
+    }
+    let mut reset = rate_num(&w["resetsAt"]);
+    if reset.is_none() && top_is_5h {
+        reset = rate_num(&info["resetsAt"]);
+    }
+    let reset = match reset {
+        Some(r) if r > 1e12 => (r / 1000.0) as i64, // milliseconds
+        Some(r) => r as i64,
+        None => now,
+    };
+    Some(format!(
+        "{}/{} · {}%",
+        clock_hhmm(now),
+        clock_hhmm(reset),
+        v.round() as i64
+    ))
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+// Local "HH:MM" (Go time.Format("15:04")).
+#[cfg(unix)]
+fn clock_hhmm(secs: i64) -> String {
+    let t = secs as libc::time_t;
+    // SAFETY: localtime_r writes into the zeroed tm we own and reads only the local `t`.
+    let tm = unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        tm
+    };
+    format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+}
+
+// No libc off unix: UTC clock, so the rate text stays well-formed.
+#[cfg(not(unix))]
+fn clock_hhmm(secs: i64) -> String {
+    let day = secs.rem_euclid(86_400);
+    format!("{:02}:{:02}", day / 3600, day % 3600 / 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1530,6 +1607,56 @@ mod tests {
         assert_eq!(
             app.on_key(key(KeyCode::Char('d'), KeyModifiers::CONTROL)),
             Action::Quit
+        );
+    }
+
+    #[test]
+    fn rate_status_follows_go_fmt_rate_status() {
+        use serde_json::json;
+        let now = 1_700_000_000;
+        let reset = 1_700_003_600;
+        let want = format!("{}/{} · 37%", clock_hhmm(now), clock_hhmm(reset));
+        // Fraction scale, ISO-less epoch seconds.
+        let frac =
+            json!({"unifiedWindows": {"five_hour": {"utilization": 0.37, "resetsAt": reset}}});
+        assert_eq!(rate_status(&frac, now).as_deref(), Some(want.as_str()));
+        // Percent scale with milliseconds and a string value.
+        let pct = json!({"unifiedWindows": {"five_hour": {"utilization": "37", "resetsAt": reset * 1000}}});
+        assert_eq!(rate_status(&pct, now).as_deref(), Some(want.as_str()));
+        // No reset time: the reset column shows now.
+        let no_reset = json!({"unifiedWindows": {"five_hour": {"utilization": 0.37}}});
+        assert_eq!(
+            rate_status(&no_reset, now),
+            Some(format!("{0}/{0} · 37%", clock_hhmm(now)))
+        );
+        // No percent, or a top-level percent for another window: nothing to show.
+        assert_eq!(rate_status(&json!({"unifiedWindows": {}}), now), None);
+        let weekly = json!({"rateLimitType": "seven_day", "utilization": 0.37});
+        assert_eq!(rate_status(&weekly, now), None);
+    }
+
+    #[test]
+    fn rate_event_sets_the_status_rate_and_budget_stop_prints_one_line() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::RateLimit {
+            info: serde_json::json!({"unifiedWindows": {"five_hour": {"utilization": 0.5}}}),
+        });
+        assert!(
+            app.bar
+                .rate
+                .as_deref()
+                .is_some_and(|r| r.ends_with("· 50%"))
+        );
+        app.apply(UiEvent::BudgetStop {
+            spent_usd: 1.5,
+            cap_usd: 2.0,
+        });
+        assert_eq!(
+            app.transcript.last().map(String::as_str),
+            Some(
+                format!("{GREY_ON}[budget] $1.5000 / $2.0000 reached, task stopped{FG_OFF}")
+                    .as_str()
+            )
         );
     }
 
