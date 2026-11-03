@@ -89,6 +89,17 @@ pub enum UiEvent {
         reason: String,
     },
     Error(String),
+    // Text of a tool_result (Go tui.go resultText: a string, or the text blocks joined by newlines).
+    ToolResult {
+        id: String,
+        text: String,
+    },
+    // The Agent launched in the background; it keeps running after this result, so no AgentEnd follows.
+    AgentBackground {
+        id: String,
+    },
+    // The running turn ended after an interrupt (before its TurnEnd).
+    Interrupted,
 }
 
 #[derive(Debug, Clone)]
@@ -508,9 +519,14 @@ impl State {
             id: id.clone(),
             ok: !is_error,
         });
-        let text = content.map(|v| v.to_string()).unwrap_or_default();
+        let text = result_text(content.as_ref());
+        self.emit(UiEvent::ToolResult {
+            id: id.clone(),
+            text: text.clone(),
+        });
         // A background agent keeps running after its launch result; it ends later, which E1 does not track.
         if text.contains(ASYNC_AGENT_MARK) {
+            self.emit(UiEvent::AgentBackground { id });
             return;
         }
         if let Some(t0) = self.agents.remove(&id) {
@@ -586,6 +602,9 @@ impl State {
 
     // Finishes the running turn and starts the next queued one, if any.
     fn end_turn(&mut self, duration_ms: u64) {
+        if self.interrupted_at.is_some() {
+            self.emit(UiEvent::Interrupted);
+        }
         self.turn_started = None;
         self.interrupted_at = None;
         self.open_tools.clear();
@@ -618,6 +637,19 @@ impl State {
 }
 
 // First short string field of a tool input, for the one-line ToolStart summary.
+// Go tui.go resultText: a plain string, or the "text" of each block joined by newlines.
+fn result_text(v: Option<&Value>) -> String {
+    match v {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .map(|b| b.get("text").and_then(Value::as_str).unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
 fn tool_summary(input: &Value) -> String {
     [
         "command",

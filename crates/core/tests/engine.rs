@@ -478,6 +478,7 @@ fn interrupted_turn_with_open_agent_is_ended_after_grace() {
             .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_agent1")),
         "open agent must end with the turn: {evs:?}"
     );
+    assert!(evs.contains(&UiEvent::Interrupted), "{evs:?}");
     assert!(
         evs.iter().any(|e| matches!(e, UiEvent::TurnEnd { .. })),
         "{evs:?}"
@@ -591,5 +592,33 @@ fn stray_result_of_abandoned_turn_does_not_end_next_turn() {
         "stale result ended the next turn before its reply: {evs:?}"
     );
     assert!(matches!(evs.last(), Some(UiEvent::Busy(false))), "{evs:?}");
+    h.shutdown();
+}
+
+// tool_result text follows Go resultText; the async launch marks the agent as background, not ended.
+#[test]
+fn tool_result_text_and_background_agent_flag_are_emitted() {
+    let _g = lock();
+    let f = fake("bg-flag", &["bg_turn_live.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("run in background");
+    let evs = until_idle(&rx);
+    let id = "toolu_01QKrZwzJmDuTJ8a4RJUWNgn".to_string();
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            UiEvent::ToolResult { id: i, text } if *i == id && text.starts_with("Async agent launched")
+        )),
+        "{evs:?}"
+    );
+    assert!(
+        evs.contains(&UiEvent::AgentBackground { id: id.clone() }),
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id: i, .. } if *i == id)),
+        "{evs:?}"
+    );
     h.shutdown();
 }
