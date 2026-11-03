@@ -169,6 +169,8 @@ pub struct Config {
     pub task_budget_usd: f64,
     // Go --metrics-dir: per-turn JSONL log directory. None = off (the CLI passes <record>/metrics).
     pub metrics_dir: Option<PathBuf>,
+    // Go --transcript: JSONL trace of unparsable child lines ({"kind":"unparsed"}). None = off (the CLI passes StateDir/transcript.jsonl).
+    pub transcript: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -187,6 +189,7 @@ impl Default for Config {
             auto_allow: false,
             task_budget_usd: 0.0,
             metrics_dir: None,
+            transcript: None,
         }
     }
 }
@@ -552,9 +555,27 @@ impl State {
 
     fn on_line(&mut self, line: &str) {
         self.last_activity = Instant::now();
-        if let Ok(ev) = parse_line(line) {
-            self.on_event(ev);
+        match parse_line(line) {
+            Ok(ev) => self.on_event(ev),
+            Err(_) => self.log_unparsed(line),
         }
+    }
+
+    // Go repl.go _unparsed -> Transcript.add("unparsed"): trace only, the turn is not affected. Write errors are ignored.
+    fn log_unparsed(&self, line: &str) {
+        let Some(path) = &self.cfg.transcript else {
+            return;
+        };
+        let t = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        let row = json!({"t": t, "kind": "unparsed", "raw": line});
+        let _ = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .and_then(|mut f| f.write_all(format!("{row}\n").as_bytes()));
     }
 
     fn on_event(&mut self, ev: Event) {

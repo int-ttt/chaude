@@ -188,6 +188,35 @@ fn submit_while_busy_queues_and_never_interrupts() {
 }
 
 #[test]
+fn unparsed_child_line_is_traced_and_turn_still_ends() {
+    let _g = lock();
+    let f = fake("unparsed", &["unparsed_turn.jsonl"]);
+    let trace = f.dir.join("transcript.jsonl");
+    let cfg = Config {
+        transcript: Some(trace.clone()),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("hi");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::Error(_))),
+        "{evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, UiEvent::TurnEnd { .. })),
+        "{evs:?}"
+    );
+    let log = wait_for(&trace, "unparsed");
+    assert_eq!(log.lines().count(), 1, "{log}");
+    assert!(
+        log.contains(r#""kind":"unparsed""#) && log.contains(r#""raw":"not json at all""#),
+        "{log}"
+    );
+    h.shutdown();
+}
+
+#[test]
 fn queued_prompts_go_out_as_one_merged_turn_on_done() {
     let _g = lock();
     let f = fake("merge", &["text_turn.jsonl", "text_turn.jsonl"]);
