@@ -55,6 +55,7 @@ version = "0.10.0"
 dependencies = [
  "chaude-core",
  "crossterm",
+ "serde_json",
  "unicode-width",
 ]
 
