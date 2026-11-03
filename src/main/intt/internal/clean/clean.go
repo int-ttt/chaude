@@ -6,6 +6,7 @@ package clean
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -16,7 +17,11 @@ import (
 	"time"
 
 	"chaude/internal/lean"
+	"chaude/internal/settings"
 )
+
+// hookSrcFn is the package hook folder that project hook files are compared with (tests replace it).
+var hookSrcFn = settings.HookSource
 
 const (
 	markStart    = "<!-- claude-lean:start -->"
@@ -71,11 +76,13 @@ const cleanUsage = `usage: chaude clean [dir] [--yes]
 type Plan struct {
 	Dir         string
 	removeFiles []string          // slash paths under .claude/ that exist and are in the manifest
+	kept        []string          // hook files left alone: not byte-identical to the package copy (or no package copy)
 	mdTouched   bool              // CLAUDE.md contains the marker block
 	mdDelete    bool              // nothing but the block was in CLAUDE.md: delete the file
 	mdNew       []byte            // CLAUDE.md content without the block (when !mdDelete)
 	setTouched  bool              // settings.json had package hook entries
 	setNew      []byte            // settings.json without them
+	setDelete   bool              // nothing but the package hooks was in settings.json: delete the file
 	hookRemoved int               // number of package hook entries removed
 	orig        map[string][]byte // slash path -> original bytes of every touched file (backup source)
 }
@@ -84,16 +91,22 @@ type Plan struct {
 // e.g. a CLAUDE.md with only a start marker or a settings.json that is not JSON.
 func MakePlan(dir string) (*Plan, error) {
 	p := &Plan{Dir: dir, orig: map[string][]byte{}}
+	src := hookSrcFn()
 	for _, rel := range pkgFiles {
-		st, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)))
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		st, err := os.Stat(full)
 		if err != nil || st.IsDir() {
 			continue
 		}
-		p.removeFiles = append(p.removeFiles, rel)
-		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+		b, err := os.ReadFile(full)
 		if err != nil {
 			return nil, err
 		}
+		if strings.HasPrefix(rel, hooksDir) && !samePackageCopy(src, path.Base(rel), b) {
+			p.kept = append(p.kept, rel)
+			continue
+		}
+		p.removeFiles = append(p.removeFiles, rel)
 		p.orig[rel] = b
 	}
 	if err := p.planClaudeMd(); err != nil {
@@ -103,6 +116,24 @@ func MakePlan(dir string) (*Plan, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// samePackageCopy: a hook file is removed only when its bytes equal (sha256) the package copy in src.
+// Without a package copy (src "" or no such file) nothing can be proven, so the file is kept.
+func samePackageCopy(src, name string, b []byte) bool {
+	if src == "" {
+		return false
+	}
+	pkg, err := os.ReadFile(filepath.Join(src, name))
+	if err != nil {
+		return false
+	}
+	return sha256.Sum256(pkg) == sha256.Sum256(b)
+}
+
+// Kept lists the hook files that were not removed (slash paths under .claude/hooks/).
+func (p *Plan) Kept() []string {
+	return p.kept
 }
 
 // Lines describes the planned changes (one line per target).
@@ -119,7 +150,11 @@ func (p *Plan) Lines() []string {
 		}
 	}
 	if p.setTouched {
-		ls = append(ls, fmt.Sprintf("settings .claude/settings.json: %d claude-lean hook entries removed (other keys kept)", p.hookRemoved))
+		if p.setDelete {
+			ls = append(ls, "delete  .claude/settings.json (only the claude-lean hook entries were in it)")
+		} else {
+			ls = append(ls, fmt.Sprintf("settings .claude/settings.json: %d claude-lean hook entries removed (other keys kept)", p.hookRemoved))
+		}
 	}
 	return ls
 }
@@ -146,7 +181,7 @@ func (p *Plan) Apply(now time.Time) (string, error) {
 			return bdir, err
 		}
 	}
-	if p.setTouched {
+	if p.setTouched && !p.setDelete {
 		if err := writeFile(filepath.Join(p.Dir, ".claude", "settings.json"), p.setNew); err != nil {
 			return bdir, err
 		}
@@ -156,6 +191,12 @@ func (p *Plan) Apply(now time.Time) (string, error) {
 			return bdir, err
 		}
 		pruneEmptyDirs(p.Dir, path.Dir(rel))
+	}
+	if p.setTouched && p.setDelete {
+		if err := os.Remove(filepath.Join(p.Dir, ".claude", "settings.json")); err != nil {
+			return bdir, err
+		}
+		pruneEmptyDirs(p.Dir, ".claude")
 	}
 	return bdir, nil
 }
@@ -247,6 +288,13 @@ func (p *Plan) planSettings() error {
 	}
 	n := stripHooks(m, pkgHookNames())
 	if n == 0 {
+		return nil
+	}
+	if len(m) == 0 {
+		p.orig[rel] = b
+		p.setTouched = true
+		p.setDelete = true
+		p.hookRemoved = n
 		return nil
 	}
 	var buf bytes.Buffer
@@ -412,6 +460,9 @@ func Main(args []string) int {
 		return 1
 	}
 	lines := p.Lines()
+	for _, k := range p.Kept() {
+		fmt.Printf("keep    %s (differs from the package copy, or no package copy to compare)\n", k)
+	}
 	if len(lines) == 0 {
 		fmt.Printf("nothing to remove: no claude-lean harness files in %s\n", abs)
 		return 0
