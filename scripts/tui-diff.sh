@@ -40,7 +40,8 @@ cat >"$FAKE_DIR/claude" <<'EOF'
 #!/bin/sh
 case "$*" in
   *--version*) echo "2.0.0 (Claude Code)"; exit 0 ;;
-  "-p "*|*" -p "*|*" -p") echo '{}'; exit 0 ;;
+  # one-shot /usage only (`-p /usage --output-format json`); the session argv starts with `-p` too, so match the json format
+  *"--output-format json"*) echo '{}'; exit 0 ;;
 esac
 while IFS= read -r line; do
   case "$line" in

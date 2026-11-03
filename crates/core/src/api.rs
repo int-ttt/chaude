@@ -540,7 +540,7 @@ impl State {
         self.last_activity = Instant::now();
         match parse_line(line) {
             Ok(ev) => self.on_event(ev),
-            Err(e) => self.emit(UiEvent::Error(format!("bad stream line: {e}"))),
+            Err(_) => {}
         }
     }
 
