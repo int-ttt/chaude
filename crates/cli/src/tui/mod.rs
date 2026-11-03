@@ -56,6 +56,14 @@ pub enum Action {
     Quit,
     // /usage: the caller asks the engine for the one-shot run (UiEvent::Usage). Never a turn.
     Usage,
+    // Answer to the open permission prompt (Go tui.go key(): y/Enter allow, n/Esc deny, Ctrl+C deny + interrupt).
+    Answer {
+        id: String,
+        allow: bool,
+        interrupt: bool,
+    },
+    // Shift+Tab: the engine cycles the permission mode (Go setMode(Next())); it answers with ModeChanged.
+    CycleMode,
 }
 
 pub struct App {
@@ -92,6 +100,8 @@ pub struct App {
     sugg_sel: usize,
     // Full-screen /usage window (Go m.usage); replaces the transcript viewport while open.
     usage: usage::Usage,
+    // Id of the permission request waiting for y/n (UiEvent::PermissionRequest). While set, keys answer it.
+    perm: Option<String>,
     welcome: Welcome,
 }
 
@@ -137,6 +147,7 @@ impl App {
             mouse: true,
             sugg_sel: 0,
             usage: usage::Usage::default(),
+            perm: None,
         }
     }
 
@@ -254,6 +265,8 @@ impl App {
             UiEvent::Error(msg) => self.transcript.push(format!("! {msg}")),
             // Go tuiWriter note: the interrupted turn keeps its text, then the dim marker.
             UiEvent::Interrupted => {
+                // The engine drops the abandoned turn's prompts (core pending_perm), so none can be answered now.
+                self.perm = None;
                 self.end_main_block();
                 self.transcript
                     .push(format!("{GREY_ON}[interrupted]{FG_OFF}"));
@@ -285,7 +298,8 @@ impl App {
                 self.bar.mode = mode;
             }
             // Go ui.ask: the prompt is a note; the answer key path is not wired yet.
-            UiEvent::PermissionRequest { tool, summary, .. } => {
+            UiEvent::PermissionRequest { id, tool, summary } => {
+                self.perm = Some(id);
                 let note = render::perm_note(&tool, &summary);
                 self.transcript.push(format!("{GREY_ON}{note}{FG_OFF}"));
                 self.transcript.push(String::new());
@@ -317,6 +331,27 @@ impl App {
             }
             return Action::Continue;
         }
+        // Go tui.go key(): while a permission prompt is open, only y/Enter, n/Esc and Ctrl+C are read.
+        if let Some(id) = self.perm.clone() {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            let (allow, interrupt) = match key.code {
+                KeyCode::Char('y' | 'Y') | KeyCode::Enter => (true, false),
+                KeyCode::Char('n' | 'N') | KeyCode::Esc => (false, false),
+                KeyCode::Char('c') if ctrl => (false, true),
+                _ => return Action::Continue,
+            };
+            self.perm = None;
+            if !interrupt {
+                let word = if allow { "allowed" } else { "denied" };
+                self.transcript.push(format!("{GREY_ON}{word}{FG_OFF}"));
+                self.transcript.push(String::new());
+            }
+            return Action::Answer {
+                id,
+                allow,
+                interrupt,
+            };
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
@@ -332,6 +367,8 @@ impl App {
                     Action::Continue
                 }
             }
+            // Go tui.go: Ctrl+D quits at once, busy or not.
+            KeyCode::Char('d') if ctrl => Action::Quit,
             KeyCode::Char('j') if ctrl => {
                 self.editor.newline();
                 Action::Continue
@@ -456,6 +493,7 @@ impl App {
                 }
                 Action::Continue
             }
+            KeyCode::BackTab => Action::CycleMode,
             _ => Action::Continue,
         }
     }
@@ -991,6 +1029,17 @@ fn tui(cfg: Config) -> io::Result<()> {
                     Action::Interrupt(src) => engine.interrupt(src),
                     Action::Quit => break 'main,
                     Action::Usage => engine.usage(),
+                    Action::Answer {
+                        id,
+                        allow,
+                        interrupt,
+                    } => {
+                        engine.answer_permission(&id, allow);
+                        if interrupt {
+                            engine.interrupt(InterruptSource::CtrlC);
+                        }
+                    }
+                    Action::CycleMode => engine.set_mode("next"),
                 },
                 Event::Paste(text) => app.editor.insert_str(&text),
                 Event::Mouse(m) if app.mouse => match m.kind {
@@ -1405,6 +1454,82 @@ mod tests {
         assert_eq!(
             app.on_key(ctrl_c()),
             Action::Interrupt(InterruptSource::CtrlC)
+        );
+    }
+
+    #[test]
+    fn permission_prompt_takes_y_n_enter_esc_and_swallows_other_keys() {
+        let mut app = App::new(80, 24);
+        let ask = |app: &mut App| {
+            app.apply(UiEvent::PermissionRequest {
+                id: "p1".into(),
+                tool: "Bash".into(),
+                summary: "ls".into(),
+            })
+        };
+        ask(&mut app);
+        assert_eq!(
+            app.on_key(key(KeyCode::Char('x'), KeyModifiers::NONE)),
+            Action::Continue
+        );
+        assert!(app.editor.is_empty());
+        assert_eq!(
+            app.on_key(key(KeyCode::Char('y'), KeyModifiers::NONE)),
+            Action::Answer {
+                id: "p1".into(),
+                allow: true,
+                interrupt: false
+            }
+        );
+        ask(&mut app);
+        assert_eq!(
+            app.on_key(key(KeyCode::Esc, KeyModifiers::NONE)),
+            Action::Answer {
+                id: "p1".into(),
+                allow: false,
+                interrupt: false
+            }
+        );
+        ask(&mut app);
+        assert_eq!(
+            app.on_key(key(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+            Action::Answer {
+                id: "p1".into(),
+                allow: false,
+                interrupt: true
+            }
+        );
+        assert_eq!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::Continue
+        );
+    }
+
+    #[test]
+    fn interrupt_drops_an_open_permission_prompt() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::PermissionRequest {
+            id: "p2".into(),
+            tool: "Bash".into(),
+            summary: "rm".into(),
+        });
+        app.apply(UiEvent::Interrupted);
+        assert_eq!(
+            app.on_key(key(KeyCode::Char('y'), KeyModifiers::NONE)),
+            Action::Continue
+        );
+    }
+
+    #[test]
+    fn shift_tab_cycles_mode_and_ctrl_d_quits() {
+        let mut app = App::new(80, 24);
+        assert_eq!(
+            app.on_key(key(KeyCode::BackTab, KeyModifiers::SHIFT)),
+            Action::CycleMode
+        );
+        assert_eq!(
+            app.on_key(key(KeyCode::Char('d'), KeyModifiers::CONTROL)),
+            Action::Quit
         );
     }
 
