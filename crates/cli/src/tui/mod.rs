@@ -193,6 +193,8 @@ impl App {
                 self.transcript.push(format!("↻ session rotated: {reason}"))
             }
             UiEvent::Error(msg) => self.transcript.push(format!("! {msg}")),
+            // Variants added after the TUI wiring (non_exhaustive in core) render nothing yet.
+            _ => {}
         }
         if content && !self.follow {
             self.unseen = true;

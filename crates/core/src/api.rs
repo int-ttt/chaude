@@ -46,6 +46,7 @@ impl InterruptSource {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum UiEvent {
     TextDelta {
         role: Role,
