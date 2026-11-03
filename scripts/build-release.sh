@@ -5,7 +5,7 @@ set -eu
 VERSION="${1:?usage: build-release.sh <version>}"
 VERSION="${VERSION#v}"
 MAIN_PKG="${MAIN_PKG:-./cmd/chaude}"
-TARGETS="${TARGETS:-darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64}"
+TARGETS="${TARGETS:-darwin/arm64 linux/amd64 linux/arm64 windows/amd64}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MOD="$ROOT/src/main/intt"   # Go module root; go commands run here
 cd "$ROOT"

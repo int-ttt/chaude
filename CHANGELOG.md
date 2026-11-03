@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.14
+- 설정: 세션 시작 시 `.claude/settings.json`이 없으면 가드 훅이 들어간 파일을 자동으로 만듭니다.
+- 빌드 대상 축소: 릴리즈 빌드를 darwin/arm64, linux/amd64, linux/arm64, windows/amd64 4개로 줄였습니다. Intel Mac(darwin/amd64)은 더 이상 빌드하지 않아 설치와 `chaude update`가 오류로 안내합니다. windows/arm64 설치와 업데이트는 windows/amd64 빌드를 받습니다(x64 에뮬레이션).
+- 버전 표기: cmd/chaude/main.go, docs/claude-lean/README.md, README.md를 0.9.14로 갱신
+
 ## 0.9.13
 - 메인 Opus 기본 effort를 medium으로 바꿨습니다 (`설정: 메인 Opus 기본 effort를 medium으로 변경`).
 - 효율: 핑퐁 벤치 effort 재측정(unset/low/medium, 2회 평균)을 추가했습니다. 비용은 unset 0.861 / low 0.689 / medium 0.786 USD(plain 1.379 대비 -37.5% / -50.0% / -43.0%)입니다. 이번 측정에서 low가 가장 쌌고 medium이 그 다음입니다. 표본이 2회라 순서를 확정할 수 없습니다. 상세는 `docs/pingpong-bench.md`입니다.

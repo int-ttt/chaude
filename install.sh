@@ -1,5 +1,5 @@
 #!/bin/sh
-# chaude installer (macOS / Linux, amd64 + arm64). Standalone: installs prebuilt release binaries only
+# chaude installer (macOS arm64 only / Linux amd64 + arm64). Standalone: installs prebuilt release binaries only
 # (no source build, no repo checkout, so git and go are not needed). Public repo: no token required.
 #   curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | bash
 # Windows: install.ps1 (irm ... | iex).
@@ -37,6 +37,9 @@ case "$arch" in
   arm64|aarch64) arch=arm64 ;;
   *) echo "error: unsupported architecture: ${arch}" >&2; exit 1 ;;
 esac
+if [ "$os" = darwin ] && [ "$arch" = amd64 ]; then
+  echo "error: unsupported: Intel Mac (darwin/amd64). chaude supports Apple Silicon (arm64) Macs only." >&2; exit 1
+fi
 case "$VERSION" in
   latest|v*) ;;
   *) VERSION="v${VERSION}" ;;

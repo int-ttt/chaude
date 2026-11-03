@@ -349,3 +349,21 @@ func TestMainUsage(t *testing.T) {
 		t.Errorf("Main with bad args = %d, want 2", code)
 	}
 }
+
+func TestAssetNamePlatforms(t *testing.T) {
+	cases := []struct{ goos, goarch, want string }{
+		{"windows", "amd64", "chaude_0.9.14_windows_amd64.zip"},
+		{"windows", "arm64", "chaude_0.9.14_windows_amd64.zip"},
+		{"darwin", "arm64", "chaude_0.9.14_darwin_arm64.tar.gz"},
+		{"linux", "arm64", "chaude_0.9.14_linux_arm64.tar.gz"},
+	}
+	for _, c := range cases {
+		got, err := assetName("0.9.14", c.goos, c.goarch)
+		if err != nil || got != c.want {
+			t.Errorf("assetName(%s/%s) = %q, %v; want %q", c.goos, c.goarch, got, err, c.want)
+		}
+	}
+	if _, err := assetName("0.9.14", "darwin", "amd64"); err == nil {
+		t.Errorf("assetName(darwin/amd64) returned no error, want Apple Silicon only error")
+	}
+}

@@ -16,6 +16,8 @@ jobs:
           go-version-file: src/main/intt/go.mod
           cache-dependency-path: src/main/intt/go.sum
       - name: Build archives
+        env:
+          TARGETS: darwin/arm64 linux/amd64 linux/arm64 windows/amd64
         run: sh scripts/build-release.sh "${GITHUB_REF_NAME}"
       - name: Release notes
         run: |

@@ -144,7 +144,10 @@ func Run(ctx context.Context, current string, o Options) (string, error) {
 		return "", err
 	}
 
-	name := assetName(newV, o.GOOS, o.GOARCH)
+	name, err := assetName(newV, o.GOOS, o.GOARCH)
+	if err != nil {
+		return "", err
+	}
 	asset, ok := rel.asset(name)
 	if !ok {
 		return "", fmt.Errorf("%s not found in release %s (no prebuilt binary for %s/%s); nothing installed", name, rel.Tag, o.GOOS, o.GOARCH)
@@ -338,11 +341,18 @@ func compareVersion(a, b [3]int) int {
 }
 
 // assetName is the release archive install.sh / install.ps1 would download for this platform.
-func assetName(ver, goos, goarch string) string {
-	if goos == "windows" {
-		return fmt.Sprintf("chaude_%s_windows_%s.zip", ver, goarch)
+// windows/arm64 gets the windows/amd64 build (x64 emulation). darwin/amd64 (Intel Mac) has no build.
+func assetName(ver, goos, goarch string) (string, error) {
+	if goos == "darwin" && goarch == "amd64" {
+		return "", fmt.Errorf("unsupported: Intel Mac (darwin/amd64). chaude ships Apple Silicon (darwin/arm64) builds only; nothing installed")
 	}
-	return fmt.Sprintf("chaude_%s_%s_%s.tar.gz", ver, goos, goarch)
+	if goos == "windows" {
+		if goarch == "arm64" {
+			goarch = "amd64"
+		}
+		return fmt.Sprintf("chaude_%s_windows_%s.zip", ver, goarch), nil
+	}
+	return fmt.Sprintf("chaude_%s_%s_%s.tar.gz", ver, goos, goarch), nil
 }
 
 func binName(goos string) string {
