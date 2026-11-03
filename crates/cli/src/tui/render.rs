@@ -3,6 +3,8 @@
 //! call these yet, so dead-code warnings are allowed for this module until they are wired in.
 #![allow(dead_code)]
 
+use std::sync::OnceLock;
+
 use unicode_width::UnicodeWidthChar;
 
 // R01 palette (tui.go:252-256): brand orange and grey as truecolor foreground SGR.
@@ -64,21 +66,251 @@ pub fn strip_sgr(s: &str) -> String {
     out
 }
 
-// R13 display width in cells (unicode-width; CJK is 2, CSI escapes are 0).
-pub fn cell_width(s: &str) -> usize {
-    let mut w = 0;
+// ---- Display width: go-runewidth v0.0.16 StringWidth/RuneWidth, which the Go TUI uses ----
+
+// runewidth.go handleEnv: RUNEWIDTH_EASTASIAN ("1" = on) wins when set, else the locale decides.
+pub fn east_asian() -> bool {
+    static EA: OnceLock<bool> = OnceLock::new();
+    *EA.get_or_init(|| match std::env::var("RUNEWIDTH_EASTASIAN") {
+        Ok(v) if !v.is_empty() => v == "1",
+        _ => {
+            let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
+                .iter()
+                .filter_map(|k| std::env::var(k).ok())
+                .find(|v| !v.is_empty())
+                .unwrap_or_default();
+            is_east_asian_locale(&locale)
+        }
+    })
+}
+
+// reLoc in runewidth_posix.go: ^[a-z][a-z][a-z]?(?:_[A-Z][A-Z])?\.(.+) ; returns the charset part.
+fn locale_charset(locale: &str) -> Option<&str> {
+    let b = locale.as_bytes();
+    let mut i = 0;
+    while i < b.len() && i < 3 && b[i].is_ascii_lowercase() {
+        i += 1;
+    }
+    if !(2..=3).contains(&i) {
+        return None;
+    }
+    if b.len() >= i + 3
+        && b[i] == b'_'
+        && b[i + 1].is_ascii_uppercase()
+        && b[i + 2].is_ascii_uppercase()
+    {
+        i += 3;
+    }
+    if b.get(i) != Some(&b'.') || i + 1 >= b.len() {
+        return None;
+    }
+    Some(&locale[i + 1..])
+}
+
+// runewidth_posix.go IsEastAsian/isEastAsian: C/POSIX are off; a legacy CJK charset (mblenTable) is on;
+// utf-8 is on only for ja/ko/zh locales. "euc-kr" (with a dash) is not in the table, so it stays off.
+pub fn is_east_asian_locale(locale: &str) -> bool {
+    if locale == "POSIX" || locale == "C" {
+        return false;
+    }
+    let b = locale.as_bytes();
+    if b.len() > 1 && b[0] == b'C' && (b[1] == b'.' || b[1] == b'-') {
+        return false;
+    }
+    let mut charset = match locale_charset(locale) {
+        Some(c) => c.to_ascii_lowercase(),
+        None => locale.to_ascii_lowercase(),
+    };
+    if charset.ends_with("@cjk_narrow") {
+        return false;
+    }
+    if let Some(p) = charset.find('@') {
+        charset.truncate(p);
+    }
+    const MBLEN_CJK: [&str; 15] = [
+        "utf-8", "utf8", "jis", "eucjp", "euckr", "euccn", "sjis", "cp932", "cp51932", "cp936",
+        "cp949", "cp950", "big5", "gbk", "gb2312",
+    ];
+    MBLEN_CJK.contains(&charset.as_str())
+        && (!charset.starts_with('u') || ["ja", "ko", "zh"].iter().any(|p| locale.starts_with(p)))
+}
+
+// RuneWidth for one rune. Zero-width marks are 0 as in unicode-width. Go gives the Hangul jamo block
+// U+1160..U+11FF width 1 (unicode-width says 0), and U+FE0F width 2 under EastAsianWidth, else 1.
+pub fn char_width_ea(c: char, ea: bool) -> usize {
+    use super::runewidth_table::{AMBIGUOUS, COMBINING, DOUBLEWIDTH, NARROW, NONPRINT};
+    let r = c as u32;
+    match r {
+        0x1160..=0x11FF => return 1,
+        0xFE0F => return if ea { 2 } else { 1 },
+        _ => {}
+    }
+    // go-runewidth v0.0.16 RuneWidth with StrictEmojiNeutral=true (the default).
+    if !ea {
+        return if r < 0x20 || (0x7F..=0x9F).contains(&r) || r == 0xAD {
+            0
+        } else if r < 0x300 || in_table(r, NARROW) {
+            1
+        } else if in_table(r, NONPRINT) || in_table(r, COMBINING) {
+            0
+        } else if in_table(r, DOUBLEWIDTH) {
+            2
+        } else {
+            1
+        };
+    }
+    if in_table(r, NONPRINT) || in_table(r, COMBINING) {
+        0
+    } else if in_table(r, NARROW) {
+        1
+    } else if in_table(r, AMBIGUOUS) || in_table(r, DOUBLEWIDTH) {
+        2
+    } else {
+        1
+    }
+}
+
+// Binary search over sorted inclusive (first, last) ranges (go-runewidth inTable).
+fn in_table(r: u32, t: &[(u32, u32)]) -> bool {
+    t.binary_search_by(|&(lo, hi)| {
+        if hi < r {
+            std::cmp::Ordering::Less
+        } else if lo > r {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Equal
+        }
+    })
+    .is_ok()
+}
+
+// Width of one rune under the process EastAsianWidth setting (input.go rw).
+pub fn char_width(c: char) -> usize {
+    char_width_ea(c, east_asian())
+}
+
+fn is_ri(c: char) -> bool {
+    ('\u{1F1E6}'..='\u{1F1FF}').contains(&c)
+}
+
+fn hangul_syllable(c: char) -> bool {
+    ('\u{AC00}'..='\u{D7A3}').contains(&c)
+}
+
+// Hangul syllable with no trailing consonant (LV). Such a syllable takes V or T after it.
+fn hangul_lv(c: char) -> bool {
+    hangul_syllable(c) && (c as u32 - 0xAC00).is_multiple_of(28)
+}
+
+// UAX29 GB6-GB8: L x (L|V|LV|LVT); (LV|V) x (V|T); (LVT|T) x T. Decomposed jamo are L 1100-115F, V 1160-11A7, T 11A8-11FF.
+fn hangul_joins(prev: char, next: char) -> bool {
+    let (p, n) = (prev as u32, next as u32);
+    let l = matches!(p, 0x1100..=0x115F | 0xA960..=0xA97C);
+    let v = matches!(p, 0x1160..=0x11A7 | 0xD7B0..=0xD7C6);
+    let t = matches!(p, 0x11A8..=0x11FF | 0xD7CB..=0xD7FB);
+    let nl = matches!(n, 0x1100..=0x115F | 0xA960..=0xA97C);
+    let nv = matches!(n, 0x1160..=0x11A7 | 0xD7B0..=0xD7C6);
+    let nt = matches!(n, 0x11A8..=0x11FF | 0xD7CB..=0xD7FB);
+    (l && (nl || nv || hangul_syllable(next)))
+        || ((hangul_lv(prev) || v) && (nv || nt))
+        || (((hangul_syllable(prev) && !hangul_lv(prev)) || t) && nt)
+}
+
+// Chars that attach to the cluster before them (Extend/SpacingMark, approximated by zero width).
+// ZWJ, the Hangul jamo block and the format controls are handled elsewhere.
+fn is_extend(c: char) -> bool {
+    match c as u32 {
+        0xFE0E | 0xFE0F | 0x1F3FB..=0x1F3FF => true,
+        0x1160..=0x11FF | 0xD7B0..=0xD7FB => false,
+        0x200B..=0x200F | 0x2028..=0x202E | 0x2060..=0x206F | 0xFEFF => false,
+        _ => c.width() == Some(0) && !c.is_control(),
+    }
+}
+
+// Splits s into extended grapheme clusters, approximating UAX29 (go-runewidth uses uniseg for StringWidth).
+pub fn grapheme_clusters(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut prev: Option<char> = None;
+    let mut ri_run = 0usize;
+    for (i, c) in s.char_indices() {
+        if let Some(p) = prev {
+            let join = c == '\u{200D}'
+                || p == '\u{200D}'
+                || is_extend(c)
+                || hangul_joins(p, c)
+                || (is_ri(p) && is_ri(c) && ri_run % 2 == 1);
+            if !join {
+                out.push(&s[start..i]);
+                start = i;
+            }
+        }
+        ri_run = if is_ri(c) { ri_run + 1 } else { 0 };
+        prev = Some(c);
+    }
+    if prev.is_some() {
+        out.push(&s[start..]);
+    }
+    out
+}
+
+// StringWidth per cluster: the first rune with a nonzero width decides (runewidth.go:177-190).
+pub fn cluster_width_ea(cluster: &str, ea: bool) -> usize {
+    cluster
+        .chars()
+        .map(|c| char_width_ea(c, ea))
+        .find(|&w| w > 0)
+        .unwrap_or(0)
+}
+
+pub fn cluster_width(cluster: &str) -> usize {
+    cluster_width_ea(cluster, east_asian())
+}
+
+pub fn display_width_ea(s: &str, ea: bool) -> usize {
+    grapheme_clusters(s)
+        .iter()
+        .map(|g| cluster_width_ea(g, ea))
+        .sum()
+}
+
+// Display width of s in cells (go-runewidth StringWidth). Escapes are not counted.
+pub fn display_width(s: &str) -> usize {
+    display_width_ea(s, east_asian())
+}
+
+// Pieces of s: each CSI escape is one piece of width 0, plain text is split into clusters.
+// The pieces cover s in order, so their byte lengths add up to s.len().
+fn width_pieces(s: &str) -> Vec<(&str, usize)> {
+    let mut out = Vec::new();
+    let mut run = 0;
     let mut i = 0;
     while i < s.len() {
         match csi_len(s.as_bytes(), i) {
-            Some(n) => i += n,
-            None => {
-                let c = cur_char(s, i);
-                w += c.width().unwrap_or(0);
-                i += c.len_utf8();
+            Some(n) => {
+                out.extend(
+                    grapheme_clusters(&s[run..i])
+                        .into_iter()
+                        .map(|g| (g, cluster_width(g))),
+                );
+                out.push((&s[i..i + n], 0));
+                i += n;
+                run = i;
             }
+            None => i += cur_char(s, i).len_utf8(),
         }
     }
-    w
+    out.extend(
+        grapheme_clusters(&s[run..])
+            .into_iter()
+            .map(|g| (g, cluster_width(g))),
+    );
+    out
+}
+
+// R13 display width in cells: CSI escapes are 0, the rest is the StringWidth of the plain text.
+pub fn cell_width(s: &str) -> usize {
+    display_width(&strip_sgr(s))
 }
 
 // R14 ansi.Truncate(s, w, "…") (tui.go:1429): unchanged when it fits, else cut to w-1 cells plus "…".
@@ -91,21 +323,12 @@ pub fn trunc_ellipsis(s: &str, w: usize) -> String {
     }
     let mut out = String::new();
     let mut used = 0;
-    let mut i = 0;
-    while i < s.len() {
-        if let Some(n) = csi_len(s.as_bytes(), i) {
-            out.push_str(&s[i..i + n]);
-            i += n;
-            continue;
-        }
-        let c = cur_char(s, i);
-        let cw = c.width().unwrap_or(0);
-        if used + cw > w - 1 {
+    for (piece, pw) in width_pieces(s) {
+        if pw > 0 && used + pw > w - 1 {
             break;
         }
-        out.push(c);
-        used += cw;
-        i += c.len_utf8();
+        out.push_str(piece);
+        used += pw;
     }
     out.push('…');
     out
@@ -131,7 +354,7 @@ pub fn wrap_cells(s: &str, width: usize) -> String {
                 continue;
             }
             let c = cur_char(line, i);
-            let cw = c.width().unwrap_or(0);
+            let cw = char_width(c);
             if cur + cw > w && !row_empty {
                 out.push('\n');
                 cur = 0;
@@ -710,17 +933,12 @@ pub fn wrap_linked(text: &str, wrap: impl Fn(&str) -> String) -> String {
 fn split_cells(s: &str, at: usize) -> (String, String) {
     let mut col = 0;
     let mut i = 0;
-    while i < s.len() {
+    for (piece, pw) in width_pieces(s) {
         if col >= at {
             break;
         }
-        if let Some(n) = csi_len(s.as_bytes(), i) {
-            i += n;
-            continue;
-        }
-        let c = cur_char(s, i);
-        col += c.width().unwrap_or(0);
-        i += c.len_utf8();
+        col += pw;
+        i += piece.len();
     }
     (s[..i].to_string(), s[i..].to_string())
 }
@@ -1184,6 +1402,93 @@ mod tests {
         // input.go TestInputWidthMixed: "ab한글cd" is 8 cells, "ab글cd" is 6.
         assert_eq!(cell_width("ab한글cd"), 8);
         assert_eq!(cell_width("ab글cd"), 6);
+    }
+
+    #[test]
+    fn width_matches_go_runewidth() {
+        // Expected (EA off, EA on) from go-runewidth v0.0.16 StringWidth, probe /private/tmp/gowidth (en2.txt, ea2.txt).
+        let cases: &[(&str, usize, usize)] = &[
+            ("가", 2, 2),
+            ("힣", 2, 2),
+            ("ㄱ", 2, 2),
+            ("ᄀ", 2, 2),
+            ("ᅡ", 1, 1),
+            ("ᆨ", 1, 1),
+            ("한글 abc", 8, 8),
+            ("。", 2, 2),
+            ("、", 2, 2),
+            ("「」", 4, 4),
+            ("「", 2, 2),
+            ("─", 1, 2),
+            ("│", 1, 2),
+            ("┌", 1, 2),
+            ("█", 1, 2),
+            ("░", 1, 1),
+            ("·", 1, 2),
+            ("※", 1, 2),
+            ("①", 1, 2),
+            ("●", 1, 2),
+            ("→", 1, 2),
+            ("°", 1, 2),
+            ("✻", 1, 1),
+            ("✶", 1, 1),
+            ("⠋", 1, 1),
+            ("😀", 2, 2),
+            ("👍🏽", 2, 2),
+            ("👨\u{200d}👩\u{200d}👧", 2, 2),
+            ("❤\u{fe0f}", 1, 1),
+            ("✔\u{fe0f}", 1, 1),
+            ("☀", 1, 1),
+            ("☀\u{fe0f}", 1, 1),
+            ("🇰🇷", 1, 1),
+            ("🇰🇷🇺", 2, 2),
+            ("🇰", 1, 1),
+            ("\u{e9}", 1, 2),
+            ("e\u{301}", 1, 1),
+            ("e\u{301}\u{302}", 1, 1),
+            ("\u{200b}", 0, 0),
+            ("\u{200d}", 0, 0),
+            ("a\u{200b}b", 2, 2),
+            ("🏽", 2, 2),
+            ("\u{fe0f}", 1, 2),
+            ("\u{1100}\u{1161}", 2, 2),
+            ("\u{1100}\u{1161}\u{11a8}", 2, 2),
+            ("\u{1112}\u{1161}\u{11ab}", 2, 2),
+            ("\u{ac00}\u{11a8}", 2, 2),
+            ("\u{1161}\u{1100}", 3, 3),
+            ("❤\u{fe0f}\u{200d}🔥", 1, 1),
+            ("❤", 1, 1),
+            ("✔", 1, 1),
+        ];
+        for &(s, off, on) in cases {
+            assert_eq!(display_width_ea(s, false), off, "EA off: {s:?}");
+            assert_eq!(display_width_ea(s, true), on, "EA on: {s:?}");
+        }
+        // Per-rune width (input.go rw) for the lone FE0F and the jamo block.
+        assert_eq!(char_width_ea('\u{fe0f}', false), 1);
+        assert_eq!(char_width_ea('\u{fe0f}', true), 2);
+        assert_eq!(char_width_ea('\u{11a8}', false), 1);
+    }
+
+    #[test]
+    fn east_asian_locale_rule() {
+        // runewidth_posix.go isEastAsian/IsEastAsian (the RUNEWIDTH_EASTASIAN override is not read here).
+        assert!(!is_east_asian_locale(""));
+        assert!(!is_east_asian_locale("C"));
+        assert!(!is_east_asian_locale("POSIX"));
+        assert!(!is_east_asian_locale("C.UTF-8"));
+        assert!(!is_east_asian_locale("en_US.UTF-8"));
+        assert!(!is_east_asian_locale("en_US.utf8"));
+        assert!(!is_east_asian_locale("UTF-8"));
+        assert!(!is_east_asian_locale("ko_KR"));
+        assert!(!is_east_asian_locale("ko_KR.UTF-8@cjk_narrow"));
+        // "euc-kr" has a dash, so it is not in mblenTable and stays off.
+        assert!(!is_east_asian_locale("ko_KR.EUC-KR"));
+        assert!(is_east_asian_locale("ko_KR.UTF-8"));
+        assert!(is_east_asian_locale("ko_KR.utf8"));
+        assert!(is_east_asian_locale("ja_JP.eucJP"));
+        assert!(is_east_asian_locale("ko_KR.euckr"));
+        assert!(is_east_asian_locale("zh_TW.Big5"));
     }
 
     #[test]

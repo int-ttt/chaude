@@ -10,8 +10,6 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use unicode_width::UnicodeWidthChar;
-
 // history.go maxHistory
 const MAX_HISTORY: usize = 500;
 
@@ -277,7 +275,7 @@ fn is_word_char(c: char) -> bool {
 }
 
 fn cell_width(c: char) -> usize {
-    UnicodeWidthChar::width(c).unwrap_or(0)
+    super::render::char_width(c)
 }
 
 fn cells(cs: &[char]) -> usize {

@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use unicode_width::UnicodeWidthChar;
+use super::render::{cluster_width, grapheme_clusters};
 
 // Spinner frames and step from tui.go:259-260 (spinner.Frames, FPS = 1/8 s).
 const SPIN_FRAMES: [char; 6] = ['✻', '✽', '✶', '✲', '✢', '·'];
@@ -144,15 +144,18 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
 
 // Cuts `s` to at most `max` display columns. Control characters (newlines, tabs) become spaces.
 pub fn clip(s: &str, max: usize) -> String {
+    let flat: String = s
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
     let mut out = String::new();
     let mut used = 0;
-    for c in s.chars() {
-        let c = if c.is_control() { ' ' } else { c };
-        let w = c.width().unwrap_or(0);
+    for g in grapheme_clusters(&flat) {
+        let w = cluster_width(g);
         if used + w > max {
             break;
         }
-        out.push(c);
+        out.push_str(g);
         used += w;
     }
     out

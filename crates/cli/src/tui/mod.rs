@@ -7,6 +7,7 @@ pub mod commands;
 pub mod edit;
 pub mod overlay;
 pub mod render;
+mod runewidth_table;
 pub mod usage;
 
 use std::io::{self, BufRead, IsTerminal, Write};

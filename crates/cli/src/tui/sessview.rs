@@ -466,7 +466,7 @@ fn utc_parts(secs: i64) -> [i64; 5] {
 }
 
 // Go Format("2006-01-02 15:04") when year is true, else Format("01-02 15:04").
-fn stamp(t: SystemTime, year: bool) -> String {
+pub fn stamp(t: SystemTime, year: bool) -> String {
     let [y, mo, d, h, mi] = local_parts(t);
     if year {
         format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02}")
