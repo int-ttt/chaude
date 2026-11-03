@@ -145,6 +145,8 @@ pub struct Config {
     pub inactivity_timeout: Duration,
     // After an interrupt, how long to wait for the turn's result before force-ending the turn (Go: 20 s).
     pub interrupt_grace: Duration,
+    // Go --auto-allow (testing): every ask is allowed without a UI prompt. Mode verdicts still apply first.
+    pub auto_allow: bool,
 }
 
 impl Default for Config {
@@ -160,6 +162,7 @@ impl Default for Config {
             log_path: None,
             inactivity_timeout: Duration::from_secs(300),
             interrupt_grace: Duration::from_secs(20),
+            auto_allow: false,
         }
     }
 }
@@ -529,13 +532,11 @@ impl State {
                     Verdict::Deny(msg) => {
                         self.respond_permission(&c.request_id, false, Value::Null, msg)
                     }
-                    // Go askPerm idle path: no turn running means no prompt can be answered.
-                    Verdict::Ask if !self.busy => self.respond_permission(
-                        &c.request_id,
-                        false,
-                        Value::Null,
-                        "denied: no interactive prompt available between turns",
-                    ),
+                    // Go askPerm: with a UI the ask goes to the UI whether or not a turn runs. The engine
+                    // always has a UI channel, so Go's idle "no interactive prompt" deny is not reachable.
+                    Verdict::Ask if self.cfg.auto_allow => {
+                        self.respond_permission(&c.request_id, true, input, "")
+                    }
                     Verdict::Ask => {
                         let summary = tool_summary(&input);
                         self.pending_perm.insert(c.request_id.clone(), input);
@@ -556,9 +557,12 @@ impl State {
         }
     }
 
-    // Go /mode. Unknown names are reported with the Go message; the mode is unchanged.
+    // Go /mode. Empty name reports the current mode (Go modeLine with no args). Unknown names are reported
+    // with the Go message and the mode is unchanged.
     fn set_mode(&mut self, name: &str) {
-        let next = if name.trim() == "next" {
+        let next = if name.trim().is_empty() {
+            Some(self.mode)
+        } else if name.trim() == "next" {
             Some(self.mode.next())
         } else {
             PermMode::parse(name)
@@ -711,6 +715,8 @@ impl State {
             }
         }
         let duration_ms = elapsed_ms(self.turn_started);
+        // The abandoned turn's prompts can no longer be answered by the child; drop them.
+        self.pending_perm.clear();
         self.stray_results += 1;
         self.end_turn(duration_ms);
     }

@@ -726,3 +726,81 @@ fn turn_stats_reports_turn_cost_delegations_and_context() {
     assert_eq!(*ctx, last_tokens, "{evs:?}");
     h.shutdown();
 }
+
+#[test]
+fn auto_allow_answers_asks_without_ui_prompt() {
+    let _g = lock();
+    let f = fake("perm-auto", &["permission_turn.jsonl"]);
+    let cfg = Config {
+        auto_allow: true,
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("rm it");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::PermissionRequest { .. })),
+        "{evs:?}"
+    );
+    let log = wait_for(&f.dir.join("stdin.log"), "control_response");
+    assert!(log.contains(r#""behavior":"allow""#), "{log}");
+    h.shutdown();
+}
+
+#[test]
+fn mode_without_name_reports_current_mode() {
+    let _g = lock();
+    let f = fake("mode-report", &["text_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.set_mode("");
+    let ev = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("mode report");
+    assert_eq!(
+        ev,
+        UiEvent::ModeChanged {
+            mode: "default".into()
+        }
+    );
+    h.shutdown();
+}
+
+#[test]
+fn pending_permission_is_dropped_when_turn_is_abandoned() {
+    let _g = lock();
+    let perm = "{\"type\":\"control_request\",\"request_id\":\"perm-1\",\"request\":{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":{\"command\":\"rm -rf x\"}}}\n";
+    let f = fake_gap("perm-hang", perm, "", "0");
+    let cfg = Config {
+        interrupt_grace: Duration::from_millis(200),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("rm it");
+    let mut evs = Vec::new();
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("permission prompt");
+        let prompt = matches!(ev, UiEvent::PermissionRequest { .. });
+        evs.push(ev);
+        if prompt {
+            break;
+        }
+    }
+    h.interrupt(InterruptSource::CtrlC);
+    let rest = until_idle(&rx);
+    assert!(
+        matches!(rest.last(), Some(UiEvent::Busy(false))),
+        "{rest:?}"
+    );
+    h.answer_permission("perm-1", true);
+    let ev = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("reply to stale answer");
+    assert_eq!(
+        ev,
+        UiEvent::Error("no pending permission request perm-1".into())
+    );
+    h.shutdown();
+}
