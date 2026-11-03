@@ -4,7 +4,7 @@
 
 ## 설치
 
-릴리즈 바이너리는 darwin, linux, windows용이며 amd64와 arm64를 지원합니다. 저장소가 공개이므로 토큰 없이 설치할 수 있습니다. 토큰은 선택 사항이며, API 요청 한도(403)에 걸릴 때만 필요합니다.
+릴리즈 바이너리는 macOS Apple Silicon(darwin/arm64), Linux(amd64, arm64), Windows(amd64)용입니다. arm64 Windows PC는 x64 에뮬레이션으로 amd64 빌드를 실행합니다. Intel Mac은 지원하지 않습니다. 저장소가 공개이므로 토큰 없이 설치할 수 있습니다. 토큰은 선택 사항이며, API 요청 한도(403)에 걸릴 때만 필요합니다.
 
 설치 스크립트는 토큰을 이 순서로 찾습니다.
 
