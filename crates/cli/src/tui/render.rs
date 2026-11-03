@@ -229,10 +229,10 @@ pub fn tool_result_text(s: &str) -> Option<String> {
     Some(t)
 }
 
-// R06 toolSummary (tui.go:67): the first priority key with a non-empty value, newlines turned into spaces,
-// cut to 100 chars. Some("") for empty input. None when the input has keys but none of the priority keys;
-// the Go fallback (JSON of the input) is not ported (no serde_json dependency in chaude-cli).
-pub fn tool_summary(input: &[(&str, &str)]) -> Option<String> {
+// R06 toolSummary (tui.go:67): the first priority key whose string value is non-empty, newlines turned
+// into spaces, cut to 100 chars. Otherwise the compact JSON of the input (Go jsonStr), cut to 100 chars.
+// Empty for no input.
+pub fn tool_summary(input: &serde_json::Value) -> String {
     const KEYS: [&str; 8] = [
         "command",
         "file_path",
@@ -244,16 +244,18 @@ pub fn tool_summary(input: &[(&str, &str)]) -> Option<String> {
         "prompt",
     ];
     for key in KEYS {
-        if let Some((_, v)) = input.iter().find(|(k, _)| *k == key)
+        if let Some(v) = input.get(key).and_then(serde_json::Value::as_str)
             && !v.is_empty()
         {
-            return Some(trunc_chars(&v.replace('\n', " "), 100));
+            return trunc_chars(&v.replace('\n', " "), 100);
         }
     }
-    if input.is_empty() {
-        return Some(String::new());
-    }
-    None
+    let Some(obj) = input.as_object().filter(|m| !m.is_empty()) else {
+        return String::new();
+    };
+    // Go encodes a map with sorted keys; a BTreeMap gives the same order whatever serde_json preserves.
+    let sorted: std::collections::BTreeMap<&String, &serde_json::Value> = obj.iter().collect();
+    trunc_chars(&serde_json::to_string(&sorted).unwrap_or_default(), 100)
 }
 
 // Cut to n chars (repl.go trunc, rune based).
@@ -1140,17 +1142,21 @@ mod tests {
 
     #[test]
     fn tool_summary_uses_priority_keys() {
+        use serde_json::json;
         assert_eq!(
-            tool_summary(&[("file_path", "a.rs"), ("command", "ls -la\nx")]).as_deref(),
-            Some("ls -la x")
+            tool_summary(&json!({"file_path": "a.rs", "command": "ls -la\nx"})),
+            "ls -la x"
         );
-        assert_eq!(tool_summary(&[]).as_deref(), Some(""));
-        assert_eq!(tool_summary(&[("other", "x")]), None);
+        assert_eq!(tool_summary(&json!({})), "");
+        // No priority key: Go falls back to the compact JSON of the input (sorted keys, no HTML escaping).
+        assert_eq!(
+            tool_summary(&json!({"other": "x<a>", "n": 1})),
+            r#"{"n":1,"other":"x<a>"}"#
+        );
+        // A non-string priority key does not count as a match.
+        assert_eq!(tool_summary(&json!({"command": 5})), r#"{"command":5}"#);
         let long = "y".repeat(150);
-        assert_eq!(
-            tool_summary(&[("query", &long)]).unwrap().chars().count(),
-            100
-        );
+        assert_eq!(tool_summary(&json!({"query": long})).chars().count(), 100);
     }
 
     #[test]
