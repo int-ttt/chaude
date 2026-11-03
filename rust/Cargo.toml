@@ -1,13 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/cli", "crates/gui"]
-# gui is a Tauri placeholder (phase 5): built only when asked for by name.
+members = ["crates/*"]
+# gui is a Tauri placeholder (phase 5): excluded from the workspace until it is built on its own.
 default-members = ["crates/core", "crates/cli"]
 # prototype/chaude-rs is the stream-json spike kept for reference; it has its own Cargo.lock.
-exclude = ["prototype/chaude-rs"]
+exclude = ["prototype/chaude-rs", "crates/gui"]
 
 [workspace.package]
-version = "0.9.14"
+version = "0.9.15"
 edition = "2024"
 publish = false
 
