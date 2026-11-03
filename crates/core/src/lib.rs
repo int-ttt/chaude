@@ -7,6 +7,7 @@ pub mod lean;
 pub mod mode;
 pub mod osenv;
 pub mod proc;
+pub mod rotate;
 pub mod settings;
 
 #[cfg(test)]
