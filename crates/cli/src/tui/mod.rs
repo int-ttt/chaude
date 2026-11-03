@@ -3,6 +3,7 @@
 // always rests on the input row, so scrolling back up two rows reaches the top of the area.
 
 pub mod bar;
+pub mod commands;
 pub mod edit;
 
 use std::io::{self, BufRead, IsTerminal, Write};
