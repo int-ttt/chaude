@@ -1,0 +1,277 @@
+# TUI parity checklist: Go (bubbletea) → Rust
+
+Source: `deprecated/src/main/intt/internal/harness/` (paths below are relative to this dir unless prefixed).
+Format: `- [ ] <ID> <behavior>  (<go file:line>) · test: <Go test or none> · core: <engine feature>`
+Status: all items unchecked (`[ ]`); this file is a checklist, not a verdict.
+Read basis: tui.go (full), input.go, links.go, selection.go, history.go, agentview.go, sessview.go, settings_picker.go, usagebar.go (full or key ranges), repl.go (runTurn, event loop, permission, interrupt, main loop), tui_test names via grep. Items marked `test: none` have no Go test found by name.
+
+Counts (filled at end): see the "Counts" section.
+
+## Go dependencies (go.mod)
+
+- github.com/charmbracelet/bubbletea v1.3.4: Program, Msg, KeyMsg, MouseMsg, WithAltScreen, WithMouseCellMotion, WithOutput (tui.go:1378-1385)
+- github.com/charmbracelet/bubbles v0.20.0: spinner (`m.sp`), viewport (`m.vp`)
+- github.com/charmbracelet/lipgloss v1.1.0: styles, Color, SetHasDarkBackground (tui.go:1384), reverse video, RoundedBorder
+- github.com/charmbracelet/x/ansi v0.8.0: Truncate, Cut, StringWidth, Strip, SetClipboard (OSC 52) (selection.go:117, tui.go:1429)
+- github.com/mattn/go-runewidth v0.0.16: CJK cell width (input.go:22-30, usagebar.go:35)
+- github.com/atotto/clipboard v0.1.4: native clipboard (selection.go:115)
+- github.com/muesli/termenv v0.16.0: terminal capability (indirect use via lipgloss)
+- Indirect: rivo/uniseg, mattn/go-isatty, go-localereader, muesli/cancelreader, lucasb-eyer/go-colorful, x/term, x/cellbuf, colorprofile, go-osc52/v2, golang.org/x/sys, golang.org/x/text
+- Stdlib: regexp (links, cavemanStatusRe tui.go:97, pctRe usagebar.go:37), os/signal + syscall (repl.go:1384-1388), sync/atomic (cursorWriter tui.go:226-236)
+
+## Layout / regions
+
+- [ ] L01 Altscreen full-screen layout: scroll viewport on top, queue/panel rows, input box, status line (View tui.go:1222; runTUI tui.go:1378)  · test: none · core: none (UI only)
+- [ ] L02 Viewport height is recomputed from terminal size and the panel/queue/input heights each frame (layout tui.go:419; WindowSizeMsg tui.go:447) · test: TestPanelScrollWindow (panel_test.go:367) · core: none
+- [ ] L03 Before the first WindowSizeMsg the view shows "starting…" (View tui.go:1223) · test: none · core: none
+- [ ] L04 Message blocks (user/asst/tool/result/note) render in the viewport in order (render tui.go:348-383) · test: TestToolResultCavemanHidden (tui_caveman_test.go:28) · core: transcript events
+- [ ] L05 Welcome banner with model and rotate threshold on start (welcome tui.go:295-314) · test: none · core: effectiveThreshold
+- [ ] L06 Bottom-of-screen background rows (sub-agent rows) sit below the input box (bgLines tui.go:1443; test) · test: TestBackgroundRowsBelowInputBox (panel_test.go:133) · core: agent tracker
+- [ ] L07 Foreground panel rows above the input (panelLines tui.go:1440) with "more" row when truncated · test: TestPanelMoreRowAndSmallHeight (panel_test.go:100) · core: agent tracker
+- [ ] L08 Small terminal heights do not overflow the frame (panel/bg/queue) · test: TestBackgroundSmallHeightNoOverflow (panel_test.go:153), TestQueueSmallHeightNoOverflow (panel_test.go:289) · core: none
+- [ ] L09 Slash suggestion popup above input, capped at maxPop=8 rows (suggestions tui.go:974; maxPop tui.go:989) · test: none · core: none
+- [ ] L10 Input box height grows with content up to maxInputRows=5 (tui.go:988; Height input.go:202) · test: none · core: none
+- [ ] L11 Queue lines dimmed above input while busy, "… +N 대기" when many (queueLines tui.go:921-939) · test: TestQueueLinesDimAboveInput (panel_test.go:254) · core: none
+- [ ] L12 Status line at bottom (statusLine tui.go:1193) · test: none · core: none
+- [ ] L13 Overlay screens replace the viewport: agent view, usage view, session view, settings, rewind, record picker (View tui.go:1222-1362) · test: TestUsageOpenNotInline (usageview_test.go:94) · core: none
+- [ ] L14 Cursor row tracking so the real terminal cursor lands in the input box (syncCursor tui.go:999; cursorWriter tui.go:226-260) · test: TestCursorRowMatchesPanelAfterTick (panel_test.go:79), TestCursorRowIncludesBackgroundRows (panel_test.go:301) · core: none
+
+## Rendering (colors, wrapping, links, markdown, CJK width)
+
+- [ ] R01 Palette: orange `#D97757` for brand accent, grey `#888888` dim (tui.go:252-256) · test: none · core: none
+- [ ] R02 Dark background assumed; no OSC background query at startup (tui.go:1384) · test: none · core: none
+- [ ] R03 Markdown bold `**x**` rendered with bold SGR (mdBold tui.go:316) · test: TestMdBold (bold_test.go:5) · core: none
+- [ ] R04 Caveman status blocks detected by regex `^status:\s*(done|partial|fail|blocked)\b` and hidden/collapsed in tool results (cavemanStatusRe tui.go:97; isCavemanBlock tui.go:100) · test: TestIsCavemanBlock (tui_caveman_test.go:9), TestToolResultCavemanHidden (tui_caveman_test.go:28) · core: none
+- [ ] R05 Tool result text summarized with "… (+N lines)" beyond the first line (tui.go:485) · test: none · core: tool_result content
+- [ ] R06 Tool summary line from tool_use input (toolSummary tui.go:67; resultText tui.go:86) · test: none · core: tool_use events
+- [ ] R07 Permission prompt note "Allow <tool>(<arg>)?  [y] yes  [n] no" (tui.go:499) · test: none · core: control_request can_use_tool
+- [ ] R08 Links: URL, Windows path, dot path, relative path, absolute path detected and colored `linkColorOn = \x1b[38;2;95;175;255m` (links.go:13-40, linkSpans links.go:59, markLinks links.go:84) · test: TestLinkSpansDetects (links_test.go:18), TestLinkSpansProseNegatives (links_test.go:40), TestLinkSpansOverlapAndBoundary (links_test.go:54) · core: none
+- [ ] R09 Link text stays visible text-equal after linkify (TestLinkifyPreservesVisibleText links_test.go:65) · test: TestLinkifyPreservesVisibleText (links_test.go:65) · core: none
+- [ ] R10 Links are not styled inside fenced code blocks (wrapLinked links.go:197) · test: TestWrapLinkedSkipsFence (links_test.go:82) · core: none
+- [ ] R11 Link color survives soft wrap across rows using private SGR marks 9001/9002/9003 (restyle links.go:128) · test: TestWrapLinkedColorsWholeTokens (links_wrap_test.go:88) · core: none
+- [ ] R12 Wrap by display cell width, not rune count (wrap in input rows input.go:149; ansi.Truncate tui.go:1429) · test: TestInputWrapWide (input_test.go:30) · core: none
+- [ ] R13 Mixed-width (CJK + ASCII) width measure (TestInputWidthMixed input_test.go:9) · test: TestInputWidthMixed (input_test.go:9) · core: none
+- [ ] R14 Ellipsis truncation with "…" for long lines (ansiTrunc tui.go:1429; trunc in repl) · test: none · core: none
+- [ ] R15 Usage bar: 10 cells, width measured with runewidth (renderBar usagebar.go:18; barWidth usagebar.go:35) · test: TestRenderBar (usagebar_test.go:8) · core: none
+- [ ] R16 Context usage decoration against ctxBarMax=150000 tokens (decorateUsage usagebar.go:41) · test: TestDecorateUsage (usagebar_test.go:28) · core: usage/context numbers
+- [ ] R17 Usage percent text parsed by `(\d+(?:\.\d+)?)%` and bar inserted (pctRe usagebar.go:37) · test: TestDecorateUsage (usagebar_test.go:28) · core: claude /usage output
+- [ ] R18 Dim/bold/reset SGR used for notes and status (dimSt tui.go:256; repl.go dim/rst constants) · test: none · core: none
+- [ ] R19 Import transcript rebuilt as blocks on --from-claude (importBlocks tui.go:283; "(N earlier turns not shown)" at 100 cap tui.go:286) · test: TestImportShowsTurnsInTUI (resumeshift_test.go:42) · core: transcript import
+- [ ] R20 Selection highlight overlay in view by content coordinates (highlightView selection.go:92; highlightLine selection.go:81) · test: TestSelectionMultiLineAndReversedOrder (selection_test.go:37) · core: none
+
+## Input editor (keys, multiline, paste, history, IME)
+
+- [ ] I01 Printable runes inserted at cursor (KeyRunes tui.go:943; Insert input.go:40) · test: TestInputNewline (input_test.go:52) · core: none
+- [ ] I02 Control chars filtered out of insert; tab converted to space (Insert input.go:40-62) · test: none · core: none
+- [ ] I03 Space key inserts (tui.go:947) · test: none · core: none
+- [ ] I04 Backspace / Ctrl+H (tui.go:949; Backspace input.go:64) · test: TestTUIAltBackspaceAndCtrlU (input_test.go:109) · core: none
+- [ ] I05 Delete / Ctrl+D inside editor (tui.go:955; Delete input.go:71) · test: none · core: none
+- [ ] I06 Left/Right move one rune (tui.go:957-959; Left/Right input.go:117-127) · test: none · core: none
+- [ ] I07 Home / Ctrl+A and End / Ctrl+E per logical line (tui.go:961-963; Home/End input.go:129-139) · test: none · core: none
+- [ ] I08 Ctrl+W deletes previous word, punctuation-aware (tui.go:965; DeleteWord input.go:81) · test: TestInputDeleteWordPunct (input_test.go:91) · core: none
+- [ ] I09 Ctrl+K kills to end of line (tui.go:967; KillToEnd input.go:141) · test: none · core: none
+- [ ] I10 Ctrl+U kills to start of line; terminal cmd+delete sends ^U (tui.go:969; KillToStart input.go:101) · test: TestInputKillToStart (input_test.go:72), TestTUIAltBackspaceAndCtrlU (input_test.go:109) · core: none
+- [ ] I11 Alt+Enter and Ctrl+J insert newline (tui.go:747) · test: none · core: none
+- [ ] I12 Trailing backslash then Enter inserts newline instead of submit (tui.go:776-783) · test: none · core: none
+- [ ] I13 Enter submits trimmed non-empty line; empty line ignored (tui.go:776-800) · test: none · core: none
+- [ ] I14 Up/Down move across soft-wrapped rows before history (tui.go:718-742; MoveRow input.go:185) · test: TestUpMovesCompleterWhenNotAtTop (history_file_test.go:109) · core: none
+- [ ] I15 Up/Down history recall when at top/bottom row (tui.go:718-742; inputHistory Prev/Next history.go:89-111) · test: TestUpDownHistoryWithSlashCompleter (history_file_test.go:77) · core: none
+- [ ] I16 Slash completer owns Up/Down while open and not browsing a recalled prompt (tui.go:718-742) · test: TestUpDownHistoryWithSlashCompleter (history_file_test.go:77) · core: none
+- [ ] I17 Tab completes the selected slash suggestion and appends a space (tui.go:712-717) · test: none · core: none
+- [ ] I18 Shift+Tab cycles permission mode (tui.go:744; setMode tui.go:1182) · test: none · core: permission modes (default/acceptEdits/plan/auto)
+- [ ] I19 Multiline paste: bracketed paste delivers runes; newlines inserted, not submitted (KeyRunes path tui.go:943 + Insert) · test: none (verify) · core: none
+- [ ] I20 History: max 500 entries, consecutive duplicates dropped (maxHistory history.go:18; Add history.go:78) · test: TestHistoryDedupeConsecutive (history_file_test.go:127) · core: none
+- [ ] I21 History persisted to `<cwd>/.chaude/history.jsonl` (historyFileFor history.go:22) · test: TestHistoryFileFor (history_file_test.go:48), TestHistoryFileRoundTrip (history_file_test.go:12) · core: none
+- [ ] I22 History load rules (skip bad lines, cap) (loadInputHistory history.go:35) · test: TestHistoryFileLoadRules (history_file_test.go:26) · core: none
+- [ ] I23 History save is tmp file + rename (saveInputHistory history.go:57) · test: none · core: none
+- [ ] I24 A new model loads previously recorded history (recordHistory tui.go:273; loadHistory tui.go:266) · test: TestRecordHistoryPersistsAndNewModelLoads (history_file_test.go:54) · core: none
+- [ ] I25 Esc+Esc on empty input opens rewind picker within 600ms (tui.go:696-711) · test: none · core: transcript turns (rewind unit = user turn)
+- [ ] I26 Rewind picker: Open/Move/Cancel/Confirm (rewindState history.go:124-152) · test: none · core: transcript turns
+- [ ] I27 Rewind excludes slash commands from the unit list (history.go:124) · test: none · core: transcript turns
+- [ ] I28 Rewind with no turns shows note "nothing to rewind to" (tui.go:700-703) · test: none · core: none
+- [ ] I29 IME preedit: real terminal cursor placed in the input row via cursor up/col escape each frame (cursorWriter tui.go:232-260; imeColShift tui.go:177) · test: TestJediTermIMEColumnShift (resumeshift_test.go:28) · core: none
+- [ ] I30 Wide-char cursor column computed with runewidth (cells input.go:24) · test: TestInputWrapWide (input_test.go:30) · core: none
+- [ ] I31 Typing while scrolled keeps the scroll position (TestTypingKeepsScroll agentview_test.go:103) · test: TestTypingKeepsScroll (agentview_test.go:103) · core: none
+- [ ] I32 Placeholder text when empty (placeholder tui.go:879; View input.go:211) · test: none · core: none
+- [ ] I33 Input cursor drawn as reverse-video cell (View input.go:211) · test: none · core: none
+- [ ] I34 Ctrl+C with input and not busy quits (tui.go:685-690; quit tui.go:1188) · test: none · core: none
+- [ ] I35 Ctrl+D quits (tui.go:691) · test: none · core: none
+
+## Scrolling
+
+- [ ] S01 Follow tail: viewport sticks to bottom unless user is held (refresh tui.go:394; held field tui.go:~60) · test: TestScrollBottomOnInputAndUpdate (agentview_test.go:130) · core: none
+- [ ] S02 Holding: wheel or PgUp/PgDn/Ctrl+B/Ctrl+F or Shift+Up/Down sets held when not at bottom (tui.go:751-763) · test: TestWheelScrollHoldsPosition (agentview_test.go:73) · core: none
+- [ ] S03 New output while held sets unseen indicator, does not move the view (refresh tui.go:394; notes/runs/scroll-bottom.md) · test: TestScrollBottomOnInputAndUpdate (agentview_test.go:130) · core: none
+- [ ] S04 Input typed or Update event at bottom re-follows tail per scroll-bottom rule (notes/runs/scroll-bottom.md; Update tui.go:444) · test: TestScrollBottomOnInputAndUpdate (agentview_test.go:130) · core: none
+- [ ] S05 Home/End jump top/bottom when input empty; otherwise edit cursor (tui.go:764-774) · test: none · core: none
+- [ ] S06 Mouse wheel scrolls the viewport (MouseMsg tui.go:526-535) · test: TestWheelScrollHoldsPosition (agentview_test.go:73) · core: none
+- [ ] S07 Mouse off (/mouse) passes selection to terminal; on = wheel scroll (/mouse slash tui.go:1063; selectMouse selection.go:124) · test: none · core: none
+- [ ] S08 Mouse drag selection by content coordinates, reversed order handled (selectMouse selection.go:124; ordered selection.go:28) · test: TestSelectionMultiLineAndReversedOrder (selection_test.go:37) · core: none
+- [ ] S09 Selection anchor stays on content after append (selection_test.go:13) · test: TestSelectionAnchorStaysOnContentAfterAppend (selection_test.go:13) · core: none
+- [ ] S10 Mouse release copies selection to clipboard; status "복사됨 (N자)" (copySelected selection.go:150; copyToClipboard selection.go:115) · test: TestReleaseCopiesSelection (selection_test.go:50) · core: none
+- [ ] S11 Clipboard: native first, then OSC 52 for SSH (copyToClipboard selection.go:115-120) · test: none · core: none
+- [ ] S12 Agent view scroll: up/down/pgup/pgdn/home/end (avKey agentview.go:135) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: sub-agent log events
+- [ ] S13 Usage view scroll bounds, wheel and refresh keep scroll (usageview_test.go:24, :66) · test: TestUsageViewScrollBounds (usageview_test.go:24), TestUsageViewWheelAndRefreshKeepScroll (usageview_test.go:66) · core: none
+- [ ] S14 Session view list wheel moves cursor (wheelSel sessview.go:116) · test: TestViewWheelMovesSessionCursor (sessview_test.go:120) · core: none
+- [ ] S15 Record picker wheel and Enter (resume_picker_test.go:33) · test: TestRecordPickerKeysWheelEnter (resume_picker_test.go:33) · core: record store
+- [ ] S16 Panel wheel scroll over agent panel (panelWheel agentview.go:355) · test: TestPanelScrollWindow (panel_test.go:367) · core: none
+- [ ] S17 "… a-b/n (마우스 휠로 스크롤)" range indicator in agent list (tui.go:1490) · test: none · core: none
+
+## Status bar, spinner, notices
+
+- [ ] B01 Status line: state, model, "rot N", "agents N running (bg N)" (statusLine tui.go:1193-1210) · test: none · core: rotation count, agent tracker
+- [ ] B02 Main status text while busy with elapsed "· Mm SSs" (mainStatusText tui.go:888-898) · test: none · core: turn start time
+- [ ] B03 Spinner while busy (sp Tick Init tui.go:280) · test: none · core: none
+- [ ] B04 Status text prefixed by agent name; format (TestAgentStatusTextPrefixedName panel_test.go:314; TestAgentStatusFormat panel_test.go:340; agentStatusText tui.go:1527) · test: TestAgentStatusFormat (panel_test.go:340) · core: agent events
+- [ ] B05 Agent state dot: state mapping (agentState tui.go:1505; agentDot tui.go:1520) · test: TestStalledOutputFileKeepsAgentRunningUntilDoneSignal (panel_test.go:169) · core: agent done signal
+- [ ] B06 Model prefix hidden when already in name (hasModelPrefix tui.go:1546) · test: none · core: none
+- [ ] B07 Thinking indicator only for foreground session (TestThinkingOnlyForForeground panel_test.go:120; TestSessionPanelAndThinking panel_test.go:17) · test: TestThinkingOnlyForForeground (panel_test.go:120) · core: thinking deltas
+- [ ] B08 Idle tick refreshes panel when background agent finishes (TestIdleTickRefreshesWhenBackgroundFinishes panel_test.go:55) · test: TestIdleTickRefreshesWhenBackgroundFinishes (panel_test.go:55) · core: agent done
+- [ ] B09 Background finish notification finishes oldest background row (TestUserEventNotificationFinishesBackground panel_test.go:384) · test: TestUserEventNotificationFinishesBackground (panel_test.go:384) · core: task-notification user events
+- [ ] B10 Done line for a finished agent (doneLine agentview/tui note; markDoneLocked drain.go/agentview.go:59) · test: none · core: agent done
+- [ ] B11 Stage notices "· main 처리중", "· agent <type> 호출", "· agent <type> 완료", "· main 완료" (repl.go:~790-800; stage resident.go:255) · test: none · core: resident child events
+- [ ] B12 Non-stage notices via addNotice / noteMsg (resident.go:277; drain.go:96) · test: none · core: drain/agent notices
+- [ ] B13 Orphan notice at start: "[orphan] claude pid N … still running" (reconcileStart repl.go:1400-1410 area) · test: none · core: registry reconcile
+- [ ] B14 Budget stop notice "[budget] … task stopped" (repl.go:839) · test: none · core: budget + total_cost_usd
+- [ ] B15 Context-rotated notice "── context rotated #N (reason; …) ──" (repl.go:1019) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff
+- [ ] B16 "── new session ──" on /clear (clear repl.go:1409-1412) · test: none · core: session start
+- [ ] B17 Quiet-wait notice "[no output for <d>; still waiting, Esc/Ctrl+C to interrupt]" once per quiet stretch with no open tool (repl.go:788; quiet closure repl.go:~775-790) · test: TestTurnQuietNoticeKeepsWaiting (turn_wait_test.go:63) · core: result/events stream
+- [ ] B18 Long-running Agent/Task tool call is waited for with no cap (repl.go:~800 comment; TestTurnWaitsForOpenAgentToolResult turn_wait_test.go:38) · test: TestTurnWaitsForOpenAgentToolResult (turn_wait_test.go:38) · core: tool_use/tool_result pairing
+- [ ] B19 Stalled output file keeps agent running until done signal (panel_test.go:169) · test: TestStalledOutputFileKeepsAgentRunningUntilDoneSignal (panel_test.go:169) · core: output file / done signal
+- [ ] B20 Usage popup and budget flows: /usage allowed while busy (usagebusy_test.go:10-51) · test: TestUsageAllowedWhileBusy (usagebusy_test.go:10), TestUsageMsgWhileBusyOpensPopup (usagebusy_test.go:51) · core: one-shot claude call
+- [ ] B21 Queue: input submitted while busy is queued, not sent (TestQueueWhileBusyNotSent panel_test.go:218) · test: TestQueueWhileBusyNotSent (panel_test.go:218) · core: none
+- [ ] B22 Queue sent on done, in order, merged with "\n\n" (mergePrompts tui.go:876; TestQueueSentOnDoneInOrder panel_test.go:235) · test: TestQueueSentOnDoneInOrder (panel_test.go:235) · core: turn done
+- [ ] B23 Background-only agents do not queue input (TestBackgroundOnlyDoesNotQueue panel_test.go:280) · test: TestBackgroundOnlyDoesNotQueue (panel_test.go:280) · core: agent tracker
+- [ ] B24 Esc during foreground agent clears foreground panel (TestEscInterruptClearsForegroundPanel panel_test.go:38) · test: TestEscInterruptClearsForegroundPanel (panel_test.go:38) · core: interrupt
+- [ ] B25 Copy note and transient status line (copyNote field tui.go:~70; copySelected selection.go:150) · test: none · core: none
+
+## Slash commands
+
+- [ ] C01 Slash list (`slashCmds`) with descriptions: help, clear, status, model, settings, resume, import, view, rotate, usage, cost, context, compact, config, mcp, agents, init, review, doctor, mode, mouse, version, update, exit, quit (tui.go:192-230) · test: none · core: see per-command rows
+- [ ] C02 Suggestions filter by prefix as user types (suggestions tui.go:974) · test: none · core: none
+- [ ] C03 /help shows command list and key help (runSlash tui.go:1057) · test: none · core: none
+- [ ] C04 /exit and /quit exit (tui.go:1055) · test: none · core: none
+- [ ] C05 /mouse toggles wheel/select mode (tui.go:1063) · test: none · core: none
+- [ ] C06 /status shows model, ctx tokens, rotations, session (tui.go:1071-1079) · test: none · core: lastCtx, rotations, session id
+- [ ] C07 /model shows or switches; switch rotates with new model (tui.go:1080; submit path runTUI repl.go:1385-1395) · test: none · core: rotate with model
+- [ ] C08 /settings opens picker: retention {0,7,30,90,365}, extra coders 0..settingsMaxExtraCoders, main model opus/sonnet/fable; saved on esc, applies next session (settings_picker.go:17-117; tui.go:1090) · test: none · core: settings file write
+- [ ] C09 /settings save message "설정 저장: <path> · ..." (settings_picker.go; closeSettings settings_picker.go:47) · test: none · core: settings file
+- [ ] C10 /resume lists record topics; /resume [n|slug]; /resume claude [q] lists Claude Code sessions (tui.go:1092-1130) · test: TestRecordPickCandidates (resume_picker_test.go:11) · core: record store, Claude session list
+- [ ] C11 Record picker keys and wheel (TestRecordPickerKeysWheelEnter resume_picker_test.go:33) · test: TestRecordPickerKeysWheelEnter (resume_picker_test.go:33) · core: record store
+- [ ] C12 /view [id-prefix] opens session browser; ambiguous and no-match messages (openSessView sessview.go:73; tui.go:1131) · test: TestViewArgOpensSessionDirectly (sessview_test.go:83), TestViewListsOnlyOwnSessions (sessview_test.go:97) · core: session list (own sessions only)
+- [ ] C13 Session browser: level 1 list, level 2 prompts; Enter/←/→/esc (svKey sessview.go:132) · test: TestViewSessionSelectionAndPromptNavigation (sessview_test.go:53) · core: session prompts
+- [ ] C14 Session browser esc returns to normal screen (TestViewEscBacksOutToNormalScreen sessview_test.go:35) · test: TestViewEscBacksOutToNormalScreen (sessview_test.go:35) · core: none
+- [ ] C15 Session list active marker "● " within sessActiveWindow=10m (sessLines sessview.go:169; sessActiveWindow sessview.go:13) · test: none · core: session last-active time
+- [ ] C16 Session prompt pane "Session <id>  prompt n/N" and "… (+N lines)" (svPromptLines sessview.go:194) · test: none · core: session prompts
+- [ ] C17 /import [id|latest] imports session (tui.go:1139; sendImport tui.go:1043) · test: TestImportShowsTurnsInTUI (resumeshift_test.go:42) · core: import from Claude session
+- [ ] C18 /mode shows or sets permission mode; shift+tab cycles (tui.go:1145) · test: none · core: permMode
+- [ ] C19 /version shows chaude and Claude Code versions (tui.go:1156) · test: TestVersionNoteShowsChaudeVersion (busyslash_test.go:56) · core: claude --version
+- [ ] C20 /update checks and installs newer chaude; runs off UI goroutine; result as note (tui.go:1158) · test: none · core: none (binary replace)
+- [ ] C21 /usage opens full-screen usage view, one-shot claude call, never a turn (tui.go:1161; usageFetch tui.go:849) · test: TestUsageSlashAcceptedWhileBusy (usagebusy_test.go:28), TestUsageViewEscCloses (usageview_test.go:86) · core: one-shot claude usage
+- [ ] C22 /clear: fresh session with handoff snapshot (clearWithHandoff repl.go:1400-1415 area) · test: TestRotateKeepsPendingSnapshot (resumeshift_test.go:65) · core: handoff snapshot
+- [ ] C23 /rotate: hand off to fresh session (runTUI submit repl.go:1366-1385) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff
+- [ ] C24 /cost, /context, /compact, /config, /mcp, /agents, /init, /review, /doctor: passthrough to Claude child (passthroughCmds; passthrough) · test: none · core: passthrough to claude child
+- [ ] C25 /init, /review, /doctor run as a conversation turn (tui.go:1163 area) · test: none · core: runTurn
+- [ ] C26 Busy-allowed slash set: /usage, /version, /help, /status, /mode, /mouse, /view (busyOK tui.go:841; busySlashMsg tui.go:844 Korean) · test: TestBusySlashAllowedAndRefused (busyslash_test.go:12) · core: none
+- [ ] C27 Other slash commands while busy are refused with busySlashMsg (tui.go:844; enter path tui.go:~800-815) · test: TestBusySlashAllowedAndRefused (busyslash_test.go:12) · core: none
+- [ ] C28 Unknown slash command handling (runSlash default) · test: none · core: none
+- [ ] C29 Agent view open via ctrl+t; cycle with tab/shift+tab/left/right; close with esc/ctrl+c/q (openAgentKey agentview.go:113; avKey agentview.go:135) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: sub-agent log events
+- [ ] C30 Agent view click on panel row opens agent (panelClick agentview.go:160; click agentview.go:172) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: agent tracker
+- [ ] C31 Agent view read-only (log lines, cap maxAgentLog=400) (agentview.go:13; agentViewLines agentview.go:182) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: sub-agent log events
+- [ ] C32 Usage popup open/close (TestUsagePopupOpenClose agentview_test.go:57) · test: TestUsagePopupOpenClose (agentview_test.go:57) · core: none
+- [ ] C33 Settings and session/agent/usage overlays close on esc and do not leak keys to input (key ordering tui.go:589-680) · test: none · core: none
+
+## Engine events shown (tool_use, agents, errors, interrupts)
+
+- [ ] E01 Assistant text streams into viewport: textMsg per delta, textEndMsg at end (repl.go:510-520, 529; runTurn put repl.go:~720-730) · test: TestLiveStreamingMultipleDeltas (acceptance_test.go:81) · core: stream-json assistant deltas
+- [ ] E02 Main-agent tool_use shown once as toolMsg (name + summary), deduped by id (repl.go:~729-735 seenTools) · test: none · core: tool_use blocks
+- [ ] E03 tool_result shown as toolResultMsg (repl.go:761; user event branch ~line 757-765) · test: TestToolResultCavemanHidden (tui_caveman_test.go:28) · core: tool_result blocks
+- [ ] E04 Agent/Task tool calls counted as delegations and tracked with label (subagentLabel; repl.go:~715-725; tracker.onToolUse) · test: TestTurnWaitsForOpenAgentToolResult (turn_wait_test.go:38) · core: Agent/Task tool_use
+- [ ] E05 Sub-agent events feed agent log (onSubEvent agentview.go:19; cap 400 agentview.go:13) · test: none · core: sub-agent event stream
+- [ ] E06 Permission request: decided by mode (decideMode); shown and asked via ui.ask in TUI (repl.go:575-600; tui.go:50) · test: none · core: control_request can_use_tool
+- [ ] E07 Permission "y"/"enter" allows, "n"/"esc" denies (tui.go:592-598) · test: none · core: RespondPermission
+- [ ] E08 Permission idle denial note "[permission denied while idle] … (use /mode auto or acceptEdits)" (repl.go:605-608 area; plain path repl.go:~603) · test: none · core: idle child permission
+- [ ] E09 AutoAllow flag bypasses prompt (repl.go:~585) · test: none · core: none
+- [ ] E10 Rate-limit events update the rate state (setRate repl.go:~1095 path; control rate_limit_event) · test: none · core: rate_limit_event
+- [ ] E11 Unparsed event recorded to transcript (_unparsed repl.go:~1098) · test: none · core: stream parser
+- [ ] E12 Result event carries total_cost_usd, charged to budget (repl.go:~1034-1038 area; budget.charge) · test: none · core: result cost
+- [ ] E13 Mid-turn budget overrun: interrupts child once, budget stop notice (repl.go:~680-690; budgetHit) · test: none · core: budget + assistant usage
+- [ ] E14 Error/timeout: child process error surfaces as note (repl.go error paths; r.p) · test: none · core: process errors
+- [ ] E15 Esc or Ctrl+C while busy calls interrupt: finish foreground panel and send intr to runTurn (interrupt tui.go:581; repl.go:637 `<-r.intr`, :711 Interrupt) · test: TestEscInterruptClearsForegroundPanel (panel_test.go:38) · core: Session.Interrupt
+- [ ] E16 After interrupt: "[interrupted]" then waits up to 20s for result (repl.go:~800-805) · test: none · core: Interrupt + result
+- [ ] E17 Stale Ctrl+C dropped at start of runTurn (repl.go:~690-695 select default) · test: none · core: none
+- [ ] E18 Ctrl+C with no turn running quits (tui.go:600-606) · test: none · core: none
+- [ ] E19 OS SIGINT/SIGTERM forwarded to intr channel (repl.go:1384-1388) · test: none · core: none
+- [ ] E20 Interrupt marks running agents interrupted on exit (markInterrupted repl.go:1207; interruptRunning agentview.go:314) · test: none · core: agent registry
+- [ ] E21 Idle child-initiated turn: reply shown with idle timers and finish (idleFinish repl.go:~530-545) · test: none · core: idle turn events
+- [ ] E22 Agents counter in status: "agents N running (bg M)" (statusLine tui.go:1203-1205) · test: TestAgentStatusFormat (panel_test.go:340) · core: agent tracker
+- [ ] E23 Agent done notice and background row finish (TestUserEventNotificationFinishesBackground panel_test.go:384) · test: TestUserEventNotificationFinishesBackground (panel_test.go:384) · core: task-notification
+- [ ] E24 Restored agents from prior run shown and dismissed (sortedRestored agentview.go:326; dismissRestored agentview.go:346) · test: none · core: agents file restore
+- [ ] E25 Resident coders: "stage" notices for residents (resident.go:255-277) · test: none · core: resident children
+- [ ] E26 Live rotation carries context and keeps pending snapshot (TestRotateKeepsPendingSnapshot resumeshift_test.go:65; TestLiveRotationCarriesContext acceptance_test.go:21) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff/snapshot
+- [ ] E27 Drain of old child before rotate (drain.go; TestDrain in drain_test.go, not opened) · test: drain_test.go (not read) · core: drain
+- [ ] E28 Waiting for an open tool call; no cap on turn wait (TestTurnWaitsForOpenAgentToolResult turn_wait_test.go:38) · test: TestTurnWaitsForOpenAgentToolResult (turn_wait_test.go:38) · core: tool open set
+
+## Startup and exit
+
+- [ ] X01 Start child process, print error to stderr and exit 1 on failure (runTUI repl.go:1364-1368; loop repl.go:1270-1273) · test: none · core: session start
+- [ ] X02 Interactive detection: stdin is a char device (repl.go:~1393) · test: none · core: none
+- [ ] X03 TUI only when interactive and HARNESS_PLAIN unset; else plain loop (repl.go:1386-1388) · test: multiproc_s_test.go (not read) · core: none
+- [ ] X04 Project settings ensured at start (settings.EnsureProjectSettings repl.go:~1374) · test: none · core: settings
+- [ ] X05 Start: agent store, client wiring, worker pool, reconcileStart, metrics (repl.go:~1376-1395) · test: none · core: registry, metrics
+- [ ] X06 --from-claude import at startup (importFromClaude) shows transcript · test: TestImportShowsTurnsInTUI (resumeshift_test.go:42) · core: import
+- [ ] X07 Startup shows welcome banner (welcome tui.go:295) · test: none · core: none
+- [ ] X08 Program runs with altscreen, mouse cell motion, custom output writer (runTUI tui.go:1378) · test: none · core: none
+- [ ] X09 On exit: save exit handoff, mark interrupted, close drains, close session, close children (deferred runTUI tui.go:1366-1377; loop repl.go:1271-1280) · test: TestRecordHistoryPersistsAndNewModelLoads (history_file_test.go:54) (partial) · core: exit handoff, registry
+- [ ] X10 Exit save input history to historyFileFor (history.go:57) · test: TestHistoryFileRoundTrip (history_file_test.go:12) · core: none
+- [ ] X11 /quit and /exit run quit (tui.go:1188) · test: none · core: none
+- [ ] X12 Submit goroutine: per-line dispatch (rotate, idle-rotate, rotate-deferred, clear, passthrough, import, model switch, default handle + recordSave) then doneMsg (runTUI repl.go:1366-1393) · test: none · core: session commands
+- [ ] X13 Program error printed as "harness: …", exit 1 (runTUI tui.go:1408-1412) · test: none · core: none
+
+## Inline vs altscreen
+
+- [ ] A01 TUI is altscreen only (tea.WithAltScreen tui.go:1378); no inline mode in the Go TUI · test: none · core: none
+- [ ] A02 Plain path (HARNESS_PLAIN or non-TTY stdin) is line-oriented, not a TUI; output goes to stdout with r.p/dim (loop repl.go:1270+) · test: multiproc_s_test.go (not read) · core: plain loop
+- [ ] A03 Overlays (usage/agent/session) render full-screen, not inline (TestUsageOpenNotInline usageview_test.go:94) · test: TestUsageOpenNotInline (usageview_test.go:94) · core: none
+- [ ] A04 Esc from full-screen overlay returns to normal screen (TestViewEscBacksOutToNormalScreen sessview_test.go:35) · test: TestViewEscBacksOutToNormalScreen (sessview_test.go:35) · core: none
+
+## Counts
+
+Items per group (this file, `- [ ]` lines):
+- L layout/regions: 14
+- R rendering: 20
+- I input editor: 35
+- S scrolling: 17
+- B status/spinner/notices: 25
+- C slash commands: 33
+- E engine events: 28
+- X startup/exit: 13
+- A altscreen/inline: 4
+- Total: 189
+
+Tests with no item mapping yet: TestDrain*, multiproc_s_test.go internals, drain_test.go, mode_test.go, bold_test.go (mapped), acceptance_test.go (mapped), input_test.go (mapped). Not opened: drain_test.go, mode_test.go, multiproc_s_test.go, resident tests.
+
+## Core engine features needed (cross-reference)
+
+- stream-json assistant/user/result events, tool_use/tool_result (E01-E03, R05-R06)
+- control_request can_use_tool and RespondPermission (E06-E09, R07)
+- Session.Interrupt, intr channel (E15-E17)
+- budget: usage per assistant message, total_cost_usd (E12-E13)
+- rate_limit_event (E10)
+- rotate/handoff/snapshot, clear with handoff (B15, C22-C23, E26)
+- transcript turns and rewind (I25-I27)
+- record store and history (C10-C11, I21)
+- session list and prompts for /view and /import (C12-C17)
+- agent tracker: Agent/Task tool_use, sub-agent events, done signals, restored agents (B04-B09, E04-E05, E22-E24)
+- resident children and stage notices (B11, E25)
+- settings file read/write (C08-C09, X04)
+- one-shot claude calls for /usage and /version (C19, C21, B20)
+- passthrough to claude child for /cost /context /compact etc. (C24)
+- registry reconcile, orphan notice (B13, X05)
+- exit handoff and interrupt marking (X09, E20)
+
+## Open gaps (not yet read)
+
+- drain.go beyond line 96; drain_test.go; mode_test.go; multiproc_s_test.go; resident tests
+- repl.go lines 540-575 and 840-1080 (passthrough, rotate notice body, budget), not read in detail
+- exact line numbers for some items marked "~" are approximate (from grep hits and partial reads); verify before porting
