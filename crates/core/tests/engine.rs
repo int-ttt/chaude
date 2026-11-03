@@ -446,3 +446,62 @@ fn silent_turn_emits_still_running_notice_and_never_interrupts() {
     assert!(!f.dir.join("interrupt.log").exists());
     h.shutdown();
 }
+
+// Go repl.go: after Interrupt the turn waits for its result, then gives up. An open Agent is ended with it.
+#[test]
+fn interrupted_turn_with_open_agent_is_ended_after_grace() {
+    let _g = lock();
+    let (head, _tail) = agent_turn_split();
+    // The fake emits only the Agent tool_use and never a result.
+    let f = fake_gap("hang-agent", &head, "", "0");
+    let cfg = Config {
+        interrupt_grace: Duration::from_millis(200),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("scan");
+    let mut evs = Vec::new();
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("engine went silent");
+        let started = matches!(ev, UiEvent::AgentStart { .. });
+        evs.push(ev);
+        if started {
+            break;
+        }
+    }
+    h.interrupt(InterruptSource::EscKey);
+    evs.extend(until_idle(&rx));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_agent1")),
+        "open agent must end with the turn: {evs:?}"
+    );
+    assert!(
+        evs.iter().any(|e| matches!(e, UiEvent::TurnEnd { .. })),
+        "{evs:?}"
+    );
+    assert!(matches!(evs.last(), Some(UiEvent::Busy(false))), "{evs:?}");
+    h.shutdown();
+}
+
+#[test]
+fn interrupted_turn_without_result_is_ended_after_grace() {
+    let _g = lock();
+    let f = fake_gap("hang-plain", "", "", "0");
+    let cfg = Config {
+        interrupt_grace: Duration::from_millis(200),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("hi");
+    h.interrupt(InterruptSource::CtrlC);
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter().any(|e| matches!(e, UiEvent::TurnEnd { .. })),
+        "{evs:?}"
+    );
+    assert!(matches!(evs.last(), Some(UiEvent::Busy(false))), "{evs:?}");
+    h.shutdown();
+}

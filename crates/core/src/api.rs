@@ -105,6 +105,8 @@ pub struct Config {
     // Quiet time with no claude output before a "still running" notice. Paused while any tool_use lacks its
     // result (a subagent may be silent for minutes). The notice never interrupts; late results are normal events.
     pub inactivity_timeout: Duration,
+    // After an interrupt, how long to wait for the turn's result before force-ending the turn (Go: 20 s).
+    pub interrupt_grace: Duration,
 }
 
 impl Default for Config {
@@ -119,6 +121,7 @@ impl Default for Config {
             context_window: 200_000,
             log_path: None,
             inactivity_timeout: Duration::from_secs(300),
+            interrupt_grace: Duration::from_secs(20),
         }
     }
 }
@@ -205,6 +208,8 @@ struct State {
     open_tools: HashSet<String>,
     // Last claude line or turn start; the inactivity timer measures from here.
     last_activity: Instant,
+    // Set by an interrupt on a busy turn; the turn is force-ended when the grace period passes without a result.
+    interrupted_at: Option<Instant>,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -231,6 +236,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         agents: HashMap::new(),
         open_tools: HashSet::new(),
         last_activity: Instant::now(),
+        interrupted_at: None,
     };
     match proc::spawn(&opts, self_tx, Input::Proc) {
         Ok(p) => st.proc = Some(p),
@@ -311,6 +317,7 @@ impl State {
                 Ok(_) => sent = true,
                 Err(e) => self.emit(UiEvent::Error(format!("interrupt write failed: {e}"))),
             }
+            self.interrupted_at.get_or_insert_with(Instant::now);
         }
         self.log_interrupt(src, busy, sent);
     }
@@ -336,6 +343,7 @@ impl State {
 
     fn on_eof(&mut self) {
         self.open_tools.clear();
+        self.interrupted_at = None;
         self.emit(UiEvent::Error("claude exited".to_string()));
         if let Some(mut p) = self.proc.take() {
             p.kill();
@@ -507,7 +515,14 @@ impl State {
     // How long the actor may block before the inactivity timer must be checked. None means block until input.
     // Idle, or any tool_use without its result, pauses the timer.
     fn wait_budget(&self) -> Option<Duration> {
-        if !self.busy || !self.open_tools.is_empty() {
+        if !self.busy {
+            return None;
+        }
+        if let Some(t0) = self.interrupted_at {
+            let left = self.cfg.interrupt_grace.saturating_sub(t0.elapsed());
+            return Some(left.max(Duration::from_millis(1)));
+        }
+        if !self.open_tools.is_empty() {
             return None;
         }
         let left = self
@@ -520,7 +535,16 @@ impl State {
     // Inactivity notice. Informational only: the turn is never interrupted, and the clock restarts so the
     // notice repeats once per quiet period rather than on every wakeup.
     fn on_quiet(&mut self) {
-        if !self.busy || !self.open_tools.is_empty() {
+        if !self.busy {
+            return;
+        }
+        if let Some(t0) = self.interrupted_at {
+            if t0.elapsed() >= self.cfg.interrupt_grace {
+                self.abandon_turn();
+            }
+            return;
+        }
+        if !self.open_tools.is_empty() {
             return;
         }
         let quiet = self.last_activity.elapsed();
@@ -534,9 +558,26 @@ impl State {
         )));
     }
 
+    // Interrupted turn gave no result within the grace period (Go: finishForeground). Agents still open are
+    // ended here, then the turn is ended as if it had finished.
+    fn abandon_turn(&mut self) {
+        let ids: Vec<String> = self.agents.keys().cloned().collect();
+        for id in ids {
+            if let Some(t0) = self.agents.remove(&id) {
+                self.emit(UiEvent::AgentEnd {
+                    id,
+                    elapsed_ms: t0.elapsed().as_millis() as u64,
+                });
+            }
+        }
+        let duration_ms = elapsed_ms(self.turn_started);
+        self.end_turn(duration_ms);
+    }
+
     // Finishes the running turn and starts the next queued one, if any.
     fn end_turn(&mut self, duration_ms: u64) {
         self.turn_started = None;
+        self.interrupted_at = None;
         self.open_tools.clear();
         self.emit(UiEvent::TurnEnd { duration_ms });
         match self.queue.pop_front() {
