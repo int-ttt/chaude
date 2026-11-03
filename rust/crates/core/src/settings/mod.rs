@@ -15,7 +15,8 @@ use serde_json::{Map, Value};
 use crate::lean::{self, ParseError};
 use crate::osenv;
 
-const GEN_USAGE: &str = "usage: chaude gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]
+const GEN_USAGE: &str =
+    "usage: chaude gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]
   .claude/settings.json(posix 원본)으로부터 OS별 설정을 생성한다.
   OS 생략 시 현재 실행 OS (windows|mac|linux). --out 생략 시 표준출력.
   --out FILE       결과를 이 파일에 쓴다
@@ -135,7 +136,8 @@ pub fn windows(src: &[u8], py: &str) -> Result<String, String> {
                     let Some(script) = script else {
                         continue;
                     };
-                    let mut args: Vec<Value> = py_parts[1..].iter().cloned().map(Value::String).collect();
+                    let mut args: Vec<Value> =
+                        py_parts[1..].iter().cloned().map(Value::String).collect();
                     args.push(Value::String(format!("${{CLAUDE_PROJECT_DIR}}/{script}")));
                     insert_after(h, "", "command", Value::String(py_parts[0].clone()));
                     insert_after(h, "command", "args", Value::Array(args));
@@ -144,9 +146,15 @@ pub fn windows(src: &[u8], py: &str) -> Result<String, String> {
         }
     }
 
-    if let Some(allow) = cfg.pointer_mut("/permissions/allow").and_then(Value::as_array_mut) {
+    if let Some(allow) = cfg
+        .pointer_mut("/permissions/allow")
+        .and_then(Value::as_array_mut)
+    {
         for item in allow.clone() {
-            let Some(rest) = item.as_str().and_then(|s| s.strip_prefix("Bash(bin/chaude ")) else {
+            let Some(rest) = item
+                .as_str()
+                .and_then(|s| s.strip_prefix("Bash(bin/chaude "))
+            else {
                 continue;
             };
             let ps = format!("PowerShell(bin/chaude.exe {rest}");
@@ -178,7 +186,9 @@ fn ensure_settings_dir(out: &Path) -> io::Result<()> {
 pub fn gen_settings_main(args: &[String]) -> i32 {
     let exe = env::current_exe().unwrap_or_default();
     let cwd = env::current_dir().ok();
-    let proj = env::var_os("CLAUDE_PROJECT_DIR").filter(|v| !v.is_empty()).map(PathBuf::from);
+    let proj = env::var_os("CLAUDE_PROJECT_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
     let parsed = match lean::parse_interspersed(args, VALUE_FLAGS) {
         Ok(p) => p,
         Err(ParseError::Help) => {
@@ -192,11 +202,18 @@ pub fn gen_settings_main(args: &[String]) -> i32 {
     };
     let values = &parsed.values;
     let pos = &parsed.positionals;
-    if pos.len() > 1 || pos.first().is_some_and(|p| !matches!(p.as_str(), "windows" | "mac" | "linux")) {
+    if pos.len() > 1
+        || pos
+            .first()
+            .is_some_and(|p| !matches!(p.as_str(), "windows" | "mac" | "linux"))
+    {
         eprintln!("{GEN_USAGE}");
         return 2;
     }
-    let os_name = pos.first().cloned().unwrap_or_else(|| osenv::name().to_string());
+    let os_name = pos
+        .first()
+        .cloned()
+        .unwrap_or_else(|| osenv::name().to_string());
     let src = match values.get("src") {
         Some(s) => PathBuf::from(s),
         None => default_src(proj.as_deref(), cwd.as_deref(), &exe),
@@ -204,7 +221,10 @@ pub fn gen_settings_main(args: &[String]) -> i32 {
     let text = match fs::read(&src) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("gen-settings: 원본 설정을 읽을 수 없습니다 (--src 로 지정): {}: {e}", src.display());
+            eprintln!(
+                "gen-settings: 원본 설정을 읽을 수 없습니다 (--src 로 지정): {}: {e}",
+                src.display()
+            );
             return 1;
         }
     };
@@ -266,17 +286,29 @@ mod tests {
         let cwd_src = write_settings(&cwd);
 
         // 1. CLAUDE_PROJECT_DIR wins over everything.
-        assert_eq!(default_src(Some(&proj), Some(&cwd), &exe), proj.join(".claude").join("settings.json"));
+        assert_eq!(
+            default_src(Some(&proj), Some(&cwd), &exe),
+            proj.join(".claude").join("settings.json")
+        );
         // 2. no env: <project>/bin/chaude -> <project>/.claude when it exists.
         assert_eq!(default_src(None, Some(&cwd), &exe), proj_src);
         // 3. binary elsewhere (no bin/ layout): fall back to cwd/.claude.
-        let foreign = root.path().join("tmp").join("go-build").join("exe").join("chaude");
+        let foreign = root
+            .path()
+            .join("tmp")
+            .join("go-build")
+            .join("exe")
+            .join("chaude");
         assert_eq!(default_src(None, Some(&cwd), &foreign), cwd_src);
         // 4. nothing exists: exe form returned so the read error names a concrete path.
         let none = root.path().join("none");
         assert_eq!(
             default_src(None, Some(&none), &foreign),
-            root.path().join("tmp").join("go-build").join(".claude").join("settings.json")
+            root.path()
+                .join("tmp")
+                .join("go-build")
+                .join(".claude")
+                .join("settings.json")
         );
     }
 
@@ -287,10 +319,16 @@ mod tests {
         fs::write(&src, "{}").expect("write src");
         let fresh = root.path().join("fresh").join(".claude");
         let out = fresh.join("settings.json");
-        let args: Vec<String> = ["mac", "--src", src.to_str().expect("utf8"), "--out", out.to_str().expect("utf8")]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let args: Vec<String> = [
+            "mac",
+            "--src",
+            src.to_str().expect("utf8"),
+            "--out",
+            out.to_str().expect("utf8"),
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         assert_eq!(gen_settings_main(&args), 0);
         for d in [fresh.clone(), fresh.join("hooks")] {
             assert!(d.is_dir(), "folder not created: {}", d.display());
@@ -305,11 +343,21 @@ mod tests {
         let v: Value = serde_json::from_str(&out).expect("valid json");
         let h = &v["hooks"]["PreToolUse"][0]["hooks"][0];
         assert_eq!(h["command"], "py");
-        assert_eq!(h["args"], serde_json::json!(["-3", "${CLAUDE_PROJECT_DIR}/.claude/hooks/ledger.py"]));
+        assert_eq!(
+            h["args"],
+            serde_json::json!(["-3", "${CLAUDE_PROJECT_DIR}/.claude/hooks/ledger.py"])
+        );
         assert_eq!(h["timeout"], 5);
-        let keys: Vec<&str> = h.as_object().expect("object").keys().map(String::as_str).collect();
+        let keys: Vec<&str> = h
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
         assert_eq!(keys, ["type", "command", "args", "timeout"]);
         let allow = v["permissions"]["allow"].as_array().expect("allow");
-        assert!(allow.contains(&Value::String("PowerShell(bin/chaude.exe metrics)".to_string())));
+        assert!(allow.contains(&Value::String(
+            "PowerShell(bin/chaude.exe metrics)".to_string()
+        )));
     }
 }

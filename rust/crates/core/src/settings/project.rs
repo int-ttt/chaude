@@ -34,21 +34,45 @@ const GUARD_FILES: &[&str] = &["main-thread-guard.py", "_lean.py"];
 /// files next to it. embedded_hooks_match_repo keeps them equal to the repo copies.
 pub const HOOKS: &[(&str, &[u8])] = &[
     ("_lean.py", include_bytes!("hooks/_lean.py")),
-    ("agent-model-pin.py", include_bytes!("hooks/agent-model-pin.py")),
-    ("caveman-format.py", include_bytes!("hooks/caveman-format.py")),
+    (
+        "agent-model-pin.py",
+        include_bytes!("hooks/agent-model-pin.py"),
+    ),
+    (
+        "caveman-format.py",
+        include_bytes!("hooks/caveman-format.py"),
+    ),
     ("context-alert.py", include_bytes!("hooks/context-alert.py")),
-    ("correction-guard.py", include_bytes!("hooks/correction-guard.py")),
-    ("haiku-context-guard.py", include_bytes!("hooks/haiku-context-guard.py")),
-    ("history-export.py", include_bytes!("hooks/history-export.py")),
+    (
+        "correction-guard.py",
+        include_bytes!("hooks/correction-guard.py"),
+    ),
+    (
+        "haiku-context-guard.py",
+        include_bytes!("hooks/haiku-context-guard.py"),
+    ),
+    (
+        "history-export.py",
+        include_bytes!("hooks/history-export.py"),
+    ),
     ("ledger.py", include_bytes!("hooks/ledger.py")),
-    ("main-thread-guard.py", include_bytes!("hooks/main-thread-guard.py")),
-    ("session-context.py", include_bytes!("hooks/session-context.py")),
+    (
+        "main-thread-guard.py",
+        include_bytes!("hooks/main-thread-guard.py"),
+    ),
+    (
+        "session-context.py",
+        include_bytes!("hooks/session-context.py"),
+    ),
     ("style-adapter.py", include_bytes!("hooks/style-adapter.py")),
 ];
 
 /// Package copy of a hook script (file name only, e.g. "ledger.py").
 pub fn embedded_hook(name: &str) -> Option<&'static [u8]> {
-    HOOKS.iter().find(|(n, _)| *n == name).map(|(_, body)| *body)
+    HOOKS
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, body)| *body)
 }
 
 /// Makes a project runnable outside this repo: when `<cwd>/.claude/settings.json` does not exist, creates
@@ -91,7 +115,11 @@ pub fn hook_python() -> &'static str {
 
 /// `hook_python` over the given PATH directories.
 pub fn hook_python_in(dirs: &[PathBuf]) -> &'static str {
-    for (exe, cmd) in [("python3", "python3"), ("python", "python"), ("py", "py -3")] {
+    for (exe, cmd) in [
+        ("python3", "python3"),
+        ("python", "python"),
+        ("py", "py -3"),
+    ] {
         if osenv::find_on_path(exe, dirs).is_some() {
             return cmd;
         }
@@ -138,17 +166,27 @@ mod tests {
         fs::create_dir_all(&home).expect("mkdir home");
         assert!(ensure_project_settings(&cwd, Some(&home)).expect("ensure"));
 
-        let settings = fs::read_to_string(cwd.join(".claude").join("settings.json")).expect("read settings");
-        assert!(settings.contains("\"PreToolUse\""), "guard hook missing:\n{settings}");
+        let settings =
+            fs::read_to_string(cwd.join(".claude").join("settings.json")).expect("read settings");
+        assert!(
+            settings.contains("\"PreToolUse\""),
+            "guard hook missing:\n{settings}"
+        );
         if !osenv::is_windows() {
             assert!(
-                settings.contains(r#"python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/main-thread-guard.py\""#),
+                settings.contains(
+                    r#"python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/main-thread-guard.py\""#
+                ),
                 "guard command missing:\n{settings}"
             );
         }
         for name in GUARD_FILES {
             let got = fs::read(cwd.join(".claude").join("hooks").join(name)).expect("hook written");
-            assert_eq!(got.as_slice(), embedded_hook(name).expect("embedded"), "hook {name} differs");
+            assert_eq!(
+                got.as_slice(),
+                embedded_hook(name).expect("embedded"),
+                "hook {name} differs"
+            );
         }
     }
 
@@ -171,8 +209,13 @@ mod tests {
             return;
         }
         for (name, body) in HOOKS {
-            let repo_body = fs::read(repo.join(name)).unwrap_or_else(|e| panic!("{name}: repo copy missing: {e}"));
-            assert_eq!(*body, repo_body.as_slice(), "{name}: embedded copy differs from .claude/hooks");
+            let repo_body = fs::read(repo.join(name))
+                .unwrap_or_else(|e| panic!("{name}: repo copy missing: {e}"));
+            assert_eq!(
+                *body,
+                repo_body.as_slice(),
+                "{name}: embedded copy differs from .claude/hooks"
+            );
         }
     }
 
@@ -189,7 +232,12 @@ mod tests {
 
         assert!(!ensure_project_settings(&cwd, Some(&home)).expect("ensure"));
         assert_eq!(fs::read_to_string(&existing).expect("read"), USER);
-        assert!(!cwd.join(".claude").join("hooks").join("main-thread-guard.py").exists());
+        assert!(
+            !cwd.join(".claude")
+                .join("hooks")
+                .join("main-thread-guard.py")
+                .exists()
+        );
     }
 
     #[test]

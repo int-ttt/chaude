@@ -44,7 +44,9 @@ pub fn parse_interspersed(args: &[String], value_flags: &[&str]) -> Result<Parse
             None => (body, None),
         };
         if !value_flags.contains(&name) {
-            return Err(ParseError::Msg(format!("flag provided but not defined: -{name}")));
+            return Err(ParseError::Msg(format!(
+                "flag provided but not defined: -{name}"
+            )));
         }
         let value = match inline {
             Some(v) => v,
@@ -71,7 +73,11 @@ mod tests {
 
     #[test]
     fn flags_and_positionals_interleave() {
-        let p = parse_interspersed(&s(&["mac", "--out", "a.json", "--src=b.json", "extra"]), &["out", "src"]).unwrap();
+        let p = parse_interspersed(
+            &s(&["mac", "--out", "a.json", "--src=b.json", "extra"]),
+            &["out", "src"],
+        )
+        .unwrap();
         assert_eq!(p.positionals, s(&["mac", "extra"]));
         assert_eq!(p.values.get("out").map(String::as_str), Some("a.json"));
         assert_eq!(p.values.get("src").map(String::as_str), Some("b.json"));
@@ -82,10 +88,15 @@ mod tests {
         let p = parse_interspersed(&s(&["--", "--out", "x"]), &["out"]).unwrap();
         assert_eq!(p.positionals, s(&["--out", "x"]));
         assert!(p.values.is_empty());
-        assert_eq!(parse_interspersed(&s(&["-h"]), &["out"]), Err(ParseError::Help));
+        assert_eq!(
+            parse_interspersed(&s(&["-h"]), &["out"]),
+            Err(ParseError::Help)
+        );
         assert_eq!(
             parse_interspersed(&s(&["-bogus"]), &["out"]),
-            Err(ParseError::Msg("flag provided but not defined: -bogus".into()))
+            Err(ParseError::Msg(
+                "flag provided but not defined: -bogus".into()
+            ))
         );
         assert_eq!(
             parse_interspersed(&s(&["--out"]), &["out"]),

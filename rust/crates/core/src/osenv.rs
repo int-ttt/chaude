@@ -24,12 +24,16 @@ pub fn name() -> &'static str {
 
 /// Directories listed in PATH.
 pub fn path_dirs() -> Vec<PathBuf> {
-    env::var_os("PATH").map(|p| env::split_paths(&p).collect()).unwrap_or_default()
+    env::var_os("PATH")
+        .map(|p| env::split_paths(&p).collect())
+        .unwrap_or_default()
 }
 
 /// Full path of `name` found in `dirs` (windows also tries PATHEXT suffixes); None when absent.
 pub fn find_on_path(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
-    dirs.iter().flat_map(|dir| candidates(dir, name)).find(|p| is_exec(p))
+    dirs.iter()
+        .flat_map(|dir| candidates(dir, name))
+        .find(|p| is_exec(p))
 }
 
 /// Full path of `name` on PATH (finds claude.cmd/.exe on Windows); falls back to the bare name.
@@ -44,7 +48,11 @@ fn candidates(dir: &Path, name: &str) -> Vec<PathBuf> {
     let mut out = vec![dir.join(name)];
     if is_windows() {
         let exts = env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
-        out.extend(exts.split(';').filter(|e| !e.is_empty()).map(|e| dir.join(format!("{name}{e}"))));
+        out.extend(
+            exts.split(';')
+                .filter(|e| !e.is_empty())
+                .map(|e| dir.join(format!("{name}{e}"))),
+        );
     }
     out
 }
