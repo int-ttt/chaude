@@ -7,6 +7,7 @@ pub mod commands;
 pub mod edit;
 pub mod overlay;
 pub mod render;
+pub mod usage;
 
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::panic;
@@ -53,6 +54,8 @@ pub enum Action {
     Submit(String),
     Interrupt(InterruptSource),
     Quit,
+    // /usage: the caller asks the engine for the one-shot run (UiEvent::Usage). Never a turn.
+    Usage,
 }
 
 pub struct App {
@@ -66,6 +69,10 @@ pub struct App {
     // First line of the prompt that started the turn (Go curPrompt), shown in the busy row.
     turn_prompt: String,
     agents: Vec<(String, String, Instant)>,
+    // Ids of the agents launched in the background (UiEvent::AgentBackground); they have no AgentEnd until done.
+    bg_agents: Vec<String>,
+    // Rotations seen this session (UiEvent::Rotated); Go m.r.rotations.
+    rot: u32,
     // Time of the last tick. Elapsed times and the spinner are computed from it, so `frame` stays pure.
     clock: Instant,
     spin: char,
@@ -83,6 +90,8 @@ pub struct App {
     mouse: bool,
     // Selected row of the slash menu (overlay::slash_popup). Reset when the input changes.
     sugg_sel: usize,
+    // Full-screen /usage window (Go m.usage); replaces the transcript viewport while open.
+    usage: usage::Usage,
     welcome: Welcome,
 }
 
@@ -106,11 +115,16 @@ impl App {
             editor: Editor::default(),
             cols,
             rows,
-            bar: BarInput::default(),
+            bar: BarInput {
+                mode: "auto".to_string(),
+                ..BarInput::default()
+            },
             busy: false,
             turn_start: None,
             turn_prompt: String::new(),
             agents: Vec::new(),
+            bg_agents: Vec::new(),
+            rot: 0,
             clock: Instant::now(),
             spin: ' ',
             transcript: Vec::new(),
@@ -122,6 +136,7 @@ impl App {
             unseen: false,
             mouse: true,
             sugg_sel: 0,
+            usage: usage::Usage::default(),
         }
     }
 
@@ -170,12 +185,21 @@ impl App {
                 };
                 self.transcript.push(format!("{TOOL_ON}● {head}{FG_OFF}"));
             }
-            UiEvent::ToolEnd { ok, .. } => {
-                let word = if ok { "done" } else { "failed" };
+            // Go shows the tool_result text, not a done/failed word; that row comes from ToolResult.
+            UiEvent::ToolEnd { .. } => {}
+            // Go toolResultMsg: the first line cut to 160 runes, then "… (+N lines)" for the rest.
+            UiEvent::ToolResult { text, .. } => {
+                let text = text.trim();
+                let lines: Vec<&str> = text.split('\n').collect();
+                let mut head = render::trunc_chars(lines[0], 160);
+                if lines.len() > 1 {
+                    head.push_str(&format!(" … (+{} lines)", lines.len() - 1));
+                }
                 self.transcript
-                    .push(format!("{GREY_ON}  ⎿  {word}{FG_OFF}"));
+                    .push(format!("{GREY_ON}  ⎿  {head}{FG_OFF}"));
                 self.transcript.push(String::new());
             }
+            UiEvent::AgentBackground { id } => self.bg_agents.push(id),
             UiEvent::AgentStart {
                 id, description, ..
             } => {
@@ -185,6 +209,7 @@ impl App {
             }
             UiEvent::AgentEnd { id, elapsed_ms } => {
                 self.agents.retain(|(aid, _, _)| *aid != id);
+                self.bg_agents.retain(|aid| *aid != id);
                 self.transcript.push(format!(
                     "◆ agent done in {}",
                     bar::fmt_secs(elapsed_ms / 1000)
@@ -209,10 +234,64 @@ impl App {
             // Go shows no per-turn "done" row; its footer comes from engine stats that UiEvent does not carry yet.
             UiEvent::TurnEnd { .. } => self.end_main_block(),
             UiEvent::Rotated { reason } => {
+                self.rot += 1;
                 self.transcript.push(format!("↻ session rotated: {reason}"))
             }
+            UiEvent::Usage { text } => {
+                let (w, h) = self.usage_geom();
+                let text = if text.trim().is_empty() {
+                    usage::EMPTY.to_string()
+                } else {
+                    render::decorate_usage(&text, self.bar.tokens as i64)
+                };
+                self.usage.set_text(&text, w, h);
+            }
+            // While the window waits for /usage, its failure goes into the window (Go usageFetch).
+            UiEvent::Error(msg) if self.usage.pending() => {
+                let (w, h) = self.usage_geom();
+                self.usage.set_text(&usage::failed(&msg), w, h);
+            }
             UiEvent::Error(msg) => self.transcript.push(format!("! {msg}")),
-            // Variants added after the TUI wiring (non_exhaustive in core) render nothing yet.
+            // Go tuiWriter note: the interrupted turn keeps its text, then the dim marker.
+            UiEvent::Interrupted => {
+                self.end_main_block();
+                self.transcript
+                    .push(format!("{GREY_ON}[interrupted]{FG_OFF}"));
+                self.transcript.push(String::new());
+            }
+            // Go record_turn.go: the measurement line follows the turn's assistant text, at column 0.
+            UiEvent::TurnStats {
+                duration_ms,
+                cost_turn_usd,
+                cost_usd,
+                ctx,
+                delegations,
+            } => {
+                let line = format!(
+                    "[측정] duration_ms={duration_ms} cost_turn_usd={} cost_usd={} ctx={ctx} rotations={} delegations={delegations}",
+                    bar::fmt_g4(cost_turn_usd),
+                    bar::fmt_g4(cost_usd),
+                    self.rot
+                );
+                self.end_main_block();
+                self.transcript.push(line);
+                self.transcript.push(String::new());
+            }
+            // Go modeLine / setMode: the start state is not announced, so only later changes print.
+            UiEvent::ModeChanged { mode } => {
+                self.transcript
+                    .push(format!("{GREY_ON}mode: {mode}{FG_OFF}"));
+                self.transcript.push(String::new());
+                self.bar.mode = mode;
+            }
+            // Go ui.ask: the prompt is a note; the answer key path is not wired yet.
+            UiEvent::PermissionRequest { tool, summary, .. } => {
+                let note = render::perm_note(&tool, &summary);
+                self.transcript.push(format!("{GREY_ON}{note}{FG_OFF}"));
+                self.transcript.push(String::new());
+            }
+            // Variants added after the TUI wiring (non_exhaustive in core) render nothing yet
+            // (RateLimit: fmtRateStatus needs local time, not available in this crate).
             _ => {}
         }
         if content && !self.follow {
@@ -231,6 +310,13 @@ impl App {
 
     // Maps one key press to an action.
     pub fn on_key(&mut self, key: KeyEvent) -> Action {
+        if self.usage.is_open() {
+            let (w, h) = self.usage_geom();
+            if self.usage.key(key, w, h) {
+                self.follow_tail();
+            }
+            return Action::Continue;
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
@@ -416,6 +502,10 @@ impl App {
                 self.note(commands::mouse_note(self.mouse));
                 return Action::Continue;
             }
+            Some(Dispatch::OpenUsage) => {
+                self.usage.open();
+                return Action::Usage;
+            }
             Some(Dispatch::Note(s)) if !matches!(first, "/status" | "/version" | "/mode") => {
                 self.note(&s);
                 return Action::Continue;
@@ -423,6 +513,11 @@ impl App {
             _ => {}
         }
         Action::Submit(text)
+    }
+
+    // Width and body rows of the viewport, as the usage window sees them (no slash menu while it is open).
+    fn usage_geom(&self) -> (usize, usize) {
+        (text_width(self.cols), self.rows.saturating_sub(self.chrome_len()).max(1))
     }
 
     // Closes the open assistant block: flushes its unfinished line and adds Go's blank row after it.
@@ -493,6 +588,11 @@ impl App {
 
     // Moves the viewport by `delta` rows. Landing on the last page follows the tail again.
     fn scroll(&mut self, delta: isize) {
+        if self.usage.is_open() {
+            let (w, h) = self.usage_geom();
+            self.usage.scroll_by(delta, w, h);
+            return;
+        }
         let total = self.total_rows(self.cols);
         let start = self.start_row(total, self.rows.saturating_sub(self.chrome_len()));
         self.scroll_to((start as isize + delta).max(0) as usize);
@@ -526,6 +626,13 @@ impl App {
             .iter()
             .map(|(_, d, t)| (d.clone(), self.clock.duration_since(*t).as_secs()))
             .collect();
+        b.bg = self
+            .agents
+            .iter()
+            .filter(|(id, _, _)| self.bg_agents.contains(id))
+            .count();
+        b.fg = self.agents.len() - b.bg;
+        b.rot = self.rot;
         b
     }
 
@@ -720,7 +827,9 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
     let menu = overlay::slash_popup(&app.suggest(), app.sugg_sel, w, menu_max);
     let body_h = h.saturating_sub(chrome_h + menu.len());
     let mut rows = Vec::with_capacity(h);
-    if body_h > 0 {
+    if body_h > 0 && app.usage.is_open() {
+        rows.extend(app.usage.lines(width, body_h));
+    } else if body_h > 0 {
         let body = app.body(width);
         let start = app.start_row(body.len(), body_h);
         for i in 0..body_h {
@@ -878,6 +987,7 @@ fn tui(cfg: Config) -> io::Result<()> {
                     Action::Submit(text) => engine.submit(&text),
                     Action::Interrupt(src) => engine.interrupt(src),
                     Action::Quit => break 'main,
+                    Action::Usage => engine.usage(),
                 },
                 Event::Paste(text) => app.editor.insert_str(&text),
                 Event::Mouse(m) if app.mouse => match m.kind {
@@ -1187,6 +1297,10 @@ mod tests {
         app.apply(UiEvent::ToolEnd {
             id: "t1".into(),
             ok: true,
+        });
+        app.apply(UiEvent::ToolResult {
+            id: "t1".into(),
+            text: "done".into(),
         });
         app.apply(UiEvent::TurnEnd { duration_ms: 1000 });
         let rows: Vec<String> = app

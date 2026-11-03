@@ -58,10 +58,32 @@ pub struct BarInput {
     pub queued: usize,
     // Main-context limit in tokens (the welcome threshold); used by the idle Go-style status row.
     pub limit: u64,
+    // Status line extras (Go statusLine): rate window text, rotations, permission mode ("default" or empty is
+    // hidden), and foreground / background agent counts.
+    pub rate: Option<String>,
+    pub rot: u32,
+    pub mode: String,
+    pub fg: usize,
+    pub bg: usize,
 }
 
 // Per-role context limit shown in the Go ctx bar (haikuThreshold in repl.go).
 const ROLE_LIMIT: &str = "80k";
+
+// Go %.4g for the measurement floats (record_turn.go measureLine). Fixed notation only; exponent form is not handled.
+pub fn fmt_g4(x: f64) -> String {
+    if x == 0.0 {
+        return "0".to_string();
+    }
+    let e = x.abs().log10().floor() as i32;
+    let decimals = (3 - e).max(0) as usize;
+    let s = format!("{x:.decimals$}");
+    if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
+    }
+}
 
 // fmtK-style token count for the ctx bar: "0" below 1000, otherwise thousands with a "k" suffix.
 fn fmt_k(n: u64) -> String {
@@ -99,13 +121,19 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
     for (desc, secs) in &b.agents {
         top.push_str(&format!(" · agent {desc} {}", fmt_secs(*secs)));
     }
-    // Go statusLine + ctxBar (tui.go:1193). M is the main context from UiEvent::Status; P/T/C, rot and mode
-    // are still 0/auto because the engine does not report them yet.
+    // Go statusLine + ctxBar (tui.go:1193). M is the main context from UiEvent::Status; P/T/C stay 0 because
+    // no UiEvent carries per-role context yet.
+    let mode = Some(b.mode.as_str()).filter(|m| !m.is_empty() && *m != "default");
+    let rate = b
+        .rate
+        .as_ref()
+        .map(|r| format!(" · {r}"))
+        .unwrap_or_default();
     let mut bottom = format!(
-        " M {}/{} P 0/{r} T 0/{r} C 0/{r}{}",
+        " M {}/{} P 0/{r} T 0/{r} C 0/{r}{rate}{}",
         fmt_k(b.tokens),
         fmt_k(b.limit),
-        status_suffix(0, Some("auto"), 0, 0),
+        status_suffix(b.rot, mode, b.fg, b.bg),
         r = ROLE_LIMIT
     );
     if b.queued > 0 {
@@ -301,6 +329,7 @@ mod tests {
     fn idle_bar_without_status_says_so() {
         let b = BarInput {
             limit: 200_000,
+            mode: "auto".to_string(),
             ..BarInput::default()
         };
         let [top, bottom] = rows(&b, '⠋', 80);
@@ -322,12 +351,15 @@ mod tests {
             context_pct: 6,
             queued: 2,
             limit: 200_000,
+            mode: "auto".to_string(),
+            fg: 1,
+            ..BarInput::default()
         };
-        let [top, bottom] = rows(&b, '⠙', 80);
+        let [top, bottom] = rows(&b, '⠙', 100);
         assert_eq!(top, "⠙ running 12s · agent 리뷰 3s");
         assert_eq!(
             bottom,
-            " M 12k/200k P 0/80k T 0/80k C 0/80k · rot 0 · mode auto · queued 2"
+            " M 12k/200k P 0/80k T 0/80k C 0/80k · rot 0 · mode auto · agents 1 running · queued 2"
         );
     }
 
