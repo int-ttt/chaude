@@ -517,7 +517,10 @@ impl App {
 
     // Width and body rows of the viewport, as the usage window sees them (no slash menu while it is open).
     fn usage_geom(&self) -> (usize, usize) {
-        (text_width(self.cols), self.rows.saturating_sub(self.chrome_len()).max(1))
+        (
+            text_width(self.cols),
+            self.rows.saturating_sub(self.chrome_len()).max(1),
+        )
     }
 
     // Closes the open assistant block: flushes its unfinished line and adds Go's blank row after it.

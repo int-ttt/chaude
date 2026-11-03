@@ -21,7 +21,7 @@ FAKE_DIR="$OUT/fakebin"
 WORK="$OUT/work"
 COLS=100
 ROWS=30
-ALL_SCENARIOS=(startup-idle type-text multiline submit-stream tool-use slash-menu scroll-up esc-interrupt resize-80x24 exit)
+ALL_SCENARIOS=(startup-idle type-text multiline submit-stream tool-use slash-menu scroll-up esc-interrupt resize-80x24 exit usage)
 
 mkdir -p "$OUT" "$FAKE_DIR" "$WORK" "$OUT/build"
 : >"$STATUS"
@@ -40,7 +40,7 @@ cat >"$FAKE_DIR/claude" <<'EOF'
 #!/bin/sh
 case "$*" in
   *--version*) echo "2.0.0 (Claude Code)"; exit 0 ;;
-  *" -p "*|*" -p") echo '{}'; exit 0 ;;
+  "-p "*|*" -p "*|*" -p") echo '{}'; exit 0 ;;
 esac
 while IFS= read -r line; do
   case "$line" in
@@ -101,6 +101,9 @@ drive() { # drive <scenario> <session>
       tmux resize-window -t "$s" -x 80 -y 24; pause 2 ;;
     exit)
       pause 2; text "$s" "/exit"; key "$s" Enter; pause 2 ;;
+    usage)
+      # /usage opens the full-screen window (one-shot claude -p; the fake returns '{}', so both sides show the same failure text).
+      pause 2; text "$s" "/usage"; key "$s" Enter; pause 3 ;;
   esac
 }
 
