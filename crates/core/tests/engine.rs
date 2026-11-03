@@ -946,3 +946,30 @@ fn usage_missing_binary_reports_error() {
     }
     h.shutdown();
 }
+
+// Go metrics: a finished turn appends one "turn" record to <metrics_dir>/<UTC date>.jsonl before TurnEnd.
+#[test]
+fn turn_is_logged_to_metrics_jsonl() {
+    let _g = lock();
+    let f = fake("metrics", &["text_turn.jsonl"]);
+    let metrics = f.dir.join("metrics");
+    let cfg = Config {
+        metrics_dir: Some(metrics.clone()),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("hi");
+    until_idle(&rx);
+    let files: Vec<PathBuf> = fs::read_dir(&metrics)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(files.len(), 1, "{files:?}");
+    let text = fs::read_to_string(&files[0]).unwrap();
+    let rec: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+    assert_eq!(rec["stage"], "turn", "{text}");
+    assert!(rec["ts"].is_string(), "{text}");
+    assert_eq!(rec["flags"]["context_window"], 200_000, "{text}");
+    assert!(rec["duration_ms"].is_u64(), "{text}");
+    assert!(rec["cost_turn_usd"].is_f64(), "{text}");
+}

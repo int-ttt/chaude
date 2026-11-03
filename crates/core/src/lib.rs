@@ -4,6 +4,7 @@ pub mod api;
 pub mod budget;
 pub mod event;
 pub mod lean;
+pub mod metrics;
 pub mod mode;
 pub mod osenv;
 pub mod proc;

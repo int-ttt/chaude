@@ -10,10 +10,11 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::budget::{self, Budget};
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
+use crate::metrics::Metrics;
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, SpawnOpts};
@@ -166,6 +167,8 @@ pub struct Config {
     pub auto_allow: bool,
     // Go --task-budget-usd: USD cap per prompt (the ledger resets on each prompt). Zero = off.
     pub task_budget_usd: f64,
+    // Go --metrics-dir: per-turn JSONL log directory. None = off (the CLI passes <record>/metrics).
+    pub metrics_dir: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -183,6 +186,7 @@ impl Default for Config {
             interrupt_grace: Duration::from_secs(20),
             auto_allow: false,
             task_budget_usd: 0.0,
+            metrics_dir: None,
         }
     }
 }
@@ -308,6 +312,10 @@ struct State {
     last_api: Option<Instant>,
     // Set when a main usage event's in-flight estimate reached the cap; the turn is interrupted once.
     budget_hit: bool,
+    // Per-turn metrics JSONL (Go metrics); disabled when cfg.metrics_dir is None.
+    metrics: Metrics,
+    // Session id from the child's system event (Go sess.SessionID); "" until the child reports one.
+    sid: String,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -322,6 +330,10 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     };
     let model = cfg.model.clone();
     let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));
+    let metrics = Metrics::new(
+        cfg.metrics_dir.clone(),
+        json!({"compact_window": cfg.compact_window, "context_window": cfg.context_window, "cache_ttl": cfg.cache_ttl}),
+    );
     let mut st = State {
         cfg,
         proc: None,
@@ -345,6 +357,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         budget,
         last_api: None,
         budget_hit: false,
+        metrics,
+        sid: String::new(),
     };
     match proc::spawn(&opts, self_tx, Input::Proc) {
         Ok(p) => st.proc = Some(p),
@@ -538,15 +552,17 @@ impl State {
 
     fn on_line(&mut self, line: &str) {
         self.last_activity = Instant::now();
-        match parse_line(line) {
-            Ok(ev) => self.on_event(ev),
-            Err(_) => {}
+        if let Ok(ev) = parse_line(line) {
+            self.on_event(ev);
         }
     }
 
     fn on_event(&mut self, ev: Event) {
         match ev {
             Event::System(s) => {
+                if let Some(id) = s.session_id {
+                    self.sid = id;
+                }
                 if let Some(m) = s.model {
                     self.model = m;
                     self.emit_status(self.cost_usd);
@@ -836,6 +852,28 @@ impl State {
         self.end_turn(duration_ms);
     }
 
+    // Go repl.go turn record (stage "turn"). Keys the Rust engine does not produce yet (draining, rotations,
+    // result_* usage) are left out until their groups land. Write errors are ignored, as in Go.
+    fn log_turn(&self, duration_ms: u64) {
+        let end_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let cost_turn = (self.cost_usd - self.turn_cost_base).max(0.0);
+        let _ = self.metrics.log(json!({
+            "stage": "turn",
+            "start_ms": end_ms.saturating_sub(duration_ms),
+            "end_ms": end_ms,
+            "model": self.model,
+            "ctx": self.ctx_tokens,
+            "session": self.sid,
+            "cost_usd": self.cost_usd,
+            "cost_turn_usd": cost_turn,
+            "duration_ms": duration_ms,
+            "delegations": self.delegations,
+        }));
+    }
+
     // Finishes the running turn and starts the next queued one, if any.
     fn end_turn(&mut self, duration_ms: u64) {
         if self.interrupted_at.is_some() {
@@ -851,6 +889,7 @@ impl State {
             ctx: self.ctx_tokens,
             delegations: self.delegations,
         });
+        self.log_turn(duration_ms);
         self.turn_started = None;
         self.interrupted_at = None;
         self.open_tools.clear();
