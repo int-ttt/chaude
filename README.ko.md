@@ -7,6 +7,8 @@
 
 [English](README.md) | **한국어**
 
+> **Deprecation notice:** The Go implementation under `deprecated/` is deprecated. It is still the binary shipped in releases. It is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. The Rust workspace at the repo root is the successor and is still in progress.
+
 ## 효과
 
 핑퐁 게임 벤치마크(프롬프트 3개)에서 chaude와 일반 Opus를 비교했습니다:

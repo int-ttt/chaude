@@ -7,6 +7,8 @@
 
 **English** | [한국어](README.ko.md)
 
+> **Deprecation notice:** The Go implementation under `deprecated/` is deprecated. It is still the binary shipped in releases. It is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. The Rust workspace at the repo root is the successor and is still in progress.
+
 ## Effect
 
 Ping-pong game benchmark (3 prompts), chaude vs plain Opus:
