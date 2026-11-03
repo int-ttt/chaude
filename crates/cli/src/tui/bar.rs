@@ -330,6 +330,17 @@ pub fn quiet_notice(idle: Duration) -> String {
     )
 }
 
+// Agent list scroll indicator (tui.go:1490). `off` is the 0-based first shown row, `shown` the rows in the
+// window, `total` all agents. Shows 1-based bounds, e.g. "  … 3-5/12 (마우스 휠로 스크롤)".
+pub fn scroll_range_text(off: usize, shown: usize, total: usize) -> String {
+    format!(
+        "  … {}-{}/{} (마우스 휠로 스크롤)",
+        off + 1,
+        off + shown,
+        total
+    )
+}
+
 // Go time.Duration.String for whole seconds: "30s", "1m0s", "1h0m0s". Sub-second parts are dropped.
 pub fn go_duration(d: Duration) -> String {
     let s = d.as_secs();
@@ -345,6 +356,14 @@ pub fn go_duration(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scroll_range_text_is_one_based() {
+        assert_eq!(
+            scroll_range_text(2, 3, 12),
+            "  … 3-5/12 (마우스 휠로 스크롤)"
+        );
+    }
 
     #[test]
     fn durations_and_token_counts_are_short() {
