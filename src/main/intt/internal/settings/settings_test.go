@@ -44,3 +44,25 @@ func TestDefaultSrcPrecedence(t *testing.T) {
 		t.Fatalf("none: %s", got)
 	}
 }
+
+// TestGenSettingsCreatesSettingsFolder: in a fresh temp dir, --out into a missing .claude folder creates .claude/,
+// .claude/hooks/ and the output file.
+func TestGenSettingsCreatesSettingsFolder(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src.json")
+	if err := os.WriteFile(src, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "fresh", ".claude", "settings.json")
+	if code := Main([]string{"mac", "--src", src, "--out", out}); code != 0 {
+		t.Fatalf("Main exit %d", code)
+	}
+	for _, d := range []string{filepath.Join(root, "fresh", ".claude"), filepath.Join(root, "fresh", ".claude", "hooks")} {
+		if st, err := os.Stat(d); err != nil || !st.IsDir() {
+			t.Fatalf("folder not created: %s: %v", d, err)
+		}
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("output not written: %v", err)
+	}
+}

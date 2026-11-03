@@ -320,9 +320,26 @@ func Main(args []string) int {
 		os.Stdout.Write(txt)
 		return 0
 	}
+	if err := ensureSettingsDir(*out); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	if err := os.WriteFile(*out, txt, 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
+}
+
+// ensureSettingsDir creates the folder that will hold out when it is missing (the --out parent). When that folder is
+// a .claude folder, its hooks/ folder is created too. Existing folders and files are left as they are.
+func ensureSettingsDir(out string) error {
+	dir := filepath.Dir(out)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if filepath.Base(dir) == ".claude" {
+		return os.MkdirAll(filepath.Join(dir, "hooks"), 0o755)
+	}
+	return nil
 }
