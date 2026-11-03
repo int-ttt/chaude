@@ -17,26 +17,26 @@ jobs:
       - if: runner.os != 'macOS'
         uses: actions/setup-go@v5
         with:
-          go-version-file: src/main/intt/go.mod
-          cache-dependency-path: src/main/intt/go.sum
+          go-version-file: deprecated/src/main/intt/go.mod
+          cache-dependency-path: deprecated/src/main/intt/go.sum
       - if: runner.os == 'macOS'
         uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          cache-dependency-path: src/main/intt/go.sum
+          cache-dependency-path: deprecated/src/main/intt/go.sum
       - name: Vet
-        working-directory: src/main/intt
+        working-directory: deprecated/src/main/intt
         run: go vet ./...
       - name: Test
-        working-directory: src/main/intt
+        working-directory: deprecated/src/main/intt
         run: go test ./... -count=1
       - name: Build
-        working-directory: src/main/intt
+        working-directory: deprecated/src/main/intt
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ../../../bin
-          go build -o ../../../bin/ ./cmd/chaude
+          mkdir -p ../../../../bin
+          go build -o ../../../../bin/ ./cmd/chaude
       - name: Smoke
         shell: bash
         run: |

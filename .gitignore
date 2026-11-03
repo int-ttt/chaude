@@ -8,6 +8,7 @@ dist/
 tests/e2e-rebuild/*
 !tests/e2e-rebuild/.gitkeep
 /chaude
+/target
 
 .idea/
 notes/pastes/
@@ -23,6 +24,6 @@ tests/e2e-rebuild/
 .DS_Store
 **/.DS_Store
 deprecated/chaude
-/src/main/intt/chaude
+/deprecated/src/main/intt/chaude
 .claude/lean-off
 e2e/results/

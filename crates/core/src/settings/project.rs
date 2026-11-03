@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn embedded_hooks_match_repo() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.claude/hooks");
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.claude/hooks");
         if !repo.is_dir() {
             eprintln!("skip: repo .claude/hooks not reachable from here");
             return;

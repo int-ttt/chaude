@@ -39,7 +39,7 @@ func TestEnsureProjectSettingsCreatesGuard(t *testing.T) {
 
 // TestEmbeddedHooksMatchRepo: the embedded copies equal the repo's .claude/hooks (skipped when run outside the repo).
 func TestEmbeddedHooksMatchRepo(t *testing.T) {
-	repoHooks := filepath.Join("..", "..", "..", "..", "..", ".claude", "hooks")
+	repoHooks := filepath.Join("..", "..", "..", "..", "..", "..", ".claude", "hooks")
 	if _, err := os.Stat(repoHooks); err != nil {
 		t.Skip("repo .claude/hooks not reachable from here")
 	}

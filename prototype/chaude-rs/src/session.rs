@@ -1,5 +1,5 @@
 // One `claude -p` child in stream-json mode. Argv mirrors sessionArgs in
-// src/main/intt/internal/harness/core.go (default options: no Minimal/Tools/Extra).
+// deprecated/src/main/intt/internal/harness/core.go (default options: no Minimal/Tools/Extra).
 // Owned types only: no lifetimes.
 
 use std::io::{self, BufRead, BufReader, Write};

@@ -13,8 +13,8 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version-file: src/main/intt/go.mod
-          cache-dependency-path: src/main/intt/go.sum
+          go-version-file: deprecated/src/main/intt/go.mod
+          cache-dependency-path: deprecated/src/main/intt/go.sum
       - name: Build archives
         env:
           TARGETS: darwin/arm64 linux/amd64 linux/arm64 windows/amd64

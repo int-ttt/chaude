@@ -269,7 +269,7 @@ func TestBrokenMarkersFailBeforeAnyChange(t *testing.T) {
 
 // TestManifestMatchesRepo keeps pkgFiles equal to the tracked .claude/{agents,hooks,skills} tree of this repo.
 func TestManifestMatchesRepo(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "..", "..")
+	root := filepath.Join("..", "..", "..", "..", "..", "..")
 	var got []string
 	for _, sub := range []string{"agents", "hooks", "skills"} {
 		base := filepath.Join(root, ".claude", sub)

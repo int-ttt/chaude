@@ -7,7 +7,7 @@ VERSION="${VERSION#v}"
 MAIN_PKG="${MAIN_PKG:-./cmd/chaude}"
 TARGETS="${TARGETS:-darwin/arm64 linux/amd64 linux/arm64 windows/amd64}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MOD="$ROOT/src/main/intt"   # Go module root; go commands run here
+MOD="$ROOT/deprecated/src/main/intt"   # Go module root; go commands run here
 cd "$ROOT"
 rm -rf dist && mkdir -p dist
 for t in $TARGETS; do

@@ -1,7 +1,7 @@
 # chaude
 
 [![Latest release](https://img.shields.io/github/v/release/int-ttt/chaude)](https://github.com/int-ttt/chaude/releases/latest)
-[![Go 1.22+](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](src/main/intt/go.mod)
+[![Go 1.22+](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](deprecated/src/main/intt/go.mod)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#install)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -197,10 +197,10 @@ A. In one ping-pong game comparison, cost was -42.7% versus plain Opus (average 
 A. Yes. Use `/import [ID|latest]` or `/resume claude`, or run `chaude --from-claude latest`. The import view shows the whole transcript, including thinking, tool calls and results, and subagent messages.
 ## Contributing
 
-Build (Go 1.22 or later) and test from `src/main/intt`:
+Build (Go 1.22 or later) and test from `deprecated/src/main/intt`:
 
 ```sh
-cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude && go test ./...
+cd deprecated/src/main/intt && go build -o ../../../../bin/chaude ./cmd/chaude && go test ./...
 ```
 
 Issues: report bugs and request features on [GitHub Issues](https://github.com/int-ttt/chaude/issues).

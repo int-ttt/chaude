@@ -292,7 +292,7 @@ fn broken_markers_fail_before_any_change() {
 /// Keeps PKG_FILES equal to the tracked .claude/{agents,hooks,skills} tree of this repo.
 #[test]
 fn manifest_matches_repo() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut got: Vec<String> = Vec::new();
     for sub in ["agents", "hooks", "skills"] {
         let base = root.join(".claude").join(sub);

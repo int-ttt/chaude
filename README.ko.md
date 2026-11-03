@@ -1,7 +1,7 @@
 # chaude
 
 [![Latest release](https://img.shields.io/github/v/release/int-ttt/chaude)](https://github.com/int-ttt/chaude/releases/latest)
-[![Go 1.22+](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](src/main/intt/go.mod)
+[![Go 1.22+](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](deprecated/src/main/intt/go.mod)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#설치)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -198,10 +198,10 @@ A. 핑퐁 게임 비교에서 일반 Opus 대비 비용이 -42.7%였습니다(2�
 A. 네. `/import [ID|latest]` 또는 `/resume claude`를 쓰거나, `chaude --from-claude latest`를 실행하세요. 가져오기 화면에는 생각, 도구 호출과 결과, 하위 에이전트 메시지를 포함한 전체 대화가 나옵니다.
 ## 기여
 
-Go 1.22 이상으로 `src/main/intt`에서 빌드하고 테스트합니다:
+Go 1.22 이상으로 `deprecated/src/main/intt`에서 빌드하고 테스트합니다:
 
 ```sh
-cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude && go test ./...
+cd deprecated/src/main/intt && go build -o ../../../../bin/chaude ./cmd/chaude && go test ./...
 ```
 
 이슈: 버그 제보와 기능 제안은 [GitHub Issues](https://github.com/int-ttt/chaude/issues)에 남겨 주세요.

@@ -1,6 +1,6 @@
 // One `claude -p` child in stream-json mode. Argv mirrors sessionArgs, env mirrors cleanEnv and withCacheTTL,
 // stderr is discarded like cmd.Stderr = nil, and the stdin frames match Send, RespondPermission and Interrupt
-// in src/main/intt/internal/harness/core.go. Owned types only: no lifetimes.
+// in deprecated/src/main/intt/internal/harness/core.go. Owned types only: no lifetimes.
 
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
