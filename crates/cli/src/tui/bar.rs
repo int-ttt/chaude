@@ -206,6 +206,36 @@ pub fn agent_state(failed: bool, interrupted: bool, done: bool, started: bool) -
     }
 }
 
+// Which thinking row to draw under the transcript (tui.go:383-391). A running foreground agent alone is not
+// enough: the row shows only when Opus or a resident session is busy, or no text has streamed yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThinkingRow {
+    None,
+    Status,
+    StatusWithEsc,
+}
+
+pub fn thinking_row(
+    fg_running: bool,
+    opus_running: bool,
+    resident_busy: bool,
+    got_text: bool,
+    perm_pending: bool,
+    busy: bool,
+) -> ThinkingRow {
+    if perm_pending {
+        return ThinkingRow::None;
+    }
+    if (fg_running || opus_running || resident_busy) && (opus_running || resident_busy || !got_text)
+    {
+        ThinkingRow::Status
+    } else if busy && !got_text {
+        ThinkingRow::StatusWithEsc
+    } else {
+        ThinkingRow::None
+    }
+}
+
 // hasModelPrefix (tui.go:1546-1554): the name already starts with a model id, so the model segment is skipped.
 pub fn has_model_prefix(name: &str) -> bool {
     ["haiku-", "opus-", "sonnet-", "fable-"]
@@ -414,6 +444,29 @@ mod tests {
             agent_status_text(AgentState::Running, "", "opus", "opus-architect", "t"),
             "실행 중-opus-architect(t)"
         );
+    }
+
+    // Port of the thinking-row gate in tuiModel.view (tui.go:383-391).
+    #[test]
+    fn thinking_row_shows_only_for_opus_resident_or_pre_text() {
+        use ThinkingRow::*;
+        // foreground agent alone after text started: hidden
+        assert_eq!(thinking_row(true, false, false, true, false, true), None);
+        // foreground agent before any text: shown
+        assert_eq!(thinking_row(true, false, false, false, false, true), Status);
+        // opus running after text: shown
+        assert_eq!(thinking_row(false, true, false, true, false, true), Status);
+        // resident busy after text: shown
+        assert_eq!(thinking_row(false, false, true, true, false, true), Status);
+        // busy, no text, nothing running: esc hint
+        assert_eq!(
+            thinking_row(false, false, false, false, false, true),
+            StatusWithEsc
+        );
+        // permission prompt pending hides everything
+        assert_eq!(thinking_row(false, true, true, false, true, true), None);
+        // idle
+        assert_eq!(thinking_row(false, false, false, false, false, false), None);
     }
 
     #[test]
