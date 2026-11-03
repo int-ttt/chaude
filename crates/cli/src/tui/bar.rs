@@ -51,7 +51,6 @@ pub struct BarInput {
     pub turn_secs: Option<u64>,
     // Running subagents as (description, elapsed seconds).
     pub agents: Vec<(String, u64)>,
-    pub has_status: bool,
     pub model: String,
     pub tokens: u64,
     pub cost_usd: f64,
@@ -100,24 +99,15 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
     for (desc, secs) in &b.agents {
         top.push_str(&format!(" · agent {desc} {}", fmt_secs(*secs)));
     }
-    let mut bottom = if b.has_status {
-        format!(
-            "{} · tokens {} · ${:.3} · ctx {}%",
-            b.model,
-            fmt_tokens(b.tokens),
-            b.cost_usd,
-            b.context_pct
-        )
-    } else {
-        // Go idle status line (statusLine + ctxBar, tui.go:1193). Role contexts are not tracked yet, so P/T/C stay 0.
-        format!(
-            " M {}/{} P 0/{r} T 0/{r} C 0/{r}{}",
-            fmt_k(0),
-            fmt_k(b.limit),
-            status_suffix(0, Some("auto"), 0, 0),
-            r = ROLE_LIMIT
-        )
-    };
+    // Go statusLine + ctxBar (tui.go:1193). M is the main context from UiEvent::Status; P/T/C, rot and mode
+    // are still 0/auto because the engine does not report them yet.
+    let mut bottom = format!(
+        " M {}/{} P 0/{r} T 0/{r} C 0/{r}{}",
+        fmt_k(b.tokens),
+        fmt_k(b.limit),
+        status_suffix(0, Some("auto"), 0, 0),
+        r = ROLE_LIMIT
+    );
     if b.queued > 0 {
         bottom.push_str(&format!(" · queued {}", b.queued));
     }
@@ -326,17 +316,19 @@ mod tests {
         let b = BarInput {
             turn_secs: Some(12),
             agents: vec![("리뷰".to_string(), 3)],
-            has_status: true,
             model: "opus".to_string(),
             tokens: 12_345,
             cost_usd: 0.042,
             context_pct: 6,
             queued: 2,
-            ..BarInput::default()
+            limit: 200_000,
         };
         let [top, bottom] = rows(&b, '⠙', 80);
         assert_eq!(top, "⠙ running 12s · agent 리뷰 3s");
-        assert_eq!(bottom, "opus · tokens 12.3k · $0.042 · ctx 6% · queued 2");
+        assert_eq!(
+            bottom,
+            " M 12k/200k P 0/80k T 0/80k C 0/80k · rot 0 · mode auto · queued 2"
+        );
     }
 
     #[test]

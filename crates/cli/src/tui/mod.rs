@@ -43,6 +43,9 @@ const WHEEL_LINES: isize = 3;
 const NEW_MSG: &str = "↓ 새 메시지";
 // Prefix for agent text lines.
 const AGENT_PREFIX: &str = "  │ ";
+// Go tui.go render(): orange "● " opens an assistant block, green "● " opens a tool block.
+const ASST_FIRST: &str = "\x1b[38;2;217;119;87m● \x1b[39m";
+const TOOL_ON: &str = "\x1b[38;2;95;175;135m";
 
 // What the event loop must do after a key press.
 #[derive(Debug, PartialEq)]
@@ -66,6 +69,8 @@ pub struct App {
     clock: Instant,
     spin: char,
     transcript: Vec<String>,
+    // True while the main assistant block has emitted its first line (the "● " lead is written once).
+    main_open: bool,
     // Unfinished text (no newline yet) per role. Agent text shares one buffer; it is flushed at its MessageDone.
     pending_main: String,
     pending_agent: String,
@@ -108,6 +113,7 @@ impl App {
             clock: Instant::now(),
             spin: ' ',
             transcript: Vec::new(),
+            main_open: false,
             pending_main: String::new(),
             pending_agent: String::new(),
             top: 0,
@@ -129,30 +135,47 @@ impl App {
             UiEvent::TextDelta {
                 role: Role::Main,
                 text,
-            } => feed(&mut self.pending_main, &text, "", &mut self.transcript),
+            } => feed(
+                &mut self.pending_main,
+                &text,
+                (ASST_FIRST, "  "),
+                &mut self.main_open,
+                &mut self.transcript,
+            ),
             UiEvent::TextDelta {
                 role: Role::Agent(_),
                 text,
             } => feed(
                 &mut self.pending_agent,
                 &text,
-                AGENT_PREFIX,
+                (AGENT_PREFIX, AGENT_PREFIX),
+                &mut false,
                 &mut self.transcript,
             ),
-            UiEvent::MessageDone { role: Role::Main } => {
-                flush(&mut self.pending_main, "", &mut self.transcript)
-            }
+            UiEvent::MessageDone { role: Role::Main } => self.end_main_block(),
             UiEvent::MessageDone {
                 role: Role::Agent(_),
-            } => flush(&mut self.pending_agent, AGENT_PREFIX, &mut self.transcript),
+            } => flush(
+                &mut self.pending_agent,
+                (AGENT_PREFIX, AGENT_PREFIX),
+                &mut false,
+                &mut self.transcript,
+            ),
             UiEvent::ToolStart { name, summary, .. } => {
-                self.transcript.push(format!("● {name} {summary}"))
+                self.end_main_block();
+                let head = if summary.is_empty() {
+                    name
+                } else {
+                    format!("{name}({summary})")
+                };
+                self.transcript.push(format!("{TOOL_ON}● {head}{FG_OFF}"));
             }
-            UiEvent::ToolEnd { ok, .. } => self.transcript.push(if ok {
-                "  ↳ ok".into()
-            } else {
-                "  ↳ failed".into()
-            }),
+            UiEvent::ToolEnd { ok, .. } => {
+                let word = if ok { "done" } else { "failed" };
+                self.transcript
+                    .push(format!("{GREY_ON}  ⎿  {word}{FG_OFF}"));
+                self.transcript.push(String::new());
+            }
             UiEvent::AgentStart {
                 id, description, ..
             } => {
@@ -173,7 +196,6 @@ impl App {
                 cost_usd,
                 context_pct,
             } => {
-                self.bar.has_status = true;
                 self.bar.model = model;
                 self.bar.tokens = tokens;
                 self.bar.cost_usd = cost_usd;
@@ -184,11 +206,8 @@ impl App {
                 self.turn_start = if b { Some(Instant::now()) } else { None };
             }
             UiEvent::Queued(n) => self.bar.queued = n,
-            UiEvent::TurnEnd { duration_ms } => {
-                flush(&mut self.pending_main, "", &mut self.transcript);
-                self.transcript
-                    .push(format!("── done in {}", bar::fmt_secs(duration_ms / 1000)));
-            }
+            // Go shows no per-turn "done" row; its footer comes from engine stats that UiEvent does not carry yet.
+            UiEvent::TurnEnd { .. } => self.end_main_block(),
             UiEvent::Rotated { reason } => {
                 self.transcript.push(format!("↻ session rotated: {reason}"))
             }
@@ -373,10 +392,14 @@ impl App {
         if text.trim().is_empty() {
             return Action::Continue;
         }
+        self.end_main_block();
+        // Go tui.go render(): the user block is grey, "> " on its first row, and is followed by a blank row.
         for (i, line) in text.split('\n').enumerate() {
+            let lead = if i == 0 { PROMPT } else { "  " };
             self.transcript
-                .push(format!("{}{line}", if i == 0 { "› " } else { "  " }));
+                .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
         }
+        self.transcript.push(String::new());
         self.follow_tail();
         let first = text.split_whitespace().next().unwrap_or("");
         let dispatched = {
@@ -408,6 +431,20 @@ impl App {
             _ => {}
         }
         Action::Submit(text)
+    }
+
+    // Closes the open assistant block: flushes its unfinished line and adds Go's blank row after it.
+    fn end_main_block(&mut self) {
+        flush(
+            &mut self.pending_main,
+            (ASST_FIRST, "  "),
+            &mut self.main_open,
+            &mut self.transcript,
+        );
+        if self.main_open {
+            self.transcript.push(String::new());
+        }
+        self.main_open = false;
     }
 
     fn note(&mut self, text: &str) {
@@ -709,19 +746,30 @@ pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Resu
     out.flush()
 }
 
-// Appends text to `buf`, emitting each completed line (with `prefix`) to `out`.
-fn feed(buf: &mut String, text: &str, prefix: &str, out: &mut Vec<String>) {
+// Appends text to `buf`, emitting each completed line to `out`. `lead` is (first line, later lines); `open`
+// records whether the block already has a line, so the first-line lead is written only once per block.
+fn feed(buf: &mut String, text: &str, lead: (&str, &str), open: &mut bool, out: &mut Vec<String>) {
     buf.push_str(text);
     while let Some(i) = buf.find('\n') {
         let line: String = buf.drain(..=i).collect();
-        out.push(format!("{prefix}{}", line.trim_end_matches('\n')));
+        out.push(format!(
+            "{}{}",
+            if *open { lead.1 } else { lead.0 },
+            line.trim_end_matches('\n')
+        ));
+        *open = true;
     }
 }
 
 // Emits whatever is left in `buf` as a final line.
-fn flush(buf: &mut String, prefix: &str, out: &mut Vec<String>) {
+fn flush(buf: &mut String, lead: (&str, &str), open: &mut bool, out: &mut Vec<String>) {
     if !buf.is_empty() {
-        out.push(format!("{prefix}{}", std::mem::take(buf)));
+        out.push(format!(
+            "{}{}",
+            if *open { lead.1 } else { lead.0 },
+            std::mem::take(buf)
+        ));
+        *open = true;
     }
 }
 
@@ -901,7 +949,7 @@ mod tests {
     fn app_with_lines(n: usize) -> App {
         let mut app = App::new(30, 6);
         for i in 0..n {
-            app.apply(text(&format!("line {i}\n")));
+            app.transcript.push(format!("line {i}"));
         }
         app
     }
@@ -1076,7 +1124,7 @@ mod tests {
     #[test]
     fn new_output_at_the_bottom_follows_the_tail() {
         let mut app = app_with_lines(10);
-        app.apply(text("line 10\n"));
+        app.transcript.push("line 10".to_string());
         let mut want = vec!["line 9".to_string(), "line 10".to_string()];
         want.extend(chrome(None, ""));
         assert_eq!(screen(&app, 30, 6), want);
@@ -1086,7 +1134,7 @@ mod tests {
     fn end_key_returns_to_the_tail_and_clears_the_indicator() {
         let mut app = app_with_lines(10);
         app.scroll(-3);
-        app.apply(text("line 10\n"));
+        app.transcript.push("line 10".to_string());
         app.on_key(key(KeyCode::End, KeyModifiers::NONE), Instant::now());
         let rows = screen(&app, 30, 6);
         assert_eq!(rows[0], "line 9");
@@ -1109,10 +1157,36 @@ mod tests {
         }
 
         let mut app = App::new(30, 5);
-        app.apply(text("가나다라마바사\n"));
+        app.transcript.push("가나다라마바사".to_string());
         let rows = screen(&app, 7, 6);
         assert_eq!(rows[0], "라마바");
         assert_eq!(rows[1], "사");
+    }
+
+    #[test]
+    fn transcript_blocks_follow_go_leads_and_blank_rows() {
+        let mut app = App::new(40, 12);
+        app.apply(text("hi\n"));
+        app.apply(UiEvent::MessageDone { role: Role::Main });
+        app.apply(UiEvent::ToolStart {
+            id: "t1".into(),
+            name: "Agent".into(),
+            summary: "scan repo".into(),
+        });
+        app.apply(UiEvent::ToolEnd {
+            id: "t1".into(),
+            ok: true,
+        });
+        app.apply(UiEvent::TurnEnd { duration_ms: 1000 });
+        let rows: Vec<String> = app
+            .transcript
+            .iter()
+            .map(|l| render::strip_sgr(l))
+            .collect();
+        assert_eq!(
+            rows,
+            vec!["● hi", "", "● Agent(scan repo)", "  ⎿  done", ""]
+        );
     }
 
     #[test]
@@ -1132,7 +1206,14 @@ mod tests {
             app.on_key(key(KeyCode::Enter, KeyModifiers::NONE), now),
             Action::Submit("hi\nx".into())
         );
-        assert_eq!(app.transcript, vec!["› hi".to_string(), "  x".to_string()]);
+        assert_eq!(
+            app.transcript,
+            vec![
+                format!("{GREY_ON}> hi{FG_OFF}"),
+                format!("{GREY_ON}  x{FG_OFF}"),
+                String::new(),
+            ]
+        );
     }
 
     #[test]
