@@ -210,6 +210,8 @@ struct State {
     last_activity: Instant,
     // Set by an interrupt on a busy turn; the turn is force-ended when the grace period passes without a result.
     interrupted_at: Option<Instant>,
+    // Results still owed by abandoned turns (Go core.go Session.skip). Each one is discarded so it cannot end a later turn.
+    stray_results: u32,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -237,6 +239,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         open_tools: HashSet::new(),
         last_activity: Instant::now(),
         interrupted_at: None,
+        stray_results: 0,
     };
     match proc::spawn(&opts, self_tx, Input::Proc) {
         Ok(p) => st.proc = Some(p),
@@ -344,6 +347,7 @@ impl State {
     fn on_eof(&mut self) {
         self.open_tools.clear();
         self.interrupted_at = None;
+        self.stray_results = 0;
         self.emit(UiEvent::Error("claude exited".to_string()));
         if let Some(mut p) = self.proc.take() {
             p.kill();
@@ -422,6 +426,10 @@ impl State {
                 }
             }
             Event::Result(r) => {
+                if self.stray_results > 0 {
+                    self.stray_results -= 1;
+                    return;
+                }
                 if !self.busy {
                     return;
                 }
@@ -571,6 +579,7 @@ impl State {
             }
         }
         let duration_ms = elapsed_ms(self.turn_started);
+        self.stray_results += 1;
         self.end_turn(duration_ms);
     }
 

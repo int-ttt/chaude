@@ -505,3 +505,91 @@ fn interrupted_turn_without_result_is_ended_after_grace() {
     assert!(matches!(evs.last(), Some(UiEvent::Busy(false))), "{evs:?}");
     h.shutdown();
 }
+
+// Each user frame n: the first prints the hanging turn; later ones print a stale result (of the abandoned
+// turn) and then the reply. The stale result must not end the later turn.
+fn fake_stray(name: &str, hang: &str, reply: &str) -> Fake {
+    let dir = temp_dir(name);
+    fs::write(dir.join("hang.jsonl"), hang).unwrap();
+    fs::write(dir.join("reply.jsonl"), reply).unwrap();
+    let script = r#"#!/bin/sh
+n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> 'DIR/stdin.log'
+  case "$line" in
+    *'"type":"user"'*)
+      n=$((n + 1))
+      if [ $n -eq 1 ]; then
+        cat 'DIR/hang.jsonl'
+      else
+        printf '%s\n' '{"type":"result","session_id":"x"}'
+        cat 'DIR/reply.jsonl'
+      fi
+      ;;
+  esac
+done
+"#
+    .replace("DIR", &dir.display().to_string());
+    let bin = dir.join("claude");
+    fs::write(&bin, script).unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    Fake {
+        bin: bin.display().to_string(),
+        dir,
+    }
+}
+
+#[test]
+fn stray_result_of_abandoned_turn_does_not_end_next_turn() {
+    let _g = lock();
+    let (head, _tail) = agent_turn_split();
+    let f = fake_stray(
+        "stray",
+        &head,
+        &fs::read_to_string(fixture("text_turn.jsonl")).unwrap(),
+    );
+    let cfg = Config {
+        interrupt_grace: Duration::from_millis(200),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("scan");
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("engine went silent");
+        if matches!(ev, UiEvent::AgentStart { .. }) {
+            break;
+        }
+    }
+    h.interrupt(InterruptSource::EscKey);
+    let first = until_idle(&rx);
+    assert!(
+        matches!(first.last(), Some(UiEvent::Busy(false))),
+        "{first:?}"
+    );
+    h.submit("next");
+    let evs = until_idle(&rx);
+    let text = evs
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                UiEvent::TextDelta {
+                    role: Role::Main,
+                    ..
+                }
+            )
+        })
+        .unwrap_or_else(|| panic!("reply lost: {evs:?}"));
+    let end = evs
+        .iter()
+        .position(|e| matches!(e, UiEvent::TurnEnd { .. }))
+        .unwrap_or_else(|| panic!("no TurnEnd: {evs:?}"));
+    assert!(
+        text < end,
+        "stale result ended the next turn before its reply: {evs:?}"
+    );
+    assert!(matches!(evs.last(), Some(UiEvent::Busy(false))), "{evs:?}");
+    h.shutdown();
+}
