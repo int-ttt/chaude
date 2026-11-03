@@ -18,7 +18,7 @@ use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
 use crossterm::cursor::{MoveTo, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{execute, queue};
@@ -39,6 +39,8 @@ const MAX_INPUT_ROWS: usize = 5;
 // Reverse-video cell for the cursor (tui.go View, cursor style).
 const REV_ON: &str = "\x1b[7m";
 const WHEEL_LINES: isize = 3;
+// Go copyNote lifetime (selection.go copyNoteMsg, 2s).
+const COPY_NOTE_TTL: Duration = Duration::from_secs(2);
 // Shown on the running row when output arrived while the view was held above the tail (scroll-bottom.md).
 const NEW_MSG: &str = "↓ 새 메시지";
 // Prefix for agent text lines.
@@ -102,6 +104,11 @@ pub struct App {
     usage: usage::Usage,
     // Id of the permission request waiting for y/n (UiEvent::PermissionRequest). While set, keys answer it.
     perm: Option<String>,
+    // Drag selection in body coordinates (wrapped body row as `line`, cell column as `col`); the Go textSel model.
+    sel: render::TextSel,
+    dragging: bool,
+    // "복사됨 (N자)" or the copy error, shown on the status row for 2s (Go copyNote); the Instant is when it was set.
+    copy_note: Option<(String, Instant)>,
     welcome: Welcome,
 }
 
@@ -148,6 +155,9 @@ impl App {
             sugg_sel: 0,
             usage: usage::Usage::default(),
             perm: None,
+            sel: render::TextSel::default(),
+            dragging: false,
+            copy_note: None,
         }
     }
 
@@ -328,6 +338,14 @@ impl App {
             Some(t) if self.busy => bar::spinner_frame(now.duration_since(t)),
             _ => ' ',
         };
+        // The copy note lasts 2s (Go copyNoteMsg timer).
+        if self
+            .copy_note
+            .as_ref()
+            .is_some_and(|(_, at)| now.duration_since(*at) >= COPY_NOTE_TTL)
+        {
+            self.copy_note = None;
+        }
     }
 
     // Maps one key press to an action.
@@ -625,6 +643,112 @@ impl App {
         rows
     }
 
+    // The status row (with the copy note), the input box and the bar above them, drawn at width `w`.
+    fn chrome(&self, w: usize) -> Vec<String> {
+        let width = text_width(w);
+        let bi = self.bar_input();
+        let [mut top, mut status] = bar::rows(&bi, self.spin, width);
+        if self.unseen && !self.follow {
+            top = format!("{top} · {NEW_MSG}");
+        }
+        // Go tui.go footer: the copy note follows the status text.
+        if let Some((note, _)) = &self.copy_note {
+            status = format!("{status} · {note}");
+        }
+        let mut chrome = Vec::with_capacity(CHROME + 1);
+        if self.shows_bar() {
+            chrome.push(bar::clip(&top, width));
+        }
+        chrome.extend(self.input_box(w));
+        chrome.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&status, width)));
+        chrome
+    }
+
+    // Rows of the transcript viewport on a `w` x `h` screen: what is left after the chrome and the slash menu.
+    fn body_h(&self, w: usize, h: usize) -> usize {
+        let chrome_h = self.chrome(w).len();
+        let menu_max = h.saturating_sub(chrome_h + 1);
+        let menu = overlay::slash_popup(&self.suggest(), self.sugg_sel, w, menu_max);
+        h.saturating_sub(chrome_h + menu.len())
+    }
+
+    // Body cell under screen cell (x, y). A drag clamps into the viewport; a press outside it gives None.
+    fn body_at(&self, x: u16, y: u16, clamp: bool) -> Option<render::TextPos> {
+        let body_h = self.body_h(self.cols, self.rows);
+        let y = y as usize;
+        if body_h == 0 || (y >= body_h && !clamp) {
+            return None;
+        }
+        let start = self.start_row(self.total_rows(self.cols), body_h);
+        Some(render::TextPos {
+            line: start + y.min(body_h - 1),
+            col: x as usize,
+        })
+    }
+
+    // Left press in the transcript starts a selection (Go selectMouse). Usage and the permission prompt keep the mouse.
+    fn select_press(&mut self, x: u16, y: u16) {
+        if self.usage.is_open() || self.perm.is_some() {
+            return;
+        }
+        if let Some(p) = self.body_at(x, y, false) {
+            self.sel = render::TextSel {
+                set: true,
+                anchor: p,
+                head: p,
+            };
+            self.dragging = true;
+        }
+    }
+
+    fn select_drag(&mut self, x: u16, y: u16) {
+        if !self.dragging {
+            return;
+        }
+        if let Some(p) = self.body_at(x, y, true) {
+            self.sel.head = p;
+        }
+    }
+
+    // Left release ends the drag. A drag over text returns that text to copy; a plain click returns None.
+    fn select_release(&mut self, x: u16, y: u16) -> Option<String> {
+        if !self.dragging {
+            return None;
+        }
+        self.select_drag(x, y);
+        self.dragging = false;
+        let text = self.selected_text();
+        (!text.is_empty()).then_some(text)
+    }
+
+    // The plain text under the selection, one line per body row (Go textSel.text).
+    fn selected_text(&self) -> String {
+        let plain: Vec<String> = self
+            .body(text_width(self.cols))
+            .iter()
+            .map(|r| render::strip_sgr(r))
+            .collect();
+        self.sel.text(&plain)
+    }
+
+    // Body row `i` with its selected cells in reverse video (Go highlightView).
+    fn selected_row(&self, i: usize, row: String) -> String {
+        let plain = render::strip_sgr(&row);
+        match self.sel.span(i, UnicodeWidthStr::width(plain.as_str())) {
+            Some((from, to)) => render::highlight_line(&row, from, to),
+            None => row,
+        }
+    }
+
+    // Records the outcome of a copy: "복사됨 (N자)" on success, the error otherwise. Shown for 2s.
+    fn copy_done(&mut self, chars: usize, result: Result<(), String>) {
+        let note = match result {
+            Ok(()) => format!("복사됨 ({chars}자)"),
+            Err(e) => format!("복사 실패: {e}"),
+        };
+        self.copy_note = Some((note, self.clock));
+    }
+
     fn total_rows(&self, w: usize) -> usize {
         self.body(text_width(w)).len()
     }
@@ -838,6 +962,59 @@ fn input_window(n: usize, cur: usize) -> (usize, usize) {
     (top, shown)
 }
 
+// Copies `text` like Go copyToClipboard: OSC 52 to the terminal (reaches the local clipboard over SSH) and,
+// on macOS, pbcopy. The error is the native copy's; elsewhere only OSC 52 is written, so success there is unverified.
+fn copy_text(out: &mut impl Write, text: &str) -> Result<(), String> {
+    let osc = format!("\x1b]52;c;{}\x07", base64(text.as_bytes()));
+    out.write_all(osc.as_bytes())
+        .and_then(|()| out.flush())
+        .map_err(|e| e.to_string())?;
+    native_copy(text)
+}
+
+#[cfg(target_os = "macos")]
+fn native_copy(text: &str) -> Result<(), String> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("pbcopy")
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(text.as_bytes())
+            .map_err(|e| e.to_string())?;
+    }
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("pbcopy {status}"))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn native_copy(_text: &str) -> Result<(), String> {
+    Ok(())
+}
+
+// Standard base64 (RFC 4648, padded) for the OSC 52 payload.
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = |k: usize| u32::from(*chunk.get(k).unwrap_or(&0));
+        let n = (b(0) << 16) | (b(1) << 8) | b(2);
+        for i in 0..4u32 {
+            if i as usize <= chunk.len() {
+                out.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 // Splits `s` at display column `col`. Used to place the cursor cell inside the input line.
 fn split_cells(s: &str, col: usize) -> (&str, &str) {
     let mut acc = 0;
@@ -858,17 +1035,7 @@ fn text_width(w: usize) -> usize {
 // The whole screen as `h` rows of at most `w` columns. Pure: the same App and size give the same rows.
 pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
     let width = text_width(w);
-    let bi = app.bar_input();
-    let [mut top, status] = bar::rows(&bi, app.spin, width);
-    if app.unseen && !app.follow {
-        top = format!("{top} · {NEW_MSG}");
-    }
-    let mut chrome = Vec::with_capacity(CHROME + 1);
-    if app.shows_bar() {
-        chrome.push(bar::clip(&top, width));
-    }
-    chrome.extend(app.input_box(w));
-    chrome.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&status, width)));
+    let chrome = app.chrome(w);
     let chrome_h = chrome.len();
     // The slash menu sits right above the input box and never takes the last row of the body.
     let menu_max = h.saturating_sub(chrome_h + 1);
@@ -882,7 +1049,8 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
         let body = app.body(width);
         let start = app.start_row(body.len(), body_h);
         for i in 0..body_h {
-            rows.push(body.get(start + i).cloned().unwrap_or_default());
+            let row = body.get(start + i).cloned().unwrap_or_default();
+            rows.push(app.selected_row(start + i, row));
         }
     }
     rows.extend(menu);
@@ -1053,6 +1221,14 @@ fn tui(cfg: Config) -> io::Result<()> {
                 Event::Mouse(m) if app.mouse => match m.kind {
                     MouseEventKind::ScrollUp => app.scroll(-WHEEL_LINES),
                     MouseEventKind::ScrollDown => app.scroll(WHEEL_LINES),
+                    MouseEventKind::Down(MouseButton::Left) => app.select_press(m.column, m.row),
+                    MouseEventKind::Drag(MouseButton::Left) => app.select_drag(m.column, m.row),
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        if let Some(text) = app.select_release(m.column, m.row) {
+                            let result = copy_text(&mut out, &text);
+                            app.copy_done(text.chars().count(), result);
+                        }
+                    }
                     _ => {}
                 },
                 Event::Resize(c, r) => {
@@ -1658,6 +1834,61 @@ mod tests {
                     .as_str()
             )
         );
+    }
+
+    #[test]
+    fn drag_over_body_rows_selects_text_and_release_returns_it() {
+        let mut app = app_with_lines(3);
+        assert_eq!(screen(&app, 30, 6)[..2], ["line 1", "line 2"]);
+        app.select_press(0, 0);
+        app.select_drag(3, 1);
+        assert_eq!(app.select_release(3, 1), Some("line 1\nlin".to_string()));
+    }
+
+    #[test]
+    fn reverse_drag_highlights_in_reverse_video_and_a_click_copies_nothing() {
+        let mut app = app_with_lines(3);
+        app.select_press(0, 1);
+        assert_eq!(app.select_release(0, 1), None);
+        // Press on row 1, drag up to row 0: the selection is ordered from row 0 col 2 to row 1 col 5.
+        app.select_press(5, 1);
+        app.select_drag(2, 0);
+        assert!(frame(&app, 30, 6)[0].contains("\x1b[7m"));
+        assert_eq!(screen(&app, 30, 6)[..2], ["line 1", "line 2"]);
+        assert_eq!(app.select_release(2, 0), Some("ne 1\nline ".to_string()));
+    }
+
+    #[test]
+    fn presses_outside_the_viewport_or_under_a_prompt_do_not_select() {
+        let mut app = app_with_lines(3);
+        app.select_press(0, 5); // input and status rows, below the two viewport rows
+        assert!(!app.sel.set);
+        app.perm = Some("p1".into());
+        app.select_press(0, 0);
+        assert!(!app.sel.set);
+    }
+
+    #[test]
+    fn copy_note_shows_the_result_on_the_status_row_for_two_seconds() {
+        let mut app = app_with_lines(3);
+        app.copy_done(5, Ok(()));
+        assert!(screen(&app, 120, 6)[5].ends_with("복사됨 (5자)"));
+        app.copy_done(0, Err("boom".into()));
+        assert!(screen(&app, 120, 6)[5].ends_with("복사 실패: boom"));
+        let t = app.clock;
+        app.tick(t + Duration::from_millis(1999));
+        assert!(app.copy_note.is_some());
+        app.tick(t + Duration::from_millis(2000));
+        assert!(app.copy_note.is_none());
+    }
+
+    #[test]
+    fn base64_matches_rfc4648_padding() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"M"), "TQ==");
+        assert_eq!(base64(b"Ma"), "TWE=");
+        assert_eq!(base64(b"Man"), "TWFu");
+        assert_eq!(base64("복사".as_bytes()), "67O17IKs");
     }
 
     #[test]

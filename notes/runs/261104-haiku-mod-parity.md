@@ -22,3 +22,18 @@ doubts:
   - Interrupted clears App.perm; core also clears pending_perm on interrupt. Matches, unverified in engine test.
   - libc localtime_r used for HH:MM (unix); UTC fallback off unix.
   - mod.rs at HEAD referenced usage.rs (untracked by others). Not my file; reported earlier.
+
+group4_status: done (uncommitted until commit step below)
+group4_ids: S08 S09 S10 S11 B25 (mouse drag select, release copy via OSC 52 + pbcopy, copy note 2s on status row)
+group4_impl: mod.rs uses render::TextSel/TextPos, render::highlight_line, render::strip_sgr; duplicate ordered/sel_cells/cut_cells removed. copy_text, base64, native_copy stay in mod.rs.
+group4_gates:
+  cargo fmt --all -- --check: PASS
+  cargo clippy -p chaude-cli --all-targets -D warnings: PASS
+  cargo clippy --workspace -D warnings: FAIL in crates/core/src/api.rs:541 (single-pattern match; core, not mine)
+  cargo test --workspace: PASS (11+116+47+24+3+5+3 passed, 0 failed)
+  HEAD snapshot tui:: tests: 116 passed
+harness (scripts/tui-diff.sh, all 11, current tree):
+  startup-idle 100 | type-text 100 | multiline 100 | submit-stream 13 | tool-use 16 | slash-menu 100
+  scroll-up 13 | esc-interrupt 66 | resize-80x24 20 | exit 93 | usage 96
+  note: no scenario drives mouse selection; S08-S11 B25 are covered only by unit tests.
+  note: scroll-up and resize-80x24 now run (engine startup fixed) but are far below 95%. Not investigated here.
