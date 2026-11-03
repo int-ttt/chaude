@@ -63,6 +63,8 @@ pub struct App {
     bar: BarInput,
     busy: bool,
     turn_start: Option<Instant>,
+    // First line of the prompt that started the turn (Go curPrompt), shown in the busy row.
+    turn_prompt: String,
     agents: Vec<(String, String, Instant)>,
     // Time of the last tick. Elapsed times and the spinner are computed from it, so `frame` stays pure.
     clock: Instant,
@@ -107,6 +109,7 @@ impl App {
             bar: BarInput::default(),
             busy: false,
             turn_start: None,
+            turn_prompt: String::new(),
             agents: Vec::new(),
             clock: Instant::now(),
             spin: ' ',
@@ -380,6 +383,7 @@ impl App {
         if text.trim().is_empty() {
             return Action::Continue;
         }
+        self.turn_prompt = render::trunc_chars(text.lines().next().unwrap_or("").trim(), 60);
         self.end_main_block();
         // Go tui.go render(): the user block is grey, "> " on its first row, and is followed by a blank row.
         for (i, line) in text.split('\n').enumerate() {
@@ -439,15 +443,35 @@ impl App {
         self.transcript.extend(text.split('\n').map(str::to_string));
     }
 
+    // Go mainStatusText + the spinner (tui.go:385-390): `✶ 생각중-model-메인(prompt) · Mm SSs`, orange frame, grey text.
+    fn busy_row(&self) -> String {
+        let mut text = format!("생각중-{}-메인", self.welcome.model);
+        if !self.turn_prompt.is_empty() {
+            text.push_str(&format!("({})", self.turn_prompt));
+        }
+        if let Some(t) = self.turn_start {
+            text.push_str(&bar::elapsed_suffix(
+                self.clock.duration_since(t).as_secs(),
+                "",
+            ));
+        }
+        format!("{ORANGE_ON}{}{FG_OFF}{GREY_ON} {text}{FG_OFF}", self.spin)
+    }
+
     // Lines in the viewport: transcript, then the unfinished text of each role, wrapped to `width`.
     fn body(&self, width: usize) -> Vec<String> {
         let agent = format!("{AGENT_PREFIX}{}", self.pending_agent);
+        let busy_row = self.busy_row();
         let mut lines: Vec<&str> = self.transcript.iter().map(String::as_str).collect();
         if !self.pending_main.is_empty() {
             lines.push(&self.pending_main);
         }
         if !self.pending_agent.is_empty() {
             lines.push(&agent);
+        }
+        // Go tui.go View(): the main session row sits in the transcript flow while busy.
+        if self.busy {
+            lines.push(&busy_row);
         }
         // Text width is one less than the full width, so the welcome box gets the full width back.
         let mut rows = self.welcome_rows(width + 1);
@@ -554,9 +578,9 @@ impl App {
             .min(MAX_INPUT_ROWS)
     }
 
-    // Rows below the viewport: the running row (only while busy, unseen output or agents), then the input box.
+    // Rows below the viewport: the top bar (unseen output or agents), then the input box. Busy state is in the body.
     fn shows_bar(&self) -> bool {
-        self.busy || self.unseen || !self.agents.is_empty()
+        self.unseen || !self.agents.is_empty()
     }
 
     // Status row, the input box's top and bottom borders, and the input rows.
@@ -1218,6 +1242,22 @@ mod tests {
             app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
             Action::Quit
         );
+    }
+
+    #[test]
+    fn busy_row_sits_in_the_transcript_flow_with_go_text() {
+        let mut app = App::new(100, 30);
+        type_str(&mut app, "long task");
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        app.apply(UiEvent::Busy(true));
+        let body = app.body(100);
+        assert!(
+            body.iter()
+                .any(|r| r.contains("생각중-claude-opus-5-5-메인(long task) · 0m00s")),
+            "{body:?}"
+        );
+        // The busy state no longer adds a chrome row, so only the top bar (unseen or agents) can.
+        assert!(!app.shows_bar());
     }
 
     #[test]
