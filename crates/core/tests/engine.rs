@@ -146,6 +146,13 @@ fn text_turn_emits_deltas_then_done() {
             UiEvent::MessageDone { role: Role::Main },
             status(100, 0.0),
             status(100, 0.01),
+            UiEvent::TurnStats {
+                duration_ms: 42,
+                cost_turn_usd: 0.01,
+                cost_usd: 0.01,
+                ctx: 100,
+                delegations: 0,
+            },
             UiEvent::TurnEnd { duration_ms: 42 },
             UiEvent::Busy(false),
         ]
@@ -640,5 +647,46 @@ fn rate_limit_event_emits_raw_info() {
         .unwrap_or_else(|| panic!("no RateLimit: {evs:?}"));
     assert_eq!(info["rateLimitType"], "five_hour");
     assert_eq!(info["unifiedWindows"]["five_hour"]["utilization"], 0.38);
+    h.shutdown();
+}
+
+// TurnStats carries the per-turn measurement (Go record_turn.go keys) just before TurnEnd.
+#[test]
+fn turn_stats_reports_turn_cost_delegations_and_context() {
+    let _g = lock();
+    let f = fake("turn-stats", &["agent_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("scan");
+    let evs = until_idle(&rx);
+    let pos = evs
+        .iter()
+        .position(|e| matches!(e, UiEvent::TurnStats { .. }))
+        .unwrap_or_else(|| panic!("no TurnStats: {evs:?}"));
+    assert!(
+        matches!(evs.get(pos + 1), Some(UiEvent::TurnEnd { .. })),
+        "TurnStats must precede TurnEnd: {evs:?}"
+    );
+    let UiEvent::TurnStats {
+        cost_turn_usd,
+        cost_usd,
+        ctx,
+        delegations,
+        ..
+    } = &evs[pos]
+    else {
+        unreachable!()
+    };
+    assert!((cost_usd - 0.02).abs() < 1e-9, "{evs:?}");
+    assert!((cost_turn_usd - 0.02).abs() < 1e-9, "{evs:?}");
+    assert_eq!(*delegations, 1, "{evs:?}");
+    let last_tokens = evs
+        .iter()
+        .filter_map(|e| match e {
+            UiEvent::Status { tokens, .. } => Some(*tokens),
+            _ => None,
+        })
+        .next_back()
+        .expect("status");
+    assert_eq!(*ctx, last_tokens, "{evs:?}");
     h.shutdown();
 }

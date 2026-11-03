@@ -104,6 +104,16 @@ pub enum UiEvent {
     RateLimit {
         info: Value,
     },
+    // Per-turn measurement, emitted just before TurnEnd (Go record_turn.go measureLine keys).
+    // cost_turn_usd = this turn's share of the session cost; cost_usd = cumulative session cost;
+    // ctx = context tokens from the last assistant usage; delegations = Agent/Task calls in the turn.
+    TurnStats {
+        duration_ms: u64,
+        cost_turn_usd: f64,
+        cost_usd: f64,
+        ctx: u64,
+        delegations: u32,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -228,6 +238,9 @@ struct State {
     interrupted_at: Option<Instant>,
     // Results still owed by abandoned turns (Go core.go Session.skip). Each one is discarded so it cannot end a later turn.
     stray_results: u32,
+    // Session cost when the running turn started, and Agent/Task calls made in it (for TurnStats).
+    turn_cost_base: f64,
+    delegations: u32,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -256,6 +269,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         last_activity: Instant::now(),
         interrupted_at: None,
         stray_results: 0,
+        turn_cost_base: 0.0,
+        delegations: 0,
     };
     match proc::spawn(&opts, self_tx, Input::Proc) {
         Ok(p) => st.proc = Some(p),
@@ -319,6 +334,8 @@ impl State {
             Ok(()) => {
                 self.turn_started = Some(Instant::now());
                 self.last_activity = Instant::now();
+                self.turn_cost_base = self.cost_usd;
+                self.delegations = 0;
                 true
             }
             Err(e) => {
@@ -503,6 +520,7 @@ impl State {
             summary,
         });
         if name == "Agent" || name == "Task" {
+            self.delegations += 1;
             let description = ["description", "subagent_type", "prompt"]
                 .iter()
                 .find_map(|k| {
@@ -614,6 +632,13 @@ impl State {
         if self.interrupted_at.is_some() {
             self.emit(UiEvent::Interrupted);
         }
+        self.emit(UiEvent::TurnStats {
+            duration_ms,
+            cost_turn_usd: (self.cost_usd - self.turn_cost_base).max(0.0),
+            cost_usd: self.cost_usd,
+            ctx: self.ctx_tokens,
+            delegations: self.delegations,
+        });
         self.turn_started = None;
         self.interrupted_at = None;
         self.open_tools.clear();
