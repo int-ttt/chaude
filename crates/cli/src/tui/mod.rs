@@ -5,6 +5,7 @@
 pub mod bar;
 pub mod commands;
 pub mod edit;
+pub mod render;
 
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::sync::mpsc::TryRecvError;
