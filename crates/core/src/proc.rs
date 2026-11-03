@@ -88,6 +88,30 @@ fn apply_env(cmd: &mut Command, compact_window: u32, cache_ttl: &str) {
     }
 }
 
+// Go /usage (usageRaw): a separate `claude -p /usage --output-format json` run in the temp dir, so it never
+// touches the session. Returns the JSON `result` text. Not charged to the budget (Go never calls chargeOneShot).
+pub fn one_shot_usage(claude_bin: &str) -> Result<String, String> {
+    let mut cmd = Command::new(claude_bin);
+    cmd.args([
+        "-p",
+        "/usage",
+        "--output-format",
+        "json",
+        "--no-session-persistence",
+    ])
+    .current_dir(std::env::temp_dir())
+    .stdin(Stdio::null())
+    .stderr(Stdio::null());
+    apply_env(&mut cmd, 0, "");
+    let out = cmd.output().map_err(|e| format!("usage: {e}"))?;
+    let v: Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("usage: bad json: {e}"))?;
+    v.get("result")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "usage: no result".to_string())
+}
+
 pub struct ClaudeProc {
     child: Child,
     stdin: ChildStdin,

@@ -893,3 +893,56 @@ fn budget_status_reports_spent_and_cap_after_each_turn() {
     );
     h.shutdown();
 }
+
+// Waits for the reply to a usage() call: Usage(text) or an "usage:" Error. Session spawn errors are skipped,
+// because Config::claude_bin is shared by the session child and the one-shot run.
+fn usage_reply(rx: &Receiver<UiEvent>) -> UiEvent {
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("engine went silent");
+        match &ev {
+            UiEvent::Usage { .. } => return ev,
+            UiEvent::Error(m) if m.starts_with("usage:") => return ev,
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn usage_answers_with_result_text_from_one_shot_run() {
+    let _g = lock();
+    let f = fake("usage", &[]);
+    // Wrapper: `-p /usage` prints the JSON result; every other argv (the session child) runs the fake.
+    let usage = f.dir.join("usage-claude");
+    let script = format!(
+        "#!/bin/sh\ncase \"$*\" in\n  *'/usage'*) printf '%s\\n' '{{\"type\":\"result\",\"result\":\"Plan: Max 5x\"}}'; exit 0;;\nesac\nexec '{}' \"$@\"\n",
+        f.bin
+    );
+    fs::write(&usage, script).unwrap();
+    fs::set_permissions(&usage, fs::Permissions::from_mode(0o755)).unwrap();
+    let mut cfg = config(&f);
+    cfg.claude_bin = usage.display().to_string();
+    let (h, rx) = Engine::start(cfg);
+    h.usage();
+    match usage_reply(&rx) {
+        UiEvent::Usage { text } => assert_eq!(text, "Plan: Max 5x"),
+        other => panic!("expected Usage, got {other:?}"),
+    }
+    h.shutdown();
+}
+
+#[test]
+fn usage_missing_binary_reports_error() {
+    let _g = lock();
+    let f = fake("usage-missing", &[]);
+    let mut cfg = config(&f);
+    cfg.claude_bin = f.dir.join("no-such-claude").display().to_string();
+    let (h, rx) = Engine::start(cfg);
+    h.usage();
+    match usage_reply(&rx) {
+        UiEvent::Error(msg) => assert!(msg.starts_with("usage:"), "{msg}"),
+        other => panic!("expected Error, got {other:?}"),
+    }
+    h.shutdown();
+}

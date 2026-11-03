@@ -139,6 +139,10 @@ pub enum UiEvent {
         spent_usd: f64,
         cap_usd: f64,
     },
+    // Result of /usage (Go usageRaw): a one-shot claude run, not the session. Answered while busy, not charged.
+    Usage {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -189,6 +193,7 @@ enum Cmd {
     // Mode name as typed ("next" cycles); parsed by the actor so unknown names are reported as UiEvent::Error.
     SetMode(String),
     Permission { id: String, allow: bool },
+    Usage,
     Shutdown,
 }
 
@@ -228,6 +233,11 @@ impl EngineHandle {
             id: id.to_string(),
             allow,
         }));
+    }
+
+    // Go /usage: answers UiEvent::Usage or Error from a one-shot run. Works while a turn is busy.
+    pub fn usage(&self) {
+        let _ = self.tx.send(Input::Cmd(Cmd::Usage));
     }
 
     // Stops the child and joins the actor thread.
@@ -361,6 +371,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
             Input::Cmd(Cmd::Interrupt(src)) => st.interrupt(src),
             Input::Cmd(Cmd::SetMode(name)) => st.set_mode(&name),
             Input::Cmd(Cmd::Permission { id, allow }) => st.answer_permission(&id, allow),
+            Input::Cmd(Cmd::Usage) => st.usage(),
             Input::Proc(ProcMsg::Line(line)) => st.on_line(&line),
             Input::Proc(ProcMsg::Eof) => st.on_eof(),
         }
@@ -373,6 +384,19 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
 impl State {
     fn emit(&self, ev: UiEvent) {
         let _ = self.ui.send(ev);
+    }
+
+    // Runs the one-shot on its own thread so the actor keeps streaming a busy turn.
+    fn usage(&self) {
+        let bin = resolve_bin(&self.cfg.claude_bin);
+        let ui = self.ui.clone();
+        thread::spawn(move || {
+            let ev = match proc::one_shot_usage(&bin) {
+                Ok(text) => UiEvent::Usage { text },
+                Err(e) => UiEvent::Error(e),
+            };
+            let _ = ui.send(ev);
+        });
     }
 
     fn submit(&mut self, text: String) {
