@@ -22,7 +22,7 @@ grep -q '^## Unreleased$' CHANGELOG.md || { echo "bump-version: CHANGELOG.md has
 sed -i.bak "s/^var version = \"[^\"]*\"/var version = \"$VERSION\"/" deprecated/src/main/intt/cmd/chaude/main.go
 # Rust workspace version: only the [workspace.package] table, not dependency versions.
 sed -i.bak '/^\[workspace.package\]/,/^\[/ s/^version = "[^"]*"/version = "'"$VERSION"'"/' Cargo.toml
-if command -v cargo >/dev/null 2>&1; then cargo metadata --format-version 1 --no-deps >/dev/null; fi   # refreshes Cargo.lock workspace entries
+if command -v cargo >/dev/null 2>&1; then cargo update --workspace --offline >/dev/null 2>&1 || echo "bump-version: cargo update -w failed, refresh Cargo.lock by hand" >&2; fi
 sed -i.bak "s/CHAUDE_VERSION=v[0-9][0-9.]*/CHAUDE_VERSION=v$VERSION/g" README.md README.ko.md
 sed -i.bak "s/\*\*버전 [0-9][0-9.]*\*\*/**버전 $VERSION**/" docs/claude-lean/README.md
 rm -f deprecated/src/main/intt/cmd/chaude/main.go.bak Cargo.toml.bak README.md.bak README.ko.md.bak docs/claude-lean/README.md.bak
