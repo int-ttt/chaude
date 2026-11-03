@@ -257,7 +257,7 @@ pub fn tool_summary(input: &[(&str, &str)]) -> Option<String> {
 }
 
 // Cut to n chars (repl.go trunc, rune based).
-fn trunc_chars(s: &str, n: usize) -> String {
+pub fn trunc_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 

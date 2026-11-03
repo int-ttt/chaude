@@ -21,17 +21,23 @@ use crossterm::event::{
 };
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{execute, queue};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use bar::BarInput;
 use commands::{Ctx, Dispatch, PermMode};
 use edit::Editor;
+use render::{BOLD_OFF, BOLD_ON, FG_OFF, GREY_ON, ORANGE_ON, RESET};
 
 const TICK: Duration = Duration::from_millis(80);
 const DOUBLE_ESC: Duration = Duration::from_secs(1);
 const PROMPT: &str = "> ";
-// Rows below the viewport: running row, input line, status row.
-const CHROME: usize = 3;
+// Rows below the viewport when idle: input box top, input line, input box bottom, status row.
+// A running row sits above them while busy (`App::shows_bar`).
+const CHROME: usize = 4;
+// Go maxInputRows (tui.go:988).
+const MAX_INPUT_ROWS: usize = 5;
+// Reverse-video cell for the cursor (tui.go View, cursor style).
+const REV_ON: &str = "\x1b[7m";
 const WHEEL_LINES: isize = 3;
 // Shown on the running row when output arrived while the view was held above the tail (scroll-bottom.md).
 const NEW_MSG: &str = "↓ 새 메시지";
@@ -72,11 +78,26 @@ pub struct App {
     last_esc: Option<Instant>,
     // Selected row of the slash menu (overlay::slash_popup). Reset when the input changes.
     sugg_sel: usize,
+    welcome: Welcome,
+}
+
+// What the welcome box shows (tui.go welcome()).
+pub struct Welcome {
+    pub cwd: String,
+    pub model: String,
+    pub threshold: u64,
 }
 
 impl App {
     pub fn new(cols: usize, rows: usize) -> Self {
         App {
+            welcome: Welcome {
+                cwd: std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+                model: "claude-opus-5-5".to_string(),
+                threshold: 200_000,
+            },
             editor: Editor::default(),
             cols,
             rows,
@@ -401,7 +422,8 @@ impl App {
         if !self.pending_agent.is_empty() {
             lines.push(&agent);
         }
-        let mut rows = Vec::new();
+        // Text width is one less than the full width, so the welcome box gets the full width back.
+        let mut rows = self.welcome_rows(width + 1);
         for l in lines {
             rows.extend(render::wrap_cells(l, width).split('\n').map(str::to_string));
         }
@@ -421,14 +443,14 @@ impl App {
     // Moves the viewport by `delta` rows. Landing on the last page follows the tail again.
     fn scroll(&mut self, delta: isize) {
         let total = self.total_rows(self.cols);
-        let start = self.start_row(total, self.rows.saturating_sub(CHROME));
+        let start = self.start_row(total, self.rows.saturating_sub(self.chrome_len()));
         self.scroll_to((start as isize + delta).max(0) as usize);
     }
 
     fn scroll_to(&mut self, row: usize) {
         let max = self
             .total_rows(self.cols)
-            .saturating_sub(self.rows.saturating_sub(CHROME));
+            .saturating_sub(self.rows.saturating_sub(self.chrome_len()));
         self.top = row.min(max);
         self.follow = self.top >= max;
         if self.follow {
@@ -447,6 +469,7 @@ impl App {
         b.turn_secs = self
             .turn_start
             .map(|t| self.clock.duration_since(t).as_secs());
+        b.limit = self.welcome.threshold;
         b.agents = self
             .agents
             .iter()
@@ -460,12 +483,164 @@ impl App {
         commands::suggestions(&self.editor.text(), self.busy, false)
     }
 
-    // The input row text and the cursor column inside it.
-    fn input_line(&self, width: usize) -> (String, usize) {
-        let pw = UnicodeWidthStr::width(PROMPT);
-        let (view, cur) = self.editor.view(width.saturating_sub(pw));
-        (format!("{PROMPT}{view}"), pw + cur)
+    // Go inputBox.rows() (input.go:149): logical lines soft-wrapped at `w` cells. Returns the visual rows,
+    // and the visual row and cell column of the cursor.
+    fn input_rows(&self, w: usize) -> (Vec<String>, usize, usize) {
+        let w = w.max(2);
+        let pos = self.editor.cursor();
+        let (mut rows, mut line) = (Vec::new(), String::new());
+        let (mut cells, mut cur) = (0, (0, 0));
+        for (i, c) in self.editor.text().chars().enumerate() {
+            if c == '\n' {
+                if i == pos {
+                    cur = (rows.len(), cells);
+                }
+                rows.push(std::mem::take(&mut line));
+                cells = 0;
+                continue;
+            }
+            let cw = UnicodeWidthChar::width(c).unwrap_or(0);
+            if cells + cw > w && cells > 0 {
+                rows.push(std::mem::take(&mut line));
+                cells = 0;
+            }
+            if i == pos {
+                cur = (rows.len(), cells);
+            }
+            line.push(c);
+            cells += cw;
+        }
+        if pos >= self.editor.text().chars().count() {
+            cur = (rows.len(), cells);
+        }
+        rows.push(line);
+        (rows, cur.0, cur.1)
     }
+
+    // Visual rows the input box shows: at least 1, at most MAX_INPUT_ROWS.
+    fn input_height(&self, w: usize) -> usize {
+        let inner = w.saturating_sub(2).max(1);
+        let pw = UnicodeWidthStr::width(PROMPT);
+        self.input_rows(inner.saturating_sub(pw))
+            .0
+            .len()
+            .min(MAX_INPUT_ROWS)
+    }
+
+    // Rows below the viewport: the running row (only while busy, unseen output or agents), then the input box.
+    fn shows_bar(&self) -> bool {
+        self.busy || self.unseen || !self.agents.is_empty()
+    }
+
+    // Status row, the input box's top and bottom borders, and the input rows.
+    fn chrome_len(&self) -> usize {
+        CHROME - 1 + self.input_height(self.cols) + usize::from(self.shows_bar())
+    }
+
+    // Go welcome() (tui.go:295-311): a rounded orange box at most 66 columns wide, then one blank row.
+    // `w` is the full terminal width. The interior is clamped to 20..=64 cells.
+    fn welcome_rows(&self, w: usize) -> Vec<String> {
+        // Shrinks to narrow terminals; long content lines wrap inside the box instead of overflowing it.
+        let inner = w.saturating_sub(2).clamp(4, 64);
+        let text = inner - 2; // one padding cell on each side inside the border
+        let edge = |s: &str| format!("{ORANGE_ON}{s}{FG_OFF}");
+        let grey = |s: String| format!("{GREY_ON}{s}{FG_OFF}");
+        let title = format!("{BOLD_ON}{ORANGE_ON}✻ Welcome to Claude Harness!{FG_OFF}{BOLD_OFF}");
+        let cwd = render::trunc_chars(&self.welcome.cwd, inner.saturating_sub(12));
+        let model = format!(
+            "  model: {} · rotate at {} tokens",
+            self.welcome.model,
+            commands::commas(self.welcome.threshold)
+        );
+        let lines = [
+            title,
+            String::new(),
+            grey("  /help for help, /rotate to rotate session, /quit to exit".to_string()),
+            String::new(),
+            grey(format!("  cwd: {cwd}")),
+            grey(model),
+        ];
+        let mut rows = vec![edge(&format!("╭{}╮", "─".repeat(inner)))];
+        for l in lines {
+            for piece in render::wrap_cells(&l, text).split('\n') {
+                let pad = text.saturating_sub(render::cell_width(piece));
+                rows.push(format!(
+                    "{} {piece}{}{}",
+                    edge("│"),
+                    " ".repeat(pad + 1),
+                    edge("│")
+                ));
+            }
+        }
+        rows.push(edge(&format!("╰{}╯", "─".repeat(inner))));
+        rows.push(String::new());
+        rows
+    }
+
+    // Go View() input box (tui.go:1222-1340): rounded grey border, the prompt, a reversed cursor cell and,
+    // while the input is empty, the placeholder (tui.go:879). `w` is the full terminal width.
+    fn input_box(&self, w: usize) -> Vec<String> {
+        let inner = w.saturating_sub(2).max(1);
+        let edge = |l: &str, r: &str| format!("{GREY_ON}{l}{}{r}{FG_OFF}", "─".repeat(inner));
+        let side = |mid: &str| {
+            let pad = inner.saturating_sub(render::cell_width(mid));
+            format!(
+                "{GREY_ON}│{FG_OFF}{mid}{}{GREY_ON}│{FG_OFF}",
+                " ".repeat(pad)
+            )
+        };
+        let mut out = vec![edge("╭", "╮")];
+        if self.editor.is_empty() {
+            let ph = if self.busy {
+                "생각중 - 추가 입력은 한 번에 합쳐 처리"
+            } else {
+                "대기 - 프롬프트 입력"
+            };
+            // The cursor cell takes one column after the prompt, so the placeholder gets the rest.
+            let ph = bar::clip(ph, inner.saturating_sub(PROMPT.len() + 1));
+            out.push(side(&format!(
+                "{PROMPT}{REV_ON} {RESET}{GREY_ON}{ph}{FG_OFF}"
+            )));
+        } else {
+            let pw = UnicodeWidthStr::width(PROMPT);
+            let (rows, cur_row, cur_col) = self.input_rows(inner.saturating_sub(pw));
+            let (top, shown) = input_window(rows.len(), cur_row);
+            for (i, row) in rows.iter().enumerate().skip(top).take(shown) {
+                let pre = if i == 0 { PROMPT } else { "  " };
+                let mid = if i == cur_row {
+                    let (before, after) = split_cells(row, cur_col);
+                    let mut rest = after.chars();
+                    let under = rest.next().map_or(" ".to_string(), String::from);
+                    format!("{before}{REV_ON}{under}{RESET}{}", rest.as_str())
+                } else {
+                    row.clone()
+                };
+                out.push(side(&format!("{pre}{mid}")));
+            }
+        }
+        out.push(edge("╰", "╯"));
+        out
+    }
+}
+
+// Go inputBox.View window (input.go:211): at most MAX_INPUT_ROWS rows, scrolled so the cursor row stays visible.
+// Returns the first row and the number of rows shown.
+fn input_window(n: usize, cur: usize) -> (usize, usize) {
+    let shown = n.min(MAX_INPUT_ROWS);
+    let top = (cur + 1).saturating_sub(shown).min(n - shown);
+    (top, shown)
+}
+
+// Splits `s` at display column `col`. Used to place the cursor cell inside the input line.
+fn split_cells(s: &str, col: usize) -> (&str, &str) {
+    let mut acc = 0;
+    for (i, c) in s.char_indices() {
+        if acc >= col {
+            return s.split_at(i);
+        }
+        acc += UnicodeWidthChar::width(c).unwrap_or(0);
+    }
+    (s, "")
 }
 
 // Columns usable for text. The last column stays empty so a full row never auto-wraps.
@@ -481,12 +656,17 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
     if app.unseen && !app.follow {
         top = format!("{top} · {NEW_MSG}");
     }
-    let (input, _) = app.input_line(width);
-    let chrome = [bar::clip(&top, width), input, bar::clip(&status, width)];
-    // The slash menu sits right above the running row and never takes the last row of the body.
-    let menu_max = h.saturating_sub(CHROME + 1);
+    let mut chrome = Vec::with_capacity(CHROME + 1);
+    if app.shows_bar() {
+        chrome.push(bar::clip(&top, width));
+    }
+    chrome.extend(app.input_box(w));
+    chrome.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&status, width)));
+    let chrome_h = chrome.len();
+    // The slash menu sits right above the input box and never takes the last row of the body.
+    let menu_max = h.saturating_sub(chrome_h + 1);
     let menu = overlay::slash_popup(&app.suggest(), app.sugg_sel, width, menu_max);
-    let body_h = h.saturating_sub(CHROME + menu.len());
+    let body_h = h.saturating_sub(chrome_h + menu.len());
     let mut rows = Vec::with_capacity(h);
     if body_h > 0 {
         let body = app.body(width);
@@ -497,14 +677,19 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
     }
     rows.extend(menu);
     // Too short for the whole chrome: keep the bottom rows, input line included.
-    rows.extend(chrome.into_iter().skip(CHROME - h.min(CHROME)));
+    rows.extend(chrome.into_iter().skip(chrome_h - h.min(chrome_h)));
     rows
 }
 
-// Terminal cell that holds the cursor: the input line, at the editing column.
+// Terminal cell that holds the cursor: inside the input box (after its left border), on the input row.
 fn cursor(app: &App, w: usize, h: usize) -> (u16, u16) {
-    let (_, col) = app.input_line(text_width(w));
-    (col as u16, h.saturating_sub(2) as u16)
+    let inner = w.saturating_sub(2).max(1);
+    let pw = UnicodeWidthStr::width(PROMPT);
+    let (rows, cur_row, cur_col) = app.input_rows(inner.saturating_sub(pw));
+    let (top, shown) = input_window(rows.len(), cur_row);
+    // The input rows sit above the box's bottom border and the status row.
+    let y = h.saturating_sub(2 + shown) + (cur_row - top);
+    ((1 + pw + cur_col) as u16, y as u16)
 }
 
 // Writes only the rows that differ from `prev` (the rows last drawn), then parks the cursor on the input line.
@@ -587,11 +772,26 @@ pub fn run(cfg: Config) -> io::Result<()> {
     }
 }
 
+// chaude_settings.go mainModelIDs: the settings alias shown as its model id. Other values pass through.
+fn main_model_id(alias: &str) -> String {
+    match alias {
+        "opus" => "claude-opus-5-5",
+        "sonnet" => "claude-sonnet-5-5",
+        "fable" => "claude-fable-5-1",
+        other => other,
+    }
+    .to_string()
+}
+
 fn tui(cfg: Config) -> io::Result<()> {
+    let model = main_model_id(&cfg.model);
+    let threshold = cfg.context_window;
     let (engine, rx) = Engine::start(cfg);
     let _guard = TermGuard::enter()?;
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
     let mut app = App::new(cols as usize, rows as usize);
+    app.welcome.model = model;
+    app.welcome.threshold = threshold;
     if let Ok(cwd) = std::env::current_dir() {
         app.editor.load_history(&cwd);
     }
@@ -697,15 +897,59 @@ mod tests {
 
     // An app at 30x5 (two viewport rows) with lines "line 0" .. "line {n-1}".
     fn app_with_lines(n: usize) -> App {
-        let mut app = App::new(30, 5);
+        let mut app = App::new(30, 6);
         for i in 0..n {
             app.apply(text(&format!("line {i}\n")));
         }
         app
     }
 
-    fn chrome(top: &str) -> Vec<String> {
-        vec![top.into(), "> ".into(), "no status yet".into()]
+    const IDLE_STATUS: &str = " M 0/200k P 0/80k T 0/80k C 0/80k · rot 0 · mode auto";
+
+    // Frame rows with the SGR escapes removed, so tests compare the visible text.
+    fn screen(app: &App, w: usize, h: usize) -> Vec<String> {
+        frame(app, w, h)
+            .into_iter()
+            .map(|r| {
+                let mut out = String::new();
+                let mut chars = r.chars();
+                while let Some(c) = chars.next() {
+                    if c == '\x1b' {
+                        for d in chars.by_ref() {
+                            if d == 'm' {
+                                break;
+                            }
+                        }
+                    } else {
+                        out.push(c);
+                    }
+                }
+                out
+            })
+            .collect()
+    }
+
+    // The idle status row clipped to the text width (w - 1 columns).
+    fn idle_status(w: usize) -> String {
+        IDLE_STATUS.chars().take(w - 1).collect()
+    }
+
+    // Expected chrome rows at width 30: optional bar row, the input box, then the status row.
+    fn chrome(bar: Option<&str>, input: &str) -> Vec<String> {
+        let inner = 28;
+        // Empty input shows the cursor cell, then the idle placeholder.
+        let mid = if input.is_empty() {
+            ">  대기 - 프롬프트 입력".to_string()
+        } else {
+            format!("> {input}")
+        };
+        let pad = inner - UnicodeWidthStr::width(mid.as_str());
+        let mut rows: Vec<String> = bar.map(String::from).into_iter().collect();
+        rows.push(format!("╭{}╮", "─".repeat(inner)));
+        rows.push(format!("│{mid}{}│", " ".repeat(pad)));
+        rows.push(format!("╰{}╯", "─".repeat(inner)));
+        rows.push(idle_status(30));
+        rows
     }
 
     fn type_str(app: &mut App, s: &str) {
@@ -715,18 +959,50 @@ mod tests {
     }
 
     #[test]
-    fn slash_menu_sits_above_the_running_row_and_the_cursor_stays_on_input() {
+    fn slash_menu_sits_above_the_input_box_and_the_cursor_stays_on_input() {
         let mut app = App::new(30, 8);
         type_str(&mut app, "/mo");
-        let rows = frame(&app, 30, 8);
+        let rows = screen(&app, 30, 8);
         assert_eq!(rows.len(), 8);
-        assert!(rows[2].starts_with("> /model "));
-        assert!(rows[3].starts_with("  /mode "));
-        assert!(rows[4].starts_with("  /mouse "));
-        assert_eq!(rows[5], "idle");
-        assert_eq!(rows[6], "> /mo");
-        assert_eq!(rows[7], "no status yet");
-        assert_eq!(cursor(&app, 30, 8), (5, 6));
+        assert!(rows[1].starts_with("> /model "), "{rows:?}");
+        assert!(rows[2].starts_with("  /mode "), "{rows:?}");
+        assert!(rows[3].starts_with("  /mouse "), "{rows:?}");
+        assert!(rows[5].starts_with("│> /mo"), "{rows:?}");
+        assert_eq!(rows[7], idle_status(30));
+        assert_eq!(cursor(&app, 30, 8), (6, 5));
+    }
+
+    // Go inputBox.View: a second logical line adds a row to the box, the cursor follows it.
+    #[test]
+    fn multiline_input_grows_the_box_and_the_cursor_follows_the_last_line() {
+        let mut app = App::new(30, 10);
+        type_str(&mut app, "line one");
+        app.editor.newline();
+        type_str(&mut app, "line two");
+        let rows = screen(&app, 30, 10);
+        assert_eq!(rows[5], format!("╭{}╮", "─".repeat(28)), "{rows:?}");
+        assert!(rows[6].starts_with("│> line one"), "{rows:?}");
+        assert!(rows[7].starts_with("│  line two"), "{rows:?}");
+        assert!(rows[8].starts_with("╰"), "{rows:?}");
+        assert_eq!(rows[9], idle_status(30));
+        assert_eq!(UnicodeWidthStr::width(rows[6].as_str()), 30);
+        assert_eq!(UnicodeWidthStr::width(rows[7].as_str()), 30);
+        assert_eq!(cursor(&app, 30, 10), (11, 7));
+    }
+
+    // draw() ends by showing the real cursor at the editor cell (1-based MoveTo: row+1, col+1).
+    #[test]
+    fn draw_shows_the_real_cursor_on_the_editor_cell() {
+        let mut app = App::new(30, 10);
+        type_str(&mut app, "ab");
+        app.editor.newline();
+        type_str(&mut app, "cd");
+        let mut buf = Vec::new();
+        draw(&mut buf, &app, &mut Vec::new()).unwrap();
+        let out = String::from_utf8_lossy(&buf);
+        assert!(out.ends_with("\x1b[?25h"), "{out:?}");
+        // Cursor after "cd" on the second input row: 0-based (5, 7), so MoveTo is 1-based row 8, column 6.
+        assert!(out.contains("\x1b[8;6H\x1b[?25h"), "{out:?}");
     }
 
     #[test]
@@ -734,41 +1010,42 @@ mod tests {
         let mut app = App::new(30, 8);
         type_str(&mut app, "/mo");
         app.on_key(key(KeyCode::Down, KeyModifiers::NONE), Instant::now());
-        assert!(frame(&app, 30, 8)[3].starts_with("> /mode"));
+        assert!(screen(&app, 30, 8)[2].starts_with("> /mode"));
         app.on_key(key(KeyCode::Tab, KeyModifiers::NONE), Instant::now());
         assert_eq!(app.editor.text(), "/mode ");
-        assert!(frame(&app, 30, 8).iter().all(|r| !r.contains("/mouse")));
+        assert!(screen(&app, 30, 8).iter().all(|r| !r.contains("/mouse")));
     }
 
     #[test]
     fn no_menu_without_a_slash_word_and_up_still_walks_history() {
         let mut app = App::new(30, 8);
         type_str(&mut app, "hi");
-        assert_eq!(frame(&app, 30, 8).len(), 8);
-        assert_eq!(frame(&app, 30, 8)[5], "idle");
+        assert_eq!(screen(&app, 30, 8).len(), 8);
+        assert!(screen(&app, 30, 8)[5].starts_with("│> hi"));
         app.on_key(key(KeyCode::Up, KeyModifiers::NONE), Instant::now());
         assert_eq!(app.editor.text(), "hi");
     }
 
     #[test]
-    fn empty_screen_shows_idle_and_the_input_line() {
+    fn empty_screen_shows_the_input_box_and_the_status_row() {
         let app = App::new(30, 5);
-        let mut want = vec!["".to_string(), "".to_string()];
-        want.extend(chrome("idle"));
-        assert_eq!(frame(&app, 30, 5), want);
+        // Five rows: one body row (the welcome box's trailing blank) above the chrome.
+        let mut want = vec!["".to_string()];
+        want.extend(chrome(None, ""));
+        assert_eq!(screen(&app, 30, 5), want);
     }
 
     #[test]
     fn long_output_shows_the_tail_until_scrolled() {
         let mut app = app_with_lines(10);
         let mut want = vec!["line 8".to_string(), "line 9".to_string()];
-        want.extend(chrome("idle"));
-        assert_eq!(frame(&app, 30, 5), want);
+        want.extend(chrome(None, ""));
+        assert_eq!(screen(&app, 30, 6), want);
 
         app.scroll(-3);
         let mut want = vec!["line 5".to_string(), "line 6".to_string()];
-        want.extend(chrome("idle"));
-        assert_eq!(frame(&app, 30, 5), want);
+        want.extend(chrome(None, ""));
+        assert_eq!(screen(&app, 30, 6), want);
     }
 
     #[test]
@@ -777,8 +1054,8 @@ mod tests {
         app.scroll(-3);
         app.apply(text("line 10\n"));
         let mut want = vec!["line 5".to_string(), "line 6".to_string()];
-        want.extend(chrome("idle · ↓ 새 메시지"));
-        assert_eq!(frame(&app, 30, 5), want);
+        want.extend(chrome(Some("idle · ↓ 새 메시지"), ""));
+        assert_eq!(screen(&app, 30, 7), want);
     }
 
     #[test]
@@ -788,10 +1065,10 @@ mod tests {
         let now = Instant::now();
         app.on_key(key(KeyCode::Char('a'), KeyModifiers::NONE), now);
         app.on_key(key(KeyCode::Char('b'), KeyModifiers::NONE), now);
-        let rows = frame(&app, 30, 5);
+        let rows = screen(&app, 30, 6);
         assert_eq!(rows[0], "line 5");
         assert_eq!(rows[1], "line 6");
-        assert_eq!(rows[3], "> ab");
+        assert!(rows[3].starts_with("│> ab"), "{rows:?}");
     }
 
     #[test]
@@ -799,8 +1076,8 @@ mod tests {
         let mut app = app_with_lines(10);
         app.apply(text("line 10\n"));
         let mut want = vec!["line 9".to_string(), "line 10".to_string()];
-        want.extend(chrome("idle"));
-        assert_eq!(frame(&app, 30, 5), want);
+        want.extend(chrome(None, ""));
+        assert_eq!(screen(&app, 30, 6), want);
     }
 
     #[test]
@@ -809,30 +1086,29 @@ mod tests {
         app.scroll(-3);
         app.apply(text("line 10\n"));
         app.on_key(key(KeyCode::End, KeyModifiers::NONE), Instant::now());
-        let rows = frame(&app, 30, 5);
+        let rows = screen(&app, 30, 6);
         assert_eq!(rows[0], "line 9");
         assert_eq!(rows[1], "line 10");
-        assert_eq!(rows[2], "idle");
+        assert!(rows[2].starts_with('╭'), "{rows:?}");
     }
 
     #[test]
     fn resize_clamps_the_view_and_rewraps_wide_text() {
         let mut app = app_with_lines(10);
         app.on_key(key(KeyCode::Home, KeyModifiers::NONE), Instant::now());
-        // Narrower and shorter: one viewport row, so the tail row is shown and the status row is clipped.
+        // Narrower and shorter: one viewport row, and the status row is clipped to the width.
         app.cols = 12;
-        app.rows = 4;
-        let rows = frame(&app, 12, 4);
-        assert_eq!(rows.len(), 4);
-        assert_eq!(rows[0], "line 0");
-        assert_eq!(rows[3], "no status y");
+        app.rows = 5;
+        let rows = screen(&app, 12, 5);
+        assert_eq!(rows.len(), 5);
+        assert_eq!(rows[4], " M 0/200k P");
         for r in &rows {
             assert!(UnicodeWidthStr::width(r.as_str()) <= 12, "{r:?}");
         }
 
         let mut app = App::new(30, 5);
         app.apply(text("가나다라마바사\n"));
-        let rows = frame(&app, 7, 5);
+        let rows = screen(&app, 7, 6);
         assert_eq!(rows[0], "라마바");
         assert_eq!(rows[1], "사");
     }
@@ -927,12 +1203,12 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         draw(&mut buf, &app, &mut prev).unwrap();
         let text = String::from_utf8_lossy(&buf);
-        assert!(text.contains("idle"), "{text:?}");
-        assert!(text.contains("no status yet"), "{text:?}");
+        assert!(text.contains("╭"), "{text:?}");
+        assert!(text.contains("M 0/200k"), "{text:?}");
         assert_eq!(prev, frame(&app, 20, 5));
 
         let mut again: Vec<u8> = Vec::new();
         draw(&mut again, &app, &mut prev).unwrap();
-        assert!(!String::from_utf8_lossy(&again).contains("idle"));
+        assert!(!String::from_utf8_lossy(&again).contains("M 0/200k"));
     }
 }

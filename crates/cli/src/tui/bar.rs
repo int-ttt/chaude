@@ -57,6 +57,20 @@ pub struct BarInput {
     pub cost_usd: f64,
     pub context_pct: u32,
     pub queued: usize,
+    // Main-context limit in tokens (the welcome threshold); used by the idle Go-style status row.
+    pub limit: u64,
+}
+
+// Per-role context limit shown in the Go ctx bar (haikuThreshold in repl.go).
+const ROLE_LIMIT: &str = "80k";
+
+// fmtK-style token count for the ctx bar: "0" below 1000, otherwise thousands with a "k" suffix.
+fn fmt_k(n: u64) -> String {
+    if n < 1_000 {
+        n.to_string()
+    } else {
+        format!("{}k", n / 1_000)
+    }
 }
 
 pub fn fmt_secs(secs: u64) -> String {
@@ -95,7 +109,14 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
             b.context_pct
         )
     } else {
-        "no status yet".to_string()
+        // Go idle status line (statusLine + ctxBar, tui.go:1193). Role contexts are not tracked yet, so P/T/C stay 0.
+        format!(
+            " M {}/{} P 0/{r} T 0/{r} C 0/{r}{}",
+            fmt_k(0),
+            fmt_k(b.limit),
+            status_suffix(0, Some("auto"), 0, 0),
+            r = ROLE_LIMIT
+        )
     };
     if b.queued > 0 {
         bottom.push_str(&format!(" · queued {}", b.queued));
@@ -288,9 +309,16 @@ mod tests {
 
     #[test]
     fn idle_bar_without_status_says_so() {
-        let [top, bottom] = rows(&BarInput::default(), '⠋', 80);
+        let b = BarInput {
+            limit: 200_000,
+            ..BarInput::default()
+        };
+        let [top, bottom] = rows(&b, '⠋', 80);
         assert_eq!(top, "idle");
-        assert_eq!(bottom, "no status yet");
+        assert_eq!(
+            bottom,
+            " M 0/200k P 0/80k T 0/80k C 0/80k · rot 0 · mode auto"
+        );
     }
 
     #[test]
@@ -304,6 +332,7 @@ mod tests {
             cost_usd: 0.042,
             context_pct: 6,
             queued: 2,
+            ..BarInput::default()
         };
         let [top, bottom] = rows(&b, '⠙', 80);
         assert_eq!(top, "⠙ running 12s · agent 리뷰 3s");
