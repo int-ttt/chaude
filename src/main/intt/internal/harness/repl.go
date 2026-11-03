@@ -74,6 +74,7 @@ type Args struct {
 	NoDelegationRule   bool          // do not append the haiku delegation rule to the child's system prompt
 	CacheTTL           string        // prompt cache TTL requested from claude: auto|1h|5m (see withCacheTTL)
 	IdleRotate         time.Duration // idle time after which a child is treated as cold; 0 = off
+	IdleNotice         time.Duration // quiet time, with no open tool call, before a "still waiting" notice; 0 = defaultIdleNotice
 	ClientsFile        string        // per-(cwd,model) client registry; empty = off
 	MaxWorkers         int           // cap on concurrent live worker sessions (see resolveMaxWorkers)
 	TaskBudgetUSD      float64       // per-task USD cap (--task-budget-usd); 0 = off
@@ -614,6 +615,22 @@ func nilStr(v any) string {
 	return fmt.Sprint(v)
 }
 
+// defaultIdleNotice is the quiet time after which a turn with no open tool call says it is still waiting.
+const defaultIdleNotice = 30 * time.Minute
+
+// trackToolUses keeps open the tool_use ids of ev (any depth) until their tool_result arrives.
+func trackToolUses(ev event, open map[string]bool) {
+	for _, bi := range asList(asMap(ev["message"])["content"]) {
+		b := asMap(bi)
+		switch str(b["type"]) {
+		case "tool_use":
+			open[str(b["id"])] = true
+		case "tool_result":
+			delete(open, str(b["tool_use_id"]))
+		}
+	}
+}
+
 // runTurn sends text, streams the reply. Returns reply text, result event (nil if none), last main usage.
 func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	select { // drop a stale Ctrl-C from while idle
@@ -657,8 +674,12 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 	var lastUsage map[string]any
 	var result event
 	agentTypes := map[string]string{} // Task/Agent tool_use id -> subagent_type while the call runs (stage lines)
+	openTools := map[string]bool{}    // tool_use ids (any depth) whose tool_result has not arrived yet
+	events := 0                       // events seen so far, to tell a quiet stretch from a busy one
 	budgetHit := false
 	handle := func(ev event) {
+		events++
+		trackToolUses(ev, openTools)
 		r.spend.onEvent(ev)
 		t := str(ev["type"])
 		r.tracker.onSubEvent(ev)
@@ -750,7 +771,24 @@ func (r *Repl) runTurn(text string, show bool) (string, event, map[string]any) {
 			r.tr.add("unparsed", kv{"raw", ev["raw"]})
 		}
 	}
-	if r.sess.Events(300*time.Second, r.intr, handle) {
+	// No cap on the wait: only the result, process exit, or the user (intr) ends it. A quiet stretch with no
+	// open tool call shows one notice; a long-running tool (Agent/Task) is waited for as long as it runs.
+	notice := r.a.IdleNotice
+	if notice <= 0 {
+		notice = defaultIdleNotice
+	}
+	seen, noticed := 0, false
+	quiet := func() {
+		if seen != events || len(openTools) > 0 {
+			seen, noticed = events, false
+			return
+		}
+		if !noticed {
+			noticed = true
+			r.p("\n"+dim+"[no output for "+notice.String()+"; still waiting, Esc/Ctrl+C to interrupt]"+rst, "\n")
+		}
+	}
+	if r.sess.EventsQuiet(notice, r.intr, handle, quiet) {
 		_ = r.sess.Interrupt()
 		r.p("\n"+dim+"[interrupted]"+rst, "\n")
 		r.sess.Events(20*time.Second, nil, func(ev event) {
@@ -1261,6 +1299,7 @@ func Main(args []string) int {
 	fs.StringVar(&a.CacheTTL, "cache-ttl", "1h", "prompt cache TTL requested from claude: auto, 1h or 5m")
 	fs.Float64Var(&a.TaskBudgetUSD, "task-budget-usd", 0, "per-task USD cap (0=off); also passed to claude as --max-budget-usd backstop")
 	fs.DurationVar(&a.IdleRotate, "idle-rotate", 3599*time.Second, "idle time after which a child is treated as cold (0=off); idle rotation runs in the TUI only")
+	fs.DurationVar(&a.IdleNotice, "idle-notice", defaultIdleNotice, "show a still-waiting notice after this quiet time with no open tool call; a turn is never cut by timeout")
 	fs.StringVar(&a.ClientsFile, "clients-file", defaultClientsFile(), "per-(cwd,model) client registry (empty=off)")
 	fs.IntVar(&a.MaxWorkers, "max-workers", DefaultMaxWorkers, "cap on concurrent live worker sessions (env CHAUDE_MAX_WORKERS when unset)")
 	fs.StringVar(&a.Orch, "orch", "m0", "orchestration mode m0|b|c|d|e|f (A/B test)")
