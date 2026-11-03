@@ -208,6 +208,16 @@ cd src/main/intt && go build -o ../../../bin/chaude ./cmd/chaude && go test ./..
 
 기여 가이드라인: 아직 공개되지 않았습니다.
 
+## Releasing
+
+Run the **release-dispatch** workflow on `master` (Actions → release-dispatch → Run workflow, enter `X.Y.Z` without the `v`), or from a shell:
+
+```sh
+gh workflow run release-dispatch.yml -f version=X.Y.Z
+```
+
+It bumps the version in the code and docs, moves `CHANGELOG.md` `## Unreleased` to `## X.Y.Z - DATE`, commits `release: X.Y.Z`, pushes the `vX.Y.Z` tag, and publishes the four release archives with `checksums.txt` (via `release.yml`). Add the entries to `## Unreleased` in `CHANGELOG.md` before you run it.
+
 ## 라이선스
 
 MIT 라이선스입니다. 자세한 내용은 [LICENSE](LICENSE)를 보세요.

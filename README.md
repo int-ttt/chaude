@@ -207,6 +207,16 @@ Issues: report bugs and request features on [GitHub Issues](https://github.com/i
 
 Contribution guidelines: not published yet.
 
+## Releasing
+
+Run the **release-dispatch** workflow on `master` (Actions → release-dispatch → Run workflow, enter `X.Y.Z` without the `v`), or from a shell:
+
+```sh
+gh workflow run release-dispatch.yml -f version=X.Y.Z
+```
+
+It bumps the version in the code and docs, moves `CHANGELOG.md` `## Unreleased` to `## X.Y.Z - DATE`, commits `release: X.Y.Z`, pushes the `vX.Y.Z` tag, and publishes the four release archives with `checksums.txt` (via `release.yml`). Add the entries to `## Unreleased` in `CHANGELOG.md` before you run it.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
