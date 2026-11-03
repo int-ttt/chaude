@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 0.10.0 - 2026-11-03
 - Repo layout: the Go implementation moved to `deprecated/src/main/intt/`. The Rust workspace is at the repo root (`crates/core`, `crates/cli`; `crates/gui` is excluded until it is built). The Rust prototype moved to `deprecated/prototype/chaude-rs/`. E2E tests moved to `tests/e2e/`, `job_monitor.py` to `scripts/`.
 - Rust workspace: in progress (core, CLI and TUI skeleton). The shipped binary is still the Go build.
 - Deprecation: `deprecated/` (Go) is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. Notes are in `deprecated/README.md`.
