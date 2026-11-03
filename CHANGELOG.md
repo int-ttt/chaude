@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+- Repo layout: the Go implementation moved to `deprecated/src/main/intt/`. The Rust workspace is at the repo root (`crates/core`, `crates/cli`; `crates/gui` is excluded until it is built). The Rust prototype moved to `deprecated/prototype/chaude-rs/`. E2E tests moved to `tests/e2e/`, `job_monitor.py` to `scripts/`.
+- Rust workspace: in progress (core, CLI and TUI skeleton). The shipped binary is still the Go build.
+- Deprecation: `deprecated/` (Go) is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. Notes are in `deprecated/README.md`.
+- Release: `release-dispatch` and `scripts/bump-version.sh` now use the `deprecated/` paths and also bump the Cargo workspace version.
+
+## 0.9.15
+- 설정: `gen-settings`의 출력 폴더(`--out`)가 없으면 자동으로 만듭니다. `.claude` 폴더면 `hooks/`도 함께 만듭니다.
+- 턴 대기: 응답을 기다리는 고정 300초 제한을 없앴습니다. 300초가 지나면 턴이 중단되어 뒤늦게 온 Agent 결과가 버려지던 문제를 고쳤습니다. 이제 열린 tool_use가 있으면 조용히 기다리고, 열린 tool_use가 없이 `--idle-notice`(기본 30분) 동안 조용하면 안내를 한 번 출력한 뒤 계속 기다립니다. 중단은 Esc, Ctrl+C, SIGINT로만 합니다.
+
 ## 0.9.14
 - 설정: 세션 시작 시 `.claude/settings.json`이 없으면 가드 훅이 들어간 파일을 자동으로 만듭니다.
 - 빌드 대상 축소: 릴리즈 빌드를 darwin/arm64, linux/amd64, linux/arm64, windows/amd64 4개로 줄였습니다. Intel Mac(darwin/amd64)은 더 이상 빌드하지 않아 설치와 `chaude update`가 오류로 안내합니다. windows/arm64 설치와 업데이트는 windows/amd64 빌드를 받습니다(x64 에뮬레이션).

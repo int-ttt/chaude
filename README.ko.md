@@ -49,7 +49,7 @@ chaude --version
 
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.9.14 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.9.15 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -209,6 +209,16 @@ cd deprecated/src/main/intt && go build -o ../../../../bin/chaude ./cmd/chaude &
 이슈: 버그 제보와 기능 제안은 [GitHub Issues](https://github.com/int-ttt/chaude/issues)에 남겨 주세요.
 
 기여 가이드라인: 아직 공개되지 않았습니다.
+
+## Releasing
+
+Run the **release-dispatch** workflow on `master` (Actions → release-dispatch → Run workflow, enter `X.Y.Z` without the `v`), or from a shell:
+
+```sh
+gh workflow run release-dispatch.yml -f version=X.Y.Z
+```
+
+It bumps the version in the code and docs, moves `CHANGELOG.md` `## Unreleased` to `## X.Y.Z - DATE`, commits `release: X.Y.Z`, pushes the `vX.Y.Z` tag, and publishes the four release archives with `checksums.txt` (via `release.yml`). Add the entries to `## Unreleased` in `CHANGELOG.md` before you run it.
 
 ## 라이선스
 

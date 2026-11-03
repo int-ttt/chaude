@@ -1,0 +1,75 @@
+name: release-dispatch
+# Manual release: Actions → release-dispatch → Run workflow (run on master), or
+#   gh workflow run release-dispatch.yml -f version=X.Y.Z
+# Bumps the version, commits "release: X.Y.Z" and tags vX.Y.Z on master, then calls release.yml to build and publish.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version X.Y.Z (no v prefix)"
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: release-dispatch
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "not semver X.Y.Z: $VERSION" >&2; exit 1
+          fi
+          if [ -n "$(git ls-remote --tags origin "refs/tags/v${VERSION}")" ]; then
+            echo "tag v${VERSION} already exists on origin" >&2; exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "tag v${VERSION} already exists locally" >&2; exit 1
+          fi
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Bump version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: sh scripts/bump-version.sh "$VERSION"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: deprecated/src/main/intt/go.mod
+          cache-dependency-path: deprecated/src/main/intt/go.sum
+      - name: Vet
+        working-directory: deprecated/src/main/intt
+        run: go vet ./...
+      - name: Test
+        working-directory: deprecated/src/main/intt
+        run: go test ./... -count=1
+      - name: Commit, tag and push
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -u
+          if git diff --cached --quiet; then echo "bump changed nothing" >&2; exit 1; fi
+          git commit -m "release: ${VERSION}"
+          git tag -a "v${VERSION}" -m "release: ${VERSION}"
+          git push --atomic origin HEAD:refs/heads/master "refs/tags/v${VERSION}"
+  release:
+    needs: prepare
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}

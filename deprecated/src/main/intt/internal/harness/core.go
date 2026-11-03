@@ -276,6 +276,16 @@ func (s *Session) Interrupt() error {
 // Events calls fn for each parsed event until the turn's `result` (inclusive), process end or timeout.
 // If intr fires, returns true (interrupted) immediately.
 func (s *Session) Events(timeout time.Duration, intr <-chan struct{}, fn func(event)) (interrupted bool) {
+	return s.events(timeout, intr, fn, nil)
+}
+
+// EventsQuiet is Events without a cap: after each `quiet` stretch with no event, quiet() runs and reading
+// goes on. It returns at the turn's `result`, process end, or true when intr fires.
+func (s *Session) EventsQuiet(quiet time.Duration, intr <-chan struct{}, fn func(event), onQuiet func()) (interrupted bool) {
+	return s.events(quiet, intr, fn, onQuiet)
+}
+
+func (s *Session) events(timeout time.Duration, intr <-chan struct{}, fn func(event), onQuiet func()) (interrupted bool) {
 	rel := s.held
 	s.held = nil
 	if rel == nil {
@@ -291,7 +301,11 @@ func (s *Session) Events(timeout time.Duration, intr <-chan struct{}, fn func(ev
 		case <-intr:
 			return true
 		case <-deadline.C:
-			return false
+			if onQuiet == nil {
+				return false
+			}
+			onQuiet()
+			deadline.Reset(timeout)
 		case line, ok := <-s.lines:
 			if !ok {
 				return false
