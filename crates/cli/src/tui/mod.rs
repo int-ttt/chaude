@@ -716,7 +716,8 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
     let chrome_h = chrome.len();
     // The slash menu sits right above the input box and never takes the last row of the body.
     let menu_max = h.saturating_sub(chrome_h + 1);
-    let menu = overlay::slash_popup(&app.suggest(), app.sugg_sel, width, menu_max);
+    // Go draws the menu rows at the full terminal width (no spare last column).
+    let menu = overlay::slash_popup(&app.suggest(), app.sugg_sel, w, menu_max);
     let body_h = h.saturating_sub(chrome_h + menu.len());
     let mut rows = Vec::with_capacity(h);
     if body_h > 0 {
@@ -1024,7 +1025,7 @@ mod tests {
         type_str(&mut app, "/mo");
         let rows = screen(&app, 30, 8);
         assert_eq!(rows.len(), 8);
-        assert!(rows[1].starts_with("> /model "), "{rows:?}");
+        assert!(rows[1].starts_with("  /model "), "{rows:?}");
         assert!(rows[2].starts_with("  /mode "), "{rows:?}");
         assert!(rows[3].starts_with("  /mouse "), "{rows:?}");
         assert!(rows[5].starts_with("│> /mo"), "{rows:?}");
@@ -1070,7 +1071,8 @@ mod tests {
         let mut app = App::new(30, 8);
         type_str(&mut app, "/mo");
         app.on_key(key(KeyCode::Down, KeyModifiers::NONE));
-        assert!(screen(&app, 30, 8)[2].starts_with("> /mode"));
+        assert!(screen(&app, 30, 8)[2].starts_with("  /mode "));
+        assert!(frame(&app, 30, 8)[2].starts_with(ORANGE_ON));
         app.on_key(key(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.editor.text(), "/mode ");
         assert!(screen(&app, 30, 8).iter().all(|r| !r.contains("/mouse")));

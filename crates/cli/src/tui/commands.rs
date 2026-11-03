@@ -2,8 +2,6 @@
 // Nothing here runs an engine effect. Each side effect comes back as a Dispatch variant for the caller to
 // execute. Ported from deprecated/src/main/intt/internal/harness/tui.go (slashCmds, busyOK, suggestions,
 // runSlash) and mode.go. Plain functions, unit-tested without a terminal.
-// The event loop is not wired to these yet, hence the module-level allow.
-#![allow(dead_code)]
 
 // tui.go:192-230 (slashCmds). Order and text are the Go source's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,6 +160,8 @@ impl PermMode {
     }
 
     // mode.go Next(): shift+tab cycles default -> acceptEdits -> plan -> auto -> default.
+    // Not wired yet: shift+tab is still unhandled in the event loop (C18).
+    #[allow(dead_code)]
     pub fn next(self) -> Self {
         match self {
             PermMode::Default => PermMode::AcceptEdits,
@@ -189,6 +189,8 @@ pub fn parse_mode(s: &str) -> Option<PermMode> {
 }
 
 // tui.go:1100-1110 (note text for /update, shown before the off-thread check starts).
+// Not wired yet: /update is not dispatched to a check (C20).
+#[allow(dead_code)]
 pub const UPDATE_START_NOTE: &str = "checking for updates...";
 
 // Runtime values the Go handlers read from the Repl. The caller fills these in.
