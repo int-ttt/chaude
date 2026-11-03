@@ -1,0 +1,8 @@
+Node.js(JS)로 로마 숫자 변환 모듈 만들어줘. 파일은 `roman.js` 하나고, CommonJS 방식으로 `module.exports = { toRoman, fromRoman }` 해줘.
+
+- `toRoman(n)`: 정수 1~3999만 받아. 그 밖의 값(0, 음수, 4000 이상, 소수, NaN, Infinity 등)은 `RangeError` 를 던져. 정상이면 대문자 로마 숫자 문자열을 돌려줘 (예: 1994 → `MCMXCIV`).
+- `fromRoman(s)`: 로마 숫자 문자열을 정수로 바꿔. 대소문자는 둘 다 받아.
+- `fromRoman`은 정규 표기만 받아. 예를 들어 `IIII`, `VV`, `IC`, `IXI`, `MMMM`, 빈 문자열, 알파벳이 아닌 문자가 섞인 것은 전부 `SyntaxError` 를 던져.
+- `fromRoman(toRoman(n)) === n` 이 1~3999 전부에서 성립해야 해.
+
+다 만들면 실행 방법(node로 불러서 한 줄 찍어보는 예시)이랑 확인한 내용을 한국어로 짧게 알려줘.

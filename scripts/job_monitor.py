@@ -2,7 +2,7 @@
 """Monitor a background job by pid and/or a status/log file.
 
 Usage:
-  python3 tools/job_monitor.py [--pid N] [--status PATH | --log PATH]
+  python3 scripts/job_monitor.py [--pid N] [--status PATH | --log PATH]
                                [--interval SEC] [--once]
 
 Without --status/--log, the newest logs/*.status file is watched.
