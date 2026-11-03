@@ -29,7 +29,6 @@ use edit::Editor;
 use render::{BOLD_OFF, BOLD_ON, FG_OFF, GREY_ON, ORANGE_ON, RESET};
 
 const TICK: Duration = Duration::from_millis(80);
-const DOUBLE_ESC: Duration = Duration::from_secs(1);
 const PROMPT: &str = "> ";
 // Rows below the viewport when idle: input box top, input line, input box bottom, status row.
 // A running row sits above them while busy (`App::shows_bar`).
@@ -80,7 +79,6 @@ pub struct App {
     unseen: bool,
     // Mouse wheel scrolling (/mouse). When off, the terminal keeps the mouse for text selection.
     mouse: bool,
-    last_esc: Option<Instant>,
     // Selected row of the slash menu (overlay::slash_popup). Reset when the input changes.
     sugg_sel: usize,
     welcome: Welcome,
@@ -120,7 +118,6 @@ impl App {
             follow: true,
             unseen: false,
             mouse: true,
-            last_esc: None,
             sugg_sel: 0,
         }
     }
@@ -230,7 +227,7 @@ impl App {
     }
 
     // Maps one key press to an action.
-    pub fn on_key(&mut self, key: KeyEvent, now: Instant) -> Action {
+    pub fn on_key(&mut self, key: KeyEvent) -> Action {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
@@ -288,18 +285,9 @@ impl App {
                 Action::Continue
             }
             KeyCode::Enter => self.submit(),
-            KeyCode::Esc => {
-                let double = self
-                    .last_esc
-                    .is_some_and(|t| now.duration_since(t) < DOUBLE_ESC);
-                self.last_esc = Some(now);
-                if self.busy && double {
-                    self.last_esc = None;
-                    Action::Interrupt(InterruptSource::EscKey)
-                } else {
-                    Action::Continue
-                }
-            }
+            // Go tui.go: a single Esc interrupts while busy.
+            KeyCode::Esc if self.busy => Action::Interrupt(InterruptSource::EscKey),
+            KeyCode::Esc => Action::Continue,
             KeyCode::Backspace => {
                 self.editor.backspace();
                 self.sugg_sel = 0;
@@ -860,14 +848,12 @@ fn tui(cfg: Config) -> io::Result<()> {
         }
         if event::poll(TICK)? {
             match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    match app.on_key(key, Instant::now()) {
-                        Action::Continue => {}
-                        Action::Submit(text) => engine.submit(&text),
-                        Action::Interrupt(src) => engine.interrupt(src),
-                        Action::Quit => break 'main,
-                    }
-                }
+                Event::Key(key) if key.kind == KeyEventKind::Press => match app.on_key(key) {
+                    Action::Continue => {}
+                    Action::Submit(text) => engine.submit(&text),
+                    Action::Interrupt(src) => engine.interrupt(src),
+                    Action::Quit => break 'main,
+                },
                 Event::Paste(text) => app.editor.insert_str(&text),
                 Event::Mouse(m) if app.mouse => match m.kind {
                     MouseEventKind::ScrollUp => app.scroll(-WHEEL_LINES),
@@ -1004,7 +990,7 @@ mod tests {
 
     fn type_str(app: &mut App, s: &str) {
         for c in s.chars() {
-            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE), Instant::now());
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
         }
     }
 
@@ -1059,9 +1045,9 @@ mod tests {
     fn down_moves_the_menu_selection_and_tab_completes_it() {
         let mut app = App::new(30, 8);
         type_str(&mut app, "/mo");
-        app.on_key(key(KeyCode::Down, KeyModifiers::NONE), Instant::now());
+        app.on_key(key(KeyCode::Down, KeyModifiers::NONE));
         assert!(screen(&app, 30, 8)[2].starts_with("> /mode"));
-        app.on_key(key(KeyCode::Tab, KeyModifiers::NONE), Instant::now());
+        app.on_key(key(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.editor.text(), "/mode ");
         assert!(screen(&app, 30, 8).iter().all(|r| !r.contains("/mouse")));
     }
@@ -1072,7 +1058,7 @@ mod tests {
         type_str(&mut app, "hi");
         assert_eq!(screen(&app, 30, 8).len(), 8);
         assert!(screen(&app, 30, 8)[5].starts_with("│> hi"));
-        app.on_key(key(KeyCode::Up, KeyModifiers::NONE), Instant::now());
+        app.on_key(key(KeyCode::Up, KeyModifiers::NONE));
         assert_eq!(app.editor.text(), "hi");
     }
 
@@ -1112,9 +1098,8 @@ mod tests {
     fn typing_while_scrolled_keeps_position() {
         let mut app = app_with_lines(10);
         app.scroll(-3);
-        let now = Instant::now();
-        app.on_key(key(KeyCode::Char('a'), KeyModifiers::NONE), now);
-        app.on_key(key(KeyCode::Char('b'), KeyModifiers::NONE), now);
+        app.on_key(key(KeyCode::Char('a'), KeyModifiers::NONE));
+        app.on_key(key(KeyCode::Char('b'), KeyModifiers::NONE));
         let rows = screen(&app, 30, 6);
         assert_eq!(rows[0], "line 5");
         assert_eq!(rows[1], "line 6");
@@ -1135,7 +1120,7 @@ mod tests {
         let mut app = app_with_lines(10);
         app.scroll(-3);
         app.transcript.push("line 10".to_string());
-        app.on_key(key(KeyCode::End, KeyModifiers::NONE), Instant::now());
+        app.on_key(key(KeyCode::End, KeyModifiers::NONE));
         let rows = screen(&app, 30, 6);
         assert_eq!(rows[0], "line 9");
         assert_eq!(rows[1], "line 10");
@@ -1145,7 +1130,7 @@ mod tests {
     #[test]
     fn resize_clamps_the_view_and_rewraps_wide_text() {
         let mut app = app_with_lines(10);
-        app.on_key(key(KeyCode::Home, KeyModifiers::NONE), Instant::now());
+        app.on_key(key(KeyCode::Home, KeyModifiers::NONE));
         // Narrower and shorter: one viewport row, and the status row is clipped to the width.
         app.cols = 12;
         app.rows = 5;
@@ -1192,18 +1177,17 @@ mod tests {
     #[test]
     fn enter_submits_and_echoes_while_blank_enter_does_nothing() {
         let mut app = App::new(80, 24);
-        let now = Instant::now();
         assert_eq!(
-            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE), now),
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
             Action::Continue
         );
         for c in "hi".chars() {
-            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE), now);
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
         }
-        app.on_key(key(KeyCode::Char('j'), KeyModifiers::CONTROL), now);
-        app.on_key(key(KeyCode::Char('x'), KeyModifiers::NONE), now);
+        app.on_key(key(KeyCode::Char('j'), KeyModifiers::CONTROL));
+        app.on_key(key(KeyCode::Char('x'), KeyModifiers::NONE));
         assert_eq!(
-            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE), now),
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
             Action::Submit("hi\nx".into())
         );
         assert_eq!(
@@ -1219,62 +1203,48 @@ mod tests {
     #[test]
     fn quit_and_mouse_are_handled_locally() {
         let mut app = App::new(80, 24);
-        let now = Instant::now();
         for c in "/mouse".chars() {
-            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE), now);
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
         }
         assert_eq!(
-            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE), now),
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
             Action::Continue
         );
         assert!(!app.mouse);
         for c in "/quit".chars() {
-            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE), now);
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
         }
         assert_eq!(
-            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE), now),
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
             Action::Quit
         );
     }
 
     #[test]
-    fn two_escapes_within_a_second_interrupt_only_while_busy() {
+    fn a_single_escape_interrupts_only_while_busy() {
         let mut app = App::new(80, 24);
-        let t0 = Instant::now();
         let esc = || key(KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(app.on_key(esc()), Action::Continue);
         app.apply(UiEvent::Busy(true));
-        assert_eq!(app.on_key(esc(), t0), Action::Continue);
         assert_eq!(
-            app.on_key(esc(), t0 + Duration::from_millis(400)),
+            app.on_key(esc()),
             Action::Interrupt(InterruptSource::EscKey)
         );
-        assert_eq!(
-            app.on_key(esc(), t0 + Duration::from_secs(5)),
-            Action::Continue
-        );
         app.apply(UiEvent::Busy(false));
-        assert_eq!(
-            app.on_key(esc(), t0 + Duration::from_secs(5)),
-            Action::Continue
-        );
-        assert_eq!(
-            app.on_key(esc(), t0 + Duration::from_secs(5)),
-            Action::Continue
-        );
+        assert_eq!(app.on_key(esc()), Action::Continue);
     }
 
     #[test]
     fn ctrl_c_interrupts_when_busy_clears_when_idle_and_quits_when_idle_and_empty() {
         let mut app = App::new(80, 24);
-        let now = Instant::now();
         let ctrl_c = || key(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        app.on_key(key(KeyCode::Char('a'), KeyModifiers::NONE), now);
-        assert_eq!(app.on_key(ctrl_c(), now), Action::Continue);
+        app.on_key(key(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert_eq!(app.on_key(ctrl_c()), Action::Continue);
         assert!(app.editor.is_empty());
-        assert_eq!(app.on_key(ctrl_c(), now), Action::Quit);
+        assert_eq!(app.on_key(ctrl_c()), Action::Quit);
         app.apply(UiEvent::Busy(true));
         assert_eq!(
-            app.on_key(ctrl_c(), now),
+            app.on_key(ctrl_c()),
             Action::Interrupt(InterruptSource::CtrlC)
         );
     }
