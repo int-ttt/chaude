@@ -20,8 +20,8 @@ import (
 	"chaude/internal/settings"
 )
 
-// hookSrcFn is the package hook folder that project hook files are compared with (tests replace it).
-var hookSrcFn = settings.HookSource
+// pkgHookFn returns the package copy of a hook script (tests replace it).
+var pkgHookFn = settings.EmbeddedHook
 
 const (
 	markStart    = "<!-- claude-lean:start -->"
@@ -91,7 +91,6 @@ type Plan struct {
 // e.g. a CLAUDE.md with only a start marker or a settings.json that is not JSON.
 func MakePlan(dir string) (*Plan, error) {
 	p := &Plan{Dir: dir, orig: map[string][]byte{}}
-	src := hookSrcFn()
 	for _, rel := range pkgFiles {
 		full := filepath.Join(dir, filepath.FromSlash(rel))
 		st, err := os.Stat(full)
@@ -102,7 +101,7 @@ func MakePlan(dir string) (*Plan, error) {
 		if err != nil {
 			return nil, err
 		}
-		if strings.HasPrefix(rel, hooksDir) && !samePackageCopy(src, path.Base(rel), b) {
+		if strings.HasPrefix(rel, hooksDir) && !samePackageCopy(path.Base(rel), b) {
 			p.kept = append(p.kept, rel)
 			continue
 		}
@@ -118,14 +117,11 @@ func MakePlan(dir string) (*Plan, error) {
 	return p, nil
 }
 
-// samePackageCopy: a hook file is removed only when its bytes equal (sha256) the package copy in src.
-// Without a package copy (src "" or no such file) nothing can be proven, so the file is kept.
-func samePackageCopy(src, name string, b []byte) bool {
-	if src == "" {
-		return false
-	}
-	pkg, err := os.ReadFile(filepath.Join(src, name))
-	if err != nil {
+// samePackageCopy: a hook file is removed only when its bytes equal (sha256) the embedded package copy.
+// Without a package copy nothing can be proven, so the file is kept.
+func samePackageCopy(name string, b []byte) bool {
+	pkg, ok := pkgHookFn(name)
+	if !ok {
 		return false
 	}
 	return sha256.Sum256(pkg) == sha256.Sum256(b)
@@ -286,7 +282,7 @@ func (p *Plan) planSettings() error {
 			return fmt.Errorf("%s is not valid JSON (%v); fix it by hand first (nothing changed)", rel, err)
 		}
 	}
-	n := stripHooks(m, pkgHookNames())
+	n := stripHooks(m, p.settingsHookNames())
 	if n == 0 {
 		return nil
 	}
@@ -399,6 +395,15 @@ func hookName(s string) string {
 		rest = rest[:end]
 	}
 	return rest
+}
+
+// settingsHookNames: package hook names whose settings entries are removed; a kept (user-edited) hook keeps its entry.
+func (p *Plan) settingsHookNames() map[string]bool {
+	names := pkgHookNames()
+	for _, k := range p.kept {
+		delete(names, path.Base(k))
+	}
+	return names
 }
 
 // pkgHookNames: the package hook file names (.claude/hooks/<name>) from the manifest.

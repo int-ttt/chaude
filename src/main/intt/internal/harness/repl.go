@@ -1320,7 +1320,7 @@ func Main(args []string) int {
 		ensureCwd, _ = os.Getwd()
 	}
 	home, _ := os.UserHomeDir()
-	if _, err := settings.EnsureProjectSettings(ensureCwd, home, settings.HookSource()); err != nil {
+	if _, err := settings.EnsureProjectSettings(ensureCwd, home); err != nil {
 		fmt.Fprintln(os.Stderr, "project settings:", err)
 	}
 	if st, err := os.Stdin.Stat(); err == nil {

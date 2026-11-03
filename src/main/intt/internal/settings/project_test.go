@@ -9,36 +9,11 @@ import (
 	"testing"
 )
 
-// fakeHooks is a .claude/hooks folder with the guard hook scripts (the layout HookSource looks for).
-func fakeHooks(t *testing.T) string {
-	t.Helper()
-	dir := filepath.Join(t.TempDir(), ".claude", "hooks")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range guardFiles {
-		if err := os.WriteFile(filepath.Join(dir, f), []byte("# "+f+"\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
-
-// captureWarn replaces warnOut for one test.
-func captureWarn(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	var buf bytes.Buffer
-	old := warnOut
-	warnOut = &buf
-	t.Cleanup(func() { warnOut = old })
-	return &buf
-}
-
+// TestEnsureProjectSettingsCreatesGuard: no hook folder anywhere on disk; settings.json and the embedded hook scripts appear.
 func TestEnsureProjectSettingsCreatesGuard(t *testing.T) {
-	src := fakeHooks(t)
 	cwd := t.TempDir()
 	home := t.TempDir()
-	created, err := EnsureProjectSettings(cwd, home, src)
+	created, err := EnsureProjectSettings(cwd, home)
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
@@ -51,14 +26,41 @@ func TestEnsureProjectSettingsCreatesGuard(t *testing.T) {
 		t.Fatalf("guard hook missing:\n%s", s)
 	}
 	for _, f := range guardFiles {
-		if _, err := os.Stat(filepath.Join(cwd, ".claude", "hooks", f)); err != nil {
-			t.Fatalf("hook script not copied: %s: %v", f, err)
+		got, err := os.ReadFile(filepath.Join(cwd, ".claude", "hooks", f))
+		if err != nil {
+			t.Fatalf("hook script not written: %s: %v", f, err)
+		}
+		want, ok := EmbeddedHook(f)
+		if !ok || !bytes.Equal(got, want) {
+			t.Fatalf("hook %s differs from the embedded copy", f)
+		}
+	}
+}
+
+// TestEmbeddedHooksMatchRepo: the embedded copies equal the repo's .claude/hooks (skipped when run outside the repo).
+func TestEmbeddedHooksMatchRepo(t *testing.T) {
+	repoHooks := filepath.Join("..", "..", "..", "..", "..", ".claude", "hooks")
+	if _, err := os.Stat(repoHooks); err != nil {
+		t.Skip("repo .claude/hooks not reachable from here")
+	}
+	ents, err := hookFS.ReadDir("hooks")
+	if err != nil || len(ents) == 0 {
+		t.Fatalf("no embedded hooks: %v", err)
+	}
+	for _, e := range ents {
+		emb, _ := EmbeddedHook(e.Name())
+		repo, err := os.ReadFile(filepath.Join(repoHooks, e.Name()))
+		if err != nil {
+			t.Errorf("%s: repo copy missing: %v", e.Name(), err)
+			continue
+		}
+		if !bytes.Equal(emb, repo) {
+			t.Errorf("%s: embedded copy differs from .claude/hooks; copy it again into internal/settings/hooks/", e.Name())
 		}
 	}
 }
 
 func TestEnsureProjectSettingsKeepsExisting(t *testing.T) {
-	src := fakeHooks(t)
 	cwd := t.TempDir()
 	home := t.TempDir()
 	existing := filepath.Join(cwd, ".claude", "settings.json")
@@ -69,7 +71,7 @@ func TestEnsureProjectSettingsKeepsExisting(t *testing.T) {
 	if err := os.WriteFile(existing, []byte(user), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	created, err := EnsureProjectSettings(cwd, home, src)
+	created, err := EnsureProjectSettings(cwd, home)
 	if err != nil || created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
@@ -83,64 +85,13 @@ func TestEnsureProjectSettingsKeepsExisting(t *testing.T) {
 }
 
 func TestEnsureProjectSettingsSkipsHome(t *testing.T) {
-	src := fakeHooks(t)
 	home := t.TempDir()
-	created, err := EnsureProjectSettings(home, home, src)
+	created, err := EnsureProjectSettings(home, home)
 	if err != nil || created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".claude")); err == nil {
 		t.Fatal("home was written")
-	}
-}
-
-// no hook source (empty srcDir, or a folder missing a guard script): one warning line, nothing written, no error.
-func TestEnsureProjectSettingsNoSourceWarnsAndSkips(t *testing.T) {
-	partial := fakeHooks(t)
-	if err := os.Remove(filepath.Join(partial, "_lean.py")); err != nil {
-		t.Fatal(err)
-	}
-	for _, src := range []string{"", partial, t.TempDir()} {
-		warn := captureWarn(t)
-		cwd := t.TempDir()
-		created, err := EnsureProjectSettings(cwd, t.TempDir(), src)
-		if err != nil || created {
-			t.Fatalf("src=%q: want no error and no creation, got created=%v err=%v", src, created, err)
-		}
-		if _, err := os.Stat(filepath.Join(cwd, ".claude")); err == nil {
-			t.Fatalf("src=%q: .claude created despite no hook source", src)
-		}
-		if n := strings.Count(warn.String(), "\n"); n != 1 {
-			t.Fatalf("src=%q: want one warning line, got %d:\n%s", src, n, warn.String())
-		}
-	}
-}
-
-func TestHookSourceCandidates(t *testing.T) {
-	// bin/ layout: <root>/bin/chaude with <root>/.claude/hooks
-	root := t.TempDir()
-	hooks := filepath.Join(root, ".claude", "hooks")
-	if err := os.MkdirAll(filepath.Join(root, "bin"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(hooks, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range guardFiles {
-		if err := os.WriteFile(filepath.Join(hooks, f), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if got := hookSource(filepath.Join(root, "bin", "chaude")); got != filepath.Join(root, "bin", "..", ".claude", "hooks") {
-		t.Fatalf("bin layout: got %q want %q", got, hooks)
-	}
-	// flat layout: <root>/chaude with <root>/.claude/hooks (found through the second candidate)
-	if got := hookSource(filepath.Join(root, "chaude")); got != filepath.Join(root, ".claude", "hooks") {
-		t.Fatalf("flat layout: got %q", got)
-	}
-	// nothing next to the binary (what the release installers leave behind)
-	if got := hookSource(filepath.Join(t.TempDir(), "usr", "local", "bin", "chaude")); got != "" {
-		t.Fatalf("no source: got %q", got)
 	}
 }
 

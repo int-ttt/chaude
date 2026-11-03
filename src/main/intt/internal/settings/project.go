@@ -1,12 +1,12 @@
 package settings
 
 import (
+	"embed"
 	"errors"
-	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 
 	"chaude/internal/osenv"
@@ -35,53 +35,26 @@ const guardHooks = `{
 // guardFiles are the hook scripts the guard needs (main-thread-guard.py imports _lean.py).
 var guardFiles = []string{"main-thread-guard.py", "_lean.py"}
 
-// warnOut receives the one-line warning when no hook source is found (tests replace it).
-var warnOut io.Writer = os.Stderr
+// hookFS holds the package hook scripts (hooks/ is a copy of the repo's .claude/hooks manifest files, see
+// TestEmbeddedHooksMatchRepo). The binary carries them, so an installed chaude needs no files next to it.
+//
+//go:embed hooks/*.py
+var hookFS embed.FS
 
-// HookSource returns the folder that holds the guard hook scripts for the running binary, "" when none is found.
-// Candidates: <exe>/../.claude/hooks (bin/ layout, the repo build), then <exe>/.claude/hooks (flat layout).
-// The release installers (install.sh, install.ps1) put only the chaude binary in place, so an installed chaude
-// usually finds nothing here.
-func HookSource() string {
-	exe, err := os.Executable()
+// EmbeddedHook returns the package copy of a hook script (name without folder, e.g. "ledger.py").
+func EmbeddedHook(name string) ([]byte, bool) {
+	b, err := hookFS.ReadFile(path.Join("hooks", name))
 	if err != nil {
-		return ""
+		return nil, false
 	}
-	if r, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = r
-	}
-	return hookSource(exe)
-}
-
-func hookSource(exe string) string {
-	dir := filepath.Dir(exe)
-	for _, d := range []string{filepath.Join(dir, "..", ".claude", "hooks"), filepath.Join(dir, ".claude", "hooks")} {
-		if hasGuardFiles(d) {
-			return d
-		}
-	}
-	return ""
-}
-
-// hasGuardFiles reports whether every guard hook script exists as a file in dir.
-func hasGuardFiles(dir string) bool {
-	if dir == "" {
-		return false
-	}
-	for _, f := range guardFiles {
-		if st, err := os.Stat(filepath.Join(dir, f)); err != nil || st.IsDir() {
-			return false
-		}
-	}
-	return true
+	return b, true
 }
 
 // EnsureProjectSettings makes a project runnable outside this repo: when <cwd>/.claude/settings.json does not exist,
-// it copies the guard hook scripts from srcDir (a .claude/hooks folder, see HookSource) into <cwd>/.claude/hooks
-// (existing files are kept) and writes settings.json with the main-thread guard registered. An existing settings.json
-// is never touched, and cwd == home is skipped (that is the user-global .claude). When srcDir has no guard scripts,
-// one warning line goes to stderr and nothing is written. Returns true when settings.json was created.
-func EnsureProjectSettings(cwd, home, srcDir string) (bool, error) {
+// it writes the guard hook scripts from the embedded package copy into <cwd>/.claude/hooks (existing files are kept)
+// and writes settings.json with the main-thread guard registered. An existing settings.json is never touched, and
+// cwd == home is skipped (that is the user-global .claude). Returns true when settings.json was created.
+func EnsureProjectSettings(cwd, home string) (bool, error) {
 	if cwd == "" {
 		return false, nil
 	}
@@ -98,12 +71,12 @@ func EnsureProjectSettings(cwd, home, srcDir string) (bool, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return false, err
 	}
-	if !hasGuardFiles(srcDir) {
-		fmt.Fprintln(warnOut, "chaude: hook scripts not found next to chaude (main-thread guard skipped, .claude/settings.json not created in "+cwd+")")
-		return false, nil
-	}
 	for _, f := range guardFiles {
-		if err := copyNew(filepath.Join(srcDir, f), filepath.Join(cwd, ".claude", "hooks", f)); err != nil {
+		b, ok := EmbeddedHook(f)
+		if !ok {
+			return false, errors.New("chaude: embedded hook missing: " + f)
+		}
+		if err := copyNew(b, filepath.Join(cwd, ".claude", "hooks", f)); err != nil {
 			return false, err
 		}
 	}
@@ -131,12 +104,8 @@ func hookPython() string {
 	return "python"
 }
 
-// copyNew copies src to dst unless dst already exists.
-func copyNew(src, dst string) error {
-	b, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
+// copyNew writes b to dst unless dst already exists.
+func copyNew(b []byte, dst string) error {
 	if _, err := os.Lstat(dst); err == nil {
 		return nil
 	}

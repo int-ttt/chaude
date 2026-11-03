@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"chaude/internal/settings"
 )
 
 // installFixture writes a project as the old install step left it: package files, CLAUDE.md policy block
@@ -15,13 +17,16 @@ import (
 func installFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	src := t.TempDir()
-	useHookSrc(t, src)
 	for _, rel := range pkgFiles {
-		writeTest(t, filepath.Join(dir, filepath.FromSlash(rel)), "pkg "+rel)
+		body := "pkg " + rel
 		if strings.HasPrefix(rel, hooksDir) {
-			writeTest(t, filepath.Join(src, path.Base(rel)), "pkg "+rel)
+			b, ok := settings.EmbeddedHook(path.Base(rel))
+			if !ok {
+				t.Fatalf("no embedded copy of %s", rel)
+			}
+			body = string(b) // package copy: clean removes it
 		}
+		writeTest(t, filepath.Join(dir, filepath.FromSlash(rel)), body)
 	}
 	writeTest(t, filepath.Join(dir, "CLAUDE.md"), markStart+"\npolicy\n"+markEnd+"\n\n# my project\nkeep me\n")
 	writeTest(t, filepath.Join(dir, ".claude", "settings.json"), `{
@@ -45,13 +50,15 @@ func installFixture(t *testing.T) string {
 	return dir
 }
 
-// useHookSrc points the package hook copy folder at src for one test.
-func useHookSrc(t *testing.T, src string) {
+// useHookFn replaces the package hook lookup for one test (nil-returning fn: no package copies).
+func useHookFn(t *testing.T, fn func(string) ([]byte, bool)) {
 	t.Helper()
-	old := hookSrcFn
-	hookSrcFn = func() string { return src }
-	t.Cleanup(func() { hookSrcFn = old })
+	old := pkgHookFn
+	pkgHookFn = fn
+	t.Cleanup(func() { pkgHookFn = old })
 }
+
+func noPkgHook(string) ([]byte, bool) { return nil, false }
 
 // TestApplyKeepsUserModifiedHook: a hook file that differs from the package copy is left alone; identical ones go.
 func TestApplyKeepsUserModifiedHook(t *testing.T) {
@@ -75,12 +82,19 @@ func TestApplyKeepsUserModifiedHook(t *testing.T) {
 	if exists(filepath.Join(dir, ".claude", "hooks", "ledger.py")) {
 		t.Error("unmodified package hook was not removed")
 	}
+	s, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.json"))
+	if !strings.Contains(string(s), "main-thread-guard.py") {
+		t.Errorf("settings entry of the kept hook was removed:\n%s", s)
+	}
+	if strings.Contains(string(s), "ledger.py") {
+		t.Errorf("settings entry of the removed hook stayed:\n%s", s)
+	}
 }
 
 // TestApplyKeepsHooksWithoutPackageCopy: with no package hook folder nothing can be proven identical, so hooks stay.
 func TestApplyKeepsHooksWithoutPackageCopy(t *testing.T) {
 	dir := installFixture(t)
-	useHookSrc(t, "")
+	useHookFn(t, noPkgHook)
 	p, err := MakePlan(dir)
 	if err != nil {
 		t.Fatal(err)
