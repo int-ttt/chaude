@@ -29,7 +29,9 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - done: record_folder.rs (project folders, legacy root migration, list/filter/load, /resume lines; date fn passed in) and record_turn.rs (RecordState topic/save, measure_line, resume, pick).
      - done: orch.rs (Go orch.go, orchws.go: parse/default_model/rule, mode f Router with parse_ws, WsState rotation at 20 turns/40k ctx/270s idle, handoff_text; api.rs routing hook needed).
      - done: rotate_defer.rs (Go rotate_defer.go: due, Deferral hold/is_due/take with timeout, bg_handoff_lines, running_count; api.rs still has its own rotate_deferred, hook needed).
-     - open: api.rs turn-end call into RecordState::save and /resume wiring (A-owned hook), api.rs wiring of orch Router and rotate_defer, import/--from-claude, metrics.
+     - done: import/--from-claude core (7b60fb4; import_claude.rs: transcript read, /resume group merge, snapshot, dry-run record; import_view.rs: paired-turn view for the TUI).
+     - done: metrics core (cf3d7f1; metrics::usage_fields, metrics_report.rs: summary text and 14-column CSV from the per-day JSONL files).
+     - open: api.rs turn-end call into RecordState::save and /resume wiring (A-owned hook), api.rs wiring of orch Router and rotate_defer, crates/cli call sites for /import --from-claude and `chaude metrics` (--dir, --csv).
 4. Terminal UI without Charm: inline streaming output, input line with Korean IME + unicode width, spinner, status/usage bar, slash commands.
    - status (2026-11-04, crates/cli/src/tui):
      - done: inline streaming output (live feed + record load, asst rows via markdown path, tool_result_text).
