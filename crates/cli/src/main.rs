@@ -178,6 +178,38 @@ fn metrics_main(args: &[String]) -> i32 {
     0
 }
 
+fn main() {
+    // Go main.go: update.CleanupOld() runs before dispatch.
+    chaude_update::cleanup_old();
+    let args: Vec<String> = env::args().skip(1).collect();
+    let code = match args.first().map(String::as_str) {
+        Some("gen-settings") => settings::gen_settings_main(&args[1..]),
+        Some("mcp-resident") => mcp_resident::main(&args[1..]),
+        // Go main.go: `repl` runs the session with the flags after it.
+        Some("repl") => run_tui(&args[1..]),
+        Some("--version" | "-v" | "version") => {
+            println!("chaude {VERSION}");
+            0
+        }
+        Some("-h" | "--help" | "help") => {
+            println!("{USAGE}");
+            0
+        }
+        // Go main.go default branch: any leading -flag runs the repl (flags are parsed by run_tui).
+        None => run_tui(&args),
+        Some(a) if a.starts_with('-') => run_tui(&args),
+        Some("metrics") => metrics_main(&args[1..]),
+        Some("clean") => chaude_clean::main(&args[1..]),
+        Some("update") => chaude_update::run_cli(VERSION, &args[1..]),
+        Some(cmd) if chaude_scripts::has(cmd) => chaude_scripts::run(cmd, &args[1..]),
+        Some(cmd) => {
+            eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");
+            2
+        }
+    };
+    process::exit(code);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,36 +248,4 @@ mod tests {
     fn usage_lists_the_helper_scripts() {
         assert!(USAGE.contains(chaude_scripts::NAMES));
     }
-}
-
-fn main() {
-    // Go main.go: update.CleanupOld() runs before dispatch.
-    chaude_update::cleanup_old();
-    let args: Vec<String> = env::args().skip(1).collect();
-    let code = match args.first().map(String::as_str) {
-        Some("gen-settings") => settings::gen_settings_main(&args[1..]),
-        Some("mcp-resident") => mcp_resident::main(&args[1..]),
-        // Go main.go: `repl` runs the session with the flags after it.
-        Some("repl") => run_tui(&args[1..]),
-        Some("--version" | "-v" | "version") => {
-            println!("chaude {VERSION}");
-            0
-        }
-        Some("-h" | "--help" | "help") => {
-            println!("{USAGE}");
-            0
-        }
-        // Go main.go default branch: any leading -flag runs the repl (flags are parsed by run_tui).
-        None => run_tui(&args),
-        Some(a) if a.starts_with('-') => run_tui(&args),
-        Some("metrics") => metrics_main(&args[1..]),
-        Some("clean") => chaude_clean::main(&args[1..]),
-        Some("update") => chaude_update::run_cli(VERSION, &args[1..]),
-        Some(cmd) if chaude_scripts::has(cmd) => chaude_scripts::run(cmd, &args[1..]),
-        Some(cmd) => {
-            eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");
-            2
-        }
-    };
-    process::exit(code);
 }

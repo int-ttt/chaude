@@ -1,5 +1,7 @@
 # Rust test parity vs Go, part 1 of 3
 
+> Merged into plan/rust-test-parity.md (single deduped 320-row table, recounted totals). This file is kept for per-group detail.
+
 Date: 2026-11-04. Reference: 320 Go tests (`grep -rhoE '^func Test' deprecated --include='*_test.go'`).
 Columns: Go test | Rust test (path::name) | status (covered/missing/n-a/ignored) | note.
 status: covered = Rust test of the same behaviour exists (name-level match noted when names differ);

@@ -7,11 +7,11 @@ use std::fs;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
+use chaude_update::Error;
 use chaude_update::cleanup::{migrate_legacy, remove_old};
 use chaude_update::fsutil::TempDir;
 use chaude_update::http::{Request, Response};
 use chaude_update::update::{Options, Version, run, run_cli};
-use chaude_update::Error;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -201,7 +201,10 @@ fn up_to_date_downloads_nothing() {
         .asset("checksums.txt", b"x".to_vec());
     let f = |r: &Request| fake.call(r);
     let msg = run("0.9.13", opts(&exe, "linux", "amd64"), &f).unwrap();
-    assert!(msg.contains("up to date") && msg.contains("0.9.13"), "{msg}");
+    assert!(
+        msg.contains("up to date") && msg.contains("0.9.13"),
+        "{msg}"
+    );
     assert!(fake.downloads().is_empty(), "{:?}", fake.downloads());
     assert_eq!(fs::read_to_string(&exe).unwrap(), "OLD");
 }
@@ -250,7 +253,11 @@ fn update_windows_renames_old_and_cleanup_removes_it() {
     let old = PathBuf::from(format!("{}.old", exe.display()));
     assert_eq!(fs::read_to_string(&old).unwrap(), "OLD");
     remove_old(&exe);
-    assert!(!old.exists(), "{} still present after cleanup", old.display());
+    assert!(
+        !old.exists(),
+        "{} still present after cleanup",
+        old.display()
+    );
 }
 
 // Go TestChecksumMismatchInstallsNothing.
@@ -419,10 +426,7 @@ fn not_writable_changes_nothing() {
         .asset("checksums.txt", b"x".to_vec());
     let f = |r: &Request| fake.call(r);
     let err = run("0.9.13", opts(&exe, "linux", "amd64"), &f).unwrap_err();
-    assert!(
-        err.to_string().contains("run: sudo chaude update"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("run: sudo chaude update"), "{err}");
     assert_eq!(fs::read_to_string(&exe).unwrap(), "OLD");
     assert!(fake.downloads().is_empty(), "{:?}", fake.downloads());
 }
@@ -432,7 +436,12 @@ fn not_writable_changes_nothing() {
 fn migrate_legacy_removes_old_install_and_path_line() {
     let home = TempDir::new("chaude-parity-").unwrap();
     let legacy = home.path().join(".local").join("bin");
-    for n in ["chaude", "chaude.exe", "chaude.0.9.12.bak", "chaude.0.9.11.bak"] {
+    for n in [
+        "chaude",
+        "chaude.exe",
+        "chaude.0.9.12.bak",
+        "chaude.0.9.11.bak",
+    ] {
         putfile(&legacy.join(n), "OLD");
     }
     putfile(&legacy.join("other"), "KEEP");
@@ -446,7 +455,12 @@ fn migrate_legacy_removes_old_install_and_path_line() {
 
     migrate_legacy(home.path(), "darwin", &running);
 
-    for n in ["chaude", "chaude.exe", "chaude.0.9.12.bak", "chaude.0.9.11.bak"] {
+    for n in [
+        "chaude",
+        "chaude.exe",
+        "chaude.0.9.12.bak",
+        "chaude.0.9.11.bak",
+    ] {
         assert!(!legacy.join(n).exists(), "{n} still present");
     }
     assert_eq!(fs::read_to_string(legacy.join("other")).unwrap(), "KEEP");
@@ -479,7 +493,10 @@ fn migrate_legacy_skips_when_running_legacy_binary() {
 #[test]
 fn migrate_legacy_noop_without_legacy_files() {
     let home = TempDir::new("chaude-parity-").unwrap();
-    let line = format!("export PATH=\"{}:$PATH\"", home.path().join(".local/bin").display());
+    let line = format!(
+        "export PATH=\"{}:$PATH\"",
+        home.path().join(".local/bin").display()
+    );
     putfile(&home.path().join(".bashrc"), &format!("{line}\n"));
     let exe = home.path().join("elsewhere").join("chaude");
     putfile(&exe, "OLD");
