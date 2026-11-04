@@ -49,13 +49,13 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 | id | command | status | Rust ref | note |
 |---|---|---|---|---|
 | S01 | /help | done | commands.rs:15 | |
-| S02 | /clear | differs | crates/cli/src/tui | new-session notice blocked (no engine event) |
+| S02 | /clear | done | crates/cli/src/tui/mod.rs:412 UiEvent::NewSession | new-session notice wired |
 | S03 | /status | done | Dispatch to engine | |
 | S04 | /model | done | Dispatch::Model | |
 | S05 | /settings | done | crates/cli/src/tui/settings.rs | |
 | S06 | /resume | done | record /resume in TUI | |
 | S07 | /import | done | Dispatch::Import | last commit 9bbe876 |
-| S08 | /view | differs | crates/cli/src/tui | prev-run owned sessions done; this run's session ids blocked |
+| S08 | /view | done | crates/cli/src/tui/mod.rs:400 UiEvent::SessionIds, prev_owned | this run's and previous run's session ids |
 | S09 | /rotate | done | Dispatch::Rotate | |
 | S10 | /usage | done | Dispatch::OpenUsage | |
 | S11 | /cost | done | passthrough to claude | not verified per command |
@@ -83,12 +83,12 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 | K3 | spinner | tui.go | done | crates/cli/src/tui/bar.rs spinner_frame | |
 | K4 | idle "still waiting" notice (30 min) | tui.go | done | crates/cli/src/tui | |
 | K5 | clipboard copy | selection.go:115 (clipboard.WriteAll + OSC 52) | done | crates/cli/src/tui/mod.rs native_copy, clipboard_tool, clipboard_payload | off macOS: wl-copy (WAYLAND_DISPLAY), xclip, xsel, clip.exe (UTF-16LE BOM); Windows native uses clip.exe not win32 API; not run on a non-macOS host |
-| K6 | status bar P/T/C per-role context | tui.go | missing | crates/cli/src/tui/bar.rs | hardcoded 0/80k; blocked, UiEvent lacks per-role context |
-| K7 | thinking row | tui.go | missing | bar.rs / render.rs | blocked, needs core data |
-| K8 | done row | tui.go | missing | bar.rs / render.rs | blocked |
-| K9 | rotated notice | tui.go | missing | render.rs | blocked |
-| K10 | orphan notice | tui.go | missing | render.rs | blocked |
-| K11 | tool summary | tui.go | missing | render.rs | blocked |
+| K6 | status bar P/T/C per-role context | tui.go | done | crates/cli/src/tui/bar.rs role_tokens; mod.rs:397 UiEvent::RoleContext | P/T/C from core RoleContext; test bar shows P 1k/80k |
+| K7 | thinking row | tui.go | done | crates/cli/src/tui/mod.rs:1154 bar::thinking_row | |
+| K8 | done row | tui.go | missing | bar.rs / render.rs | no per-turn done row; mod.rs:395 says footer needs engine stats. TurnStats now emits a [측정] line, not this row (doubt: confirm Go intent) |
+| K9 | rotated notice | tui.go | done | crates/cli/src/tui/mod.rs:428 UiEvent::Rotated, bar::rotated_notice | |
+| K10 | orphan notice | tui.go | done | crates/cli/src/tui/mod.rs:417 UiEvent::OrphanNotice, bar::orphan_notice | |
+| K11 | tool summary | tui.go | done | crates/cli/src/tui/mod.rs:297 render::tool_summary | |
 | K12 | assistant link wrap | render | missing | render.rs | blocked |
 
 ## Settings (internal/harness/chaude_settings.go:11-15)
@@ -102,8 +102,9 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 ## Totals
 
 - Rows: 63 (C 15, F 3, E 5, S 25, K 12, T 3).
-- done: 45. differs: 5. missing: 13.
-- Missing, top: (1) `repl` subcommand and 26 repl flags (C2, F3); (2) `--from-claude` and `--import-dry-run` CLI (C5, C6); (3) `clean` (C8); (4) `update` CLI and startup cleanup (C9, C15); (5) 7 helper scripts (C12); (6) `CHAUDE_MAX_WORKERS` (E3); (7) status bar P/T/C (K6, blocked).
+- done: 55. differs: 1 (S23). missing: 7 (C2, C9, C15, F3, E3, K8, K12).
+- Missing, top: (1) `repl` subcommand and 26 repl flags (C2, F3); (2) `update` CLI and startup cleanup (C9, C15; crates/update has cleanup_old but main.rs does not call it); (3) `CHAUDE_MAX_WORKERS` (E3; no max_workers in core); (4) K8 done row (doubt); (5) K12 assistant link wrap (wrap_linked still dead code).
+- Verified 2026-11-04 against code at c8233d6: C3, C4, C5, C6, C8, C11, C12, C13 done (main.rs match arms); K6-K11, S02, S08 wired (f73b6fb). Orch Router (orch.rs) is not called from api.rs (rust-port.md phase 3).
 
 ## Notes
 
