@@ -1,6 +1,7 @@
 //! Resident pipeline (Go resident.go): the prompter slot state machine and its reply rules.
 //! The slots are parked child processes; this module holds the logic that does not need one.
 
+use std::path::Path;
 use std::time::Duration;
 
 // The prompter's system prompt: the Go resident-prompter rules, copied so the engine does not depend on deprecated/.
@@ -8,6 +9,48 @@ pub const PROMPTER_RULE: &str = include_str!("rules/resident-prompter.md");
 
 // How long the prompter may take to summarize (Go prompterTimeout). On timeout the input goes unchanged.
 pub const PROMPTER_TIMEOUT: Duration = Duration::from_secs(60);
+
+// How long the tui may take to translate the main reply (Go tuiTimeout). On timeout the main reply stays.
+pub const TUI_TIMEOUT: Duration = Duration::from_secs(120);
+
+// Go viaTUI prompt: the main return is the basis of the answer for the user.
+pub fn tui_prompt(reply: &str) -> String {
+    format!(
+        "Opus main return follows. Use the relay field if present, else summary_ko (else the body), as the basis. Output only the answer for the user, in polite Korean (존댓말). Add no new facts.\n\n{reply}"
+    )
+}
+
+// Go agentBody: the agent file under cwd, then under the home directory. Frontmatter is dropped.
+pub fn agent_body(cwd: &Path, name: &str) -> Result<String, String> {
+    let file = format!("{name}.md");
+    let mut paths = vec![cwd.join(".claude").join("agents").join(&file)];
+    if let Some(home) = std::env::var_os("HOME") {
+        paths.push(Path::new(&home).join(".claude").join("agents").join(&file));
+    }
+    for p in paths {
+        if let Ok(s) = std::fs::read_to_string(&p) {
+            let body = strip_frontmatter(&s);
+            if !body.is_empty() {
+                return Ok(body);
+            }
+        }
+    }
+    Err(format!("no agent file {name:?}"))
+}
+
+// Go stripFrontmatter: when the first line is `---`, drops the lines up to and including the second `---`.
+pub fn strip_frontmatter(s: &str) -> String {
+    let lines: Vec<&str> = s.split_inclusive('\n').collect();
+    if lines.first().is_none_or(|l| l.trim() != "---") {
+        return s.trim().to_string();
+    }
+    for i in 1..lines.len() {
+        if lines[i].trim() == "---" {
+            return lines[i + 1..].concat().trim().to_string();
+        }
+    }
+    s.trim().to_string()
+}
 
 // Progress of one resident stage, shown as UiEvent::Stage. Failed carries the reason for the notice.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +214,21 @@ fn has_path(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_frontmatter_drops_header_block() {
+        let s = "---\nname: haiku-tui\n---\n\nBody line\n";
+        assert_eq!(strip_frontmatter(s), "Body line");
+        assert_eq!(strip_frontmatter("  plain  \n"), "plain");
+        assert_eq!(strip_frontmatter("---\nno end\n"), "---\nno end");
+    }
+
+    #[test]
+    fn tui_prompt_wraps_reply_after_instruction() {
+        let p = tui_prompt("hello");
+        assert!(p.starts_with("Opus main return follows."));
+        assert!(p.ends_with("\n\nhello"));
+    }
 
     #[test]
     fn summary_is_composed_with_original_and_stage_done() {

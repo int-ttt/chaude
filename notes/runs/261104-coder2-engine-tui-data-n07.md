@@ -66,3 +66,18 @@ remaining:
 - not tested: 60 s prompter timeout path (too slow for suite); queued second prompt during prompter wait
 - doubt: queued merged turns (next_turn) still bypass the prompter, as before
 - remaining: coder+tui slots (c), N14 idlesweep (d), exit_handoff (e)
+
+## sub-group 4c: tui child (Go viaTUI, resident.go:354-380)
+- resident.rs: TUI_TIMEOUT 120 s; tui_prompt(reply) (Go prompt text verbatim); agent_body(cwd, name) (cwd then $HOME agents dir, Go agentBody); strip_frontmatter (Go stripFrontmatter); unit tests strip_frontmatter_drops_header_block, tui_prompt_wraps_reply_after_instruction
+- api.rs: UiEvent::TuiAnswer { text } (new non_exhaustive variant); Input::Tui(epoch, ProcMsg); State tui_proc / tui_epoch / tui_deadline
+- end_turn: after remember_turn, residents on and non-empty reply -> start_tui (turn stays busy); tail moved to after_turn (rotation, then next_turn)
+- start_tui: stage tui Working, write tui_prompt(reply); spawn_tui = haiku, Shape minimal + rule = haiku-tui agent body (cwd, then HOME); epoch-tagged child kept alive
+- answer: result line trimmed -> stage tui Done + TuiAnswer; empty -> Failed("tui empty reply"); exit -> Failed("tui exited"); timeout (TUI_TIMEOUT via wait_budget/on_quiet) -> Failed("tui timed out"); spawn/write errors -> Failed; main reply kept (no TuiAnswer)
+- interrupt while tui runs is not sent to the idle main child (avoids stale interrupted_at)
+- tests/engine.rs: fake() writes .claude/agents/haiku-tui.md (TUIMARK) and tui.jsonl; argv TUIMARK selects tui role, tui.log records its input. Residents tests set cfg.cwd = fake dir.
+- new tests: tui_answer_replaces_main_reply_after_turn (text_turn.jsonl), tui_exit_keeps_main_reply_and_reports_failed_stage
+- note: resume_agent_turn.jsonl has no text deltas, so the stage test sees no tui rows (no reply, no tui run)
+- gates: cargo test -p chaude-core 62 lib + 39 engine PASS; clippy --all-targets -D warnings PASS; fmt --check PASS; cargo build --workspace PASS
+- not tested: 120 s timeout path (too slow); Result-only replies (no text deltas) skip the tui because turn_reply is delta-built
+- doubt: TUI consumer (replace shown main text on TuiAnswer) lives in crates/cli (other agent)
+- remaining: coder slot (c), N14 idlesweep (d), exit_handoff (e)

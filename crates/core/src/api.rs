@@ -18,7 +18,10 @@ use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, Shape, SpawnOpts};
-use crate::resident::{PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter, PrompterOutcome, StagePhase};
+use crate::resident::{
+    PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter, PrompterOutcome, StagePhase, TUI_TIMEOUT,
+    agent_body, tui_prompt,
+};
 use crate::rotate::{
     HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
     validate_handoff, with_reco,
@@ -136,6 +139,10 @@ pub enum UiEvent {
         slot: String,
         phase: crate::resident::StagePhase,
     },
+    // The tui resident's Korean answer for the turn just ended (Go viaTUI). It replaces the main reply shown.
+    TuiAnswer {
+        text: String,
+    },
     // Per-turn measurement, emitted just before TurnEnd (Go record_turn.go measureLine keys).
     // cost_turn_usd = this turn's share of the session cost; cost_usd = cumulative session cost;
     // ctx = context tokens from the last assistant usage; delegations = Agent/Task calls in the turn.
@@ -243,6 +250,8 @@ enum Input {
     Proc(u64, ProcMsg),
     // Prompter child line, tagged with the prompter's generation like Proc.
     Prompter(u64, ProcMsg),
+    // Tui child line, tagged with the tui's generation like Proc.
+    Tui(u64, ProcMsg),
 }
 
 pub struct EngineHandle {
@@ -385,6 +394,11 @@ struct State {
     prompter_epoch: u64,
     // When the running prompter wait gives up (Go prompterTimeout).
     prompter_deadline: Option<Instant>,
+    // Tui resident (Go tui slot): translates the main reply to the Korean answer. Kept alive across turns.
+    tui_proc: Option<ClaudeProc>,
+    tui_epoch: u64,
+    // When the running tui wait gives up (Go tuiTimeout).
+    tui_deadline: Option<Instant>,
 }
 
 // A handoff turn in progress: the rotation reason and how many handoff prompts were sent (Go makeSnapshotN).
@@ -459,6 +473,9 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         prompter_proc: None,
         prompter_epoch: 0,
         prompter_deadline: None,
+        tui_proc: None,
+        tui_epoch: 0,
+        tui_deadline: None,
     };
     st.start_child();
     loop {
@@ -493,12 +510,20 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
                 ProcMsg::Eof => st.on_prompter_eof(),
             },
             Input::Prompter(_, _) => {}
+            Input::Tui(epoch, msg) if epoch == st.tui_epoch => match msg {
+                ProcMsg::Line(line) => st.on_tui_line(&line),
+                ProcMsg::Eof => st.on_tui_eof(),
+            },
+            Input::Tui(_, _) => {}
         }
     }
     if let Some(mut p) = st.proc.take() {
         p.kill();
     }
     if let Some(mut p) = st.prompter_proc.take() {
+        p.kill();
+    }
+    if let Some(mut p) = st.tui_proc.take() {
         p.kill();
     }
 }
@@ -645,6 +670,101 @@ impl State {
         self.dispatch(&o.text);
     }
 
+    // Go viaTUI: the main reply goes to the tui child. Failures keep the main reply (the stage row says why).
+    fn start_tui(&mut self, reply: String) {
+        if self.tui_proc.is_none()
+            && let Err(e) = self.spawn_tui()
+        {
+            self.stage("tui", StagePhase::Failed(format!("tui spawn failed: {e}")));
+            self.after_turn();
+            return;
+        }
+        self.stage("tui", StagePhase::Working);
+        self.tui_deadline = Some(Instant::now() + TUI_TIMEOUT);
+        let wrote = match self.tui_proc.as_mut() {
+            Some(p) => p.write_user(&tui_prompt(&reply)).map_err(|e| e.to_string()),
+            None => Err("tui not running".to_string()),
+        };
+        if let Err(e) = wrote {
+            self.tui_proc = None;
+            self.finish_tui(Err(format!("tui write failed: {e}")));
+        }
+    }
+
+    // Go residentSlots tui: haiku with the minimal shape and the haiku-tui agent body. Kept alive across turns.
+    fn spawn_tui(&mut self) -> Result<(), String> {
+        let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
+        let rule = agent_body(&cwd, "haiku-tui")?;
+        let opts = SpawnOpts {
+            model: "haiku".to_string(),
+            resume: None,
+            max_budget_usd: 0.0,
+            shape: Shape {
+                minimal: true,
+                rule,
+                ..Shape::default()
+            },
+            ..self.opts.clone()
+        };
+        self.tui_epoch += 1;
+        let epoch = self.tui_epoch;
+        let p = proc::spawn(&opts, self.self_tx.clone(), move |m| Input::Tui(epoch, m))
+            .map_err(|e| e.to_string())?;
+        self.tui_proc = Some(p);
+        Ok(())
+    }
+
+    // The tui's result line is its answer. An empty answer is a failure (Go empty reply).
+    fn on_tui_line(&mut self, line: &str) {
+        if self.tui_deadline.is_none() {
+            return;
+        }
+        let Ok(Event::Result(r)) = parse_line(line) else {
+            return;
+        };
+        let text = r.result.unwrap_or_default().trim().to_string();
+        if text.is_empty() {
+            self.finish_tui(Err("tui empty reply".to_string()));
+        } else {
+            self.finish_tui(Ok(text));
+        }
+    }
+
+    fn on_tui_eof(&mut self) {
+        self.tui_proc = None;
+        if self.tui_deadline.is_some() {
+            self.finish_tui(Err("tui exited".to_string()));
+        }
+    }
+
+    // The tui gave up waiting. Its child is replaced, so late lines are dropped by epoch.
+    fn tui_timeout(&mut self) {
+        if let Some(mut p) = self.tui_proc.take() {
+            p.kill();
+        }
+        self.tui_epoch += 1;
+        self.finish_tui(Err("tui timed out".to_string()));
+    }
+
+    // Ends the tui wait: the answer (or its failure row), then the turn is over.
+    fn finish_tui(&mut self, out: Result<String, String>) {
+        self.tui_deadline = None;
+        match out {
+            Ok(text) => {
+                self.stage("tui", StagePhase::Done);
+                self.emit(UiEvent::TuiAnswer { text });
+            }
+            Err(reason) => self.stage("tui", StagePhase::Failed(reason)),
+        }
+        self.after_turn();
+    }
+
+    // Time left in the running tui wait. None when no wait is running.
+    fn tui_left(&self) -> Option<Duration> {
+        self.tui_deadline
+            .map(|t| t.saturating_duration_since(Instant::now()))
+    }
+
     // Time left in the running prompter wait. None when no wait is running.
     fn prompter_left(&self) -> Option<Duration> {
         self.prompter_deadline
@@ -740,7 +860,11 @@ impl State {
     fn interrupt(&mut self, src: InterruptSource) {
         let busy = self.busy;
         let mut sent = false;
-        if busy && let Some(p) = self.proc.as_mut() {
+        // While the tui translates, the main child is idle: there is nothing to interrupt.
+        if busy
+            && self.tui_deadline.is_none()
+            && let Some(p) = self.proc.as_mut()
+        {
             match p.write_interrupt() {
                 Ok(_) => sent = true,
                 Err(e) => self.emit(UiEvent::Error(format!("interrupt write failed: {e}"))),
@@ -1146,6 +1270,10 @@ impl State {
         if let Some(left) = self.prompter_left() {
             return Some(left.max(Duration::from_millis(1)));
         }
+        // A tui wait runs on a busy turn with no open tool: its own deadline is the only timer.
+        if let Some(left) = self.tui_left() {
+            return Some(left.max(Duration::from_millis(1)));
+        }
         if !self.busy {
             // Idle with a deferred rotation: wake when its defer timeout ends.
             return self
@@ -1171,6 +1299,13 @@ impl State {
     fn on_quiet(&mut self) {
         if self.prompter_left().is_some_and(|d| d.is_zero()) {
             self.prompter_timeout();
+        }
+        if self.tui_left().is_some_and(|d| d.is_zero()) {
+            self.tui_timeout();
+        }
+        // A running tui wait is not an inactivity case: the main child is idle.
+        if self.tui_deadline.is_some() {
+            return;
         }
         if !self.busy {
             // A deferred rotation waits out a prompter wait: it would send its handoff while the prompter runs.
@@ -1274,6 +1409,16 @@ impl State {
         self.stage("main", StagePhase::Done);
         self.emit(UiEvent::TurnEnd { duration_ms });
         self.remember_turn();
+        if self.cfg.residents && !self.turn_reply.trim().is_empty() {
+            // The turn stays busy until the tui answers or fails; after_turn runs then.
+            self.start_tui(self.turn_reply.clone());
+            return;
+        }
+        self.after_turn();
+    }
+
+    // Rotation and the queued turn, once the reply is final (Go runs these after viaTUI).
+    fn after_turn(&mut self) {
         if self.rotation_wanted() {
             if self.rotation_due() {
                 self.rotate_deferred = None;

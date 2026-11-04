@@ -54,13 +54,36 @@ fn fake(name: &str, turns: &[&str]) -> Fake {
         "{\"type\":\"result\",\"result\":\"caveman summary\"}\n",
     )
     .unwrap();
+    // The tui reply; an empty file makes the fake tui exit on its first prompt. Its agent body carries TUIMARK.
+    fs::write(
+        dir.join("tui.jsonl"),
+        "{\"type\":\"result\",\"result\":\"tui answer\"}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join(".claude").join("agents")).unwrap();
+    fs::write(
+        dir.join(".claude").join("agents").join("haiku-tui.md"),
+        "---\nname: haiku-tui\n---\n\nTUIMARK translator body\n",
+    )
+    .unwrap();
     let script = r#"#!/bin/sh
 n=0
 case "$*" in
+  *TUIMARK*) role=tui ;;
   *system-prompt*) role=prompter ;;
   *) role=main ;;
 esac
 while IFS= read -r line; do
+  if [ "$role" = tui ]; then
+    case "$line" in
+      *'"type":"user"'*)
+        printf '%s\n' "$line" >> 'DIR/tui.log'
+        [ -s 'DIR/tui.jsonl' ] || exit 1
+        cat 'DIR/tui.jsonl'
+        ;;
+    esac
+    continue
+  fi
   if [ "$role" = prompter ]; then
     case "$line" in
       *'"type":"user"'*)
@@ -1171,6 +1194,7 @@ fn resident_stage_rows_bracket_main_turn_and_agent_calls() {
     let f = fake("stage_on", &["resume_agent_turn.jsonl"]);
     let mut cfg = config(&f);
     cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
     let (h, rx) = Engine::start(cfg);
     h.submit("go");
     let evs = until_idle(&rx);
@@ -1199,11 +1223,65 @@ fn resident_stage_rows_bracket_main_turn_and_agent_calls() {
 }
 
 #[test]
+fn tui_answer_replaces_main_reply_after_turn() {
+    let _g = lock();
+    let f = fake("tui_on", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let log = wait_for(&f.dir.join("tui.log"), "Opus main return follows");
+    assert!(log.contains("Opus main return follows"), "{log}");
+    let answer = evs
+        .iter()
+        .position(|e| {
+            *e == UiEvent::TuiAnswer {
+                text: "tui answer".into(),
+            }
+        })
+        .unwrap_or_else(|| panic!("{evs:?}"));
+    let turn_end = evs
+        .iter()
+        .position(|e| matches!(e, UiEvent::TurnEnd { .. }))
+        .unwrap();
+    assert!(answer > turn_end, "{evs:?}");
+    h.shutdown();
+}
+
+#[test]
+fn tui_exit_keeps_main_reply_and_reports_failed_stage() {
+    let _g = lock();
+    let f = fake("tui_fail", &["text_turn.jsonl"]);
+    fs::write(f.dir.join("tui.jsonl"), "").unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.contains(&UiEvent::Stage {
+            slot: "tui".into(),
+            phase: StagePhase::Failed("tui exited".into()),
+        }),
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::TuiAnswer { .. })),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
 fn prompter_summary_wraps_prompt_for_main_child() {
     let _g = lock();
     let f = fake("prompter_on", &["resume_agent_turn.jsonl"]);
     let mut cfg = config(&f);
     cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
     let (h, rx) = Engine::start(cfg);
     h.submit("go");
     let evs = until_idle(&rx);
@@ -1227,6 +1305,7 @@ fn prompter_failure_falls_back_to_raw_prompt() {
     fs::write(f.dir.join("prompter.jsonl"), "").unwrap();
     let mut cfg = config(&f);
     cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
     let (h, rx) = Engine::start(cfg);
     h.submit("go");
     let evs = until_idle(&rx);
