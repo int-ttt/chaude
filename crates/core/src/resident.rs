@@ -13,6 +13,26 @@ pub const PROMPTER_TIMEOUT: Duration = Duration::from_secs(60);
 // How long the tui may take to translate the main reply (Go tuiTimeout). On timeout the main reply stays.
 pub const TUI_TIMEOUT: Duration = Duration::from_secs(120);
 
+// How long one coder task may run (Go residentCoderTimeout). On timeout the coder child is replaced.
+pub const CODER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+// Appended to every coder task so the reply ends with the lines summarize_reply keeps (Go coderReplyFormat).
+pub const CODER_REPLY_FORMAT: &str = "\n\n[reply] End with `status: done|partial|fail` and one `changed: <path>: <what>` line per file you edited.";
+
+// Go summarizeReply: keeps the status and changed lines; a reply without them is cut to 300 chars.
+pub fn summarize_reply(reply: &str) -> String {
+    let keep: Vec<String> = reply
+        .split('\n')
+        .map(|ln| ln.trim().trim_start_matches("- ").trim())
+        .filter(|t| t.starts_with("status:") || t.starts_with("changed:"))
+        .map(str::to_string)
+        .collect();
+    if keep.is_empty() {
+        return reply.trim().chars().take(300).collect();
+    }
+    keep.join("\n").chars().take(1200).collect()
+}
+
 // Go viaTUI prompt: the main return is the basis of the answer for the user.
 pub fn tui_prompt(reply: &str) -> String {
     format!(
@@ -214,6 +234,22 @@ fn has_path(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summarize_keeps_status_and_changed_lines() {
+        let reply = "working...\n- status: done\nchanged: a.rs: fix\n  - changed: b.rs: add\nbye";
+        assert_eq!(
+            summarize_reply(reply),
+            "status: done\nchanged: a.rs: fix\nchanged: b.rs: add"
+        );
+    }
+
+    #[test]
+    fn summarize_without_status_cuts_to_300_chars() {
+        let long = "x".repeat(400);
+        assert_eq!(summarize_reply(&long).chars().count(), 300);
+        assert_eq!(summarize_reply("  plain  "), "plain");
+    }
 
     #[test]
     fn strip_frontmatter_drops_header_block() {

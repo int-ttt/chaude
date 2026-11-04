@@ -19,8 +19,8 @@ use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, Shape, SpawnOpts};
 use crate::resident::{
-    PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter, PrompterOutcome, StagePhase, TUI_TIMEOUT,
-    agent_body, tui_prompt,
+    CODER_REPLY_FORMAT, CODER_TIMEOUT, PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter, PrompterOutcome,
+    StagePhase, TUI_TIMEOUT, agent_body, summarize_reply, tui_prompt,
 };
 use crate::rotate::{
     HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
@@ -143,6 +143,11 @@ pub enum UiEvent {
     TuiAnswer {
         text: String,
     },
+    // The coder resident's summary for a task (Go runResidentCoder). role is "coder" or "coder2".."coder9".
+    CoderReply {
+        role: String,
+        text: String,
+    },
     // Per-turn measurement, emitted just before TurnEnd (Go record_turn.go measureLine keys).
     // cost_turn_usd = this turn's share of the session cost; cost_usd = cumulative session cost;
     // ctx = context tokens from the last assistant usage; delegations = Agent/Task calls in the turn.
@@ -171,6 +176,9 @@ pub enum UiEvent {
 
 // Recent turns kept for the handoff snapshot (Go --tail-turns) and their size limits (Go --snapshot-chars).
 const TAIL_TURNS: usize = 4;
+// Go coderSlot tools and the extra coder cap (settingsMaxExtraCoders).
+const CODER_TOOLS: &str = "Read,Edit,Write,Bash,Grep,Glob";
+const MAX_EXTRA_CODERS: usize = 8;
 const TURN_CHARS: usize = 1_500;
 const SNAPSHOT_CHARS: usize = 24_000;
 
@@ -208,6 +216,9 @@ pub struct Config {
     // Resident slots are running (Go len(resident) > 0): the engine emits UiEvent::Stage rows for the main turn
     // and each agent call. Off = no stage rows.
     pub residents: bool,
+    // Go extra_coders (.chaude/settings.json): coders coder2..coder(1+n) beyond the always-on coder, 0-8.
+    // Extra coders start on demand and expire after 270 s idle (N14 idle sweep).
+    pub extra_coders: usize,
 }
 
 impl Default for Config {
@@ -230,12 +241,15 @@ impl Default for Config {
             rotate_threshold: HAIKU_THRESHOLD,
             rotate_defer_timeout: Duration::from_secs(600),
             residents: true,
+            extra_coders: 4,
         }
     }
 }
 
 enum Cmd {
     Submit(String),
+    // Go runResidentCoder: one task for an idle coder. The reply comes back as UiEvent::CoderReply.
+    Coder(String),
     Interrupt(InterruptSource),
     // Mode name as typed ("next" cycles); parsed by the actor so unknown names are reported as UiEvent::Error.
     SetMode(String),
@@ -252,6 +266,8 @@ enum Input {
     Prompter(u64, ProcMsg),
     // Tui child line, tagged with the tui's generation like Proc.
     Tui(u64, ProcMsg),
+    // Coder child line: slot index into State::coders, tagged with that slot's generation.
+    Coder(usize, u64, ProcMsg),
 }
 
 pub struct EngineHandle {
@@ -268,6 +284,11 @@ impl EngineHandle {
     // Submits "/command" through the same queue as a normal prompt.
     pub fn slash(&self, command: &str) {
         self.submit(&format!("/{}", command.trim_start_matches('/')));
+    }
+
+    // Go runResidentCoder: sends a task to an idle coder (coder, then coder2...). Answers CoderReply or a Failed stage.
+    pub fn coder(&self, task: &str) {
+        let _ = self.tx.send(Input::Cmd(Cmd::Coder(task.to_string())));
     }
 
     pub fn interrupt(&self, source: InterruptSource) {
@@ -399,6 +420,18 @@ struct State {
     tui_epoch: u64,
     // When the running tui wait gives up (Go tuiTimeout).
     tui_deadline: Option<Instant>,
+    // Coder residents (Go coder, coder2..): slot 0 is "coder", slot i is "coder{i+1}". Grown on demand.
+    coders: Vec<Coder>,
+    coder_epoch: u64,
+}
+
+// One coder resident. A running deadline means a task is in flight (Go busyRec).
+#[derive(Default)]
+struct Coder {
+    proc: Option<ClaudeProc>,
+    // Generation of the child in this slot; a replaced child's lines are dropped by epoch.
+    epoch: u64,
+    deadline: Option<Instant>,
 }
 
 // A handoff turn in progress: the rotation reason and how many handoff prompts were sent (Go makeSnapshotN).
@@ -476,6 +509,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         tui_proc: None,
         tui_epoch: 0,
         tui_deadline: None,
+        coders: Vec::new(),
+        coder_epoch: 0,
     };
     st.start_child();
     loop {
@@ -515,6 +550,12 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
                 ProcMsg::Eof => st.on_tui_eof(),
             },
             Input::Tui(_, _) => {}
+            Input::Cmd(Cmd::Coder(task)) => st.start_coder(task),
+            Input::Coder(i, epoch, msg) if st.coder_matches(i, epoch) => match msg {
+                ProcMsg::Line(line) => st.on_coder_line(i, &line),
+                ProcMsg::Eof => st.on_coder_eof(i),
+            },
+            Input::Coder(_, _, _) => {}
         }
     }
     if let Some(mut p) = st.proc.take() {
@@ -525,6 +566,11 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     }
     if let Some(mut p) = st.tui_proc.take() {
         p.kill();
+    }
+    for c in &mut st.coders {
+        if let Some(mut p) = c.proc.take() {
+            p.kill();
+        }
     }
 }
 
@@ -712,6 +758,129 @@ impl State {
             .map_err(|e| e.to_string())?;
         self.tui_proc = Some(p);
         Ok(())
+    }
+
+    // Go runResidentCoder: the first idle coder takes the task (spawned if not running). Busy coders are skipped.
+    fn start_coder(&mut self, task: String) {
+        let task = task.trim().to_string();
+        if task.is_empty() {
+            self.emit(UiEvent::Error("task is required".to_string()));
+            return;
+        }
+        let extra = self.cfg.extra_coders.min(MAX_EXTRA_CODERS);
+        let idle = (0..=extra).find(|&i| self.coders.get(i).is_none_or(|c| c.deadline.is_none()));
+        let Some(i) = idle else {
+            self.stage(
+                "coder",
+                StagePhase::Failed("all resident coders are busy".into()),
+            );
+            return;
+        };
+        let role = coder_role(i);
+        if self.coders.len() <= i {
+            self.coders.resize_with(i + 1, Coder::default);
+        }
+        if self.coders[i].proc.is_none()
+            && let Err(e) = self.spawn_coder(i)
+        {
+            self.stage(&role, StagePhase::Failed(format!("coder spawn failed: {e}")));
+            return;
+        }
+        self.stage(&role, StagePhase::Working);
+        self.coders[i].deadline = Some(Instant::now() + CODER_TIMEOUT);
+        let text = format!("{task}{CODER_REPLY_FORMAT}");
+        let wrote = match self.coders[i].proc.as_mut() {
+            Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
+            None => Err("coder not running".to_string()),
+        };
+        if let Err(e) = wrote {
+            self.drop_coder(i);
+            self.finish_coder(i, Err(format!("coder write failed: {e}")));
+        }
+    }
+
+    // Go residentSlots coder: haiku with the haiku-coder agent body, the coder tools, strict MCP and no slash commands.
+    fn spawn_coder(&mut self, i: usize) -> Result<(), String> {
+        let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
+        let rule = agent_body(&cwd, "haiku-coder")?;
+        let opts = SpawnOpts {
+            model: "haiku".to_string(),
+            resume: None,
+            max_budget_usd: 0.0,
+            shape: Shape {
+                minimal: false,
+                tools: CODER_TOOLS.to_string(),
+                strict_mcp: true,
+                no_slash: true,
+                rule,
+            },
+            ..self.opts.clone()
+        };
+        self.coder_epoch += 1;
+        let epoch = self.coder_epoch;
+        self.coders[i].epoch = epoch;
+        let p = proc::spawn(&opts, self.self_tx.clone(), move |m| {
+            Input::Coder(i, epoch, m)
+        })
+        .map_err(|e| e.to_string())?;
+        self.coders[i].proc = Some(p);
+        Ok(())
+    }
+
+    // A message is current only while its slot still has the child that sent it.
+    fn coder_matches(&self, i: usize, epoch: u64) -> bool {
+        self.coders.get(i).is_some_and(|c| c.epoch == epoch)
+    }
+
+    // Kills the slot's child and bumps its generation, so its late lines are dropped.
+    fn drop_coder(&mut self, i: usize) {
+        if let Some(mut p) = self.coders[i].proc.take() {
+            p.kill();
+        }
+        self.coder_epoch += 1;
+        self.coders[i].epoch = self.coder_epoch;
+    }
+
+    // The coder's result line is its reply. An empty reply is a failure, as for the tui.
+    fn on_coder_line(&mut self, i: usize, line: &str) {
+        if self.coders[i].deadline.is_none() {
+            return;
+        }
+        let Ok(Event::Result(r)) = parse_line(line) else {
+            return;
+        };
+        let text = summarize_reply(&r.result.unwrap_or_default());
+        if text.is_empty() {
+            self.finish_coder(i, Err("coder empty reply".to_string()));
+        } else {
+            self.finish_coder(i, Ok(text));
+        }
+    }
+
+    fn on_coder_eof(&mut self, i: usize) {
+        self.coders[i].proc = None;
+        if self.coders[i].deadline.is_some() {
+            self.finish_coder(i, Err("coder exited".to_string()));
+        }
+    }
+
+    // The coder gave up waiting (Go residentCoderTimeout). The child is replaced.
+    fn coder_timeout(&mut self, i: usize) {
+        self.drop_coder(i);
+        self.finish_coder(i, Err("coder timed out".to_string()));
+    }
+
+    // Ends a coder task: its stage row, then the reply (or the failure reason) goes to the UI.
+    fn finish_coder(&mut self, i: usize, out: Result<String, String>) {
+        self.coders[i].deadline = None;
+        let role = coder_role(i);
+        match out {
+            Ok(text) => {
+                self.stage(&role, StagePhase::Done);
+                self.emit(UiEvent::CoderReply { role, text });
+            }
+            Err(reason) => self.stage(&role, StagePhase::Failed(reason)),
+        }
     }
 
     // The tui's result line is its answer. An empty answer is a failure (Go empty reply).
@@ -1264,8 +1433,25 @@ impl State {
     }
 
     // How long the actor may block before the inactivity timer must be checked. None means block until input.
-    // Idle, or any tool_use without its result, pauses the timer.
+    // A coder wait can run during a busy main turn, so its deadline is only added to the main timers.
     fn wait_budget(&self) -> Option<Duration> {
+        let own = self
+            .coders
+            .iter()
+            .filter_map(|c| c.deadline)
+            .min()
+            .map(|t| {
+                t.saturating_duration_since(Instant::now())
+                    .max(Duration::from_millis(1))
+            });
+        match (self.main_wait_budget(), own) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    // Idle, or any tool_use without its result, pauses the timer.
+    fn main_wait_budget(&self) -> Option<Duration> {
         // A prompter wait only starts while idle, so it is the only timer that matters until it ends.
         if let Some(left) = self.prompter_left() {
             return Some(left.max(Duration::from_millis(1)));
@@ -1302,6 +1488,11 @@ impl State {
         }
         if self.tui_left().is_some_and(|d| d.is_zero()) {
             self.tui_timeout();
+        }
+        for i in 0..self.coders.len() {
+            if self.coders[i].deadline.is_some_and(|t| t <= Instant::now()) {
+                self.coder_timeout(i);
+            }
         }
         // A running tui wait is not an inactivity case: the main child is idle.
         if self.tui_deadline.is_some() {
@@ -1643,6 +1834,15 @@ impl State {
             cost_usd,
             context_pct: pct,
         });
+    }
+}
+
+// Go coderRole: slot 0 is "coder", slot i is "coder{i+1}" (coder2 for the first extra coder).
+fn coder_role(i: usize) -> String {
+    if i == 0 {
+        "coder".to_string()
+    } else {
+        format!("coder{}", i + 1)
     }
 }
 
