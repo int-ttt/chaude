@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::windows;
 use crate::osenv;
+use serde_json::{Map, Value};
 
 /// Project settings written when a folder has no .claude/settings.json: the main-thread guard only
 /// (same matcher and command form as the repo's .claude/settings.json; posix form, windows converted by `windows`).
@@ -21,6 +22,16 @@ const GUARD_HOOKS: &str = r#"{
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/main-thread-guard.py\"",
+            "timeout": 5
+          }
+        ]
       }
     ]
   }
@@ -29,6 +40,46 @@ const GUARD_HOOKS: &str = r#"{
 
 /// Hook scripts the guard needs (main-thread-guard.py imports _lean.py).
 const GUARD_FILES: &[&str] = &["main-thread-guard.py", "_lean.py"];
+
+/// Script the merge looks for to tell that a PreToolUse group already runs the guard.
+const GUARD_SCRIPT: &str = "main-thread-guard.py";
+
+/// Package copies of the repo's .claude/agents definitions (haiku-*.md and opus-architect.md). A first-opened
+/// folder gets them, so the main model can delegate to named agents. embedded_agents_match_repo keeps them equal.
+pub const AGENTS: &[(&str, &[u8])] = &[
+    (
+        "haiku-batch-worker.md",
+        include_bytes!("agents/haiku-batch-worker.md"),
+    ),
+    (
+        "haiku-checker.md",
+        include_bytes!("agents/haiku-checker.md"),
+    ),
+    ("haiku-coder.md", include_bytes!("agents/haiku-coder.md")),
+    (
+        "haiku-drafter.md",
+        include_bytes!("agents/haiku-drafter.md"),
+    ),
+    (
+        "haiku-extractor.md",
+        include_bytes!("agents/haiku-extractor.md"),
+    ),
+    (
+        "haiku-prompter.md",
+        include_bytes!("agents/haiku-prompter.md"),
+    ),
+    (
+        "haiku-researcher.md",
+        include_bytes!("agents/haiku-researcher.md"),
+    ),
+    ("haiku-runner.md", include_bytes!("agents/haiku-runner.md")),
+    ("haiku-scout.md", include_bytes!("agents/haiku-scout.md")),
+    ("haiku-tui.md", include_bytes!("agents/haiku-tui.md")),
+    (
+        "opus-architect.md",
+        include_bytes!("agents/opus-architect.md"),
+    ),
+];
 
 /// Package copies of the repo's .claude/hooks scripts. The binary carries them, so an installed chaude needs no
 /// files next to it. embedded_hooks_match_repo keeps them equal to the repo copies.
@@ -75,10 +126,11 @@ pub fn embedded_hook(name: &str) -> Option<&'static [u8]> {
         .map(|(_, body)| *body)
 }
 
-/// Makes a project runnable outside this repo: when `<cwd>/.claude/settings.json` does not exist, creates
-/// `<cwd>/.claude/hooks`, writes the guard hook scripts from the embedded copies (existing files are kept) and writes
-/// settings.json with the main-thread guard registered. An existing settings.json is never touched, and cwd == home
-/// is skipped (that is the user-global .claude). Returns true when settings.json was created.
+/// Makes a project runnable outside this repo: writes the agent definitions into `<cwd>/.claude/agents` and the guard
+/// hook scripts into `<cwd>/.claude/hooks` (existing files are kept, never overwritten), then creates
+/// `<cwd>/.claude/settings.json` or merges the guard into an existing one (user keys and hooks kept, guard groups
+/// appended only when missing, so a second run changes nothing). cwd == home is skipped (that is the user-global
+/// .claude). Returns true when settings.json was created.
 pub fn ensure_project_settings(cwd: &Path, home: Option<&Path>) -> io::Result<bool> {
     if cwd.as_os_str().is_empty() {
         return Ok(false);
@@ -86,26 +138,34 @@ pub fn ensure_project_settings(cwd: &Path, home: Option<&Path>) -> io::Result<bo
     if home.is_some_and(|h| same_dir(cwd, h)) {
         return Ok(false);
     }
-    let dst = cwd.join(".claude").join("settings.json");
-    match fs::symlink_metadata(&dst) {
-        Ok(_) => return Ok(false),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
+    let claude = cwd.join(".claude");
+    for (name, body) in AGENTS {
+        copy_new(body, &claude.join("agents").join(name))?;
     }
-    let hooks_dir = cwd.join(".claude").join("hooks");
-    fs::create_dir_all(&hooks_dir)?;
     for name in GUARD_FILES {
         let body = embedded_hook(name)
             .ok_or_else(|| io::Error::other(format!("chaude: embedded hook missing: {name}")))?;
-        copy_new(body, &hooks_dir.join(name))?;
+        copy_new(body, &claude.join("hooks").join(name))?;
     }
     let text = if osenv::is_windows() {
         windows(GUARD_HOOKS.as_bytes(), hook_python()).map_err(io::Error::other)?
     } else {
         GUARD_HOOKS.to_string()
     };
-    write_new(&dst, text.as_bytes())?;
-    Ok(true)
+    let dst = claude.join("settings.json");
+    match fs::read(&dst) {
+        Ok(old) => {
+            if let Some(merged) = merge_guard(&old, &text).map_err(io::Error::other)? {
+                fs::write(&dst, merged)?;
+            }
+            Ok(false)
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            write_new(&dst, text.as_bytes())?;
+            Ok(true)
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Hook interpreter for the windows guard command: the first of python3, python, py found on PATH, else "python".
@@ -125,6 +185,64 @@ pub fn hook_python_in(dirs: &[PathBuf]) -> &'static str {
         }
     }
     "python"
+}
+
+/// Adds the guard PreToolUse groups from `guard` to an existing settings body. Keys and order of `old` are kept; a
+/// group is added only when no group with the same matcher already runs the guard script. None when nothing was
+/// added. Text that is not a JSON object (or whose hooks/PreToolUse have the wrong shape) is an error.
+fn merge_guard(old: &[u8], guard: &str) -> Result<Option<String>, String> {
+    let mut cfg: Value = serde_json::from_slice(old).map_err(|e| e.to_string())?;
+    let guard_cfg: Value = serde_json::from_str(guard).map_err(|e| e.to_string())?;
+    let obj = cfg
+        .as_object_mut()
+        .ok_or("settings.json: top level is not an object")?;
+    let hooks = obj
+        .entry("hooks")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or("settings.json: hooks is not an object")?;
+    let pre = hooks
+        .entry("PreToolUse")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or("settings.json: hooks.PreToolUse is not an array")?;
+    let mut changed = false;
+    for group in guard_cfg["hooks"]["PreToolUse"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        let matcher = group["matcher"].as_str().unwrap_or_default();
+        if pre.iter().any(|g| runs_guard(g, matcher)) {
+            continue;
+        }
+        pre.push(group.clone());
+        changed = true;
+    }
+    if !changed {
+        return Ok(None);
+    }
+    let mut text = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    text.push('\n');
+    Ok(Some(text))
+}
+
+/// True when a PreToolUse group with this matcher already runs the guard script.
+fn runs_guard(group: &Value, matcher: &str) -> bool {
+    group["matcher"].as_str() == Some(matcher)
+        && group["hooks"]
+            .as_array()
+            .is_some_and(|hs| hs.iter().any(|h| hook_text(h).contains(GUARD_SCRIPT)))
+}
+
+/// Command line of a hook entry: the command, plus the args of the windows exec form.
+fn hook_text(h: &Value) -> String {
+    let mut s = h["command"].as_str().unwrap_or_default().to_string();
+    for a in h["args"].as_array().into_iter().flatten() {
+        s.push(' ');
+        s.push_str(a.as_str().unwrap_or_default());
+    }
+    s
 }
 
 /// True when both paths name the same existing directory.
@@ -220,24 +338,88 @@ mod tests {
     }
 
     #[test]
-    fn keeps_existing_settings() {
-        let root = TempDir::new("guard-keep");
+    fn merges_existing_settings() {
+        let root = TempDir::new("guard-merge");
         let cwd = root.path().join("cwd");
         let home = root.path().join("home");
         let existing = cwd.join(".claude").join("settings.json");
         fs::create_dir_all(existing.parent().expect("parent")).expect("mkdir");
         fs::create_dir_all(&home).expect("mkdir home");
-        const USER: &str = r#"{"model":"sonnet"}"#;
+        const USER: &str = r#"{"model":"sonnet","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo mine"}]}]}}"#;
         fs::write(&existing, USER).expect("write user settings");
 
         assert!(!ensure_project_settings(&cwd, Some(&home)).expect("ensure"));
-        assert_eq!(fs::read_to_string(&existing).expect("read"), USER);
+        let first = fs::read_to_string(&existing).expect("read");
         assert!(
-            !cwd.join(".claude")
-                .join("hooks")
-                .join("main-thread-guard.py")
-                .exists()
+            first.contains(r#""model": "sonnet""#),
+            "user key lost:\n{first}"
         );
+        assert!(first.contains("echo mine"), "user hook lost:\n{first}");
+        assert!(
+            first.contains("Agent|Task"),
+            "Agent|Task guard missing:\n{first}"
+        );
+        assert!(
+            first.contains("main-thread-guard.py"),
+            "guard missing:\n{first}"
+        );
+        assert!(
+            !ensure_project_settings(&cwd, Some(&home)).expect("ensure"),
+            "second run should not create"
+        );
+        assert_eq!(
+            fs::read_to_string(&existing).expect("read"),
+            first,
+            "second run changed settings"
+        );
+    }
+
+    #[test]
+    fn rejects_non_object_settings() {
+        let root = TempDir::new("guard-bad");
+        let cwd = root.path().join("cwd");
+        let existing = cwd.join(".claude").join("settings.json");
+        fs::create_dir_all(existing.parent().expect("parent")).expect("mkdir");
+        fs::write(&existing, "[1, 2]").expect("write");
+        assert!(ensure_project_settings(&cwd, None).is_err());
+        assert_eq!(fs::read_to_string(&existing).expect("read"), "[1, 2]");
+    }
+
+    #[test]
+    fn agents_written_and_existing_kept() {
+        let root = TempDir::new("guard-agents");
+        let cwd = root.path().join("cwd");
+        fs::create_dir_all(&cwd).expect("mkdir cwd");
+        let mine = cwd.join(".claude").join("agents").join("haiku-coder.md");
+        fs::create_dir_all(mine.parent().expect("parent")).expect("mkdir");
+        fs::write(&mine, "mine").expect("write");
+        assert!(ensure_project_settings(&cwd, None).expect("ensure"));
+        assert_eq!(fs::read_to_string(&mine).expect("read"), "mine");
+        let (_, body) = AGENTS
+            .iter()
+            .find(|(n, _)| *n == "opus-architect.md")
+            .expect("opus-architect embedded");
+        let got = fs::read(cwd.join(".claude").join("agents").join("opus-architect.md"))
+            .expect("opus-architect written");
+        assert_eq!(got.as_slice(), *body);
+    }
+
+    #[test]
+    fn embedded_agents_match_repo() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.claude/agents");
+        if !repo.is_dir() {
+            eprintln!("skip: repo .claude/agents not reachable from here");
+            return;
+        }
+        for (name, body) in AGENTS {
+            let repo_body = fs::read(repo.join(name))
+                .unwrap_or_else(|e| panic!("{name}: repo copy missing: {e}"));
+            assert_eq!(
+                *body,
+                repo_body.as_slice(),
+                "{name}: embedded copy differs from .claude/agents"
+            );
+        }
     }
 
     #[test]
