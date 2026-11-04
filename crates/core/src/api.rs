@@ -687,6 +687,8 @@ struct Coder {
 struct Handoff {
     reason: String,
     attempts: u32,
+    // Go clearWithHandoff: the snapshot goes to a fresh session after /clear instead of a rotation.
+    clear: bool,
 }
 
 // One panel/background row (Go agentRec fields the TUI shows). Field order follows agentRec in drain.go:17-38.
@@ -998,6 +1000,20 @@ impl State {
     fn submit(&mut self, text: String) {
         if self.proc.is_none() {
             self.emit(UiEvent::Error("claude is not running".to_string()));
+            return;
+        }
+        // Go /clear and /rotate are session commands, not turns: they run here and never reach the child as text.
+        let cmd = text.trim();
+        if cmd == "/clear" || cmd == "/rotate" {
+            if self.busy || self.prompter.waiting() {
+                self.emit(UiEvent::Error(format!("{cmd} needs an idle session")));
+                return;
+            }
+            if cmd == "/clear" {
+                self.clear_session();
+            } else {
+                self.manual_rotate();
+            }
             return;
         }
         if self.busy || self.prompter.waiting() {
@@ -1774,12 +1790,6 @@ impl State {
                 self.turn_cost_base = self.cost_usd;
                 self.delegations = 0;
                 self.spend = TurnSpend::new();
-                // Go /clear: the next saved turn starts a new record file (RecordState.split).
-                if text.trim() == "/clear" {
-                    self.record.split = true;
-                    self.clear_mark();
-                    self.clear_client_row();
-                }
                 true
             }
             Err(e) => {
@@ -2816,9 +2826,15 @@ impl State {
             self.rotate_keep_snapshot(reason);
             return false;
         }
+        self.start_handoff_as(reason, false)
+    }
+
+    // The handoff turn itself; the caller has already ruled out a pending snapshot.
+    fn start_handoff_as(&mut self, reason: String, clear: bool) -> bool {
         self.handoff = Some(Handoff {
             reason,
             attempts: 1,
+            clear,
         });
         if self.send_turn(HANDOFF_PROMPT) {
             return true;
@@ -2846,6 +2862,7 @@ impl State {
             self.handoff = Some(Handoff {
                 reason: h.reason.clone(),
                 attempts: h.attempts + 1,
+                clear: h.clear,
             });
             if self.send_turn(HANDOFF_PROMPT) {
                 return;
@@ -2871,6 +2888,11 @@ impl State {
             )
         };
         let snapshot = with_reco(&self.last_reco, &self.build_snapshot(&body));
+        if h.clear {
+            self.finish_clear(snapshot);
+            self.next_turn();
+            return;
+        }
         if let Some((model, text)) = self.switch_to.take() {
             self.complete_switch(model, text, snapshot);
             return;
@@ -2967,6 +2989,44 @@ impl State {
         self.emit(UiEvent::RotatedFrom { old_session: old });
         self.emit(UiEvent::Rotated { reason });
         self.emit_status(self.cost_usd);
+    }
+
+    // Go /rotate (repl.go rotate("manual")): the same handoff as a context rotation, reason "manual".
+    fn manual_rotate(&mut self) {
+        self.busy = true;
+        self.emit(UiEvent::Busy(true));
+        if !self.start_handoff("manual".to_string()) {
+            self.busy = false;
+            self.emit(UiEvent::Busy(false));
+        }
+    }
+
+    // Go /clear in the TUI (clearWithHandoff): the snapshot is taken first when there is a conversation to carry.
+    // A pending snapshot is dropped, as in Go (clear() resets pendingSnapshot before the new one is set).
+    fn clear_session(&mut self) {
+        self.busy = true;
+        self.emit(UiEvent::Busy(true));
+        if self.recent.is_empty() || !self.pending_snapshot.is_empty() {
+            self.finish_clear(String::new());
+            self.next_turn();
+            return;
+        }
+        if !self.start_handoff_as("clear".to_string(), true) {
+            self.finish_clear(String::new());
+            self.next_turn();
+        }
+    }
+
+    // Go clear(): the old session ends, the record splits at this time, and the fresh child gets the snapshot
+    // (empty when none) with its next prompt.
+    fn finish_clear(&mut self, snapshot: String) {
+        self.clear_mark();
+        self.clear_client_row();
+        self.record.split = true;
+        self.restart_child();
+        self.recent.clear();
+        self.files.clear();
+        self.pending_snapshot = snapshot;
     }
 
     // Closes the current child and starts a fresh one that gets the snapshot with its next prompt.

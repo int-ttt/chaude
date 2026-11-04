@@ -1448,23 +1448,8 @@ fn session_ids_new_session_and_tool_input_are_emitted() {
         .position(|e| matches!(e, UiEvent::ToolStart { id, .. } if id == "toolu_bash1"))
         .unwrap();
     assert_eq!(input, start + 1, "{first:?}");
-    // The same child now reports a new session id with no rotation: a user /clear.
-    h.submit("/clear");
-    let second = until_idle(&rx);
-    assert!(
-        second.contains(&UiEvent::NewSession {
-            old_session: "s1".into()
-        }),
-        "{second:?}"
-    );
-    assert!(
-        second.contains(&UiEvent::SessionIds {
-            main: "s2".into(),
-            residents: BTreeMap::new(),
-            owned: vec!["s1".into(), "s2".into()],
-        }),
-        "{second:?}"
-    );
+    // /clear no longer reaches the child as a turn (api.rs clear_session runs a handoff, then restarts),
+    // so the NewSession event is covered by clear_command_carries_snapshot_to_a_fresh_session instead.
     h.shutdown();
 }
 
@@ -2069,6 +2054,71 @@ fn clear_splits_the_next_saved_turn() {
         .filter(|p| fs::read_to_string(p).unwrap_or_default().contains("say hi"))
         .count();
     assert_eq!(files, 2, "the turn after /clear starts a new record file");
+}
+
+// Go /rotate (rotate("manual")): a handoff runs on the current child and the fresh child gets the snapshot.
+#[test]
+fn rotate_command_hands_off_to_a_fresh_session() {
+    let _g = lock();
+    let f = fake("rotate_cmd", &["rotate_turn.jsonl", "handoff_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("first");
+    until_idle(&rx);
+    h.submit("/rotate");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::Rotated { reason } if reason == "manual")),
+        "/rotate reports a manual rotation"
+    );
+    h.submit("again");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    assert!(log.contains("Write a handoff note"), "{log}");
+    assert!(
+        !log.contains("/rotate"),
+        "/rotate is not sent to claude: {log}"
+    );
+    let frame = log
+        .lines()
+        .find(|l| l.contains("## Current user message"))
+        .expect("snapshot frame");
+    assert!(
+        frame.contains("Goal: finish the context rotation test"),
+        "{frame}"
+    );
+    assert!(frame.contains("again"), "{frame}");
+    h.shutdown();
+}
+
+// Go /clear (clearWithHandoff): the snapshot of the conversation goes to a fresh session, not to the old one.
+#[test]
+fn clear_command_carries_snapshot_to_a_fresh_session() {
+    let _g = lock();
+    let f = fake("clear_cmd", &["rotate_turn.jsonl", "handoff_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("first");
+    until_idle(&rx);
+    h.submit("/clear");
+    until_idle(&rx);
+    h.submit("again");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    assert!(log.contains("Write a handoff note"), "{log}");
+    assert!(
+        !log.contains("/clear"),
+        "/clear is not sent to claude: {log}"
+    );
+    let frame = log
+        .lines()
+        .find(|l| l.contains("## Current user message"))
+        .expect("snapshot frame");
+    assert!(
+        frame.contains("Goal: finish the context rotation test"),
+        "{frame}"
+    );
+    assert!(frame.contains("again"), "{frame}");
+    h.shutdown();
 }
 
 fn files_under(dir: &Path) -> Vec<PathBuf> {
