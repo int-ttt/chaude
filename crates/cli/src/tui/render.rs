@@ -455,7 +455,6 @@ pub fn tool_result_text(s: &str) -> Option<String> {
 // R06 toolSummary (tui.go:67): the first priority key whose string value is non-empty, newlines turned
 // into spaces, cut to 100 chars. Otherwise the compact JSON of the input (Go jsonStr), cut to 100 chars.
 // Empty for no input.
-#[allow(dead_code)] // blocked: needs tool input JSON in UiEvent::ToolStart
 pub fn tool_summary(input: &serde_json::Value) -> String {
     const KEYS: [&str; 8] = [
         "command",
@@ -1066,7 +1065,8 @@ pub fn input_placeholder(busy: bool) -> &'static str {
 }
 
 // I30 cells (input.go:24): cell column of byte index `pos` within one visual row.
-#[allow(dead_code)] // blocked: I30 needs core cursor (TODO(core-cursor))
+// Only tests call it: no terminal cursor placement uses the cell column yet.
+#[allow(dead_code)]
 pub fn input_cursor_cells(row: &str, pos: usize) -> usize {
     cell_width(&row[..pos])
 }

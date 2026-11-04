@@ -15,7 +15,7 @@ pub mod sessview;
 pub mod settings;
 pub mod usage;
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::panic;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -146,6 +146,16 @@ pub struct App {
     session_mode: Option<String>,
     // Model and configured rotate threshold, the inputs of handoff::resume_mode for /resume (set in tui()).
     resume_rule: (String, u64),
+    // Session ids of this run (UiEvent::SessionIds: main, residents, owned). /view lists them with the previous run's.
+    this_run: BTreeSet<String>,
+    // Session id the next rotation replaces (UiEvent::RotatedFrom), read by the Rotated notice.
+    rot_from: String,
+    // Tool rows by tool id: transcript index and tool name. ToolInput rewrites the row in place.
+    tool_rows: HashMap<String, (usize, String)>,
+    // Agent outcome by tool id until its AgentEnd: failed (ToolEnd ok=false) and the result's first line.
+    agent_outcome: HashMap<String, (bool, String)>,
+    // Main text streamed in this turn (Go gotText). Cleared when a turn starts.
+    got_text: bool,
     welcome: Welcome,
 }
 
@@ -208,6 +218,11 @@ impl App {
             copy_note: None,
             session_mode: None,
             resume_rule: (String::new(), 0),
+            this_run: BTreeSet::new(),
+            rot_from: String::new(),
+            tool_rows: HashMap::new(),
+            agent_outcome: HashMap::new(),
+            got_text: false,
         }
     }
 
@@ -217,6 +232,15 @@ impl App {
             ev,
             UiEvent::Status { .. } | UiEvent::Busy(_) | UiEvent::Queued(_)
         );
+        if matches!(
+            ev,
+            UiEvent::TextDelta {
+                role: Role::Main,
+                ..
+            }
+        ) {
+            self.got_text = true;
+        }
         match ev {
             UiEvent::TextDelta {
                 role: Role::Main,
@@ -251,21 +275,48 @@ impl App {
                 plain_text,
             ),
             UiEvent::ToolStart { id, name, summary } => {
-                self.open_tools.insert(id);
+                self.open_tools.insert(id.clone());
                 self.end_main_block();
                 let head = if summary.is_empty() {
-                    name
+                    name.clone()
                 } else {
                     format!("{name}({summary})")
                 };
+                self.tool_rows.insert(id, (self.transcript.len(), name));
                 self.transcript.push(format!("{TOOL_ON}● {head}{FG_OFF}"));
             }
+            // Go tool_summary: the input JSON gives the row its argument summary. Rewrites only a row still in place.
+            UiEvent::ToolInput { id, input } => {
+                let summary = render::tool_summary(&input);
+                if let Some((row, name)) = self.tool_rows.get(&id).cloned()
+                    && let Some(line) = self.transcript.get_mut(row)
+                {
+                    let head = if summary.is_empty() {
+                        name
+                    } else {
+                        format!("{name}({summary})")
+                    };
+                    *line = format!("{TOOL_ON}● {head}{FG_OFF}");
+                }
+            }
             // Go shows the tool_result text, not a done/failed word; that row comes from ToolResult.
-            UiEvent::ToolEnd { id, .. } => {
+            UiEvent::ToolEnd { id, ok } => {
                 self.open_tools.remove(&id);
+                if !ok && self.is_agent_tool(&id) {
+                    self.agent_outcome.entry(id).or_default().0 = true;
+                }
             }
             // Go toolResultMsg: the first line cut to 160 runes, then "… (+N lines)" for the rest.
-            UiEvent::ToolResult { text, .. } => {
+            UiEvent::ToolResult { id, text } => {
+                if self.is_agent_tool(&id) {
+                    let first = text
+                        .lines()
+                        .map(str::trim)
+                        .find(|l| !l.is_empty())
+                        .unwrap_or_default()
+                        .to_string();
+                    self.agent_outcome.entry(id).or_default().1 = first;
+                }
                 // Go hides an agent's caveman return from the transcript (tui.go:481); None means hidden.
                 let Some(head) = render::tool_result_text(&text) else {
                     return;
@@ -294,12 +345,23 @@ impl App {
                 }
             }
             UiEvent::AgentEnd { id, elapsed_ms } => {
+                let desc = self
+                    .agents
+                    .iter()
+                    .find(|(aid, _, _)| *aid == id)
+                    .map(|(_, d, _)| d.clone())
+                    .unwrap_or_default();
+                let (failed, what) = self.agent_outcome.remove(&id).unwrap_or_default();
                 self.agents.retain(|(aid, _, _)| *aid != id);
                 self.bg_agents.retain(|aid| *aid != id);
                 self.transcript.push(format!(
                     "◆ agent done in {}",
                     bar::fmt_secs(elapsed_ms / 1000)
                 ));
+                // Go doneLine: the result's first line, else the description. The model is not in the event.
+                let what = if what.is_empty() { desc.clone() } else { what };
+                let notice = bar::done_line(failed, "", &desc, &what);
+                self.note(&format!("{GREY_ON}{notice}{FG_OFF}"));
             }
             UiEvent::Status {
                 model,
@@ -315,6 +377,9 @@ impl App {
             UiEvent::Busy(b) => {
                 self.busy = b;
                 self.turn_start = if b { Some(Instant::now()) } else { None };
+                if b {
+                    self.got_text = false;
+                }
                 // A new turn starts its quiet count now, not at the last event of the previous turn.
                 self.quiet_since = Some(self.clock);
                 self.quiet_noted = false;
@@ -322,9 +387,39 @@ impl App {
             UiEvent::Queued(n) => self.bar.queued = n,
             // Go shows no per-turn "done" row; its footer comes from engine stats that UiEvent does not carry yet.
             UiEvent::TurnEnd { .. } => self.end_main_block(),
+            UiEvent::RoleContext { role, tokens } => {
+                self.bar.role_tokens.insert(role, tokens);
+            }
+            // Go /view: this run's main, resident and owned session ids.
+            UiEvent::SessionIds {
+                main,
+                residents,
+                owned,
+            } => {
+                self.this_run = std::iter::once(main)
+                    .chain(residents.into_values())
+                    .chain(owned)
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+            // Go repl.go:1412: /clear starts a new session.
+            UiEvent::NewSession { .. } => self.note(bar::NEW_SESSION_NOTICE),
+            UiEvent::RotatedFrom { old_session } => self.rot_from = old_session,
+            // Go repl.go:1436: a claude child left by a dead harness. Core sends only the role and pid, so the
+            // model is the main model for main and the role name for a resident (the model is not in the event).
+            UiEvent::OrphanNotice { role, pid } => {
+                let model = if role == handoff::MAIN_ROLE {
+                    self.welcome.model.clone()
+                } else {
+                    role
+                };
+                let cwd = self.welcome.cwd.clone();
+                self.note(&bar::orphan_notice(pid, &model, &cwd));
+            }
             UiEvent::Rotated { reason } => {
                 self.rot += 1;
-                self.transcript.push(format!("↻ session rotated: {reason}"))
+                let old = std::mem::take(&mut self.rot_from);
+                self.note(&bar::rotated_notice(self.rot, &reason, &old));
             }
             UiEvent::Usage { text } => {
                 let (w, h) = self.usage_geom();
@@ -498,6 +593,8 @@ impl App {
                 .collect();
             if let Some(cut) = self.rw.key(key, &refs) {
                 self.transcript.truncate(self.prompts[cut.cut].0);
+                self.tool_rows
+                    .retain(|_, (row, _)| *row < self.transcript.len());
                 self.wide.retain(|&i| i < self.transcript.len());
                 self.prompts.truncate(cut.cut);
                 self.editor.clear();
@@ -798,8 +895,7 @@ impl App {
     }
 
     // Go /view: the sessions this run and the previous run spawned. The previous run comes from the exit handoff
-    // (handoff::prev_owned, Go loadPrevOwned). TODO(view-owned): this run's ids (main, rotated, resident child)
-    // are not in any UiEvent yet, so only the previous run's ids are listed.
+    // (handoff::prev_owned, Go loadPrevOwned); this run's ids come from UiEvent::SessionIds.
     fn open_view(&mut self, arg: &str) {
         if let Some(mode) = self.session_mode.clone() {
             self.note(&mode);
@@ -809,11 +905,12 @@ impl App {
 
     // The /view list itself, also reopened after SessionResumed so the switch is visible.
     fn open_sessions(&mut self, arg: &str) {
-        let owned: HashSet<String> = handoff::read_exit_handoff(&handoff::handoff_file(
+        let mut owned: HashSet<String> = handoff::read_exit_handoff(&handoff::handoff_file(
             &records::record_dir(std::path::Path::new(&self.welcome.cwd)),
         ))
         .map(|h| h.prev_owned().into_iter().collect())
         .unwrap_or_default();
+        owned.extend(self.this_run.iter().cloned());
         let result = sessview::session_list(&self.welcome.cwd)
             .and_then(|all| sessview::own_sessions(all, &owned))
             .and_then(|list| sessview::SessView::open(list, arg));
@@ -974,8 +1071,13 @@ impl App {
         self.wide.extend(at..self.transcript.len());
     }
 
+    // Agent and Task tool calls, which launch a subagent. Checked by the name the ToolStart row was given.
+    fn is_agent_tool(&self, id: &str) -> bool {
+        matches!(self.tool_rows.get(id), Some((_, name)) if name == "Agent" || name == "Task")
+    }
+
     // Go mainStatusText + the spinner (tui.go:385-390): `✶ 생각중-model-메인(prompt) · Mm SSs`, orange frame, grey text.
-    fn busy_row(&self) -> String {
+    fn busy_row(&self, esc: bool) -> String {
         let mut text = format!("생각중-{}-메인", self.welcome.model);
         if !self.turn_prompt.is_empty() {
             text.push_str(&format!("({})", self.turn_prompt));
@@ -986,13 +1088,17 @@ impl App {
                 "",
             ));
         }
+        if esc {
+            text.push_str(" (esc to interrupt)");
+        }
         format!("{ORANGE_ON}{}{FG_OFF}{GREY_ON} {text}{FG_OFF}", self.spin)
     }
 
     // Lines in the viewport: transcript, then the unfinished text of each role, wrapped to `width`.
     fn body(&self, width: usize) -> Vec<String> {
         let agent = format!("{AGENT_PREFIX}{}", self.pending_agent);
-        let busy_row = self.busy_row();
+        let status_row = self.busy_row(false);
+        let esc_row = self.busy_row(true);
         let mut lines: Vec<&str> = self.transcript.iter().map(String::as_str).collect();
         if !self.pending_main.is_empty() {
             lines.push(&self.pending_main);
@@ -1000,9 +1106,23 @@ impl App {
         if !self.pending_agent.is_empty() {
             lines.push(&agent);
         }
-        // Go tui.go View(): the main session row sits in the transcript flow while busy.
-        if self.busy {
-            lines.push(&busy_row);
+        // Go tui.go View() thinking row (tui.go:383-391), in the transcript flow. The opus and resident busy
+        // states have no UiEvent yet, so they are passed as false.
+        let fg = self
+            .agents
+            .iter()
+            .any(|(id, _, _)| !self.bg_agents.contains(id));
+        match bar::thinking_row(
+            fg,
+            false,
+            false,
+            self.got_text,
+            self.perm.is_some(),
+            self.busy,
+        ) {
+            bar::ThinkingRow::None => {}
+            bar::ThinkingRow::Status => lines.push(&status_row),
+            bar::ThinkingRow::StatusWithEsc => lines.push(&esc_row),
         }
         // Text width is one less than the full width, so the welcome box gets the full width back.
         let mut rows = self.welcome_rows(width + 1);
@@ -2277,6 +2397,115 @@ mod tests {
         assert_eq!(
             app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
             Action::Quit
+        );
+    }
+
+    #[test]
+    fn role_context_fills_the_bar_and_session_ids_join_this_run() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::RoleContext {
+            role: "tui".to_string(),
+            tokens: 12_000,
+        });
+        let [_, bottom] = bar::rows(&app.bar_input(), ' ', 200);
+        assert!(bottom.contains(" T 12k/80k"), "{bottom}");
+        app.apply(UiEvent::SessionIds {
+            main: "m1".to_string(),
+            residents: std::collections::BTreeMap::from([(
+                "prompter".to_string(),
+                "p1".to_string(),
+            )]),
+            owned: vec!["o1".to_string(), String::new()],
+        });
+        assert_eq!(
+            app.this_run,
+            BTreeSet::from(["m1".to_string(), "p1".to_string(), "o1".to_string()])
+        );
+    }
+
+    #[test]
+    fn rotation_notice_names_the_replaced_session() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::RotatedFrom {
+            old_session: "abcdef0123456789".to_string(),
+        });
+        app.apply(UiEvent::Rotated {
+            reason: "tokens".to_string(),
+        });
+        assert!(
+            app.transcript
+                .iter()
+                .any(|r| r == "── context rotated #1 (tokens; abcdef01 → new) ──"),
+            "{:?}",
+            app.transcript
+        );
+    }
+
+    #[test]
+    fn tool_input_rewrites_the_tool_row_summary() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::ToolStart {
+            id: "t1".to_string(),
+            name: "Bash".to_string(),
+            summary: String::new(),
+        });
+        app.apply(UiEvent::ToolInput {
+            id: "t1".to_string(),
+            input: serde_json::json!({"command": "ls"}),
+        });
+        assert!(
+            app.transcript.iter().any(|r| r.contains("● Bash(ls)")),
+            "{:?}",
+            app.transcript
+        );
+    }
+
+    #[test]
+    fn thinking_row_hides_once_main_text_streams() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::Busy(true));
+        assert!(app.body(80).iter().any(|r| r.contains("생각중")));
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "hi\n".to_string(),
+        });
+        assert!(!app.body(80).iter().any(|r| r.contains("생각중")));
+    }
+
+    #[test]
+    fn agent_end_adds_the_done_line() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "a1".to_string(),
+            description: "Scan repo".to_string(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentEnd {
+            id: "a1".to_string(),
+            elapsed_ms: 1500,
+        });
+        assert!(
+            app.transcript
+                .iter()
+                .any(|r| r.contains("[agent 완료] 상속 Scan repo · Scan repo")),
+            "{:?}",
+            app.transcript
+        );
+    }
+
+    #[test]
+    fn orphan_notice_names_the_child_and_its_model() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::OrphanNotice {
+            role: "main".to_string(),
+            pid: 4242,
+        });
+        assert!(
+            app.transcript
+                .iter()
+                .any(|r| r.starts_with("[orphan] claude pid 4242 (claude-opus-5-5, ")),
+            "{:?}",
+            app.transcript
         );
     }
 

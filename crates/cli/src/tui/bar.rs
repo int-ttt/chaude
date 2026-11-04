@@ -2,6 +2,7 @@
 // without a terminal. Every row is clipped to the given display width so it never wraps.
 // Helpers that need core data or hooks not wired yet carry a targeted #[allow(dead_code)] with the reason.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use super::render::{cluster_width, grapheme_clusters};
@@ -63,6 +64,8 @@ pub struct BarInput {
     pub mode: String,
     pub fg: usize,
     pub bg: usize,
+    // Latest context tokens per role (UiEvent::RoleContext): P = prompter, T = tui, C = coder.
+    pub role_tokens: BTreeMap<String, u64>,
 }
 
 // Per-role context limit shown in the Go ctx bar (haikuThreshold in repl.go).
@@ -136,18 +139,22 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
         };
         top.push_str(&format!(" · agent {desc} {secs}"));
     }
-    // Go statusLine + ctxBar (tui.go:1193). M is the main context from UiEvent::Status; P/T/C stay 0 because
-    // no UiEvent carries per-role context yet.
+    // Go statusLine + ctxBar (tui.go:1193). M is the main context from UiEvent::Status; P/T/C come from
+    // UiEvent::RoleContext (prompter, tui, coder).
     let mode = Some(b.mode.as_str()).filter(|m| !m.is_empty() && *m != "default");
     let rate = b
         .rate
         .as_ref()
         .map(|r| format!(" · {r}"))
         .unwrap_or_default();
+    let role = |k: &str| fmt_k(b.role_tokens.get(k).copied().unwrap_or(0));
     let mut bottom = format!(
-        " M {}/{} P 0/{r} T 0/{r} C 0/{r}{rate}{}",
+        " M {}/{} P {}/{r} T {}/{r} C {}/{r}{rate}{}",
         fmt_k(b.tokens),
         fmt_k(b.limit),
+        role("prompter"),
+        role("tui"),
+        role("coder"),
         status_suffix(b.rot, mode, b.fg, b.bg),
         r = ROLE_LIMIT
     );
@@ -232,14 +239,12 @@ pub fn agent_state(failed: bool, interrupted: bool, done: bool, started: bool) -
 // Which thinking row to draw under the transcript (tui.go:383-391). A running foreground agent alone is not
 // enough: the row shows only when Opus or a resident session is busy, or no text has streamed yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // blocked: thinking row needs per-role state from core
 pub enum ThinkingRow {
     None,
     Status,
     StatusWithEsc,
 }
 
-#[allow(dead_code)] // blocked: thinking row needs per-role state from core
 pub fn thinking_row(
     fg_running: bool,
     opus_running: bool,
@@ -293,7 +298,6 @@ pub fn agent_status_text(
 
 // doneLine (drain.go:39-55): the one-line completion notice of a finished agent. Whitespace is collapsed and
 // the result is capped at 120 characters (trunc counts runes in Go).
-#[allow(dead_code)] // blocked: done row needs model and result text from core
 pub fn done_line(failed: bool, model: &str, name: &str, what: &str) -> String {
     let kind = if failed {
         "[agent 실패]"
@@ -312,7 +316,6 @@ pub fn done_line(failed: bool, model: &str, name: &str, what: &str) -> String {
 }
 
 // Notice for a claude process left over from a dead harness (repl.go:1435).
-#[allow(dead_code)] // blocked: engine orphan detection is not in core events
 pub fn orphan_notice(pid: u32, model: &str, cwd: &str) -> String {
     format!(
         "[orphan] claude pid {pid} ({model}, {cwd}) still running after its harness died; left running"
@@ -325,7 +328,6 @@ pub fn budget_notice(spent: f64, cap: f64) -> String {
 }
 
 // Context rotation line (repl.go:1019). The old session id is cut to 8 characters, or shown as "None".
-#[allow(dead_code)] // blocked: UiEvent::Rotated has no old session id
 pub fn rotated_notice(rotations: u32, reason: &str, old_session: &str) -> String {
     let old = if old_session.is_empty() {
         "None".to_string()
@@ -336,7 +338,6 @@ pub fn rotated_notice(rotations: u32, reason: &str, old_session: &str) -> String
 }
 
 // Shown after /clear starts a new session (repl.go:1412).
-#[allow(dead_code)] // blocked: /clear is handled by the engine; no new-session event yet
 pub const NEW_SESSION_NOTICE: &str = "── new session ──";
 
 // Quiet-wait notice (repl.go:788). The duration is written the way Go's time.Duration prints it.
@@ -428,6 +429,18 @@ mod tests {
             bottom,
             " M 12k/200k P 0/80k T 0/80k C 0/80k · rot 0 · mode auto · agents 1 running · queued 2"
         );
+    }
+
+    #[test]
+    fn role_tokens_fill_the_prompter_tui_coder_slots() {
+        let role_tokens =
+            BTreeMap::from([("prompter".to_string(), 1_500), ("tui".to_string(), 12_000)]);
+        let b = BarInput {
+            role_tokens,
+            ..BarInput::default()
+        };
+        let [_, bottom] = rows(&b, ' ', 200);
+        assert!(bottom.contains(" P 1k/80k T 12k/80k C 0/80k"), "{bottom}");
     }
 
     #[test]
