@@ -308,6 +308,32 @@ mod tests {
     }
 
     #[test]
+    fn budget_args_append_after_rule_flag() {
+        // Go TestBudgetExtraAppends: rule args come first, then the budget cap is appended.
+        let shape = Shape {
+            rule: "be brief".to_string(),
+            ..Shape::default()
+        };
+        let mut a = build_args("opus", None, &shape);
+        a.extend(budget_args(0.5));
+        let n = a.len();
+        assert_eq!(
+            a[n - 4..],
+            [
+                "--append-system-prompt",
+                "be brief",
+                "--max-budget-usd",
+                "0.5"
+            ]
+        );
+
+        let mut off = build_args("opus", None, &shape);
+        off.extend(budget_args(0.0));
+        assert!(!off.iter().any(|s| s == "--max-budget-usd"));
+        assert_eq!(off[off.len() - 2..], ["--append-system-prompt", "be brief"]);
+    }
+
+    #[test]
     fn args_match_go_session_defaults() {
         let a = build_args("opus", None, &Shape::default());
         let want = [

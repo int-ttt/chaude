@@ -64,7 +64,7 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/budget_test.go::TestBudgetResumeBaseline | core/src/budget.rs::resumed_process_books_whole_first_total | covered | name-level |
 | harness/budget_test.go::TestBudgetGateBeforeSend | core/tests/engine.rs::budget_refuses_prompt_whose_next_call_estimate_exceeds_cap | covered | |
 | harness/budget_test.go::TestBudgetInterruptMidTurn | core/tests/engine.rs::budget_interrupts_turn_once_when_in_flight_estimate_reaches_cap | covered | |
-| harness/budget_test.go::TestBudgetExtraAppends | - | missing | Rust budget_args test covers only set/unset, not extra args |
+| harness/budget_test.go::TestBudgetExtraAppends | proc.rs::budget_args_append_after_rule_flag | covered | rule args then --max-budget-usd appended; cap 0 adds no flag |
 | harness/budget_test.go::TestBudgetDisabledByDefault | core/src/proc.rs::budget_args_only_when_cap_is_set | covered | name-level: no budget args when off |
 | harness/budget_test.go::TestChildPIDRecordedOnPark | - | missing | needs Repl.parkOld and the client registry (not ported) |
 | harness/budget_test.go::TestReconcileParkedAliveChild | - | missing | needs Repl.parkOld and the client registry (not ported) |
