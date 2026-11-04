@@ -91,10 +91,10 @@ fn serve_conn(conn: TcpStream, run: &CoderFn) {
     let mut writer = conn;
     for line in BufReader::new(reader_side).lines() {
         let Ok(line) = line else { break };
-        if let Some(resp) = reply(&line, run) {
-            if writeln!(writer, "{resp}").is_err() {
-                break;
-            }
+        if let Some(resp) = reply(&line, run)
+            && writeln!(writer, "{resp}").is_err()
+        {
+            break;
         }
     }
 }
