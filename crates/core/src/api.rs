@@ -909,8 +909,11 @@ impl State {
             text: text.clone(),
         });
         // SendMessage to a background agent resumes it: it runs again under its original tool id.
-        let resume = after_marker(&text, "Resuming agent ")
-            .or_else(|| after_marker(&text, "resumedAgentId\":\""));
+        // The SendMessage result is JSON: {"success":true,"message":"Resuming agent <short>","resumedAgentId":"<full>"}.
+        let resume = serde_json::from_str::<Value>(&text)
+            .ok()
+            .filter(|v| v["success"] != false)
+            .and_then(|v| v["resumedAgentId"].as_str().map(str::to_string));
         let known = resume.and_then(|aid| self.agent_ids.get(&aid).cloned());
         if let Some((tool, description)) = known.and_then(|t| {
             let name = self.agent_info.get(&t)?.name.clone();

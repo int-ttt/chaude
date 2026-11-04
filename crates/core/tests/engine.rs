@@ -1160,6 +1160,12 @@ fn resumed_background_agent_is_active_again_until_task_notification() {
     assert!(resumed.is_some(), "{evs:?}");
     assert!(ended.is_some(), "{evs:?}");
     assert!(launched < resumed && resumed < ended, "{evs:?}");
+    // The failed second SendMessage must not resume the agent again.
+    let resumes = evs
+        .iter()
+        .filter(|e| matches!(e, UiEvent::AgentResumed { .. }))
+        .count();
+    assert_eq!(resumes, 1, "{evs:?}");
     h.shutdown();
 }
 
