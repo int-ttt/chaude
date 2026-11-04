@@ -21,7 +21,7 @@ FAKE_DIR="$OUT/fakebin"
 WORK="$OUT/work"
 COLS=100
 ROWS=30
-ALL_SCENARIOS=(startup-idle type-text multiline submit-stream tool-use slash-menu scroll-up esc-interrupt resize-80x24 exit usage)
+ALL_SCENARIOS=(startup-idle type-text multiline submit-stream tool-use slash-menu scroll-up esc-interrupt resize-80x24 exit usage settings resume view)
 
 mkdir -p "$OUT" "$FAKE_DIR" "$WORK" "$OUT/build"
 : >"$STATUS"
@@ -105,6 +105,15 @@ drive() { # drive <scenario> <session>
     usage)
       # /usage opens the full-screen window (one-shot claude -p; the fake returns '{}', so both sides show the same failure text).
       pause 2; text "$s" "/usage"; key "$s" Enter; pause 3 ;;
+    settings)
+      # /settings opens the settings picker below the input box (no claude call).
+      pause 2; text "$s" "/settings"; key "$s" Enter; pause 2 ;;
+    resume)
+      # /resume with no argument lists the record topics (empty work dir: same message on both sides).
+      pause 2; text "$s" "/resume"; key "$s" Enter; pause 2 ;;
+    view)
+      # /view with no owned Claude Code session shows the same note on both sides.
+      pause 2; text "$s" "/view"; key "$s" Enter; pause 2 ;;
   esac
 }
 
