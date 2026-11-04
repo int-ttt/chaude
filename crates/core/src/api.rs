@@ -544,11 +544,16 @@ struct Handoff {
     attempts: u32,
 }
 
-// What the handoff snapshot needs about a delegated agent (Go agentRec: Task, ResultPath, Background).
+// What the handoff snapshot needs about a delegated agent (Go agentRec: Name, ResultPath, Background, Started,
+// Done, ResultDone). The entry stays after the agent ends, marked done, so the snapshot can list it.
 struct AgentInfo {
     name: String,
     result_path: String,
     background: bool,
+    started: Instant,
+    done: bool,
+    // The result file was written. Not set yet: Rust has no agentresult port (Go agentresult.go).
+    result_done: bool,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -1712,6 +1717,9 @@ impl State {
                     name: description.clone(),
                     result_path: format!("notes/runs/{}-agent-{}.md", yymmdd_today(), id),
                     background: false,
+                    started: Instant::now(),
+                    done: false,
+                    result_done: false,
                 },
             );
             self.stage(&agent_slot(&description), StagePhase::Working);
@@ -1740,7 +1748,7 @@ impl State {
             .ok()
             .filter(|v| v["success"] != false)
             .and_then(|v| v["resumedAgentId"].as_str().map(str::to_string));
-        // agent_info is dropped when the agent ends, so a resume after that uses the start label, then the agent id.
+        // agent_info stays after the agent ends, so a resume uses its start label, then the agent id.
         let known = resume.and_then(|aid| {
             let tool = self.agent_ids.get(&aid).cloned()?;
             Some((tool, aid))
@@ -1756,6 +1764,7 @@ impl State {
             self.agents.insert(tool.clone(), Instant::now());
             if let Some(info) = self.agent_info.get_mut(&tool) {
                 info.background = true;
+                info.done = false;
             }
             self.emit(UiEvent::AgentResumed {
                 id: tool,
@@ -1790,11 +1799,14 @@ impl State {
     }
 
     fn finish_agent(&mut self, id: String) {
-        let info = self.agent_info.remove(&id);
         self.opus_set(&id, false);
         if let Some(t0) = self.agents.remove(&id) {
-            if let Some(i) = info {
-                self.stage(&agent_slot(&i.name), StagePhase::Done);
+            let name = self.agent_info.get_mut(&id).map(|i| {
+                i.done = true;
+                i.name.clone()
+            });
+            if let Some(name) = name {
+                self.stage(&agent_slot(&name), StagePhase::Done);
             }
             self.emit(UiEvent::AgentEnd {
                 id,
@@ -2217,22 +2229,23 @@ impl State {
             "## Handoff note (written by previous session)".to_string(),
             note.to_string(),
         ];
-        // Go bgHandoffLines: background agents still running, oldest first, with their result file.
-        let mut bg: Vec<(Instant, String)> = self
-            .agents
+        // Go bgHandoffLines: background agents still running or with a written result, oldest first.
+        let bg: Vec<rotate_defer::BgAgent> = self
+            .agent_info
             .iter()
-            .filter_map(|(id, t0)| {
-                let info = self.agent_info.get(id).filter(|i| i.background)?;
-                let line = format!(
-                    "- {} ({}): running, result file: {}",
-                    info.name, id, info.result_path
-                );
-                Some((*t0, line))
+            .map(|(id, i)| rotate_defer::BgAgent {
+                id: id.as_str(),
+                name: &i.name,
+                task: "",
+                started: i.started,
+                background: i.background,
+                done: i.done,
+                result_done: i.result_done,
+                result_path: &i.result_path,
             })
             .collect();
-        bg.sort();
-        if !bg.is_empty() {
-            let lines: Vec<String> = bg.into_iter().map(|(_, l)| l).collect();
+        let lines = rotate_defer::bg_handoff_lines(&bg);
+        if !lines.is_empty() {
             parts.push("## Background agents (results in notes/runs/)".to_string());
             parts.push(lines.join("\n"));
         }
