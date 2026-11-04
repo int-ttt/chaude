@@ -155,13 +155,15 @@ fn config(f: &Fake) -> Config {
     }
 }
 
+// Longest wait for one engine event or file write. A passing run never reaches it; it only keeps a
+// loaded machine (parallel cargo builds) from failing a test that is still making progress.
+const WAIT: Duration = Duration::from_secs(60);
+
 // Collects events up to and including Busy(false).
 fn until_idle(rx: &Receiver<UiEvent>) -> Vec<UiEvent> {
     let mut out = Vec::new();
     loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         let idle = ev == UiEvent::Busy(false);
         out.push(ev);
         if idle {
@@ -175,7 +177,7 @@ fn wait_for(path: &Path, needle: &str) -> String {
     let t0 = Instant::now();
     loop {
         let s = fs::read_to_string(path).unwrap_or_default();
-        if s.contains(needle) || t0.elapsed() > Duration::from_secs(10) {
+        if s.contains(needle) || t0.elapsed() > WAIT {
             return s;
         }
         thread::sleep(Duration::from_millis(20));
@@ -495,17 +497,13 @@ fn spawn_failure_reports_error_and_rejects_work() {
         ..Config::default()
     };
     let (h, rx) = Engine::start(cfg);
-    let first = rx
-        .recv_timeout(Duration::from_secs(10))
-        .expect("spawn error event");
+    let first = rx.recv_timeout(WAIT).expect("spawn error event");
     assert!(
         matches!(&first, UiEvent::Error(m) if m.starts_with("claude spawn failed")),
         "{first:?}"
     );
     h.submit("hi");
-    let second = rx
-        .recv_timeout(Duration::from_secs(10))
-        .expect("rejection event");
+    let second = rx.recv_timeout(WAIT).expect("rejection event");
     assert_eq!(second, UiEvent::Error("claude is not running".into()));
     h.shutdown();
 }
@@ -660,9 +658,7 @@ fn interrupted_turn_with_open_agent_is_ended_after_grace() {
     h.submit("scan");
     let mut evs = Vec::new();
     loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         let started = matches!(ev, UiEvent::AgentStart { .. });
         evs.push(ev);
         if started {
@@ -754,9 +750,7 @@ fn stray_result_of_abandoned_turn_does_not_end_next_turn() {
     let (h, rx) = Engine::start(cfg);
     h.submit("scan");
     loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         if matches!(ev, UiEvent::AgentStart { .. }) {
             break;
         }
@@ -909,9 +903,7 @@ fn mode_without_name_reports_current_mode() {
     let f = fake("mode-report", &["text_turn.jsonl"]);
     let (h, rx) = Engine::start(config(&f));
     h.set_mode("");
-    let ev = rx
-        .recv_timeout(Duration::from_secs(10))
-        .expect("mode report");
+    let ev = rx.recv_timeout(WAIT).expect("mode report");
     assert_eq!(
         ev,
         UiEvent::ModeChanged {
@@ -934,9 +926,7 @@ fn pending_permission_is_dropped_when_turn_is_abandoned() {
     h.submit("rm it");
     let mut evs = Vec::new();
     loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("permission prompt");
+        let ev = rx.recv_timeout(WAIT).expect("permission prompt");
         let prompt = matches!(ev, UiEvent::PermissionRequest { .. });
         evs.push(ev);
         if prompt {
@@ -950,9 +940,7 @@ fn pending_permission_is_dropped_when_turn_is_abandoned() {
         "{rest:?}"
     );
     h.answer_permission("perm-1", true);
-    let ev = rx
-        .recv_timeout(Duration::from_secs(10))
-        .expect("reply to stale answer");
+    let ev = rx.recv_timeout(WAIT).expect("reply to stale answer");
     assert_eq!(
         ev,
         UiEvent::Error("no pending permission request perm-1".into())
@@ -1053,9 +1041,7 @@ fn budget_status_reports_spent_and_cap_after_each_turn() {
 // because Config::claude_bin is shared by the session child and the one-shot run.
 fn usage_reply(rx: &Receiver<UiEvent>) -> UiEvent {
     loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         match &ev {
             UiEvent::Usage { .. } => return ev,
             UiEvent::Error(m) if m.starts_with("usage:") => return ev,
@@ -1141,9 +1127,7 @@ fn idle_rotation_hands_off_after_quiet_child() {
     // No further prompt: the child sits idle past the 1 s idle rotation and hands off on its own.
     let t0 = Instant::now();
     let reason = loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         if let UiEvent::Rotated { reason } = ev {
             break reason;
         }
@@ -1572,9 +1556,7 @@ fn abandoned_turn_ends_foreground_agent_but_not_background_agent() {
     let (h, rx) = Engine::start(cfg);
     h.submit("scan");
     loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         if matches!(ev, UiEvent::AgentStart { ref id, .. } if id == "toolu_fg") {
             break;
         }
@@ -1598,9 +1580,7 @@ fn abandoned_turn_ends_foreground_agent_but_not_background_agent() {
 fn until_coder_reply(rx: &Receiver<UiEvent>) -> Vec<UiEvent> {
     let mut out = Vec::new();
     loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         let done = matches!(ev, UiEvent::CoderReply { .. })
             || matches!(&ev, UiEvent::Stage { slot, phase: StagePhase::Failed(_) } if slot.starts_with("coder"));
         out.push(ev);
@@ -1658,9 +1638,7 @@ fn idle_extra_coder_expires_and_base_coder_stays() {
     h.coder("second");
     let mut replies = 0;
     while replies < 2 {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         if matches!(ev, UiEvent::CoderReply { .. }) {
             replies += 1;
         }
@@ -1954,9 +1932,7 @@ fn resume_session_relaunches_main_with_resume_flag() {
     h.resume_session("old9");
     let mut got = Vec::new();
     loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         let done = matches!(ev, UiEvent::SessionResumed { .. });
         got.push(ev);
         if done {
@@ -1991,9 +1967,7 @@ fn resume_session_rejects_empty_id() {
     cfg.cwd = Some(f.dir.clone());
     let (h, rx) = Engine::start(cfg);
     h.resume_session("");
-    let ev = rx
-        .recv_timeout(Duration::from_secs(10))
-        .expect("engine went silent");
+    let ev = rx.recv_timeout(WAIT).expect("engine went silent");
     assert!(matches!(ev, UiEvent::Error(_)), "{ev:?}");
     h.shutdown();
 }
@@ -2043,9 +2017,7 @@ fn resume_session_is_refused_while_busy() {
     let (h, rx) = Engine::start(cfg);
     h.submit("go");
     loop {
-        let ev = rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("engine went silent");
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
         if ev == UiEvent::Busy(true) {
             break;
         }
