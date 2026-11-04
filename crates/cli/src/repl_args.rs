@@ -7,7 +7,7 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use chaude_core::api::{Config, resolve_max_workers};
+use chaude_core::api::{Config, resolve_max_workers, worker_floor};
 use chaude_core::{osenv, record};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -194,6 +194,10 @@ impl Parsed {
             None => None,
         };
         cfg.max_workers = resolve_max_workers(flag, env_workers, cfg.extra_coders)?;
+        // Go repl.go: the resident floor applies only when neither --max-workers nor CHAUDE_MAX_WORKERS is set.
+        if flag.is_none() && env_workers.trim().is_empty() {
+            cfg.max_workers = worker_floor(cfg.max_workers, cfg.extra_coders);
+        }
         Ok(())
     }
 
