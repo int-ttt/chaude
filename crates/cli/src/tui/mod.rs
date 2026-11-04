@@ -122,6 +122,8 @@ pub struct App {
     prompts: Vec<(usize, String)>,
     // Time of the last Esc on an empty input (Go m.lastEsc); a second Esc within 600 ms opens the picker.
     last_esc: Option<Instant>,
+    // Transcript indices of note rows that wrap at width + 1 (Go shows /view errors at the full width).
+    wide: HashSet<usize>,
     // Id of the permission request waiting for y/n (UiEvent::PermissionRequest). While set, keys answer it.
     perm: Option<String>,
     // Drag selection in body coordinates (wrapped body row as `line`, cell column as `col`); the Go textSel model.
@@ -181,6 +183,7 @@ impl App {
             rw: rewind::Rewind::default(),
             prompts: Vec::new(),
             last_esc: None,
+            wide: HashSet::new(),
             perm: None,
             sel: render::TextSel::default(),
             dragging: false,
@@ -442,6 +445,7 @@ impl App {
             let refs: Vec<(&str, &str)> = self.prompts.iter().map(|(_, t)| ("user", t.as_str())).collect();
             if let Some(cut) = self.rw.key(key, &refs) {
                 self.transcript.truncate(self.prompts[cut.cut].0);
+                self.wide.retain(|&i| i < self.transcript.len());
                 self.prompts.truncate(cut.cut);
                 self.editor.clear();
                 self.editor.insert_str(&cut.text);
@@ -744,7 +748,11 @@ impl App {
             .and_then(|list| sessview::SessView::open(list, arg));
         match result {
             Ok(sv) => self.sess = Some(sv),
-            Err(msg) => self.note(&msg),
+            // Go prints the note grey and resets the colour on its own row after the text.
+            Err(msg) => {
+                self.note_wide(&format!("{GREY_ON}{msg}"));
+                self.transcript.push(FG_OFF.to_string());
+            }
         }
     }
 
@@ -864,6 +872,13 @@ impl App {
         self.transcript.extend(text.split('\n').map(str::to_string));
     }
 
+    // A note whose rows wrap at the full width instead of the chat width.
+    fn note_wide(&mut self, text: &str) {
+        let at = self.transcript.len();
+        self.note(text);
+        self.wide.extend(at..self.transcript.len());
+    }
+
     // Go mainStatusText + the spinner (tui.go:385-390): `✶ 생각중-model-메인(prompt) · Mm SSs`, orange frame, grey text.
     fn busy_row(&self) -> String {
         let mut text = format!("생각중-{}-메인", self.welcome.model);
@@ -896,8 +911,9 @@ impl App {
         }
         // Text width is one less than the full width, so the welcome box gets the full width back.
         let mut rows = self.welcome_rows(width + 1);
-        for l in lines {
-            rows.extend(render::wrap_cells(l, width).split('\n').map(str::to_string));
+        for (i, l) in lines.into_iter().enumerate() {
+            let w = if self.wide.contains(&i) { width + 1 } else { width };
+            rows.extend(render::wrap_cells(l, w).split('\n').map(str::to_string));
         }
         rows
     }
@@ -1677,6 +1693,30 @@ mod tests {
             role: Role::Main,
             text: s.into(),
         }
+    }
+
+    // Double Esc on an empty editor opens the rewind picker; Enter cuts the transcript to the chosen prompt
+    // and puts that prompt back into the editor (Go tui.go rewind branch).
+    #[test]
+    fn double_esc_rewinds_to_selected_prompt() {
+        let mut app = App::new(100, 30);
+        for (i, text) in ["first", "second"].iter().enumerate() {
+            app.prompts.push((app.transcript.len(), text.to_string()));
+            app.transcript.push(format!("> {text}"));
+            app.transcript.push(format!("answer {i}"));
+        }
+        assert!(matches!(app.on_key(key(KeyCode::Esc, KeyModifiers::NONE)), Action::Continue));
+        assert!(matches!(app.on_key(key(KeyCode::Esc, KeyModifiers::NONE)), Action::Continue));
+        assert!(app.rw.is_open());
+        // The picker starts on the newest prompt; step back to the first one, then confirm.
+        app.on_key(key(KeyCode::Up, KeyModifiers::NONE));
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!app.rw.is_open());
+        assert_eq!(app.prompts.len(), 0);
+        // Only the rewound note remains; the cut turns are gone.
+        assert!(app.transcript.iter().all(|l| !l.starts_with("> ") && !l.starts_with("answer")));
+        assert!(app.transcript.iter().any(|l| l.contains("rewound")));
+        assert_eq!(app.editor.text(), "first");
     }
 
     // An app at 30x5 (two viewport rows) with lines "line 0" .. "line {n-1}".

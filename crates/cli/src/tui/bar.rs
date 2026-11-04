@@ -2,6 +2,7 @@
 // without a terminal. Every row is clipped to the given display width so it never wraps.
 // The Go parity helpers below (status suffix, spinner, agent rows, notices) take their data as arguments;
 // the callers that feed them from UiEvent are not wired yet, hence the module-level allow.
+// Unused until mod.rs wires them: agent_state/agent_status_text/has_model_prefix (B04-B06, needs per-agent model data), thinking_row (B07, needs per-role core state), done_line (B10), rotated_notice (B15, needs old session id in UiEvent::Rotated), quiet_notice (B17, idle timer), scroll_range_text (S17, agent list window). Each is a TODO to wire.
 #![allow(dead_code)]
 
 use std::time::Duration;

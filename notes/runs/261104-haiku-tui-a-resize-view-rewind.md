@@ -14,3 +14,9 @@ not done:
 risks:
 - view 95+ needs note-specific wrap width (transcript flag) in TUI-B render.rs wrap path.
 - rewind has no unit test.
+update (2nd turn):
+- view: 93% (28/30). /view error note now wraps at width+1 (wide transcript indices) and starts grey. Remaining rows 11-12: Go reset-only row 12 (ESC[39m) vs Rust reset folded into row 11. Tried FG_OFF row and FG_OFF+space row; both gave the same 93%. Not solved.
+- rewind unit test: mod.rs double_esc_rewinds_to_selected_prompt (PASS).
+- render/bar R03..B17 hooks: NOT wired. Still "yes" in notes/runs/tui-render-bar-edit.md: R03 R04 R08 R09 R10 R11 R15 R19 R20 I30 I32 I33 B04 B05 B06 B07 B10 B15 B17. allow(dead_code) kept in bar.rs, render.rs; commands.rs:164 kept.
+- bar.rs/render.rs WIP comments kept and committed (document unwired items).
+- acceptance: cargo build -p chaude-cli PASS; cargo test -p chaude-cli 159 passed; cargo clippy -p chaude-cli -- -D warnings PASS.

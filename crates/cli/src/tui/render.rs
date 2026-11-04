@@ -1,6 +1,7 @@
 //! Pure rendering helpers ported from the Go TUI (tui.go, links.go, usagebar.go, input.go, repl.go).
 //! Nothing here touches the terminal. Each item cites the Go source it mirrors. The event loop does not
 //! call these yet, so dead-code warnings are allowed for this module until they are wired in.
+// Unused until mod.rs/overlays call: highlight_view, input_cursor_cells, input_view_row, link_spans (I33/R20/R10, TODO(core-cursor) for I30) and the wrap_linked path (R10/R11).
 #![allow(dead_code)]
 
 use std::sync::OnceLock;
