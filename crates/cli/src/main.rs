@@ -50,7 +50,7 @@ fn main() {
             eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");
             2
         }
-        None => match apply_orch(&args) {
+        None | Some("--orch") => match apply_orch(&args) {
             Err(e) => {
                 eprintln!("chaude: {e}\n{USAGE}");
                 2
