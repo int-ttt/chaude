@@ -7,6 +7,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -37,6 +38,7 @@ use crate::rotate::{
     validate_handoff, with_reco,
 };
 use crate::rotate_defer::{self, Hold};
+use crate::usage_poll::{USAGE_POLL_EVERY_SECS, log_usage};
 
 // Text tool results of background agents say this; the agent keeps running after the tool result.
 const ASYNC_AGENT_MARK: &str = "Async agent launched";
@@ -566,7 +568,10 @@ struct State {
     // Set when a main usage event's in-flight estimate reached the cap; the turn is interrupted once.
     budget_hit: bool,
     // Per-turn metrics JSONL (Go metrics); disabled when cfg.metrics_dir is None.
-    metrics: Metrics,
+    metrics: Arc<Metrics>,
+    // Go usagePollAt/usagePolling: last background /usage poll start, and whether one is in flight.
+    usage_poll_at: Option<Instant>,
+    usage_polling: Arc<AtomicBool>,
     // Session id from the child's system event (Go sess.SessionID); "" until the child reports one.
     sid: String,
     // Every main and resident session id this run started (Go r.owned), kept for the handoff.
@@ -703,10 +708,10 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     };
     let model = cfg.model.clone();
     let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));
-    let metrics = Metrics::new(
+    let metrics = Arc::new(Metrics::new(
         cfg.metrics_dir.clone(),
         json!({"compact_window": cfg.compact_window, "context_window": cfg.context_window, "cache_ttl": cfg.cache_ttl}),
-    );
+    ));
     let mut st = State {
         cfg,
         proc: None,
@@ -768,6 +773,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         tui_deadline: None,
         coders: Vec::new(),
         coder_epoch: 0,
+        usage_poll_at: None,
+        usage_polling: Arc::new(AtomicBool::new(false)),
     };
     for (role, pid, model) in orphans {
         st.emit(UiEvent::OrphanNotice { role, pid, model });
@@ -842,6 +849,12 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     }
 }
 
+// Go usagePollEvery gate: a poll starts when none is in flight and the last start is a full interval ago.
+fn usage_poll_due(last: Option<Instant>, now: Instant, polling: bool) -> bool {
+    let every = Duration::from_secs(USAGE_POLL_EVERY_SECS);
+    !polling && last.is_none_or(|t| now.duration_since(t) >= every)
+}
+
 impl State {
     fn emit(&self, ev: UiEvent) {
         let _ = self.ui.send(ev);
@@ -857,6 +870,34 @@ impl State {
                 Err(e) => UiEvent::Error(e),
             };
             let _ = ui.send(ev);
+        });
+    }
+
+    // Go pollUsage: after a turn ends, at most one background /usage poll per interval. Off when
+    // HARNESS_USAGE_POLL=0 or metrics are off (Go returns before the throttle, so no claude runs).
+    fn poll_usage(&mut self) {
+        if self.cfg.metrics_dir.is_none()
+            || std::env::var("HARNESS_USAGE_POLL").as_deref() == Ok("0")
+        {
+            return;
+        }
+        let now = Instant::now();
+        if !usage_poll_due(
+            self.usage_poll_at,
+            now,
+            self.usage_polling.load(Ordering::SeqCst),
+        ) {
+            return;
+        }
+        self.usage_poll_at = Some(now);
+        self.usage_polling.store(true, Ordering::SeqCst);
+        let bin = resolve_bin(&self.cfg.claude_bin);
+        let metrics = Arc::clone(&self.metrics);
+        let polling = Arc::clone(&self.usage_polling);
+        thread::spawn(move || {
+            let text = proc::one_shot_usage(&bin);
+            let _ = log_usage(&metrics, text.as_deref().map_err(|e| e.as_str()));
+            polling.store(false, Ordering::SeqCst);
         });
     }
 
@@ -1713,6 +1754,7 @@ impl State {
                         cap_usd: b.cap(),
                     });
                 }
+                self.poll_usage();
                 self.end_turn(duration_ms);
             }
             Event::ControlRequest(c) => {
@@ -2780,6 +2822,20 @@ mod tests {
     fn effective_ttl_prefers_observed() {
         assert_eq!(effective_ttl("", "5m"), "5m");
         assert_eq!(effective_ttl("1h", "5m"), "1h");
+    }
+
+    #[test]
+    fn usage_poll_throttles_to_one_per_interval() {
+        let t0 = Instant::now();
+        let every = Duration::from_secs(USAGE_POLL_EVERY_SECS);
+        assert!(usage_poll_due(None, t0, false));
+        assert!(!usage_poll_due(
+            Some(t0),
+            t0 + every - Duration::from_secs(1),
+            false
+        ));
+        assert!(usage_poll_due(Some(t0), t0 + every, false));
+        assert!(!usage_poll_due(None, t0, true));
     }
 
     #[test]
