@@ -219,30 +219,30 @@ Counts (filled at end): see the "Counts" section.
 - [x] E23 Agent done notice and background row finish (TestUserEventNotificationFinishesBackground panel_test.go:384) · test: TestUserEventNotificationFinishesBackground (panel_test.go:384) · core: task-notification · audited (same for string content): bg AgentEnd removes row + done notice (mod.rs agent_done) · test: background_agent_end_removes_row_and_notes_done · fixed: api.rs user event reads Block::Text too (Go onUserEvent) · test: text_block_notice_finishes_background_agent
 - [ ] E24 Restored agents from prior run shown and dismissed (sortedRestored agentview.go:326; dismissRestored agentview.go:346) · test: none · core: agents file restore · differs: core agent_store.rs:780-792 has sorted_restored/dismiss_restored, but no engine startup restore and no UiEvent carries restored agents; TUI agent_recs (mod.rs:1105) has no restored view. Core-owned, not changed.
 - [ ] E25 Resident coders: "stage" notices for residents (resident.go:255-277) · test: none · core: resident children
-- [ ] E26 Live rotation carries context and keeps pending snapshot (TestRotateKeepsPendingSnapshot resumeshift_test.go:65; TestLiveRotationCarriesContext acceptance_test.go:21) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff/snapshot
-- [ ] E27 Drain of old child before rotate (drain.go; TestDrain in drain_test.go, not opened) · test: drain_test.go (not read) · core: drain
-- [ ] E28 Waiting for an open tool call; no cap on turn wait (TestTurnWaitsForOpenAgentToolResult turn_wait_test.go:38) · test: TestTurnWaitsForOpenAgentToolResult (turn_wait_test.go:38) · core: tool open set
+- [x] E26 Live rotation carries context and keeps pending snapshot (TestRotateKeepsPendingSnapshot resumeshift_test.go:65; TestLiveRotationCarriesContext acceptance_test.go:21) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff/snapshot · verdict: same (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] E27 Drain of old child before rotate (drain.go; TestDrain in drain_test.go, not opened) · test: drain_test.go (not read) · core: drain · verdict: diff (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] E28 Waiting for an open tool call; no cap on turn wait (TestTurnWaitsForOpenAgentToolResult turn_wait_test.go:38) · test: TestTurnWaitsForOpenAgentToolResult (turn_wait_test.go:38) · core: tool open set · verdict: same (see notes/runs/261105-haiku-tui-parity-tail.md)
 
 ## Startup and exit
 
-- [ ] X01 Start child process, print error to stderr and exit 1 on failure (runTUI repl.go:1364-1368; loop repl.go:1270-1273) · test: none · core: session start
-- [ ] X02 Interactive detection: stdin is a char device (repl.go:~1393) · test: none · core: none
+- [x] X01 Start child process, print error to stderr and exit 1 on failure (runTUI repl.go:1364-1368; loop repl.go:1270-1273) · test: none · core: session start · verdict: diff (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] X02 Interactive detection: stdin is a char device (repl.go:~1393) · test: none · core: none · verdict: diff (see notes/runs/261105-haiku-tui-parity-tail.md)
 - [x] X03 TUI only when interactive and HARNESS_PLAIN unset; else plain loop (repl.go:1386-1388) · fixed: mod.rs:1984 HARNESS_PLAIN check in run · test: multiproc_s_test.go (not read) · core: none
 - [x] X04 Project settings ensured at start (settings.EnsureProjectSettings repl.go:~1374) · fixed: main.rs:138 ensure_project_settings before tui::run · test: none · core: settings
-- [ ] X05 Start: agent store, client wiring, worker pool, reconcileStart, metrics (repl.go:~1376-1395) · test: none · core: registry, metrics
-- [ ] X06 --from-claude import at startup (importFromClaude) shows transcript · test: TestImportShowsTurnsInTUI (resumeshift_test.go:42) · core: import
-- [ ] X07 Startup shows welcome banner (welcome tui.go:295) · test: none · core: none
-- [ ] X08 Program runs with altscreen, mouse cell motion, custom output writer (runTUI tui.go:1378) · test: none · core: none
-- [ ] X09 On exit: save exit handoff, mark interrupted, close drains, close session, close children (deferred runTUI tui.go:1366-1377; loop repl.go:1271-1280) · test: TestRecordHistoryPersistsAndNewModelLoads (history_file_test.go:54) (partial) · core: exit handoff, registry
-- [ ] X10 Exit save input history to historyFileFor (history.go:57) · test: TestHistoryFileRoundTrip (history_file_test.go:12) · core: none
-- [ ] X11 /quit and /exit run quit (tui.go:1188) · test: none · core: none
-- [ ] X12 Submit goroutine: per-line dispatch (rotate, idle-rotate, rotate-deferred, clear, passthrough, import, model switch, default handle + recordSave) then doneMsg (runTUI repl.go:1366-1393) · test: none · core: session commands
-- [ ] X13 Program error printed as "harness: …", exit 1 (runTUI tui.go:1408-1412) · test: none · core: none
+- [x] X05 Start: agent store, client wiring, worker pool, reconcileStart, metrics (repl.go:~1376-1395) · test: none · core: registry, metrics · verdict: diff (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] X06 --from-claude import at startup (importFromClaude) shows transcript · test: TestImportShowsTurnsInTUI (resumeshift_test.go:42) · core: import · verdict: same (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] X07 Startup shows welcome banner (welcome tui.go:295) · test: none · core: none · verdict: same (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] X08 Program runs with altscreen, mouse cell motion, custom output writer (runTUI tui.go:1378) · test: none · core: none · verdict: diff (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] X09 On exit: save exit handoff, mark interrupted, close drains, close session, close children (deferred runTUI tui.go:1366-1377; loop repl.go:1271-1280) · test: TestRecordHistoryPersistsAndNewModelLoads (history_file_test.go:54) (partial) · core: exit handoff, registry · verdict: diff (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] X10 Exit save input history to historyFileFor (history.go:57) · test: TestHistoryFileRoundTrip (history_file_test.go:12) · core: none · verdict: same (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] X11 /quit and /exit run quit (tui.go:1188) · test: none · core: none · verdict: same (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] X12 Submit goroutine: per-line dispatch (rotate, idle-rotate, rotate-deferred, clear, passthrough, import, model switch, default handle + recordSave) then doneMsg (runTUI repl.go:1366-1393) · test: none · core: session commands · verdict: diff (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] X13 Program error printed as "harness: …", exit 1 (runTUI tui.go:1408-1412) · test: none · core: none · verdict: diff (see notes/runs/261105-haiku-tui-parity-tail.md)
 
 ## Inline vs altscreen
 
-- [ ] A01 TUI is altscreen only (tea.WithAltScreen tui.go:1378); no inline mode in the Go TUI · test: none · core: none
-- [ ] A02 Plain path (HARNESS_PLAIN or non-TTY stdin) is line-oriented, not a TUI; output goes to stdout with r.p/dim (loop repl.go:1270+) · test: multiproc_s_test.go (not read) · core: plain loop
+- [x] A01 TUI is altscreen only (tea.WithAltScreen tui.go:1378); no inline mode in the Go TUI · test: none · core: none · verdict: same (see notes/runs/261105-haiku-tui-parity-tail.md)
+- [x] A02 Plain path (HARNESS_PLAIN or non-TTY stdin) is line-oriented, not a TUI; output goes to stdout with r.p/dim (loop repl.go:1270+) · test: multiproc_s_test.go (not read) · core: plain loop · verdict: diff (see notes/runs/261105-haiku-tui-parity-tail.md)
 - [x] A03 Overlays (usage/agent/session) render full-screen, not inline (TestUsageOpenNotInline usageview_test.go:94) · test: TestUsageOpenNotInline (usageview_test.go:94) · core: none · audited: overlays replace body rows only, chrome and input kept (mod.rs:1782-1790), same as tui.go:1349-1354
 - [x] A04 Esc from full-screen overlay returns to normal screen (TestViewEscBacksOutToNormalScreen sessview_test.go:35) · test: TestViewEscBacksOutToNormalScreen (sessview_test.go:35) · core: none · audited: usage.rs:108, sessview.rs:337, agentview mod.rs:658-665 all return to normal view
 
