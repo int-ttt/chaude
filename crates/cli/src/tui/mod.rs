@@ -508,6 +508,11 @@ impl App {
                 self.end_main_block();
                 self.note(&stage_text(&slot, &phase));
             }
+            // Go resident.go notice(): a failed prompter or tui pass, one note line.
+            UiEvent::Notice { text } => {
+                self.end_main_block();
+                self.note(&text);
+            }
             UiEvent::Error(msg) if self.usage.pending() => {
                 let (w, h) = self.usage_geom();
                 self.usage.set_text(&usage::failed(&msg), w, h);

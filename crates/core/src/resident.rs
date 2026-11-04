@@ -118,7 +118,7 @@ impl Prompter {
     pub fn reply(&mut self, reply: &str) -> Option<PrompterOutcome> {
         let original = self.pending.take()?;
         if reply.is_empty() {
-            return Some(failed(original, "prompter failed: empty reply"));
+            return Some(failed(original, &prompter_notice("빈 응답")));
         }
         let (_, summary) = parse_prompter_reply(reply);
         if summary.is_empty() {
@@ -136,7 +136,10 @@ impl Prompter {
     // The prompter failed for reason (child exited, could not spawn or write). None when nothing is pending.
     pub fn fail(&mut self, reason: &str) -> Option<PrompterOutcome> {
         let original = self.pending.take()?;
-        Some(failed(original, reason))
+        Some(failed(
+            original,
+            &prompter_notice(&format!("오류: {reason}")),
+        ))
     }
 
     // The wait exceeded PROMPTER_TIMEOUT. None when nothing is pending.
@@ -144,15 +147,25 @@ impl Prompter {
         let original = self.pending.take()?;
         Some(failed(
             original,
-            &format!("prompter timed out after {}s", PROMPTER_TIMEOUT.as_secs()),
+            &prompter_notice(&format!("{}초 시간초과", PROMPTER_TIMEOUT.as_secs())),
         ))
     }
 }
 
-fn failed(original: String, reason: &str) -> PrompterOutcome {
+// Go notice texts for a failed prompter pass; the original input goes to the main child unchanged.
+pub fn prompter_notice(detail: &str) -> String {
+    format!("prompter 실패({detail}): 원문 그대로 메인에 보냄")
+}
+
+// Go notice texts for a failed tui pass; the main reply is shown as is.
+pub fn tui_notice(detail: &str) -> String {
+    format!("haiku-tui 실패({detail}): 메인 원문 표시")
+}
+
+fn failed(original: String, notice: &str) -> PrompterOutcome {
     PrompterOutcome {
         text: original,
-        stage: Some(StagePhase::Failed(reason.to_string())),
+        stage: Some(StagePhase::Failed(notice.to_string())),
     }
 }
 
@@ -314,7 +327,9 @@ mod tests {
         assert_eq!(out.text, "hi");
         assert_eq!(
             out.stage,
-            Some(StagePhase::Failed("prompter timed out after 60s".into()))
+            Some(StagePhase::Failed(
+                "prompter 실패(60초 시간초과): 원문 그대로 메인에 보냄".into()
+            ))
         );
         assert!(p.timeout().is_none());
     }
@@ -351,11 +366,13 @@ mod tests {
     fn fail_passes_input_through_with_reason() {
         let mut p = Prompter::new();
         p.start("go").unwrap();
-        let out = p.fail("prompter exited").unwrap();
+        let out = p.fail("exited").unwrap();
         assert_eq!(out.text, "go");
         assert_eq!(
             out.stage,
-            Some(StagePhase::Failed("prompter exited".into()))
+            Some(StagePhase::Failed(
+                "prompter 실패(오류: exited): 원문 그대로 메인에 보냄".into()
+            ))
         );
         assert!(p.fail("again").is_none());
     }

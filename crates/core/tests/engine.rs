@@ -1511,7 +1511,7 @@ fn tui_answer_replaces_main_reply_after_turn() {
 }
 
 #[test]
-fn tui_exit_keeps_main_reply_and_reports_failed_stage() {
+fn tui_exit_keeps_main_reply_and_reports_notice() {
     let _g = lock();
     let f = fake("tui_fail", &["text_turn.jsonl"]);
     fs::write(f.dir.join("tui.jsonl"), "").unwrap();
@@ -1522,9 +1522,8 @@ fn tui_exit_keeps_main_reply_and_reports_failed_stage() {
     h.submit("go");
     let evs = until_idle(&rx);
     assert!(
-        evs.contains(&UiEvent::Stage {
-            slot: "tui".into(),
-            phase: StagePhase::Failed("tui exited".into()),
+        evs.contains(&UiEvent::Notice {
+            text: "haiku-tui 실패(오류: exited): 메인 원문 표시".into(),
         }),
         "{evs:?}"
     );
@@ -1572,9 +1571,8 @@ fn prompter_failure_falls_back_to_raw_prompt() {
     let stdin = fs::read_to_string(f.dir.join("stdin.log")).unwrap_or_default();
     assert!(!stdin.contains("[original]"), "{stdin}");
     assert!(
-        evs.contains(&UiEvent::Stage {
-            slot: "prompter".into(),
-            phase: StagePhase::Failed("prompter exited".into()),
+        evs.contains(&UiEvent::Notice {
+            text: "prompter 실패(오류: exited): 원문 그대로 메인에 보냄".into(),
         }),
         "{evs:?}"
     );

@@ -36,7 +36,8 @@ use crate::record::{self, Stamp};
 use crate::record_turn::{self, RecordState};
 use crate::resident::{
     CODER_REPLY_FORMAT, CODER_RULE, CODER_TIMEOUT, PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter,
-    PrompterOutcome, StagePhase, TUI_TIMEOUT, agent_body, summarize_reply, tui_prompt,
+    PrompterOutcome, StagePhase, TUI_TIMEOUT, agent_body, prompter_notice, summarize_reply,
+    tui_notice, tui_prompt,
 };
 use crate::resume_group;
 use crate::rotate::{
@@ -174,6 +175,10 @@ pub enum UiEvent {
     Stage {
         slot: String,
         phase: crate::resident::StagePhase,
+    },
+    // A failed prompter or tui pass, as the Go notice line (Go notice): text is the whole note.
+    Notice {
+        text: String,
     },
     // The tui resident's Korean answer for the turn just ended (Go viaTUI). It replaces the main reply shown.
     TuiAnswer {
@@ -1269,17 +1274,14 @@ impl State {
         if self.prompter_proc.is_none()
             && let Err(e) = self.spawn_prompter()
         {
-            self.stage(
-                "prompter",
-                StagePhase::Failed(format!("prompter spawn failed: {e}")),
-            );
+            self.notice(prompter_notice(&format!("오류: {e}")));
             self.dispatch(&text);
             return;
         }
         let phase = match self.prompter.start(&text) {
             Ok(phase) => phase,
             Err(e) => {
-                self.stage("prompter", StagePhase::Failed(e));
+                self.notice(prompter_notice(&format!("오류: {e}")));
                 self.dispatch(&text);
                 return;
             }
@@ -1337,7 +1339,7 @@ impl State {
 
     fn on_prompter_eof(&mut self) {
         self.prompter_proc = None;
-        if let Some(o) = self.prompter.fail("prompter exited") {
+        if let Some(o) = self.prompter.fail("exited") {
             self.finish_prompter(o);
         }
     }
@@ -1358,8 +1360,10 @@ impl State {
         if self.prompter_deadline.take().is_some() {
             self.resident_busy("prompter", false);
         }
-        if let Some(phase) = o.stage {
-            self.stage("prompter", phase);
+        match o.stage {
+            Some(StagePhase::Failed(text)) => self.notice(text),
+            Some(phase) => self.stage("prompter", phase),
+            None => {}
         }
         self.dispatch(&o.text);
     }
@@ -1369,7 +1373,7 @@ impl State {
         if self.tui_proc.is_none()
             && let Err(e) = self.spawn_tui()
         {
-            self.stage("tui", StagePhase::Failed(format!("tui spawn failed: {e}")));
+            self.notice(tui_notice(&format!("오류: {e}")));
             self.after_turn();
             return;
         }
@@ -1382,7 +1386,7 @@ impl State {
         };
         if let Err(e) = wrote {
             self.tui_proc = None;
-            self.finish_tui(Err(format!("tui write failed: {e}")));
+            self.finish_tui(Err(format!("오류: write failed: {e}")));
         }
     }
 
@@ -1719,7 +1723,7 @@ impl State {
         self.role_context("tui", r.usage.as_ref());
         let text = r.result.unwrap_or_default().trim().to_string();
         if text.is_empty() {
-            self.finish_tui(Err("tui empty reply".to_string()));
+            self.finish_tui(Err("빈 응답".to_string()));
         } else {
             self.finish_tui(Ok(text));
         }
@@ -1728,7 +1732,7 @@ impl State {
     fn on_tui_eof(&mut self) {
         self.tui_proc = None;
         if self.tui_deadline.is_some() {
-            self.finish_tui(Err("tui exited".to_string()));
+            self.finish_tui(Err("오류: exited".to_string()));
         }
     }
 
@@ -1738,7 +1742,7 @@ impl State {
             p.kill();
         }
         self.tui_epoch += 1;
-        self.finish_tui(Err("tui timed out".to_string()));
+        self.finish_tui(Err(format!("{}초 시간초과", TUI_TIMEOUT.as_secs())));
     }
 
     // Ends the tui wait: the answer (or its failure row), then the turn is over.
@@ -1751,7 +1755,7 @@ impl State {
                 self.stage("tui", StagePhase::Done);
                 self.emit(UiEvent::TuiAnswer { text });
             }
-            Err(reason) => self.stage("tui", StagePhase::Failed(reason)),
+            Err(detail) => self.notice(tui_notice(&detail)),
         }
         self.after_turn();
     }
@@ -2354,6 +2358,13 @@ impl State {
     // Queued prompt texts, oldest first (Go m.queue), sent with each queue change.
     fn emit_queue(&self) {
         self.emit(UiEvent::QueueTexts(self.queue.iter().cloned().collect()));
+    }
+
+    // Go resident.go notice(): a failed prompter or tui pass, sent only while residents run.
+    fn notice(&mut self, text: String) {
+        if self.cfg.residents {
+            self.emit(UiEvent::Notice { text });
+        }
     }
 
     // Go repl.go stage rows ("· main 처리중", "· agent X 호출"): sent only while residents run.
