@@ -1144,6 +1144,26 @@ fn handoff_snapshot_lists_running_background_agent_with_result_path() {
 }
 
 #[test]
+fn resumed_background_agent_is_active_again_until_task_notification() {
+    let _g = lock();
+    let f = fake("resume", &["resume_agent_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let pos = |want: &dyn Fn(&UiEvent) -> bool| evs.iter().position(want);
+    let launched = pos(&|e| matches!(e, UiEvent::AgentBackground { id } if id == "toolu_bg1"));
+    let resumed = pos(
+        &|e| matches!(e, UiEvent::AgentResumed { id, description, .. } if id == "toolu_bg1" && description == "scan"),
+    );
+    let ended = pos(&|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1"));
+    assert!(launched.is_some(), "{evs:?}");
+    assert!(resumed.is_some(), "{evs:?}");
+    assert!(ended.is_some(), "{evs:?}");
+    assert!(launched < resumed && resumed < ended, "{evs:?}");
+    h.shutdown();
+}
+
+#[test]
 fn abandoned_turn_ends_foreground_agent_but_not_background_agent() {
     let _g = lock();
     let hang = concat!(

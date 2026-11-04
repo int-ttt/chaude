@@ -82,6 +82,12 @@ pub enum UiEvent {
         id: String,
         elapsed_ms: u64,
     },
+    // A background agent resumed by SendMessage runs again under its original tool id until its AgentEnd.
+    AgentResumed {
+        id: String,
+        description: String,
+        started_at: u64,
+    },
     // tokens = tokens in the context window (last assistant usage); context_pct = tokens * 100 / context_window.
     Status {
         model: String,
@@ -317,6 +323,8 @@ struct State {
     // Delegated agents by tool_use id. A background agent (launch result said "async") keeps running past the
     // turn, so an abandoned turn does not end it, and it is listed in the handoff snapshot.
     agent_info: HashMap<String, AgentInfo>,
+    // agentId from an async launch result -> tool_use id, so a SendMessage resume finds the agent.
+    agent_ids: HashMap<String, String>,
     // tool_use ids still waiting for their tool_result; the inactivity timer is paused while non-empty.
     open_tools: HashSet<String>,
     // Last claude line or turn start; the inactivity timer measures from here.
@@ -404,6 +412,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         agents: HashMap::new(),
         rotate_deferred: None,
         agent_info: HashMap::new(),
+        agent_ids: HashMap::new(),
         open_tools: HashSet::new(),
         last_activity: Instant::now(),
         interrupted_at: None,
@@ -712,6 +721,9 @@ impl State {
                 if env.parent_tool_use_id.is_some() {
                     return;
                 }
+                if let Some(Content::Text(text)) = &env.message.content {
+                    self.on_task_notification(text);
+                }
                 if let Some(Content::Blocks(blocks)) = env.message.content {
                     for b in blocks {
                         if let Block::ToolResult {
@@ -896,14 +908,41 @@ impl State {
             id: id.clone(),
             text: text.clone(),
         });
+        // SendMessage to a background agent resumes it: it runs again under its original tool id.
+        let resume = after_marker(&text, "Resuming agent ")
+            .or_else(|| after_marker(&text, "resumedAgentId\":\""));
+        let known = resume.and_then(|aid| self.agent_ids.get(&aid).cloned());
+        if let Some((tool, description)) = known.and_then(|t| {
+            let name = self.agent_info.get(&t)?.name.clone();
+            Some((t, name))
+        }) {
+            self.agents.insert(tool.clone(), Instant::now());
+            if let Some(info) = self.agent_info.get_mut(&tool) {
+                info.background = true;
+            }
+            self.emit(UiEvent::AgentResumed {
+                id: tool,
+                description,
+                started_at: now_secs(),
+            });
+            return;
+        }
         // A background agent keeps running after its launch result; it ends later, which E1 does not track.
         if text.contains(ASYNC_AGENT_MARK) {
+            if let Some(aid) = after_marker(&text, "agentId: ") {
+                self.agent_ids.insert(aid, id.clone());
+            }
             if let Some(info) = self.agent_info.get_mut(&id) {
                 info.background = true;
             }
             self.emit(UiEvent::AgentBackground { id });
             return;
         }
+        self.finish_agent(id);
+    }
+
+    // Ends a delegated agent: AgentEnd, and the deferred rotation runs if this was the last agent.
+    fn finish_agent(&mut self, id: String) {
         self.agent_info.remove(&id);
         if let Some(t0) = self.agents.remove(&id) {
             self.emit(UiEvent::AgentEnd {
@@ -918,6 +957,22 @@ impl State {
             && self.rotation_wanted()
         {
             self.run_deferred_rotation();
+        }
+    }
+
+    // A <task-notification> names the background agents that finished (Go drain.go onNotification).
+    fn on_task_notification(&mut self, text: &str) {
+        if !text.contains("<task-notification>") {
+            return;
+        }
+        for part in text.split("<tool-use-id>").skip(1) {
+            let id: String = part
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .collect();
+            if self.agents.contains_key(&id) {
+                self.finish_agent(id);
+            }
         }
     }
 
@@ -1273,6 +1328,16 @@ impl State {
 
 // First short string field of a tool input, for the one-line ToolStart summary.
 // Go tui.go resultText: a plain string, or the "text" of each block joined by newlines.
+// The id that follows `marker` in `text`, e.g. the agentId in "agentId: a1b2".
+fn after_marker(text: &str, marker: &str) -> Option<String> {
+    let rest = &text[text.find(marker)? + marker.len()..];
+    let id: String = rest
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+        .collect();
+    (!id.is_empty()).then_some(id)
+}
+
 fn result_text(v: Option<&Value>) -> String {
     match v {
         Some(Value::String(s)) => s.clone(),
