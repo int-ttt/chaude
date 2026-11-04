@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.10.1 - 2026-11-04
+- Resume: a background agent resumed with SendMessage (`resumedAgentId`) goes back to the active agent list. The launch `agentId` is kept and saved with the agent store, so restored agents can be matched after a restart.
+- /view: session rows and the prompt header show the agent name (for example `coder`, `prompter`) instead of the session id. Sessions from an earlier run still show their transcript title.
+- /view: the prompt text scrolls with up/down, pgup/pgdn, home/end and the mouse wheel. Left/right step through prompts, esc goes back to the list.
+
 ## 0.10.0 - 2026-11-03
 - Repo layout: the Go implementation moved to `deprecated/src/main/intt/`. The Rust workspace is at the repo root (`crates/core`, `crates/cli`; `crates/gui` is excluded until it is built). The Rust prototype moved to `deprecated/prototype/chaude-rs/`. E2E tests moved to `tests/e2e/`, `job_monitor.py` to `scripts/`.
 - Rust workspace: in progress (core, CLI and TUI skeleton). The shipped binary is still the Go build.
