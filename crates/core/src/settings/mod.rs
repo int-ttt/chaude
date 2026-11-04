@@ -2,6 +2,7 @@
 //! mac/linux output is the source unchanged. windows hooks use exec form (command=<python>, args=[..., script])
 //! so no shell is needed.
 
+pub mod chaude_settings;
 pub mod project;
 
 use std::env;

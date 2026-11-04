@@ -33,14 +33,66 @@ fn apply_orch(args: &[String]) -> Result<&'static str, String> {
     Ok(mode)
 }
 
-// Go repl.go:1316-1334: an orch mode with a default main model (orchDefaultModel) replaces the model when
-// --model is not given; otherwise the base model stays. m0 has no default, so it keeps the base.
-fn orch_model(mode: &str, model_set: bool, base: &str) -> String {
+// Go repl.go:1316-1334: --model <id> (Go flag -model) wins; otherwise an orch mode with a default main model
+// (orchDefaultModel) replaces the settings model; otherwise the project settings main_model is used.
+fn resolve_model(mode: &str, flag: Option<String>, settings_model: &str) -> String {
+    if let Some(m) = flag {
+        return m;
+    }
     let default = orch::default_model(mode);
-    if !model_set && !default.is_empty() {
-        default.to_string()
+    if default.is_empty() {
+        settings_model
     } else {
-        base.to_string()
+        default
+    }
+    .to_string()
+}
+
+// --model <v> or --model=<v>. A missing value is an error (Go flag package behavior).
+fn parse_model(args: &[String]) -> Result<Option<String>, String> {
+    for (i, a) in args.iter().enumerate() {
+        if let Some(v) = a.strip_prefix("--model=") {
+            return Ok(Some(v.to_string()));
+        }
+        if a == "--model" {
+            return args
+                .get(i + 1)
+                .cloned()
+                .map(Some)
+                .ok_or_else(|| "--model needs a value".to_string());
+        }
+    }
+    Ok(None)
+}
+
+// The interactive session: --orch and --model are applied, then the TUI runs. Returns the exit code.
+fn run_tui(args: &[String]) -> i32 {
+    let mode = match apply_orch(args) {
+        Ok(mode) => mode,
+        Err(e) => {
+            eprintln!("chaude: {e}\n{USAGE}");
+            return 2;
+        }
+    };
+    let flag = match parse_model(args) {
+        Ok(flag) => flag,
+        Err(e) => {
+            eprintln!("chaude: {e}\n{USAGE}");
+            return 2;
+        }
+    };
+    let mut cfg = Config::default();
+    cfg.model = resolve_model(
+        mode,
+        flag,
+        settings::chaude_settings::main_model(cfg.cwd.as_deref()),
+    );
+    match tui::run(cfg) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("chaude: {e}");
+            1
+        }
     }
 }
 
@@ -48,21 +100,52 @@ fn orch_model(mode: &str, model_set: bool, base: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn orch_model_keeps_given_model() {
-        assert_eq!(orch_model("b", true, "sonnet"), "sonnet");
-        assert_eq!(orch_model("e", true, "sonnet"), "sonnet");
+    fn strs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]
-    fn orch_model_uses_orch_default_when_model_absent() {
-        assert_eq!(orch_model("b", false, "sonnet"), "opus");
-        assert_eq!(orch_model("e", false, "opus"), "haiku");
+    fn model_flag_given_wins_over_orch_and_settings() {
+        assert_eq!(
+            resolve_model("b", Some("sonnet".into()), "claude-fable-5-1"),
+            "sonnet"
+        );
+        assert_eq!(
+            resolve_model("e", Some("opus".into()), "claude-sonnet-5-5"),
+            "opus"
+        );
     }
 
     #[test]
-    fn orch_model_m0_keeps_base() {
-        assert_eq!(orch_model("m0", false, "sonnet"), "sonnet");
+    fn model_flag_absent_orch_default_overrides_settings() {
+        assert_eq!(resolve_model("b", None, "claude-sonnet-5-5"), "opus");
+        assert_eq!(resolve_model("e", None, "claude-opus-5-5"), "haiku");
+    }
+
+    #[test]
+    fn model_flag_absent_m0_uses_settings_value() {
+        assert_eq!(
+            resolve_model("m0", None, "claude-sonnet-5-5"),
+            "claude-sonnet-5-5"
+        );
+        assert_eq!(
+            resolve_model("m0", None, "claude-opus-5-5"),
+            "claude-opus-5-5"
+        );
+    }
+
+    #[test]
+    fn parse_model_forms() {
+        assert_eq!(parse_model(&strs(&["--orch", "b"])), Ok(None));
+        assert_eq!(
+            parse_model(&strs(&["--model", "sonnet"])),
+            Ok(Some("sonnet".into()))
+        );
+        assert_eq!(
+            parse_model(&strs(&["--model=fable"])),
+            Ok(Some("fable".into()))
+        );
+        assert!(parse_model(&strs(&["--model"])).is_err());
     }
 }
 
@@ -79,26 +162,8 @@ fn main() {
             println!("{USAGE}");
             0
         }
-        None | Some("--orch") => match apply_orch(&args) {
-            Err(e) => {
-                eprintln!("chaude: {e}\n{USAGE}");
-                2
-            }
-            Ok(mode) => {
-                let mut cfg = Config::default();
-                let model_set = args
-                    .iter()
-                    .any(|a| a == "--model" || a.starts_with("--model="));
-                cfg.model = orch_model(mode, model_set, &cfg.model);
-                match tui::run(cfg) {
-                    Ok(()) => 0,
-                    Err(e) => {
-                        eprintln!("chaude: {e}");
-                        1
-                    }
-                }
-            }
-        },
+        None | Some("--orch" | "--model") => run_tui(&args),
+        Some(a) if a.starts_with("--model=") => run_tui(&args),
         Some(cmd) => {
             eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");
             2
