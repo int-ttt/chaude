@@ -12,10 +12,10 @@ Dedupe key: Go test name (320 unique names, no collisions across packages). Prec
 
 | status | count |
 |---|---|
-| covered | 229 |
-| partial | 17 |
+| covered | 233 |
+| partial | 14 |
 | ignored | 48 |
-| missing | 1 |
+| missing | 0 |
 | n-a | 25 |
 | **total** | **320** |
 
@@ -23,20 +23,22 @@ Ignored by reason (sum 48):
 
 | reason | count |
 |---|---|
-| core seam/API not wired | 14 |
+| core seam/API not wired | 15 |
 | TUI behaviour not in Rust yet | 23 |
 | no Rust test written yet | 2 |
-| Rust differs by design | 4 |
-| bin-only/cli-private helper | 5 |
+| Rust differs by design | 2 |
+| bin-only/cli-private helper | 6 |
 
 ## Remaining
 
-- partial (17) and missing (2): no ignored stub written in crates/core for the uncovered part.
-  crates/core is owned by another coder; follow-up needed there (stub names in p2 "Body checks" and p1).
-- missing TestAgentCounts: no counts() fg/bg helper in Rust; running() and the background flag exist.
-- ignored (48): stubs exist; each needs its seam wired before the #[ignore] can be removed.
+- partial (14): Rust test covers the part of the Go body that is ported; the rest has an ignored stub in
+  crates/core/tests/parity_final3_ignored.rs (or the stub named in the note). Stubs panic when run with --ignored.
+- ignored (48): stubs exist; each needs its seam wired (core Repl seam, TUI, or cli test seam) before #[ignore] can be removed.
+- design (2): TestResidentSlotsFixedFour, TestResidentCoderBusyRefuses. Go fixes four resident roles and refuses a busy single coder;
+  Rust uses a coder pool (floor 8, api.rs RESIDENT_MAX_WORKERS) and errors "all resident coders are busy".
+- TestMaxWorkersDefault: Rust default 3 equals Go DefaultMaxWorkers 3 (dispatch.go:12); the Go value 4 in the brief is
+  chaude_settings.go:20 (extra coders), not the max-workers default. Expected value stays 3; row covered.
 - n-a (25): parked-child pool (24, p2) and live usage CLI (1, needs HARNESS_LIVE_USAGE=1; Rust covered by engine.rs).
-- Go-vs-Rust behaviour differences recorded as ignored (design): see table rows with "Rust differs by design".
 - Update/install rows: covered via crates/update/tests/parity_update.rs (p3).
 
 ## Table
@@ -86,7 +88,7 @@ Ignored by reason (sum 48):
 | TestBusySlashAllowedAndRefused | internal/harness/busyslash_test.go | - | ignored | ignored (core seam/API not wired): busy-slash allow/refuse rule not in Rust  [p12: busy_slash_allowed_and_refused] |
 | TestVersionNoteShowsChaudeVersion | internal/harness/busyslash_test.go | - | ignored | ignored (no Rust test written yet): version note not covered in Rust tests  [p12: version_note_shows_chaude_version] |
 | TestParseCacheTTL | internal/harness/cachettl_test.go | crates/core/src/cache_ttl.rs::parse_cache_ttl_accepts_three_values_only | covered |  |
-| TestRegistryNilWhenNoFile | internal/harness/cachettl_test.go | crates/core/src/clients.rs::empty_path_is_noop_registry | partial | nil/empty-path half only; Repl wiring (reg, children, ttl, idleRotate) stays in api.rs |
+| TestRegistryNilWhenNoFile | internal/harness/cachettl_test.go | crates/core/src/clients.rs::empty_path_is_noop_registry | partial | nil/empty-path half only; Repl wiring stays in api.rs; stub: crates/core/tests/parity_final3_ignored.rs::go_registry_nil_when_no_file_wiring |
 | TestParseCategory | internal/harness/category_test.go | crates/core/src/category.rs::parse_category_takes_last_marker_line | covered |  |
 | TestCategoryRotation | internal/harness/category_test.go | crates/core/src/category.rs::category_rotation_rules | covered |  |
 | TestCategoryRuleSize | internal/harness/category_test.go | crates/core/src/category.rs::category_rule_fits_budget | covered |  |
@@ -124,11 +126,11 @@ Ignored by reason (sum 48):
 | TestDelegationRuleNamesHaikuCoder | internal/harness/delegation_test.go | core/src/orch.rs::rule_per_mode | covered | name-level: RULE_B names haiku-coder |
 | TestForwardRuleFor | internal/harness/delegation_test.go | crates/core/src/forward.rs::forward_rule_for_skips_opus_models | covered |  |
 | TestPickChild | internal/harness/dispatch_test.go | crates/core/src/pick_child.rs::pick_child_matches_go_cases | covered | name-level match; owner case is pick_child_refuses_row_owned_by_other_live_pid (pid 1 instead of parent pid) |
-| TestMaxWorkersDefault | internal/harness/dispatch_test.go | crates/core/tests/parity_harness_p1.rs::max_workers_default_is_three | ignored | ignored (Rust differs by design): parity: Go default 3; Rust default is max(3, 8 + extra_coders) |
+| TestMaxWorkersDefault | internal/harness/dispatch_test.go | crates/core/tests/parity_harness_p1.rs::max_workers_default_is_three | covered | Rust default 3 matches Go DefaultMaxWorkers=3 (dispatch.go:12); brief premise of 4 not Go (chaude_settings.go:20 is extra coders); expected stays 3 |
 | TestMaxWorkersEnvOverride | internal/harness/dispatch_test.go | crates/core/tests/parity_harness_p1.rs::max_workers_env_override_and_flag_precedence | covered | added in parity_harness_p1.rs |
 | TestMaxWorkersRejectZero | internal/harness/dispatch_test.go | crates/core/tests/parity_harness_p1.rs::max_workers_rejects_zero_from_flag_and_env | covered | added in parity_harness_p1.rs |
 | TestMaxWorkersCapRefuses | internal/harness/dispatch_test.go | - | ignored | ignored (core seam/API not wired): Rust has no worker cap check  [p12: max_workers_cap_refuses] |
-| TestAgentTrackerAndDrain | internal/harness/drain_test.go | - | partial | Rust has no agent tracker drain  [p12: agent_tracker_and_drain_tracker_half]  [p12: agent_tracker_drain_half] |
+| TestAgentTrackerAndDrain | internal/harness/drain_test.go | crates/core/tests/parity_final3.rs::agent_tracker_tracks_and_finishes | partial | tracker half covered (final3); drain.finished stub: crates/core/tests/parity_final3_ignored.rs::go_agent_tracker_drain_finished  [p12: agent_tracker_and_drain_tracker_half]  [p12: agent_tracker_drain_half] |
 | TestDrainConsumeDenies | internal/harness/drain_test.go | - | ignored | ignored (core seam/API not wired): Rust has no drain consume  [p12: drain_consume_denies] |
 | TestBackgroundAgentShownRunning | internal/harness/drain_test.go | - | covered | no direct test in Rust  [p12: background_agent_shown_running] |
 | TestAgentDoneNotice | internal/harness/drain_test.go | - | covered | no agent-done notice test in Rust  [p12: agent_done_notice] |
@@ -152,15 +154,15 @@ Ignored by reason (sum 48):
 | TestInputHistoryCap | internal/harness/history_test.go | cli/src/tui/edit.rs::history_file_load_rules_skip_bad_lines_and_cap | covered | name-level: cap checked on file load only |
 | TestRewindState | internal/harness/history_test.go | crates/cli/src/tui/rewind.rs::rewind_state_follows_go | covered | body read: rewind open/move/wrap/confirm/cancel match Go (rewind.rs:146) |
 | TestAgentCounts | internal/harness/history_test.go | crates/core/tests/parity_final2.rs::agent_counts | covered | fg/bg counts via running() filtered by background |
-| TestIdleControlRequestAnswered | internal/harness/idle_test.go | crates/core/tests/engine.rs::can_use_tool_in_default_mode_asks_ui_and_sends_answer | partial | body read: Rust covers part of Go body; remaining assertions need ignored stub (not written, crates/core owned elsewhere) |
+| TestIdleControlRequestAnswered | internal/harness/idle_test.go | crates/core/tests/engine.rs::can_use_tool_in_default_mode_asks_ui_and_sends_answer | partial | ask/answer half covered; remaining assertions stub: crates/core/tests/parity_final3_ignored.rs::go_idle_control_request_answered_rest |
 | TestIdleDeniesWhenNoPrompt | internal/harness/idle_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): idle can_use_tool with no UI prompt must deny  [p12: idle_denies_when_no_prompt] |
 | TestStrayLateResultSkipped | internal/harness/idle_test.go | crates/core/tests/engine.rs::stray_result_of_abandoned_turn_does_not_end_next_turn | covered | name-level match |
 | TestIdleBackgroundFollowupRendered | internal/harness/idle_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): task-notification between turns renders "에이전트 완료" and clears tracker  [p12: idle_background_followup_rendered] |
-| TestIdleSpendRow | internal/harness/idlespend_test.go | none | partial | background row sub_output_tokens / spawns / result_model_usage  [p12: idle_spend_row] |
-| TestIdleSpendLiveReplay | internal/harness/idlespend_test.go | none | partial | Go reads testdata/bg_turn_live.jsonl and skips if absent  [p12: idle_spend_live_replay] |
-| TestReadClaudeTranscriptFullView | internal/harness/importview_test.go | crates/core/src/import_view.rs::tool_use_result_and_thinking_are_rendered_in_order, crates/core/src/import_view.rs::subagent_renders_after_its_agent_call | partial | body read: Rust covers part of Go body; remaining assertions need ignored stub (not written) |
-| TestInputWidthMixed | internal/harness/input_test.go | crates/cli/src/tui/render.rs::mixed_width_measure | partial | body read: Rust covers mixed-width measure only; remaining assertions need ignored stub (not written) |
-| TestInputWrapWide | internal/harness/input_test.go | crates/cli/src/tui/render.rs::wrap_cells_breaks_by_cell_width | partial | body read: Rust covers wide-cell wrap only; remaining assertions need ignored stub (not written) |
+| TestIdleSpendRow | internal/harness/idlespend_test.go | crates/core/tests/parity_final3.rs::idle_spend_row_sub_and_spawns | partial | background row sub tokens and spawns covered (final3); result_model_usage stub: crates/core/tests/parity_final3_ignored.rs::go_idle_spend_row_background_row  [p12: idle_spend_row] |
+| TestIdleSpendLiveReplay | internal/harness/idlespend_test.go | crates/core/tests/parity_final3.rs::idle_spend_live_replay | covered | reads crates/core/tests/fixtures/bg_turn_live.jsonl (final3) |
+| TestReadClaudeTranscriptFullView | internal/harness/importview_test.go | crates/core/src/import_view.rs::tool_use_result_and_thinking_are_rendered_in_order, crates/core/src/import_view.rs::subagent_renders_after_its_agent_call, crates/core/tests/parity_final3.rs::read_claude_transcript_full_view | covered | full view read (final3) plus import_view unit tests |
+| TestInputWidthMixed | internal/harness/input_test.go | crates/cli/src/tui/render.rs::mixed_width_measure | partial | mixed-width measure covered; remaining cases stub: crates/core/tests/parity_final3_ignored.rs::go_input_width_mixed_rest |
+| TestInputWrapWide | internal/harness/input_test.go | crates/cli/src/tui/render.rs::wrap_cells_breaks_by_cell_width | partial | wide-cell wrap covered; remaining cases stub: crates/core/tests/parity_final3_ignored.rs::go_input_wrap_wide_rest |
 | TestInputNewline | internal/harness/input_test.go | crates/cli/src/tui/edit.rs::newline_is_a_marker_column_and_home_end_stay_on_the_line | covered | name-level match |
 | TestInputKillToStart | internal/harness/input_test.go | crates/cli/src/tui/edit.rs::kill_to_start_cases | covered | name-level match |
 | TestInputDeleteWordPunct | internal/harness/input_test.go | crates/cli/src/tui/edit.rs::delete_word_is_punctuation_aware | covered | name-level match |
@@ -209,11 +211,11 @@ Ignored by reason (sum 48):
 | TestWSNeedsRotateCases | internal/harness/orchws_test.go | crates/core/src/orch.rs::needs_rotate_cases | covered | name-level match |
 | TestWSHandoffRuneCap | internal/harness/orchws_test.go | crates/core/src/orch.rs::handoff_is_rune_capped_with_prefix | covered | name-level match |
 | TestRouteOrchBReturnsLine | internal/harness/orchws_test.go | crates/core/src/orch.rs::route_non_f_mode_keeps_line | covered | body read: route_non_f_mode_keeps_line checks the returned line |
-| TestSessionPanelAndThinking | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::thinking_row_shows_only_for_opus_resident_or_pre_text | partial | body read: Rust covers thinking row only; panel assertions need ignored stub (not written) |
-| TestEscInterruptClearsForegroundPanel | internal/harness/panel_test.go | crates/cli/src/tui/mod.rs::a_single_escape_interrupts_only_while_busy | partial | body read: Rust covers esc interrupt; foreground panel clear needs ignored stub (not written) |
+| TestSessionPanelAndThinking | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::thinking_row_shows_only_for_opus_resident_or_pre_text | partial | thinking row covered; panel assertions stub: crates/core/tests/parity_final3_ignored.rs::go_session_panel_rest |
+| TestEscInterruptClearsForegroundPanel | internal/harness/panel_test.go | crates/cli/src/tui/mod.rs::a_single_escape_interrupts_only_while_busy | partial | esc interrupt covered; foreground panel clear stub: crates/core/tests/parity_final3_ignored.rs::go_esc_interrupt_clears_foreground_panel |
 | TestIdleTickRefreshesWhenBackgroundFinishes | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): idle tick refresh of panel after background finishes  [p12: idle_tick_refreshes_when_background_finishes] |
 | TestCursorRowMatchesPanelAfterTick | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): cursor row vs panel after tick  [p12: cursor_row_matches_panel_after_tick] |
-| TestPanelMoreRowAndSmallHeight | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::every_running_agent_stays_visible_when_row_is_narrow | missing | body read: no Rust test for more-row and small-height panel; needs ignored stub (not written) |
+| TestPanelMoreRowAndSmallHeight | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::every_running_agent_stays_visible_when_row_is_narrow | ignored | bin-only (cli has no lib target): more-row and small-height panel; stub: crates/core/tests/parity_final3_ignored.rs::go_panel_more_row_small_height |
 | TestThinkingOnlyForForeground | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::thinking_row_shows_only_for_opus_resident_or_pre_text | covered | body read: thinking row shown only for foreground agent |
 | TestBackgroundRowsBelowInputBox | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): background rows layout below input  [p12: background_rows_below_input_box] |
 | TestBackgroundSmallHeightNoOverflow | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): background rows, small height  [p12: background_small_height_no_overflow] |
@@ -224,8 +226,8 @@ Ignored by reason (sum 48):
 | TestBackgroundOnlyDoesNotQueue | internal/harness/panel_test.go | crates/core/tests/engine.rs::background_only_agent_does_not_queue_next_prompt | covered | name-level match |
 | TestQueueSmallHeightNoOverflow | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): queue rows, small height  [p12: queue_small_height_no_overflow] |
 | TestCursorRowIncludesBackgroundRows | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): cursor row counts background rows  [p12: cursor_row_includes_background_rows] |
-| TestAgentStatusTextPrefixedName | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::agent_name_with_model_prefix_skips_model_segment | partial | body read: Rust covers model-prefix skip only; remaining cases need ignored stub (not written) |
-| TestAgentStatusFormat | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::agent_status_text_uses_state_model_and_name | partial | body read: Rust covers status text; remaining format cases need ignored stub (not written) |
+| TestAgentStatusTextPrefixedName | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::agent_name_with_model_prefix_skips_model_segment | partial | model-prefix skip covered; remaining cases stub: crates/core/tests/parity_final3_ignored.rs::go_agent_status_prefixed_rest |
+| TestAgentStatusFormat | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::agent_status_text_uses_state_model_and_name | partial | status text covered; remaining format cases stub: crates/core/tests/parity_final3_ignored.rs::go_agent_status_format_rest |
 | TestPanelScrollWindow | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): panel scroll window  [p12: panel_scroll_window] |
 | TestUserEventNotificationFinishesBackground | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): user-event notification finishes background row  [p12: user_event_notification_finishes_background] |
 | TestSetRateLogsOnFiveHourChange | internal/harness/ratestatus_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): rate log row (stage "rate") on five-hour change; Rust metrics has no rate stage test  [p12: set_rate_logs_on_five_hour_change] |
@@ -248,18 +250,18 @@ Ignored by reason (sum 48):
 | TestRecordSkip | internal/harness/record_turn_test.go | crates/core/src/record_turn.rs::skip_slash_commands_and_empty_prompts | covered | body read: slash commands and empty prompts skipped |
 | TestMeasureLine | internal/harness/record_turn_test.go | crates/core/src/record_turn.rs::measure_line_fixed_then_result_keys | covered | body read: measure line key order matches |
 | TestAgentPromptLoaded | internal/harness/resident_agent_test.go | none | covered | agent prompt file loaded (crates/core/src/resident.rs::strip_frontmatter_drops_header_block covers frontmatter only)  [p12: agent_prompt_loaded] |
-| TestAgentPromptMissingNotice | internal/harness/resident_agent_test.go | none | partial | missing agent prompt shows notice  [p12: agent_prompt_missing_is_err] |
-| TestStageLinesOrder | internal/harness/resident_agent_test.go | crates/core/tests/engine.rs::resident_stage_rows_bracket_main_turn_and_agent_calls | partial | body read: Rust checks stage row bracket; full order list needs ignored stub (not written) |
+| TestAgentPromptMissingNotice | internal/harness/resident_agent_test.go | none | partial | missing agent prompt shows notice (p12: agent_prompt_missing_is_err); notice and agent-less spawn stub: crates/core/tests/parity_final3_ignored.rs::go_agent_prompt_missing_notice  [p12: agent_prompt_missing_is_err] |
+| TestStageLinesOrder | internal/harness/resident_agent_test.go | crates/core/tests/engine.rs::resident_stage_rows_bracket_main_turn_and_agent_calls | partial | stage row bracket covered; full order stub: crates/core/tests/parity_final3_ignored.rs::go_stage_lines_full_order |
 | TestSessionArgsMinimal | internal/harness/resident_agent_test.go | crates/core/src/proc.rs::args_match_go_session_defaults | covered | body read: Rust args checked against Go session defaults |
 | TestSessionArgsCoder | internal/harness/resident_agent_test.go | crates/core/src/proc.rs::resident_shape_args_match_go_session_args | covered | body read: coder session args |
-| TestMainStrictMCP | internal/harness/resident_agent_test.go | crates/core/src/proc.rs::mcp_config_flag_only_when_set | partial | body read: Rust checks MCP flag only when set; strict-MCP main case needs ignored stub (not written) |
+| TestMainStrictMCP | internal/harness/resident_agent_test.go | crates/core/src/proc.rs::mcp_config_flag_only_when_set, crates/core/tests/parity_final3.rs::main_strict_mcp_args | partial | strict-MCP args covered (final3); spawn-once stub: crates/core/tests/parity_final3_ignored.rs::go_main_strict_mcp_spawn_once |
 | TestResidentRunningListShowsOnlyBusySessions | internal/harness/resident_busy_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): running list shows only busy residents  [p12: resident_running_list_shows_only_busy_sessions] |
 | TestResidentCoderReply | internal/harness/resident_coder_test.go | crates/core/tests/engine.rs::coder_task_emits_working_done_rows_and_reply | covered | body read: coder reply rows |
 | TestResidentCoderSlotReuse | internal/harness/resident_coder_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): coder slot reuse  [p12: resident_coder_slot_reuse] |
 | TestResidentCoderBusyRefuses | internal/harness/resident_coder_test.go | none | ignored | ignored (Rust differs by design): Go refuses a busy single coder; Rust pool errors "all resident coders are busy" (crates/core/src/api.rs:1046). Planned #[ignore = "parity: single-coder busy refusal vs pool error"]  [p12: resident_coder_busy_refuses] |
 | TestCoderPermissionOnlyWhenBusy | internal/harness/resident_coder_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): coder permission prompt only when busy  [p12: coder_permission_only_when_busy] |
-| TestMCPRoundTripFakeSession | internal/harness/resident_coder_test.go | none | partial | MCP round trip with fake session  [p12: mcp_round_trip_reply_level] |
-| TestResidentMCPConfigWritten | internal/harness/resident_coder_test.go | none | partial | resident MCP config written to disk  [p12: mcp_config_args] |
+| TestMCPRoundTripFakeSession | internal/harness/resident_coder_test.go | crates/core/tests/parity_final3.rs::mcp_round_trip_fake_session | covered | fake session MCP round trip (final3) |
+| TestResidentMCPConfigWritten | internal/harness/resident_coder_test.go | crates/core/tests/parity_final3.rs::resident_mcp_config_written | partial | config written with 0600 mode (final3); created-once stub: crates/core/tests/parity_final3_ignored.rs::go_resident_mcp_config_created_once  [p12: mcp_config_args] |
 | TestExtraCoderPoolFromSetting | internal/harness/resident_extra_test.go | crates/cli/src/tui/settings.rs::extra_coders_wins_over_legacy_key; crates/core/tests/parity_harness_p3.rs::default_extra_pool_and_idle_ttl_match_go | covered | default pool 4 asserted in p3 (new); the setting parse is name-level |
 | TestExtraCoderExpiresAt270s | internal/harness/resident_extra_test.go | crates/core/tests/engine.rs::idle_extra_coder_expires_and_base_coder_stays; crates/core/tests/parity_harness_p3.rs::default_extra_pool_and_idle_ttl_match_go | covered | engine test uses 300 ms TTL; p3 asserts the default 270 s |
 | TestViaPrompterFailureNotice | internal/harness/resident_pipeline_test.go | crates/core/tests/engine.rs::prompter_failure_falls_back_to_raw_prompt | covered | name-level |
@@ -293,7 +295,7 @@ Ignored by reason (sum 48):
 | TestViewHelpers | internal/harness/resume_test.go | crates/core/tests/parity_harness_p3_ignored.rs::go_view_helpers | ignored | ignored (bin-only/cli-private helper): #[ignore] stub: cli-private sessview helpers; bin-only crate |
 | TestJediTermIMEColumnShift | internal/harness/resumeshift_test.go | crates/cli/src/tui/mod.rs::ime_shift_follows_env_override_and_jediterm | covered |  |
 | TestImportShowsTurnsInTUI | internal/harness/resumeshift_test.go | crates/cli/src/tui/mod.rs::import_replaces_the_transcript_view | covered |  |
-| TestRotateKeepsPendingSnapshot | internal/harness/resumeshift_test.go | crates/core/tests/parity_harness_p3_ignored.rs::go_rotate_keeps_pending_snapshot | ignored | ignored (Rust differs by design): #[ignore] stub: rotate path does not keep pending import snapshot in Rust |
+| TestRotateKeepsPendingSnapshot | internal/harness/resumeshift_test.go | crates/core/tests/parity_final3_ignored.rs::go_rotate_keeps_pending_snapshot | ignored | core seam: Rust keeps pending snapshot (api.rs rotate_keep_snapshot); Repl rotate needs fake newSessionFn seam; not a design difference |
 | TestSelectionAnchorStaysOnContentAfterAppend | internal/harness/selection_test.go | crates/cli/src/tui/render.rs::selection_anchor_stays_on_content_after_append | covered |  |
 | TestSelectionMultiLineAndReversedOrder | internal/harness/selection_test.go | crates/cli/src/tui/render.rs::selection_text_multi_line_and_reversed | covered |  |
 | TestReleaseCopiesSelection | internal/harness/selection_test.go | crates/core/tests/parity_harness_p3_ignored.rs::go_release_copies_selection | ignored | ignored (bin-only/cli-private helper): #[ignore] stub: cli-private clipboard release; bin-only crate |
