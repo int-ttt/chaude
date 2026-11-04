@@ -89,7 +89,7 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 | K9 | rotated notice | tui.go | done | crates/cli/src/tui/mod.rs:428 UiEvent::Rotated, bar::rotated_notice | |
 | K10 | orphan notice | tui.go | done | crates/cli/src/tui/mod.rs:417 UiEvent::OrphanNotice, bar::orphan_notice | |
 | K11 | tool summary | tui.go | done | crates/cli/src/tui/mod.rs:297 render::tool_summary | |
-| K12 | assistant link wrap | links.go:197 wrapLinked; tui.go:374 | done | crates/cli/src/tui/mod.rs body() wrap_linked; render.rs wrap_linked | raw md_bold text kept per row; links styled after wrap so a link across rows keeps style; applies to every transcript row (doubt: Go styles only assistant and user text) |
+| K12 | assistant link wrap | links.go:197 wrapLinked; tui.go:374 | done | crates/cli/src/tui/mod.rs body() wrap_linked; render.rs wrap_linked | raw md_bold text kept per row; links styled after wrap so a link across rows keeps style; only assistant and user rows (Go tui.go:374, 376), other rows wrap plain; live assistant row included |
 
 ## Settings (internal/harness/chaude_settings.go:11-15)
 

@@ -142,6 +142,8 @@ pub struct App {
     last_esc: Option<Instant>,
     // Transcript indices of note rows that wrap at width + 1 (Go shows /view errors at the full width).
     wide: HashSet<usize>,
+    // Transcript indices of assistant and user rows; only these get link styles in body() (Go tui.go:374, 376).
+    linked: HashSet<usize>,
     // Id of the permission request waiting for y/n (UiEvent::PermissionRequest). While set, keys answer it.
     perm: Option<String>,
     // Drag selection in body coordinates (wrapped body row as `line`, cell column as `col`); the Go textSel model.
@@ -221,6 +223,7 @@ impl App {
             import_install: None,
             last_esc: None,
             wide: HashSet::new(),
+            linked: HashSet::new(),
             perm: None,
             sel: render::TextSel::default(),
             dragging: false,
@@ -254,14 +257,18 @@ impl App {
             UiEvent::TextDelta {
                 role: Role::Main,
                 text,
-            } => feed(
-                &mut self.pending_main,
-                &text,
-                (ASST_FIRST, "  "),
-                &mut self.main_open,
-                &mut self.transcript,
-                asst_text,
-            ),
+            } => {
+                let at = self.transcript.len();
+                feed(
+                    &mut self.pending_main,
+                    &text,
+                    (ASST_FIRST, "  "),
+                    &mut self.main_open,
+                    &mut self.transcript,
+                    asst_text,
+                );
+                self.link_from(at);
+            }
             UiEvent::TextDelta {
                 role: Role::Agent(_),
                 text,
@@ -607,6 +614,7 @@ impl App {
                 self.tool_rows
                     .retain(|_, (row, _)| *row < self.transcript.len());
                 self.wide.retain(|&i| i < self.transcript.len());
+                self.linked.retain(|&i| i < self.transcript.len());
                 self.prompts.truncate(cut.cut);
                 self.editor.clear();
                 self.editor.insert_str(&cut.text);
@@ -841,11 +849,13 @@ impl App {
         if first != "/view" {
             self.prompts.push((self.transcript.len(), text.clone()));
             // Go tui.go render(): the user block is grey, "> " on its first row, and is followed by a blank row.
+            let at = self.transcript.len();
             for (i, line) in text.split('\n').enumerate() {
                 let lead = if i == 0 { PROMPT } else { "  " };
                 self.transcript
                     .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
             }
+            self.link_from(at);
             self.transcript.push(String::new());
             self.follow_tail();
         }
@@ -926,6 +936,7 @@ impl App {
     fn show_import(&mut self, imp: &ClaudeImport) {
         self.transcript.clear();
         self.wide.clear();
+        self.linked.clear();
         self.prompts.clear();
         for (kind, text) in render::import_blocks(&imp.view) {
             self.record_block(kind, &text);
@@ -1013,16 +1024,20 @@ impl App {
     // path as live output does (asst_text); other kinds are plain note rows.
     fn record_block(&mut self, kind: &str, text: &str) {
         if kind == "user" {
+            let at = self.transcript.len();
             for (i, line) in text.split('\n').enumerate() {
                 let lead = if i == 0 { PROMPT } else { "  " };
                 self.transcript
                     .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
             }
+            self.link_from(at);
         } else if kind == "asst" {
+            let at = self.transcript.len();
             for (i, line) in text.split('\n').enumerate() {
                 let lead = if i == 0 { ASST_FIRST } else { "  " };
                 self.transcript.push(format!("{lead}{}", asst_text(line)));
             }
+            self.link_from(at);
         } else {
             self.note(text);
         }
@@ -1087,6 +1102,7 @@ impl App {
 
     // Closes the open assistant block: flushes its unfinished line and adds Go's blank row after it.
     fn end_main_block(&mut self) {
+        let at = self.transcript.len();
         flush(
             &mut self.pending_main,
             (ASST_FIRST, "  "),
@@ -1094,6 +1110,7 @@ impl App {
             &mut self.transcript,
             asst_text,
         );
+        self.link_from(at);
         if self.main_open {
             self.transcript.push(String::new());
         }
@@ -1102,6 +1119,11 @@ impl App {
 
     fn note(&mut self, text: &str) {
         self.transcript.extend(text.split('\n').map(str::to_string));
+    }
+
+    // Marks the rows pushed since `at` as assistant or user rows, whose links body() styles.
+    fn link_from(&mut self, at: usize) {
+        self.linked.extend(at..self.transcript.len());
     }
 
     // A note whose rows wrap at the full width instead of the chat width.
@@ -1172,11 +1194,14 @@ impl App {
             } else {
                 width
             };
-            rows.extend(
+            // Go wrapLinked (tui.go:374, 376) styles links in assistant and user rows only; the live row is assistant text.
+            let live = i == self.transcript.len() && !self.pending_main.is_empty();
+            let wrapped = if live || self.linked.contains(&i) {
                 render::wrap_linked(l, |s| render::wrap_cells(s, w))
-                    .split('\n')
-                    .map(str::to_string),
-            );
+            } else {
+                render::wrap_cells(l, w)
+            };
+            rows.extend(wrapped.split('\n').map(str::to_string));
         }
         rows
     }
@@ -2541,6 +2566,27 @@ mod tests {
                 |r| render::strip_sgr(r).contains("exampl") && r.contains(render::LINK_URL_ON)
             )
         );
+    }
+
+    #[test]
+    fn only_assistant_and_user_rows_get_link_style() {
+        let mut app = app_with_lines(0);
+        app.note("log at /var/tmp/some/long/path/file.txt");
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "see /var/tmp/some/long/path/file.txt\n".to_string(),
+        });
+        let rows = app.body(60);
+        let note = rows
+            .iter()
+            .find(|r| render::strip_sgr(r).contains("log at"))
+            .expect("note row");
+        assert!(!note.contains(render::LINK_COLOR_ON));
+        let asst = rows
+            .iter()
+            .find(|r| render::strip_sgr(r).contains("see /var"))
+            .expect("assistant row");
+        assert!(asst.contains(render::LINK_COLOR_ON));
     }
 
     #[test]
