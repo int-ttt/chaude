@@ -54,6 +54,7 @@ name = "chaude-cli"
 version = "0.10.2"
 dependencies = [
  "chaude-core",
+ "chaude-scripts",
  "crossterm",
  "libc",
  "serde_json",
