@@ -130,6 +130,11 @@ pub enum UiEvent {
     ModeChanged {
         mode: String,
     },
+    // Progress of a resident stage (prompter summary now, later tui and coder slots). slot names the resident role.
+    Stage {
+        slot: String,
+        phase: crate::resident::StagePhase,
+    },
     // Per-turn measurement, emitted just before TurnEnd (Go record_turn.go measureLine keys).
     // cost_turn_usd = this turn's share of the session cost; cost_usd = cumulative session cost;
     // ctx = context tokens from the last assistant usage; delegations = Agent/Task calls in the turn.

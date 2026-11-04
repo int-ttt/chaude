@@ -8,6 +8,7 @@ pub mod metrics;
 pub mod mode;
 pub mod osenv;
 pub mod proc;
+pub mod resident;
 pub mod rotate;
 pub mod settings;
 

@@ -1,0 +1,254 @@
+//! Resident pipeline (Go resident.go): the prompter slot state machine and its reply rules.
+//! The slots are parked child processes; this module holds the logic that does not need one.
+
+use std::time::Duration;
+
+// How long the prompter may take to summarize (Go prompterTimeout). On timeout the input goes unchanged.
+pub const PROMPTER_TIMEOUT: Duration = Duration::from_secs(60);
+
+// Progress of one resident stage, shown as UiEvent::Stage. Failed carries the reason for the notice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StagePhase {
+    Working,
+    Done,
+    Failed(String),
+}
+
+// What the main child receives for one input, and the stage to show (None: no stage line, Go viaPrompter).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrompterOutcome {
+    pub text: String,
+    pub stage: Option<StagePhase>,
+}
+
+// The prompter slot: at most one summary is pending, holding the original input until its reply or timeout.
+#[derive(Debug, Default)]
+pub struct Prompter {
+    pending: Option<String>,
+}
+
+impl Prompter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn waiting(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    // Go viaPrompter: starts a summary of input. Err while an earlier summary is still pending.
+    pub fn start(&mut self, input: &str) -> Result<StagePhase, String> {
+        if self.pending.is_some() {
+            return Err("prompter busy".to_string());
+        }
+        self.pending = Some(input.to_string());
+        Ok(StagePhase::Working)
+    }
+
+    // The prompter's reply for the pending input. None when nothing is pending.
+    pub fn reply(&mut self, reply: &str) -> Option<PrompterOutcome> {
+        let original = self.pending.take()?;
+        if reply.is_empty() {
+            return Some(failed(original, "prompter failed: empty reply"));
+        }
+        let (_, summary) = parse_prompter_reply(reply);
+        if summary.is_empty() {
+            return Some(PrompterOutcome {
+                text: original,
+                stage: None,
+            });
+        }
+        Some(PrompterOutcome {
+            text: format!("[prompter summary]\n{summary}\n\n[original]\n{original}"),
+            stage: Some(StagePhase::Done),
+        })
+    }
+
+    // The wait exceeded PROMPTER_TIMEOUT. None when nothing is pending.
+    pub fn timeout(&mut self) -> Option<PrompterOutcome> {
+        let original = self.pending.take()?;
+        Some(failed(
+            original,
+            &format!("prompter timed out after {}s", PROMPTER_TIMEOUT.as_secs()),
+        ))
+    }
+}
+
+fn failed(original: String, reason: &str) -> PrompterOutcome {
+    PrompterOutcome {
+        text: original,
+        stage: Some(StagePhase::Failed(reason.to_string())),
+    }
+}
+
+// Go parsePrompterReply: a first non-empty line NEED_ORIGINAL (flag set) or OK is dropped; any other reply is
+// the summary whole. The summary is trimmed; empty when nothing is left.
+pub fn parse_prompter_reply(reply: &str) -> (bool, String) {
+    let s = reply.trim();
+    let (head, rest) = s.split_once('\n').unwrap_or((s, ""));
+    match head.trim() {
+        "NEED_ORIGINAL" => (true, rest.trim().to_string()),
+        "OK" => (false, rest.trim().to_string()),
+        _ => (false, s.to_string()),
+    }
+}
+
+const NEED_QUOTES: &[char] = &['`', '"', '“', '”', '「', '『'];
+const NEED_WORDS: &[&str] = &[
+    "아니",
+    "근데",
+    "말고",
+    "정정",
+    "다시 말",
+    "번역",
+    "translate",
+    "문구",
+    "표현",
+    "말투",
+    "어투",
+    "wording",
+    "문장",
+    "그대로",
+    "원문",
+];
+const PATH_EXTS: &[&str] = &[
+    "go", "py", "md", "js", "ts", "tsx", "json", "yml", "yaml", "toml", "sh", "txt", "rs", "java",
+    "c", "h", "cpp", "html", "css",
+];
+
+// Go needOriginal: true when input is too exact for a summary alone (quotes or code, many lines or long
+// text, digits, file paths, a correction, or a translation or wording request). The path check is a hand port
+// of Go's regex: a '/' between path characters, or a token named like a source file.
+pub fn need_original(s: &str) -> bool {
+    if s.chars().any(|c| NEED_QUOTES.contains(&c))
+        || s.matches('\n').count() >= 3
+        || s.chars().count() > 400
+    {
+        return true;
+    }
+    if s.chars().any(|c| c.is_ascii_digit()) || has_path(s) {
+        return true;
+    }
+    let lower = s.to_lowercase();
+    NEED_WORDS.iter().any(|w| lower.contains(w))
+}
+
+fn has_path(s: &str) -> bool {
+    let is_path = |c: char| c.is_alphanumeric() || matches!(c, '_' | '.' | '-' | '/');
+    let chars: Vec<char> = s.chars().collect();
+    let slash_path = chars.windows(3).any(|w| {
+        w[1] == '/'
+            && (w[0].is_alphanumeric() || w[0] == '_' || w[0] == '.' || w[0] == '-')
+            && is_path(w[2])
+    });
+    if slash_path {
+        return true;
+    }
+    s.split_whitespace().any(|tok| {
+        let tok = tok.trim_matches(|c: char| !c.is_alphanumeric());
+        match tok.rsplit_once('.') {
+            Some((name, ext)) => {
+                !name.is_empty()
+                    && name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+                    && PATH_EXTS.contains(&ext)
+            }
+            None => false,
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_is_composed_with_original_and_stage_done() {
+        let mut p = Prompter::new();
+        assert_eq!(p.start("fix the bug").unwrap(), StagePhase::Working);
+        assert!(p.waiting());
+        let out = p.reply("OK\nUser wants the bug fixed.\n").unwrap();
+        assert_eq!(
+            out.text,
+            "[prompter summary]\nUser wants the bug fixed.\n\n[original]\nfix the bug"
+        );
+        assert_eq!(out.stage, Some(StagePhase::Done));
+        assert!(!p.waiting());
+    }
+
+    #[test]
+    fn empty_summary_passes_input_through_without_stage() {
+        let mut p = Prompter::new();
+        p.start("hi").unwrap();
+        let out = p.reply("OK\n").unwrap();
+        assert_eq!(
+            out,
+            PrompterOutcome {
+                text: "hi".into(),
+                stage: None
+            }
+        );
+    }
+
+    #[test]
+    fn empty_reply_fails_and_passes_input_through() {
+        let mut p = Prompter::new();
+        p.start("hi").unwrap();
+        let out = p.reply("").unwrap();
+        assert_eq!(out.text, "hi");
+        assert!(matches!(out.stage, Some(StagePhase::Failed(_))));
+    }
+
+    #[test]
+    fn timeout_fails_and_passes_input_through() {
+        let mut p = Prompter::new();
+        p.start("hi").unwrap();
+        let out = p.timeout().unwrap();
+        assert_eq!(out.text, "hi");
+        assert_eq!(
+            out.stage,
+            Some(StagePhase::Failed("prompter timed out after 60s".into()))
+        );
+        assert!(p.timeout().is_none());
+    }
+
+    #[test]
+    fn second_start_while_pending_is_refused() {
+        let mut p = Prompter::new();
+        p.start("one").unwrap();
+        assert!(p.start("two").is_err());
+        assert!(p.reply("OK\ndone").is_some());
+        assert!(p.start("two").is_ok());
+    }
+
+    #[test]
+    fn reply_with_nothing_pending_is_none() {
+        assert!(Prompter::new().reply("OK\nx").is_none());
+    }
+
+    #[test]
+    fn parse_reply_drops_status_head() {
+        assert_eq!(
+            parse_prompter_reply("NEED_ORIGINAL\n  s  "),
+            (true, "s".into())
+        );
+        assert_eq!(parse_prompter_reply("OK\nx"), (false, "x".into()));
+        assert_eq!(
+            parse_prompter_reply("  plain text "),
+            (false, "plain text".into())
+        );
+        assert_eq!(parse_prompter_reply("OK"), (false, "".into()));
+    }
+
+    #[test]
+    fn need_original_flags_exact_inputs() {
+        assert!(need_original("rename `foo` to bar"));
+        assert!(need_original("line\none\ntwo\nthree"));
+        assert!(need_original("version 2 please"));
+        assert!(need_original("see src/main.rs"));
+        assert!(need_original("open config.json now"));
+        assert!(need_original("이 문장 번역해줘"));
+        assert!(!need_original("summarize what we did today"));
+    }
+}
