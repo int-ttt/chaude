@@ -8,6 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use chaude_core::record_folder;
+
 use super::bar::clip;
 use super::render::{FG_OFF, GREY_ON, ORANGE_ON};
 use super::sessview::{stamp, wheel_sel};
@@ -15,7 +17,6 @@ use super::sessview::{stamp, wheel_sel};
 // Go rpick title (tui.go draw).
 pub const TITLE: &str = "Resume a project  (↑/↓ wheel or 1-9 select · enter load · esc cancel)";
 // Go recordResume list title (bare /resume).
-const LIST_TITLE: &str = "record projects (/resume <번호|이름|검색어> opens one):";
 
 // One project folder under the record root (Go recordProject).
 #[derive(Clone, Debug, PartialEq)]
@@ -135,37 +136,6 @@ pub fn parse_entries(data: &str) -> Vec<RecordEntry> {
         .collect()
 }
 
-// Go slugify: at most 30 chars, whitespace/control/`/:*?<>|"\` become "-", empty becomes "misc".
-fn slugify(topic: &str) -> String {
-    let s: String = topic
-        .trim()
-        .chars()
-        .take(30)
-        .map(|c| {
-            if c.is_whitespace() || c.is_control() || "/:*?<>|\"\\".contains(c) {
-                '-'
-            } else {
-                c
-            }
-        })
-        .collect();
-    if s.is_empty() { "misc".to_string() } else { s }
-}
-
-// Go folderName: the basename of path, slugified, leading dots removed, never empty.
-pub fn folder_name(path: &Path) -> String {
-    let base = path
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let name = slugify(&base).trim_start_matches('.').to_string();
-    if name.is_empty() {
-        "misc".to_string()
-    } else {
-        name
-    }
-}
-
 // Go recordLegacyRe `^\d{6}-.+-\d{3,}\.md$`: an old date/topic file name sitting directly in the root.
 fn is_legacy(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".md") else {
@@ -193,33 +163,6 @@ fn sorted_entries(dir: &Path) -> Result<Vec<std::fs::DirEntry>, String> {
     Ok(ents)
 }
 
-// Go recordDir: HARNESS_RECORD_DIR if set, else <main checkout root>/record (the same root for every stacked
-// worktree, from `git rev-parse --git-common-dir`), else <cwd>/record.
-pub fn record_dir(cwd: &Path) -> PathBuf {
-    if let Some(d) = std::env::var_os("HARNESS_RECORD_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(d);
-    }
-    let common = std::process::Command::new("git")
-        .args(["rev-parse", "--git-common-dir"])
-        .current_dir(cwd)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|g| !g.is_empty());
-    match common {
-        Some(gc) => {
-            let gc = if Path::new(&gc).is_absolute() {
-                PathBuf::from(gc)
-            } else {
-                cwd.join(gc)
-            };
-            gc.parent().unwrap_or(&gc).join("record")
-        }
-        None => cwd.join("record"),
-    }
-}
-
 // Go migrateRecordRoot: moves legacy files out of root into one folder named after root's parent.
 pub fn migrate_root(root: &Path) -> Result<(), String> {
     let legacy: Vec<String> = sorted_entries(root)?
@@ -232,7 +175,7 @@ pub fn migrate_root(root: &Path) -> Result<(), String> {
         return Ok(());
     }
     let parent = root.parent().unwrap_or(Path::new("."));
-    let dst = root.join(folder_name(parent));
+    let dst = root.join(record_folder::folder_name(parent));
     std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
     for name in legacy {
         std::fs::rename(root.join(&name), dst.join(&name)).map_err(|e| e.to_string())?;
@@ -345,52 +288,15 @@ pub fn pick(root: &Path, arg: &str) -> Result<Option<Vec<RecordProject>>, String
     })
 }
 
+// The date part of a record project row (Go row date), used by core record_turn::resume.
+pub fn list_date(t: SystemTime) -> String {
+    stamp(t, true).chars().take(10).collect()
+}
+
 // Go recordProjectLines row text: "<name> · 파일 <n>개 · <yyyy-mm-dd>".
 fn row_text(p: &RecordProject) -> String {
     let date: String = stamp(p.last, true).chars().take(10).collect();
     format!("{} · 파일 {}개 · {date}", p.name, p.files)
-}
-
-// Go recordProjectLines: numbered rows can be picked with /resume <번호>.
-fn project_lines(title: &str, ps: &[RecordProject], numbered: bool) -> Vec<String> {
-    let mut l = vec![title.to_string()];
-    for (i, p) in ps.iter().enumerate() {
-        let prefix = if numbered {
-            format!("{:>2}. ", i + 1)
-        } else {
-            "  - ".to_string()
-        };
-        l.push(format!("{prefix}{}", row_text(p)));
-    }
-    l
-}
-
-// Go recordResume: answers /resume <arg> over the record root. Returns (lines, blocks) like the Go pair.
-pub fn resume(root: &Path, arg: &str) -> Result<(Vec<String>, Vec<RecordEntry>), String> {
-    let projects = list_projects(root)?;
-    if projects.is_empty() {
-        return Err(format!("no record in {}", root.display()));
-    }
-    if arg.is_empty() {
-        return Ok((project_lines(LIST_TITLE, &projects, true), Vec::new()));
-    }
-    let picked = if let Ok(n) = arg.parse::<i64>() {
-        if n < 1 || n as usize > projects.len() {
-            return Err(format!("no project {n} (1-{})", projects.len()));
-        }
-        projects[n as usize - 1].clone()
-    } else {
-        let matches = filter_projects(&projects, arg)?;
-        match matches.len() {
-            0 => return Err(format!("no project matches \"{arg}\"")),
-            1 => matches[0].clone(),
-            _ => {
-                let title = format!("record projects matching {arg} (/resume <이름> opens one):");
-                return Ok((project_lines(&title, &matches, false), Vec::new()));
-            }
-        }
-    };
-    Ok((Vec::new(), load_project(&picked.dir)?))
 }
 
 // Result of a key press on the record picker.
@@ -473,6 +379,16 @@ impl RecPicker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const LIST_TITLE: &str = "record projects (/resume <번호|이름|검색어> opens one):";
+
+    // The core resume with the picker's date format.
+    fn resume(
+        root: &Path,
+        arg: &str,
+    ) -> Result<(Vec<String>, Vec<chaude_core::record::Block>), String> {
+        chaude_core::record_turn::resume(root, arg, &list_date)
+    }
     use std::time::Duration;
 
     fn press(code: KeyCode) -> KeyEvent {

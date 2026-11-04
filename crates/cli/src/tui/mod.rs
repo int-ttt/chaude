@@ -928,7 +928,7 @@ impl App {
     // The /view list itself, also reopened after SessionResumed so the switch is visible.
     fn open_sessions(&mut self, arg: &str) {
         let mut owned: HashSet<String> = handoff::read_exit_handoff(&handoff::handoff_file(
-            &records::record_dir(std::path::Path::new(&self.welcome.cwd)),
+            &chaude_core::record::dir_for(std::path::Path::new(&self.welcome.cwd)),
         ))
         .map(|h| h.prev_owned().into_iter().collect())
         .unwrap_or_default();
@@ -949,7 +949,8 @@ impl App {
     // Go /resume <arg> over the record folder: several hits open the picker, one hit or a number loads.
     // A session id from the record folder's .sessions.jsonl resumes that session; anything else is a record lookup.
     fn resume(&mut self, arg: &str) -> Action {
-        let exit = handoff::handoff_file(&records::record_dir(Path::new(&self.welcome.cwd)));
+        let exit =
+            handoff::handoff_file(&chaude_core::record::dir_for(Path::new(&self.welcome.cwd)));
         if let Some(sid) = claude_session_id(&exit, arg) {
             let (model, rotate) = self.resume_rule.clone();
             if !picked_resumes(&exit, &sid, &model, rotate) {
@@ -958,11 +959,12 @@ impl App {
             }
             return Action::ResumeSession(sid);
         }
-        let root = records::record_dir(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
+        let root =
+            chaude_core::record::dir_for(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
         match records::pick(&root, arg) {
             Err(e) => self.note(&e),
             Ok(Some(ps)) => self.recs = Some(records::RecPicker::new(ps)),
-            Ok(None) => match records::resume(&root, arg) {
+            Ok(None) => match chaude_core::record_turn::resume(&root, arg, &records::list_date) {
                 Err(e) => self.note(&e),
                 Ok((lines, entries)) => {
                     for l in &lines {
@@ -1819,7 +1821,7 @@ fn session_mode_note(
 fn tui(mut cfg: Config) -> io::Result<()> {
     // Go writes the exit handoff into the record folder on quit; /view reads it back (prev_owned).
     if let (None, Ok(cwd)) = (&cfg.handoff_path, std::env::current_dir()) {
-        cfg.handoff_path = Some(handoff::handoff_file(&records::record_dir(&cwd)));
+        cfg.handoff_path = Some(handoff::handoff_file(&chaude_core::record::dir_for(&cwd)));
     }
     let model = settings::Settings {
         main_model: cfg.model.clone(),
