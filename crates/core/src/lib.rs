@@ -14,6 +14,7 @@ pub mod metrics_report;
 pub mod mode;
 pub mod orch;
 pub mod osenv;
+pub mod pick_child;
 pub mod proc;
 pub mod record;
 pub mod record_folder;
