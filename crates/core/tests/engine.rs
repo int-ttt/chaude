@@ -1110,3 +1110,50 @@ fn rotation_waits_for_background_agent_then_runs_at_defer_timeout() {
     assert!(rotated);
     h.shutdown();
 }
+
+#[test]
+fn abandoned_turn_ends_foreground_agent_but_not_background_agent() {
+    let _g = lock();
+    let hang = concat!(
+        r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-haiku-test"}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_bg","name":"Agent","input":{"description":"bg","prompt":"p","subagent_type":"general"}}]},"session_id":"s1","parent_tool_use_id":null}"#,
+        "\n",
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bg","content":"Async agent launched successfully.","is_error":false}]},"session_id":"s1","parent_tool_use_id":null}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fg","name":"Agent","input":{"description":"fg","prompt":"p","subagent_type":"general"}}]},"session_id":"s1","parent_tool_use_id":null}"#,
+        "\n",
+    );
+    let f = fake_stray(
+        "abandon_bg",
+        hang,
+        &fs::read_to_string(fixture("text_turn.jsonl")).unwrap(),
+    );
+    let cfg = Config {
+        interrupt_grace: Duration::from_millis(200),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("scan");
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("engine went silent");
+        if matches!(ev, UiEvent::AgentStart { ref id, .. } if id == "toolu_fg") {
+            break;
+        }
+    }
+    h.interrupt(InterruptSource::EscKey);
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_fg")),
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg")),
+        "{evs:?}"
+    );
+    h.shutdown();
+}

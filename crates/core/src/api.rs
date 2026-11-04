@@ -314,6 +314,9 @@ struct State {
     agents: HashMap<String, Instant>,
     // A rotation that was due while background agents ran: when it was first deferred (Go rotate_defer).
     rotate_deferred: Option<Instant>,
+    // Agents whose launch result said "async": they keep running past the turn (Go background agents),
+    // so an abandoned turn does not end them.
+    background: HashSet<String>,
     // tool_use ids still waiting for their tool_result; the inactivity timer is paused while non-empty.
     open_tools: HashSet<String>,
     // Last claude line or turn start; the inactivity timer measures from here.
@@ -393,6 +396,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         tools: HashSet::new(),
         agents: HashMap::new(),
         rotate_deferred: None,
+        background: HashSet::new(),
         open_tools: HashSet::new(),
         last_activity: Instant::now(),
         interrupted_at: None,
@@ -879,9 +883,11 @@ impl State {
         });
         // A background agent keeps running after its launch result; it ends later, which E1 does not track.
         if text.contains(ASYNC_AGENT_MARK) {
+            self.background.insert(id.clone());
             self.emit(UiEvent::AgentBackground { id });
             return;
         }
+        self.background.remove(&id);
         if let Some(t0) = self.agents.remove(&id) {
             self.emit(UiEvent::AgentEnd {
                 id,
@@ -950,10 +956,15 @@ impl State {
         )));
     }
 
-    // Interrupted turn gave no result within the grace period (Go: finishForeground). Agents still open are
-    // ended here, then the turn is ended as if it had finished.
+    // Interrupted turn gave no result within the grace period (Go: finishForeground). Foreground agents still
+    // open are ended here; background agents keep running. Then the turn is ended as if it had finished.
     fn abandon_turn(&mut self) {
-        let ids: Vec<String> = self.agents.keys().cloned().collect();
+        let ids: Vec<String> = self
+            .agents
+            .keys()
+            .filter(|id| !self.background.contains(*id))
+            .cloned()
+            .collect();
         for id in ids {
             if let Some(t0) = self.agents.remove(&id) {
                 self.emit(UiEvent::AgentEnd {
