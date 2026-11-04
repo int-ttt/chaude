@@ -222,7 +222,7 @@ pub fn parse_entries(data: &str) -> Vec<Entry> {
 
 // Go category.go catRe for one line: a line ending in `[cat: X]` or `[cat-switch: X]`, with optional
 // spaces, `*`, `>` or backticks around it. Returns (is cat-switch, X).
-fn cat_mark(line: &str) -> Option<(bool, &str)> {
+fn cat_mark_span(line: &str) -> Option<(usize, bool, &str)> {
     let t = line.trim_end_matches(|c: char| c.is_whitespace() || c == '*' || c == '`');
     let body = t.strip_suffix(']')?;
     for (p, _) in body.match_indices('[') {
@@ -234,14 +234,32 @@ fn cat_mark(line: &str) -> Option<(bool, &str)> {
         if !(before.is_empty() || before.ends_with(' ') || before.ends_with('\t')) {
             continue;
         }
+        // the regex consumes the one space/tab before the marker, or starts at line start
+        let start = before.len().saturating_sub(1);
         if let Some(label) = inner.strip_prefix("cat-switch:") {
-            return Some((true, label.trim()));
+            return Some((start, true, label.trim()));
         }
         if let Some(label) = inner.strip_prefix("cat:") {
-            return Some((false, label.trim()));
+            return Some((start, false, label.trim()));
         }
     }
     None
+}
+
+fn cat_mark(line: &str) -> Option<(bool, &str)> {
+    cat_mark_span(line).map(|(_, switch, label)| (switch, label))
+}
+
+// Go catRe.ReplaceAllString(reply, ""): each line loses its trailing [cat: X] / [cat-switch: X] mark.
+pub fn strip_cat_marks(reply: &str) -> String {
+    reply
+        .split('\n')
+        .map(|line| match cat_mark_span(line) {
+            Some((start, _, _)) => &line[..start],
+            None => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // Go recordTopicOf: the last [cat-switch: X], else the last [cat: X], else prev.

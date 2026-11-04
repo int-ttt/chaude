@@ -26,7 +26,8 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - done: resident MCP loopback requires a per-run token line (d50d91f; mcp::new_token 256-bit from /dev/urandom, token in mcp.json env CHAUDE_MCP_TOKEN, not argv).
      - done: record file format (record.rs: render/parse_entries, append_turn with lock, next_number, topic_of, slugify, dir_for; Stamp passed in, no local-time dep).
      - done: mcp temp dir guard (mcp::McpConfig/start_owned removes chaude-mcp-* dir on drop; api.rs still calls mcp::start, hook needed).
-     - open: record_turn/record_folder (turn assembly, project folders), orch, rotation details beyond idle, import/--from-claude, metrics.
+     - done: record_folder.rs (project folders, legacy root migration, list/filter/load, /resume lines; date fn passed in) and record_turn.rs (RecordState topic/save, measure_line, resume, pick).
+     - open: api.rs turn-end call into RecordState::save and /resume wiring (A-owned hook), orch, rotation details beyond idle, import/--from-claude, metrics.
 4. Terminal UI without Charm: inline streaming output, input line with Korean IME + unicode width, spinner, status/usage bar, slash commands.
    - status (2026-11-04, crates/cli/src/tui):
      - done: inline streaming output (live feed + record load, asst rows via markdown path, tool_result_text).
