@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Release: the release archives are now built from the Rust workspace (`crates/cli`, binary `chaude`) for the same four targets: darwin/arm64, linux/amd64, linux/arm64, windows/amd64. Asset names (`chaude_<version>_<os>_<arch>.tar.gz`, windows `.zip`) and `checksums.txt` are unchanged, so `install.sh`, `install.ps1` and `chaude update` keep working.
+- Release: the Go build under `deprecated/` is no longer published. Its release job is disabled, not deleted.
+- Parity: the Rust build does not yet cover every Go feature. The open phases are listed in `plan/rust-port.md`.
 
 ## 0.10.2 - 2026-11-04
 - Project setup: when chaude opens a folder, it writes the agent definitions (`haiku-*.md`, `opus-architect.md`) into `<cwd>/.claude/agents`. Existing files are never overwritten.

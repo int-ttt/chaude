@@ -12,42 +12,8 @@ on:
 permissions:
   contents: write
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    env:
-      TAG: ${{ inputs.tag || github.ref_name }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: deprecated/src/main/intt/go.mod
-          cache-dependency-path: deprecated/src/main/intt/go.sum
-      - name: Build archives
-        env:
-          TARGETS: darwin/arm64 linux/amd64 linux/arm64 windows/amd64
-        run: sh scripts/build-release.sh "${TAG}"
-      - name: Release notes
-        run: |
-          prev=$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^" 2>/dev/null || true)
-          {
-            if [ -n "$prev" ]; then
-              echo "## Changes since ${prev}"; echo
-              git log --no-merges --pretty='- %s (%h)' "${prev}..${TAG}"
-              echo; echo "Full diff: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${TAG}"
-            else
-              echo "## Initial release"
-            fi
-          } > dist/notes.md
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${TAG}" dist/*.tar.gz dist/*.zip dist/checksums.txt \
-            --title "${TAG}" --notes-file dist/notes.md
-  # Rust build for the same four targets. Artifacts only: the Go release job above stays the published release.
+  # Rust build (crates/cli, binary chaude) for the four release targets. Artifacts only; the release job publishes them.
+  # Asset names must match crates/update asset_name and install.sh / install.ps1.
   rust-build:
     strategy:
       fail-fast: false
@@ -104,3 +70,82 @@ jobs:
           name: chaude-rust-${{ matrix.os }}-${{ matrix.arch }}
           path: dist-rust/*
           if-no-files-found: error
+  # Publishes the Rust archives. checksums.txt is required by `chaude update` and install.sh / install.ps1.
+  release:
+    needs: rust-build
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chaude-rust-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums
+        run: |
+          cd dist
+          n=$(ls chaude_*.tar.gz chaude_*.zip 2>/dev/null | wc -l || true)
+          [ "$n" -eq 4 ] || { echo "expected 4 archives, found ${n}" >&2; exit 1; }
+          sha256sum chaude_*.tar.gz chaude_*.zip > checksums.txt
+          cat checksums.txt
+      - name: Release notes
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^" 2>/dev/null || true)
+          {
+            if [ -n "$prev" ]; then
+              echo "## Changes since ${prev}"; echo
+              git log --no-merges --pretty='- %s (%h)' "${prev}..${TAG}"
+              echo; echo "Full diff: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${TAG}"
+            else
+              echo "## Initial release"
+            fi
+          } > dist/notes.md
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${TAG}" dist/*.tar.gz dist/*.zip dist/checksums.txt \
+            --title "${TAG}" --notes-file dist/notes.md
+  # Go build (deprecated/src/main/intt). Disabled since the Rust switch: it no longer publishes.
+  # Kept, not deleted, until deprecated/ is deleted (6th release after 0.10.0). Then delete this job.
+  go-release:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: deprecated/src/main/intt/go.mod
+          cache-dependency-path: deprecated/src/main/intt/go.sum
+      - name: Build archives
+        env:
+          TARGETS: darwin/arm64 linux/amd64 linux/arm64 windows/amd64
+        run: sh scripts/build-release.sh "${TAG}"
+      - name: Release notes
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "${TAG}^" 2>/dev/null || true)
+          {
+            if [ -n "$prev" ]; then
+              echo "## Changes since ${prev}"; echo
+              git log --no-merges --pretty='- %s (%h)' "${prev}..${TAG}"
+              echo; echo "Full diff: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${TAG}"
+            else
+              echo "## Initial release"
+            fi
+          } > dist/notes.md
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${TAG}" dist/*.tar.gz dist/*.zip dist/checksums.txt \
+            --title "${TAG}" --notes-file dist/notes.md

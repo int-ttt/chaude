@@ -1,13 +1,13 @@
 # chaude
 
 [![Latest release](https://img.shields.io/github/v/release/int-ttt/chaude)](https://github.com/int-ttt/chaude/releases/latest)
-[![Go 1.22+](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](deprecated/src/main/intt/go.mod)
+[![Rust stable](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)](rust-toolchain.toml)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#install)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **English** | [한국어](README.ko.md)
 
-> **Deprecation notice:** The Go implementation under `deprecated/` is deprecated. It is still the binary shipped in releases. It is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. The Rust workspace at the repo root is the successor and is still in progress.
+> **Deprecation notice:** The Go implementation under `deprecated/` is deprecated. Release archives are built from the Rust workspace at the repo root (`crates/cli`, binary `chaude`) from the Rust switch on, with the same asset names. The Go build is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. The Rust version does not yet cover every Go feature; see `plan/rust-port.md`.
 
 ## Effect
 
@@ -199,11 +199,14 @@ A. In one ping-pong game comparison, cost was -42.7% versus plain Opus (average 
 A. Yes. Use `/import [ID|latest]` or `/resume claude`, or run `chaude --from-claude latest`. The import view shows the whole transcript, including thinking, tool calls and results, and subagent messages.
 ## Contributing
 
-Build (Go 1.22 or later) and test from `deprecated/src/main/intt`:
+Build (Rust stable, pinned by `rust-toolchain.toml`) and test from the repo root:
 
 ```sh
-cd deprecated/src/main/intt && go build -o ../../../../bin/chaude ./cmd/chaude && go test ./...
+cargo build --release -p chaude-cli   # binary: target/release/chaude
+cargo test
 ```
+
+The Go implementation is kept for reference under `deprecated/src/main/intt` (Go 1.22 or later).
 
 Issues: report bugs and request features on [GitHub Issues](https://github.com/int-ttt/chaude/issues).
 
