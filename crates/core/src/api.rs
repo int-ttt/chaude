@@ -183,6 +183,9 @@ pub struct Config {
     // Go context rotation: a turn that ends at or above this many context tokens starts a handoff and a fresh
     // child (Opus uses its own threshold, see rotate::threshold_for). Zero = rotation off.
     pub rotate_threshold: u64,
+    // Go --rotate-defer-timeout: how long a due rotation waits for background agents before it runs anyway.
+    // Zero = rotate at once.
+    pub rotate_defer_timeout: Duration,
 }
 
 impl Default for Config {
@@ -203,6 +206,7 @@ impl Default for Config {
             metrics_dir: None,
             transcript: None,
             rotate_threshold: HAIKU_THRESHOLD,
+            rotate_defer_timeout: Duration::from_secs(600),
         }
     }
 }
@@ -308,6 +312,8 @@ struct State {
     tools: HashSet<String>,
     // Agent tool_use id -> start time, for AgentEnd elapsed_ms.
     agents: HashMap<String, Instant>,
+    // A rotation that was due while background agents ran: when it was first deferred (Go rotate_defer).
+    rotate_deferred: Option<Instant>,
     // tool_use ids still waiting for their tool_result; the inactivity timer is paused while non-empty.
     open_tools: HashSet<String>,
     // Last claude line or turn start; the inactivity timer measures from here.
@@ -386,6 +392,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         cost_usd: 0.0,
         tools: HashSet::new(),
         agents: HashMap::new(),
+        rotate_deferred: None,
         open_tools: HashSet::new(),
         last_activity: Instant::now(),
         interrupted_at: None,
@@ -881,13 +888,24 @@ impl State {
                 elapsed_ms: t0.elapsed().as_millis() as u64,
             });
         }
+        // The last background agent finished while the child is idle: the deferred rotation runs now.
+        if self.agents.is_empty()
+            && !self.busy
+            && self.rotate_deferred.is_some()
+            && self.rotation_wanted()
+        {
+            self.run_deferred_rotation();
+        }
     }
 
     // How long the actor may block before the inactivity timer must be checked. None means block until input.
     // Idle, or any tool_use without its result, pauses the timer.
     fn wait_budget(&self) -> Option<Duration> {
         if !self.busy {
-            return None;
+            // Idle with a deferred rotation: wake when its defer timeout ends.
+            return self
+                .defer_left()
+                .map(|left| left.max(Duration::from_millis(1)));
         }
         if let Some(t0) = self.interrupted_at {
             let left = self.cfg.interrupt_grace.saturating_sub(t0.elapsed());
@@ -907,6 +925,9 @@ impl State {
     // notice repeats once per quiet period rather than on every wakeup.
     fn on_quiet(&mut self) {
         if !self.busy {
+            if self.defer_left().is_some_and(|d| d.is_zero()) {
+                self.run_deferred_rotation();
+            }
             return;
         }
         if let Some(t0) = self.interrupted_at {
@@ -995,8 +1016,17 @@ impl State {
         self.open_tools.clear();
         self.emit(UiEvent::TurnEnd { duration_ms });
         self.remember_turn();
-        if self.rotation_due() && self.start_handoff() {
-            return;
+        if self.rotation_wanted() {
+            if self.rotation_due() {
+                self.rotate_deferred = None;
+                if self.start_handoff() {
+                    return;
+                }
+            } else {
+                self.rotate_deferred.get_or_insert_with(Instant::now);
+            }
+        } else {
+            self.rotate_deferred = None;
         }
         self.next_turn();
     }
@@ -1028,13 +1058,35 @@ impl State {
         }
     }
 
-    // Go shouldRotate at turn end. Rotation waits while background agents run (rotate_defer, not yet ported).
-    fn rotation_due(&self) -> bool {
+    // Go shouldRotate at turn end: the context is at or past the threshold.
+    fn rotation_wanted(&self) -> bool {
         let thr = threshold_for(&self.model, self.cfg.rotate_threshold);
-        self.cfg.rotate_threshold > 0
-            && self.proc.is_some()
-            && self.agents.is_empty()
-            && should_rotate(self.ctx_tokens, thr)
+        self.cfg.rotate_threshold > 0 && self.proc.is_some() && should_rotate(self.ctx_tokens, thr)
+    }
+
+    // Time left before a deferred rotation runs anyway. None when nothing is deferred.
+    fn defer_left(&self) -> Option<Duration> {
+        self.rotate_deferred
+            .map(|t0| self.cfg.rotate_defer_timeout.saturating_sub(t0.elapsed()))
+    }
+
+    // A wanted rotation may start now: no background agents, the defer timeout passed, or zero timeout.
+    fn rotation_due(&self) -> bool {
+        self.rotation_wanted()
+            && (self.agents.is_empty()
+                || self.cfg.rotate_defer_timeout.is_zero()
+                || self.defer_left().is_some_and(|d| d.is_zero()))
+    }
+
+    // Go runDeferredRotation: the held handoff runs while the child is idle, so the turn is marked busy.
+    fn run_deferred_rotation(&mut self) {
+        self.rotate_deferred = None;
+        self.busy = true;
+        self.emit(UiEvent::Busy(true));
+        if !self.start_handoff() {
+            self.busy = false;
+            self.emit(UiEvent::Busy(false));
+        }
     }
 
     // Sends the hidden handoff prompt on the current child. Returns false when it could not be sent.

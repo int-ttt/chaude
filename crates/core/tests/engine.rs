@@ -1077,3 +1077,36 @@ fn context_rotation_hands_off_and_fresh_child_gets_snapshot() {
     assert!(frame.contains("again"));
     h.shutdown();
 }
+
+#[test]
+fn rotation_waits_for_background_agent_then_runs_at_defer_timeout() {
+    let _g = lock();
+    let f = fake("defer", &["bg_rotate_turn.jsonl", "handoff_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let evs = until_idle(&rx);
+    // The agent never reports a result, so the rotation is deferred: no handoff prompt yet.
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::Rotated { .. })),
+        "{evs:?}"
+    );
+    assert!(
+        !f.dir.join("stdin.log").exists()
+            || !fs::read_to_string(f.dir.join("stdin.log"))
+                .unwrap()
+                .contains("Write a handoff note")
+    );
+    // After the defer timeout the rotation runs while idle.
+    let mut rotated = false;
+    while let Ok(e) = rx.recv_timeout(Duration::from_secs(5)) {
+        if matches!(e, UiEvent::Rotated { .. }) {
+            rotated = true;
+            break;
+        }
+    }
+    assert!(rotated);
+    h.shutdown();
+}
