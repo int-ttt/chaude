@@ -5,10 +5,11 @@ mod mcp_resident;
 mod tui;
 
 use std::env;
+use std::path::PathBuf;
 use std::process;
 
 use chaude_core::api::Config;
-use chaude_core::{orch, settings};
+use chaude_core::{metrics_report, orch, settings};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -16,6 +17,7 @@ const USAGE: &str = "usage: chaude [command] [args]
   (no command)           interactive session (inline TUI; plain line mode when stdin is not a TTY)
   mcp-resident <tcp:addr>  stdio bridge to the resident coder MCP socket (used by the main child's mcp.json)
   gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]   OS-specific .claude/settings.json
+  metrics [--dir D] [--csv]  summary of the per-turn metrics (or CSV rows); --dir defaults to <record>/metrics
   --version, -v          print version
   -h, --help             print this help";
 
@@ -96,6 +98,42 @@ fn run_tui(args: &[String]) -> i32 {
     }
 }
 
+// Go MetricsMain: `chaude metrics [--dir D] [--csv]`. Prints the summary, or the CSV rows with --csv.
+fn metrics_main(args: &[String]) -> i32 {
+    let mut dir = "auto".to_string();
+    let mut csv = false;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--csv" => csv = true,
+            "--dir" => match it.next() {
+                Some(v) => dir = v.clone(),
+                None => {
+                    eprintln!("chaude metrics: --dir needs a value\n{USAGE}");
+                    return 2;
+                }
+            },
+            _ if a.starts_with("--dir=") => dir = a["--dir=".len()..].to_string(),
+            _ => {
+                eprintln!("chaude metrics: unknown argument {a}\n{USAGE}");
+                return 2;
+            }
+        }
+    }
+    let dir = if dir == "auto" {
+        let cwd = env::current_dir().unwrap_or_else(|_| ".".into());
+        chaude_core::record::dir_for(&cwd).join("metrics")
+    } else {
+        PathBuf::from(dir)
+    };
+    if csv {
+        print!("{}", metrics_report::csv(&dir));
+    } else {
+        print!("{}", metrics_report::summary(&dir));
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,6 +202,7 @@ fn main() {
         }
         None | Some("--orch" | "--model") => run_tui(&args),
         Some(a) if a.starts_with("--model=") => run_tui(&args),
+        Some("metrics") => metrics_main(&args[1..]),
         Some(cmd) => {
             eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");
             2
