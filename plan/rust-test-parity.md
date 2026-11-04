@@ -12,10 +12,10 @@ Dedupe key: Go test name (320 unique names, no collisions across packages). Prec
 
 | status | count |
 |---|---|
-| covered | 228 |
+| covered | 229 |
 | partial | 17 |
 | ignored | 48 |
-| missing | 2 |
+| missing | 1 |
 | n-a | 25 |
 | **total** | **320** |
 
@@ -151,7 +151,7 @@ Ignored by reason (sum 48):
 | TestInputHistory | internal/harness/history_test.go | cli/src/tui/edit.rs::history_walks_back_and_forth_and_restores_the_draft | covered |  |
 | TestInputHistoryCap | internal/harness/history_test.go | cli/src/tui/edit.rs::history_file_load_rules_skip_bad_lines_and_cap | covered | name-level: cap checked on file load only |
 | TestRewindState | internal/harness/history_test.go | crates/cli/src/tui/rewind.rs::rewind_state_follows_go | covered | body read: rewind open/move/wrap/confirm/cancel match Go (rewind.rs:146) |
-| TestAgentCounts | internal/harness/history_test.go | crates/core/src/agent_store.rs::running | missing | no counts() fg/bg helper; running() and background flag exist, no fg/bg count test |
+| TestAgentCounts | internal/harness/history_test.go | crates/core/tests/parity_final2.rs::agent_counts | covered | fg/bg counts via running() filtered by background |
 | TestIdleControlRequestAnswered | internal/harness/idle_test.go | crates/core/tests/engine.rs::can_use_tool_in_default_mode_asks_ui_and_sends_answer | partial | body read: Rust covers part of Go body; remaining assertions need ignored stub (not written, crates/core owned elsewhere) |
 | TestIdleDeniesWhenNoPrompt | internal/harness/idle_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): idle can_use_tool with no UI prompt must deny  [p12: idle_denies_when_no_prompt] |
 | TestStrayLateResultSkipped | internal/harness/idle_test.go | crates/core/tests/engine.rs::stray_result_of_abandoned_turn_does_not_end_next_turn | covered | name-level match |
