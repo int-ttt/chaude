@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+use crate::agent_store::AgentStore;
 use crate::budget::{self, Budget};
 use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
@@ -717,6 +718,10 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     };
     let model = cfg.model.clone();
     let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));
+    // Go repl.go start(): agents a crashed harness left running are marked interrupted (before the reconcile).
+    if let Some(path) = &cfg.agents_file {
+        AgentStore::new(path).interrupt_running(false);
+    }
     let clients = cfg.clients_file.clone().map(ClientRegistry::new);
     let metrics = Arc::new(Metrics::new(
         cfg.metrics_dir.clone(),
