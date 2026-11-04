@@ -120,22 +120,22 @@ Counts (filled at end): see the "Counts" section.
 ## Status bar, spinner, notices
 
 - [ ] B01 Status line: state, model, "rot N", "agents N running (bg N)" (statusLine tui.go:1193-1210) · test: none · core: rotation count, agent tracker
-- [ ] B02 Main status text while busy with elapsed "· Mm SSs" (mainStatusText tui.go:888-898) · test: none · core: turn start time
-- [ ] B03 Spinner while busy (sp Tick Init tui.go:280) · test: none · core: none
-- [ ] B04 Status text prefixed by agent name; format (TestAgentStatusTextPrefixedName panel_test.go:314; TestAgentStatusFormat panel_test.go:340; agentStatusText tui.go:1527) · test: TestAgentStatusFormat (panel_test.go:340) · core: agent events
-- [ ] B05 Agent state dot: state mapping (agentState tui.go:1505; agentDot tui.go:1520) · test: TestStalledOutputFileKeepsAgentRunningUntilDoneSignal (panel_test.go:169) · core: agent done signal
-- [ ] B06 Model prefix hidden when already in name (hasModelPrefix tui.go:1546) · test: none · core: none
+- [x] B02 Main status text while busy with elapsed "· Mm SSs" (mainStatusText tui.go:888-898) · test: none · core: turn start time  · audited (diff): busy_row passes no last_tool (mod.rs:1254-1270, bar.rs:199 takes it); Go appends lastTool (tui.go:900-906)
+- [x] B03 Spinner while busy (sp Tick Init tui.go:280) · test: none · core: none  · audited (same): bar.rs:192 spinner_frame; tick at mod.rs:593
+- [x] B04 Status text prefixed by agent name; format (TestAgentStatusTextPrefixedName panel_test.go:314; TestAgentStatusFormat panel_test.go:340; agentStatusText tui.go:1527) · test: TestAgentStatusFormat (panel_test.go:340) · core: agent events  · audited (same): bar.rs:269-292 agent_status_text + tests
+- [x] B05 Agent state dot: state mapping (agentState tui.go:1505; agentDot tui.go:1520) · test: TestStalledOutputFileKeepsAgentRunningUntilDoneSignal (panel_test.go:169) · core: agent done signal  · audited (same): bar.rs:225 agent_state; dot wiring in agent rows
+- [x] B06 Model prefix hidden when already in name (hasModelPrefix tui.go:1546) · test: none · core: none  · audited (same): bar.rs:269-292 has_model_prefix + tests
 - [ ] B07 Thinking indicator only for foreground session (TestThinkingOnlyForForeground panel_test.go:120; TestSessionPanelAndThinking panel_test.go:17) · test: TestThinkingOnlyForForeground (panel_test.go:120) · core: thinking deltas
 - [ ] B08 Idle tick refreshes panel when background agent finishes (TestIdleTickRefreshesWhenBackgroundFinishes panel_test.go:55) · test: TestIdleTickRefreshesWhenBackgroundFinishes (panel_test.go:55) · core: agent done
 - [ ] B09 Background finish notification finishes oldest background row (TestUserEventNotificationFinishesBackground panel_test.go:384) · test: TestUserEventNotificationFinishesBackground (panel_test.go:384) · core: task-notification user events
-- [ ] B10 Done line for a finished agent (doneLine agentview/tui note; markDoneLocked drain.go/agentview.go:59) · test: none · core: agent done
-- [ ] B11 Stage notices "· main 처리중", "· agent <type> 호출", "· agent <type> 완료", "· main 완료" (repl.go:~790-800; stage resident.go:255) · test: none · core: resident child events
-- [ ] B12 Non-stage notices via addNotice / noteMsg (resident.go:277; drain.go:96) · test: none · core: drain/agent notices
-- [ ] B13 Orphan notice at start: "[orphan] claude pid N … still running" (reconcileStart repl.go:1400-1410 area) · test: none · core: registry reconcile
-- [ ] B14 Budget stop notice "[budget] … task stopped" (repl.go:839) · test: none · core: budget + total_cost_usd
-- [ ] B15 Context-rotated notice "── context rotated #N (reason; …) ──" (repl.go:1019) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff
-- [ ] B16 "── new session ──" on /clear (clear repl.go:1409-1412) · test: none · core: session start
-- [ ] B17 Quiet-wait notice "[no output for <d>; still waiting, Esc/Ctrl+C to interrupt]" once per quiet stretch with no open tool (repl.go:788; quiet closure repl.go:~775-790) · test: TestTurnQuietNoticeKeepsWaiting (turn_wait_test.go:63) · core: result/events stream
+- [x] B10 Done line for a finished agent (doneLine agentview/tui note; markDoneLocked drain.go/agentview.go:59) · test: none · core: agent done  · audited (same): bar.rs:305 done line; mod.rs:1229-1232
+- [x] B11 Stage notices "· main 처리중", "· agent <type> 호출", "· agent <type> 완료", "· main 완료" (repl.go:~790-800; stage resident.go:255) · test: none · core: resident child events  · audited (same): mod.rs:485-488 Stage -> note; stage_text mod.rs:1753-1764 (· main 처리중/· agent X 호출/완료)
+- [x] B12 Non-stage notices via addNotice / noteMsg (resident.go:277; drain.go:96) · test: none · core: drain/agent notices  · audited (same): mod.rs:489-494 error note block (Go addNotice/noteMsg)
+- [x] B13 Orphan notice at start: "[orphan] claude pid N … still running" (reconcileStart repl.go:1400-1410 area) · test: none · core: registry reconcile  · audited (same): bar.rs:319 orphan_notice; mod.rs:467
+- [x] B14 Budget stop notice "[budget] … task stopped" (repl.go:839) · test: none · core: budget + total_cost_usd  · audited (same): bar.rs:327 budget_notice; mod.rs:556
+- [x] B15 Context-rotated notice "── context rotated #N (reason; …) ──" (repl.go:1019) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff  · audited (same): bar.rs:331-337 rotated_notice; mod.rs:472
+- [x] B16 "── new session ──" on /clear (clear repl.go:1409-1412) · test: none · core: session start  · audited (same): bar.rs:340-341 NEW_SESSION_NOTICE; mod.rs:454
+- [x] B17 Quiet-wait notice "[no output for <d>; still waiting, Esc/Ctrl+C to interrupt]" once per quiet stretch with no open tool (repl.go:788; quiet closure repl.go:~775-790) · test: TestTurnQuietNoticeKeepsWaiting (turn_wait_test.go:63) · core: result/events stream  · audited (same): bar.rs:346 quiet_notice; mod.rs:590
 - [ ] B18 Long-running Agent/Task tool call is waited for with no cap (repl.go:~800 comment; TestTurnWaitsForOpenAgentToolResult turn_wait_test.go:38) · test: TestTurnWaitsForOpenAgentToolResult (turn_wait_test.go:38) · core: tool_use/tool_result pairing
 - [ ] B19 Stalled output file keeps agent running until done signal (panel_test.go:169) · test: TestStalledOutputFileKeepsAgentRunningUntilDoneSignal (panel_test.go:169) · core: output file / done signal
 - [ ] B20 Usage popup and budget flows: /usage allowed while busy (usagebusy_test.go:10-51) · test: TestUsageAllowedWhileBusy (usagebusy_test.go:10), TestUsageMsgWhileBusyOpensPopup (usagebusy_test.go:51) · core: one-shot claude call
@@ -143,7 +143,7 @@ Counts (filled at end): see the "Counts" section.
 - [ ] B22 Queue sent on done, in order, merged with "\n\n" (mergePrompts tui.go:876; TestQueueSentOnDoneInOrder panel_test.go:235) · test: TestQueueSentOnDoneInOrder (panel_test.go:235) · core: turn done
 - [ ] B23 Background-only agents do not queue input (TestBackgroundOnlyDoesNotQueue panel_test.go:280) · test: TestBackgroundOnlyDoesNotQueue (panel_test.go:280) · core: agent tracker
 - [ ] B24 Esc during foreground agent clears foreground panel (TestEscInterruptClearsForegroundPanel panel_test.go:38) · test: TestEscInterruptClearsForegroundPanel (panel_test.go:38) · core: interrupt
-- [ ] B25 Copy note and transient status line (copyNote field tui.go:~70; copySelected selection.go:150) · test: none · core: none
+- [x] B25 Copy note and transient status line (copyNote field tui.go:~70; copySelected selection.go:150) · test: none · core: none  · audited (same): mod.rs:1504 복사됨 (N자); test mod.rs:3613 asserts 5자; Go selection.go:161-166
 
 ## Slash commands
 

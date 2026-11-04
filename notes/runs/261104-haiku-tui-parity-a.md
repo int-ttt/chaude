@@ -52,3 +52,12 @@ core: not touched
 - commit: see git log for the S group commit (message: fix(tui): S11 copy order, agent view and settings wheel)
 - remaining: B01-B25, C01-C33
 - blocked-core: B21-B23 (queue text, core emits Queued(usize) only)
+
+## batch 3: group B (done, partial)
+- audited: 25 of 25 rows reviewed; 14 marked [x] audited.
+- same (14): B03 spinner, B04 agent text, B05 agent state, B06 model prefix, B10 done line, B11 stage notices, B12 error note, B13 orphan, B14 budget, B15 rotated, B16 new session, B17 quiet notice, B25 copy note; B02 is diff.
+- diff (1): B02 busy row omits lastTool suffix (mod.rs:1254-1270 passes "" to bar.rs:199; Go tui.go:900-906).
+- pending, left [ ] (not verified): B01 status hint text, B07 foreground-only thinking, B08 idle refresh, B09 notification finish, B18 agent wait cap, B19 stalled output, B20 /usage while busy, B24 Esc clears foreground panel.
+- blocked-core/other coder: B21, B22, B23 (queue; needs QueueTexts consumer at mod.rs:561, uncommitted L-group work, and core support).
+- code fixes: none in group B.
+- tests: plan-only commit; no code change. cargo not rerun for this batch.
