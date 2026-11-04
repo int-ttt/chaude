@@ -21,20 +21,20 @@ Counts (filled at end): see the "Counts" section.
 
 ## Layout / regions
 
-- [ ] L01 Altscreen full-screen layout: scroll viewport on top, queue/panel rows, input box, status line (View tui.go:1222; runTUI tui.go:1378)  · test: none · core: none (UI only)
-- [ ] L02 Viewport height is recomputed from terminal size and the panel/queue/input heights each frame (layout tui.go:419; WindowSizeMsg tui.go:447) · test: TestPanelScrollWindow (panel_test.go:367) · core: none
-- [ ] L03 Before the first WindowSizeMsg the view shows "starting…" (View tui.go:1223) · test: none · core: none
-- [ ] L04 Message blocks (user/asst/tool/result/note) render in the viewport in order (render tui.go:348-383) · test: TestToolResultCavemanHidden (tui_caveman_test.go:28) · core: transcript events
-- [ ] L05 Welcome banner with model and rotate threshold on start (welcome tui.go:295-314) · test: none · core: effectiveThreshold
-- [ ] L06 Bottom-of-screen background rows (sub-agent rows) sit below the input box (bgLines tui.go:1443; test) · test: TestBackgroundRowsBelowInputBox (panel_test.go:133) · core: agent tracker
-- [ ] L07 Foreground panel rows above the input (panelLines tui.go:1440) with "more" row when truncated · test: TestPanelMoreRowAndSmallHeight (panel_test.go:100) · core: agent tracker
-- [ ] L08 Small terminal heights do not overflow the frame (panel/bg/queue) · test: TestBackgroundSmallHeightNoOverflow (panel_test.go:153), TestQueueSmallHeightNoOverflow (panel_test.go:289) · core: none
-- [ ] L09 Slash suggestion popup above input, capped at maxPop=8 rows (suggestions tui.go:974; maxPop tui.go:989) · test: none · core: none
-- [ ] L10 Input box height grows with content up to maxInputRows=5 (tui.go:988; Height input.go:202) · test: none · core: none
-- [ ] L11 Queue lines dimmed above input while busy, "… +N 대기" when many (queueLines tui.go:921-939) · test: TestQueueLinesDimAboveInput (panel_test.go:254) · core: none
-- [ ] L12 Status line at bottom (statusLine tui.go:1193) · test: none · core: none
-- [ ] L13 Overlay screens replace the viewport: agent view, usage view, session view, settings, rewind, record picker (View tui.go:1222-1362) · test: TestUsageOpenNotInline (usageview_test.go:94) · core: none
-- [ ] L14 Cursor row tracking so the real terminal cursor lands in the input box (syncCursor tui.go:999; cursorWriter tui.go:226-260) · test: TestCursorRowMatchesPanelAfterTick (panel_test.go:79), TestCursorRowIncludesBackgroundRows (panel_test.go:301) · core: none
+- [x] L01 Altscreen full-screen layout: scroll viewport on top, queue/panel rows, input box, status line (View tui.go:1222; runTUI tui.go:1378)  · test: none · core: none (UI only) · audited (diff): layout order body/menu/input/status matches (mod.rs:1767-1797); panel/bg/queue rows absent (L06/L07/L11)
+- [x] L02 Viewport height is recomputed from terminal size and the panel/queue/input heights each frame (layout tui.go:419; WindowSizeMsg tui.go:447) · test: TestPanelScrollWindow (panel_test.go:367) · core: none · audited (same): layout() recomputes body_h from chrome each frame (mod.rs:1772-1797)
+- [x] L03 Before the first WindowSizeMsg the view shows "starting…" (View tui.go:1223) · test: none · core: none · audited (diff): Go shows "starting…" before first WindowSizeMsg (tui.go:1232); Rust reads terminal size at start, no pre-size frame
+- [x] L04 Message blocks (user/asst/tool/result/note) render in the viewport in order (render tui.go:348-383) · test: TestToolResultCavemanHidden (tui_caveman_test.go:28) · core: transcript events · audited (same): transcript Vec rendered in order (mod.rs:119, body 1219)
+- [x] L05 Welcome banner with model and rotate threshold on start (welcome tui.go:295-314) · test: none · core: effectiveThreshold · audited (diff): welcome text matches (mod.rs:1523-1560, tui.go:295-311); box min inner width 4 vs Go 20 (mod.rs:1527 vs tui.go:300-306)
+- [x] L06 Bottom-of-screen background rows (sub-agent rows) sit below the input box (bgLines tui.go:1443; test) · test: TestBackgroundRowsBelowInputBox (panel_test.go:133) · core: agent tracker · audited (diff): AgentBackground fills bg_agents (mod.rs:365) but no bottom bg rows rendered; deferred to panel coder (core events in progress)
+- [x] L07 Foreground panel rows above the input (panelLines tui.go:1440) with "more" row when truncated · test: TestPanelMoreRowAndSmallHeight (panel_test.go:100) · core: agent tracker · audited (diff): no foreground panel rows; agent_recs leaves model/state empty (mod.rs:1105); deferred to panel coder
+- [x] L08 Small terminal heights do not overflow the frame (panel/bg/queue) · test: TestBackgroundSmallHeightNoOverflow (panel_test.go:153), TestQueueSmallHeightNoOverflow (panel_test.go:289) · core: none · audited (diff): no panel/bg/queue rows to bound; chrome skip only for input/status (mod.rs:1795)
+- [x] L09 Slash suggestion popup above input, capped at maxPop=8 rows (suggestions tui.go:974; maxPop tui.go:989) · test: none · core: none · audited (same): SLASH_MAX_ROWS=8 (overlay.rs:9), menu_max in layout (mod.rs:1778)
+- [x] L10 Input box height grows with content up to maxInputRows=5 (tui.go:988; Height input.go:202) · test: none · core: none · audited (same): MAX_INPUT_ROWS=5 (mod.rs:58), input_height (mod.rs:1503); tui.go:996
+- [x] L11 Queue lines dimmed above input while busy, "… +N 대기" when many (queueLines tui.go:921-939) · test: TestQueueLinesDimAboveInput (panel_test.go:254) · core: none · audited (blocked-core): Queued(usize) count only (crates/core/src/api.rs Queued); no queue text
+- [x] L12 Status line at bottom (statusLine tui.go:1193) · test: none · core: none · audited (same): bar::rows + status row at bottom (mod.rs:1280-1298); text compared in B group
+- [x] L13 Overlay screens replace the viewport: agent view, usage view, session view, settings, rewind, record picker (View tui.go:1222-1362) · test: TestUsageOpenNotInline (usageview_test.go:94) · core: none · audited (same): overlays replace body rows only (mod.rs:1782-1790), see A03
+- [x] L14 Cursor row tracking so the real terminal cursor lands in the input box (syncCursor tui.go:999; cursorWriter tui.go:226-260) · test: TestCursorRowMatchesPanelAfterTick (panel_test.go:79), TestCursorRowIncludesBackgroundRows (panel_test.go:301) · core: none · audited (diff): input cursor matches (mod.rs:1806-1816); panel/bg rows not counted since rows absent (L06/L07)
 
 ## Rendering (colors, wrapping, links, markdown, CJK width)
 
