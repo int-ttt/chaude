@@ -125,10 +125,82 @@ pub fn read_exit_handoff(path: &Path) -> Option<ExitHandoff> {
     serde_json::from_str(&text).ok()
 }
 
+// Append-only log of the Claude session ids a record folder has run (one JSON object per line). /resume lists
+// it. Not .md, so the record listing ignores it.
+pub const SESSIONS_FILE: &str = ".sessions.jsonl";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionRef {
+    pub session_id: String,
+    // MAIN_ROLE or a resident role.
+    pub role: String,
+    // Unix seconds when the id was first seen by this run.
+    pub saved_at_unix: u64,
+}
+
+// The session log next to an exit handoff file (same folder, SESSIONS_FILE).
+pub fn sessions_file(exit_path: &Path) -> PathBuf {
+    exit_path.with_file_name(SESSIONS_FILE)
+}
+
+// Appends one session id. Empty ids are ignored.
+pub fn append_session(exit_path: &Path, role: &str, session_id: &str) -> io::Result<()> {
+    use std::io::Write;
+    if session_id.is_empty() {
+        return Ok(());
+    }
+    let row = SessionRef {
+        session_id: session_id.to_string(),
+        role: role.to_string(),
+        saved_at_unix: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    };
+    let line = serde_json::to_string(&row).map_err(io::Error::other)?;
+    if let Some(dir) = exit_path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut f = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(sessions_file(exit_path))?;
+    writeln!(f, "{line}")
+}
+
+// The session log, oldest first, each session id once (its first row). Unparsable lines are skipped.
+pub fn read_sessions(exit_path: &Path) -> Vec<SessionRef> {
+    let Ok(text) = fs::read_to_string(sessions_file(exit_path)) else {
+        return Vec::new();
+    };
+    let mut seen = BTreeSet::new();
+    text.lines()
+        .filter_map(|l| serde_json::from_str::<SessionRef>(l).ok())
+        .filter(|r| seen.insert(r.session_id.clone()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::TempDir;
+
+    #[test]
+    fn session_log_appends_and_reads_each_id_once() {
+        let dir = TempDir::new("handoff-sessions");
+        let path = handoff_file(dir.path());
+        assert!(read_sessions(&path).is_empty());
+        append_session(&path, MAIN_ROLE, "s1").unwrap();
+        append_session(&path, "coder", "c1").unwrap();
+        append_session(&path, MAIN_ROLE, "s1").unwrap();
+        append_session(&path, MAIN_ROLE, "").unwrap();
+        let got = read_sessions(&path);
+        let ids: Vec<(&str, &str)> = got
+            .iter()
+            .map(|r| (r.session_id.as_str(), r.role.as_str()))
+            .collect();
+        assert_eq!(ids, vec![("s1", MAIN_ROLE), ("c1", "coder")]);
+    }
 
     fn sample() -> ExitHandoff {
         let mut h = ExitHandoff {

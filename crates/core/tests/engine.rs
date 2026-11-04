@@ -1791,3 +1791,62 @@ fn mcp_coder_call_blocks_for_summary_and_rejects_empty_task() {
     assert_eq!(caller.call("   "), Err("task is required".to_string()));
     h.shutdown();
 }
+
+// EngineHandle::resume_session relaunches the idle main child with --resume and records the ids it ran.
+#[test]
+fn resume_session_relaunches_main_with_resume_flag() {
+    let _g = lock();
+    let f = fake("resume_mid_run", &["text_turn.jsonl"]);
+    let path = f.dir.join(".exit-handoff.json");
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.handoff_path = Some(path.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    until_idle(&rx);
+    h.resume_session("old9");
+    let mut got = Vec::new();
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("engine went silent");
+        let done = matches!(ev, UiEvent::SessionResumed { .. });
+        got.push(ev);
+        if done {
+            break;
+        }
+    }
+    assert!(
+        got.contains(&UiEvent::SessionResumed {
+            old_session: "s1".into(),
+            session_id: "old9".into(),
+        }),
+        "{got:?}"
+    );
+    let args = wait_for(&f.dir.join("args.log"), "--resume old9");
+    assert!(args.contains("--resume old9"), "{args}");
+    h.shutdown();
+    let logged = handoff::read_sessions(&path);
+    assert!(
+        logged
+            .iter()
+            .any(|r| r.session_id == "s1" && r.role == handoff::MAIN_ROLE),
+        "{logged:?}"
+    );
+}
+
+// An empty session id is refused with an Error and the engine keeps running.
+#[test]
+fn resume_session_rejects_empty_id() {
+    let _g = lock();
+    let f = fake("resume_empty", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.resume_session("");
+    let ev = rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("engine went silent");
+    assert!(matches!(ev, UiEvent::Error(_)), "{ev:?}");
+    h.shutdown();
+}

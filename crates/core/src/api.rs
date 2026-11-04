@@ -194,6 +194,11 @@ pub enum UiEvent {
     RotatedFrom {
         old_session: String,
     },
+    // EngineHandle::resume_session relaunched the main child with --resume session_id (old_session may be empty).
+    SessionResumed {
+        old_session: String,
+        session_id: String,
+    },
     // Tool input JSON of a tool call, emitted right after its ToolStart (Go tool_summary / Agent model).
     ToolInput {
         id: String,
@@ -292,6 +297,8 @@ enum Cmd {
     Interrupt(InterruptSource),
     // Mode name as typed ("next" cycles); parsed by the actor so unknown names are reported as UiEvent::Error.
     SetMode(String),
+    // Go /resume (mid-run): relaunches the main child with --resume on this session id. Rejected while busy.
+    ResumeSession(String),
     Permission { id: String, allow: bool },
     Usage,
     Shutdown,
@@ -344,6 +351,14 @@ impl EngineHandle {
     // Go /mode: "next" cycles, otherwise default | acceptEdits | plan | auto (case-insensitive).
     pub fn set_mode(&self, name: &str) {
         let _ = self.tx.send(Input::Cmd(Cmd::SetMode(name.to_string())));
+    }
+
+    // Relaunches the main child on an existing Claude session (claude --resume <session_id>), mid-run.
+    // Only when idle; a busy run answers UiEvent::Error and keeps its child. Answers SessionResumed.
+    pub fn resume_session(&self, session_id: &str) {
+        let _ = self
+            .tx
+            .send(Input::Cmd(Cmd::ResumeSession(session_id.to_string())));
     }
 
     // Answers a UiEvent::PermissionRequest. allow=false denies with the Go empty-message reply.
@@ -621,6 +636,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
             Input::Cmd(Cmd::Submit(text)) => st.submit(text),
             Input::Cmd(Cmd::Interrupt(src)) => st.interrupt(src),
             Input::Cmd(Cmd::SetMode(name)) => st.set_mode(&name),
+            Input::Cmd(Cmd::ResumeSession(sid)) => st.resume_session(&sid),
             Input::Cmd(Cmd::Permission { id, allow }) => st.answer_permission(&id, allow),
             Input::Cmd(Cmd::Usage) => st.usage(),
             Input::Proc(epoch, msg) if epoch == st.epoch => match msg {
@@ -961,8 +977,18 @@ impl State {
     fn note_resident(&mut self, role: &str, session_id: Option<String>) {
         if let Some(id) = session_id.filter(|id| !id.is_empty()) {
             self.note_own(&id);
+            if self.resident_sids.get(role) != Some(&id) {
+                self.record_session(role, &id);
+            }
             self.resident_sids.insert(role.to_string(), id);
             self.emit_session_ids();
+        }
+    }
+
+    // Appends a changed session id to the record folder's session log (/resume lists it). Only with a handoff path.
+    fn record_session(&self, role: &str, session_id: &str) {
+        if let Some(path) = &self.cfg.handoff_path {
+            let _ = handoff::append_session(path, role, session_id);
         }
     }
 
@@ -1329,6 +1355,7 @@ impl State {
                     self.note_own(&id);
                     let prev = std::mem::replace(&mut self.sid, id.clone());
                     if prev != id {
+                        self.record_session(handoff::MAIN_ROLE, &id);
                         // A rotation clears sid first, so a non-empty previous id here means a /clear.
                         if !prev.is_empty() {
                             self.emit(UiEvent::NewSession { old_session: prev });
@@ -2101,6 +2128,40 @@ impl State {
         }));
         self.emit(UiEvent::RotatedFrom { old_session: old });
         self.emit(UiEvent::Rotated { reason });
+        self.emit_status(self.cost_usd);
+    }
+
+    // Relaunches the main child on an existing session with --resume (EngineHandle::resume_session).
+    // The caller names the session, so resume_mode does not apply here. Idle only, like a fresh start.
+    fn resume_session(&mut self, session_id: &str) {
+        if session_id.is_empty() {
+            self.emit(UiEvent::Error("resume needs a session id".to_string()));
+            return;
+        }
+        if self.busy || self.prompter.waiting() {
+            self.emit(UiEvent::Error(
+                "cannot resume while a turn is running".to_string(),
+            ));
+            return;
+        }
+        let old = self.sid.clone();
+        if let Some(mut p) = self.proc.take() {
+            p.kill();
+        }
+        self.epoch += 1;
+        self.open_tools.clear();
+        self.interrupted_at = None;
+        self.stray_results = 0;
+        self.pending_perm.clear();
+        self.sid.clear();
+        self.ctx_tokens = 0;
+        self.last_api = None;
+        self.opts.resume = Some(session_id.to_string());
+        self.start_child();
+        self.emit(UiEvent::SessionResumed {
+            old_session: old,
+            session_id: session_id.to_string(),
+        });
         self.emit_status(self.cost_usd);
     }
 
