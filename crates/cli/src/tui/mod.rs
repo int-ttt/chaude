@@ -18,7 +18,8 @@ pub mod usage;
 use std::collections::HashSet;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::panic;
-use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
@@ -398,6 +399,11 @@ impl App {
         }
     }
 
+    // True while something changes with time (spinner, elapsed clock, copy note). The loop wakes every TICK only then.
+    pub fn animating(&self) -> bool {
+        self.busy || self.copy_note.is_some()
+    }
+
     // Records the time for elapsed counters and the spinner (Go spinner: one frame per 125 ms).
     pub fn tick(&mut self, now: Instant) {
         self.clock = now;
@@ -466,7 +472,11 @@ impl App {
         }
         // Go tui.go rewind branch: while the picker is open it reads every key.
         if self.rw.is_open() {
-            let refs: Vec<(&str, &str)> = self.prompts.iter().map(|(_, t)| ("user", t.as_str())).collect();
+            let refs: Vec<(&str, &str)> = self
+                .prompts
+                .iter()
+                .map(|(_, t)| ("user", t.as_str()))
+                .collect();
             if let Some(cut) = self.rw.key(key, &refs) {
                 self.transcript.truncate(self.prompts[cut.cut].0);
                 self.wide.retain(|&i| i < self.transcript.len());
@@ -584,13 +594,18 @@ impl App {
                 // Go tui.go esc: on an empty input a second Esc within 600 ms opens the rewind picker.
                 let now = Instant::now();
                 let double = self.editor.is_empty()
-                    && self.last_esc.is_some_and(|t| now.duration_since(t) < Duration::from_millis(600));
+                    && self
+                        .last_esc
+                        .is_some_and(|t| now.duration_since(t) < Duration::from_millis(600));
                 self.last_esc = Some(now);
                 if double {
                     self.last_esc = None;
                     let opened = {
-                        let refs: Vec<(&str, &str)> =
-                            self.prompts.iter().map(|(_, t)| ("user", t.as_str())).collect();
+                        let refs: Vec<(&str, &str)> = self
+                            .prompts
+                            .iter()
+                            .map(|(_, t)| ("user", t.as_str()))
+                            .collect();
                         self.rw.open(&refs)
                     };
                     if !opened {
@@ -860,12 +875,20 @@ impl App {
 
     fn overlay_lines(&self, width: usize, h: usize) -> Option<Vec<String>> {
         if self.rw.is_open() {
-            let refs: Vec<(&str, &str)> = self.prompts.iter().map(|(_, t)| ("user", t.as_str())).collect();
+            let refs: Vec<(&str, &str)> = self
+                .prompts
+                .iter()
+                .map(|(_, t)| ("user", t.as_str()))
+                .collect();
             return Some(self.rw.lines(&refs, width, h));
         }
         if let Some(av) = &self.av {
             let recs = self.agent_recs();
-            let rec = recs.iter().find(|r| r.id == av.id).cloned().unwrap_or_default();
+            let rec = recs
+                .iter()
+                .find(|r| r.id == av.id)
+                .cloned()
+                .unwrap_or_default();
             return Some(av.clone().lines(&rec, &self.bar.model, width, h));
         }
         if let Some(p) = &self.settings {
@@ -947,7 +970,11 @@ impl App {
         // Text width is one less than the full width, so the welcome box gets the full width back.
         let mut rows = self.welcome_rows(width + 1);
         for (i, l) in lines.into_iter().enumerate() {
-            let w = if self.wide.contains(&i) { width + 1 } else { width };
+            let w = if self.wide.contains(&i) {
+                width + 1
+            } else {
+                width
+            };
             rows.extend(render::wrap_cells(l, w).split('\n').map(str::to_string));
         }
         rows
@@ -1259,7 +1286,10 @@ impl App {
                 let pre = if i == 0 { PROMPT } else { "  " };
                 // Go input.go View: reverse-video cursor cell (I33 input_view_row), byte index from the cell column.
                 let cursor = (i == cur_row).then(|| split_cells(row, cur_col).0.len());
-                out.push(side(&format!("{pre}{}", render::input_view_row(row, cursor))));
+                out.push(side(&format!(
+                    "{pre}{}",
+                    render::input_view_row(row, cursor)
+                )));
             }
         }
         out.push(edge("╰", "╯"));
@@ -1518,6 +1548,34 @@ pub fn run(cfg: Config) -> io::Result<()> {
     }
 }
 
+// Everything the TUI loop waits on: a terminal event, an engine event, or the end of either source.
+enum Wake {
+    Term(Event),
+    Engine(UiEvent),
+    Closed,
+}
+
+// Blocks until a wake arrives (or `timeout` passes), then takes every queued wake too.
+// Returns None when a source has closed and the UI should end.
+fn wait_batch(wakes: &Receiver<Wake>, timeout: Option<Duration>) -> Option<Vec<Wake>> {
+    let first = match timeout {
+        Some(t) => match wakes.recv_timeout(t) {
+            Ok(wake) => Some(wake),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => return None,
+        },
+        None => Some(wakes.recv().ok()?),
+    };
+    let mut batch = Vec::new();
+    for wake in first.into_iter().chain(wakes.try_iter()) {
+        if matches!(wake, Wake::Closed) {
+            return None;
+        }
+        batch.push(wake);
+    }
+    Some(batch)
+}
+
 fn tui(mut cfg: Config) -> io::Result<()> {
     // Go writes the exit handoff into the record folder on quit; /view reads it back (prev_owned).
     if let (None, Ok(cwd)) = (&cfg.handoff_path, std::env::current_dir()) {
@@ -1543,37 +1601,59 @@ fn tui(mut cfg: Config) -> io::Result<()> {
     let mut prev = Vec::new();
     // The guard turned mouse capture on; this tracks whether it is still on.
     let mut captured = true;
-    draw(&mut out, &app, &mut prev)?;
-    'main: loop {
-        loop {
-            match rx.try_recv() {
-                Ok(ev) => app.apply(ev),
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break 'main,
+    // Terminal input and engine output feed one channel, so the loop blocks on a single receiver.
+    let (wake_tx, wakes) = mpsc::channel::<Wake>();
+    {
+        let tx = wake_tx.clone();
+        thread::spawn(move || {
+            while let Ok(ev) = event::read() {
+                if tx.send(Wake::Term(ev)).is_err() {
+                    return;
+                }
+            }
+            let _ = tx.send(Wake::Closed);
+        });
+    }
+    thread::spawn(move || {
+        for ev in rx {
+            if wake_tx.send(Wake::Engine(ev)).is_err() {
+                return;
             }
         }
-        if event::poll(TICK)? {
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => match app.on_key(key) {
-                    Action::Continue => {}
-                    Action::Submit(text) => engine.submit(&text),
-                    Action::Interrupt(src) => engine.interrupt(src),
-                    Action::Quit => break 'main,
-                    Action::Usage => engine.usage(),
-                    Action::Answer {
-                        id,
-                        allow,
-                        interrupt,
-                    } => {
-                        engine.answer_permission(&id, allow);
-                        if interrupt {
-                            engine.interrupt(InterruptSource::CtrlC);
+        let _ = wake_tx.send(Wake::Closed);
+    });
+    draw(&mut out, &app, &mut prev)?;
+    'main: loop {
+        // Idle: sleep until input or output arrives. Animating: also wake every TICK for the spinner and clock.
+        let Some(batch) = wait_batch(&wakes, app.animating().then_some(TICK)) else {
+            break;
+        };
+        // Every queued wake is applied before one tick and one draw, so a burst of output costs one frame.
+        for wake in batch {
+            match wake {
+                Wake::Engine(ev) => app.apply(ev),
+                Wake::Term(Event::Key(key)) if key.kind == KeyEventKind::Press => {
+                    match app.on_key(key) {
+                        Action::Continue => {}
+                        Action::Submit(text) => engine.submit(&text),
+                        Action::Interrupt(src) => engine.interrupt(src),
+                        Action::Quit => break 'main,
+                        Action::Usage => engine.usage(),
+                        Action::Answer {
+                            id,
+                            allow,
+                            interrupt,
+                        } => {
+                            engine.answer_permission(&id, allow);
+                            if interrupt {
+                                engine.interrupt(InterruptSource::CtrlC);
+                            }
                         }
+                        Action::CycleMode => engine.set_mode("next"),
                     }
-                    Action::CycleMode => engine.set_mode("next"),
-                },
-                Event::Paste(text) => app.editor.insert_str(&text),
-                Event::Mouse(m) if app.mouse => match m.kind {
+                }
+                Wake::Term(Event::Paste(text)) => app.editor.insert_str(&text),
+                Wake::Term(Event::Mouse(m)) if app.mouse => match m.kind {
                     MouseEventKind::ScrollUp if app.overlay_wheel(true) => {}
                     MouseEventKind::ScrollDown if app.overlay_wheel(false) => {}
                     MouseEventKind::ScrollUp => app.scroll(-WHEEL_LINES),
@@ -1588,13 +1668,13 @@ fn tui(mut cfg: Config) -> io::Result<()> {
                     }
                     _ => {}
                 },
-                Event::Resize(c, r) => {
+                Wake::Term(Event::Resize(c, r)) => {
                     app.cols = c as usize;
                     app.rows = r as usize;
                     queue!(out, Clear(ClearType::All))?;
                     prev.clear();
                 }
-                _ => {}
+                Wake::Term(_) | Wake::Closed => {}
             }
         }
         app.tick(Instant::now());
@@ -1738,8 +1818,14 @@ mod tests {
             app.transcript.push(format!("> {text}"));
             app.transcript.push(format!("answer {i}"));
         }
-        assert!(matches!(app.on_key(key(KeyCode::Esc, KeyModifiers::NONE)), Action::Continue));
-        assert!(matches!(app.on_key(key(KeyCode::Esc, KeyModifiers::NONE)), Action::Continue));
+        assert!(matches!(
+            app.on_key(key(KeyCode::Esc, KeyModifiers::NONE)),
+            Action::Continue
+        ));
+        assert!(matches!(
+            app.on_key(key(KeyCode::Esc, KeyModifiers::NONE)),
+            Action::Continue
+        ));
         assert!(app.rw.is_open());
         // The picker starts on the newest prompt; step back to the first one, then confirm.
         app.on_key(key(KeyCode::Up, KeyModifiers::NONE));
@@ -1747,7 +1833,11 @@ mod tests {
         assert!(!app.rw.is_open());
         assert_eq!(app.prompts.len(), 0);
         // Only the rewound note remains; the cut turns are gone.
-        assert!(app.transcript.iter().all(|l| !l.starts_with("> ") && !l.starts_with("answer")));
+        assert!(
+            app.transcript
+                .iter()
+                .all(|l| !l.starts_with("> ") && !l.starts_with("answer"))
+        );
         assert!(app.transcript.iter().any(|l| l.contains("rewound")));
         assert_eq!(app.editor.text(), "first");
     }
@@ -2305,6 +2395,56 @@ mod tests {
         assert_eq!(base64(b"Ma"), "TWE=");
         assert_eq!(base64(b"Man"), "TWFu");
         assert_eq!(base64("복사".as_bytes()), "67O17IKs");
+    }
+
+    #[test]
+    fn a_key_press_wakes_the_loop_without_waiting_for_the_tick() {
+        let (tx, wakes) = mpsc::channel();
+        let sender = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            tx.send(Wake::Term(Event::Key(key(
+                KeyCode::Char('a'),
+                KeyModifiers::NONE,
+            ))))
+            .unwrap();
+            // Keep the channel open so the wait can only end by the key or the timeout.
+            thread::sleep(Duration::from_millis(200));
+        });
+        let start = Instant::now();
+        // A 10 s timeout stands in for "the tick is far away": the key must end the wait first.
+        let batch = wait_batch(&wakes, Some(Duration::from_secs(10))).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        assert!(matches!(batch.as_slice(), [Wake::Term(Event::Key(_))]));
+        sender.join().unwrap();
+    }
+
+    #[test]
+    fn idle_timeout_yields_an_empty_batch_and_closed_ends_the_wait() {
+        let (tx, wakes) = mpsc::channel();
+        assert!(
+            wait_batch(&wakes, Some(Duration::from_millis(1)))
+                .unwrap()
+                .is_empty()
+        );
+        tx.send(Wake::Engine(UiEvent::MessageDone { role: Role::Main }))
+            .unwrap();
+        tx.send(Wake::Closed).unwrap();
+        assert!(wait_batch(&wakes, None).is_none());
+    }
+
+    #[test]
+    fn only_busy_or_a_copy_note_keeps_the_loop_on_a_timer() {
+        let mut app = App::new(40, 10);
+        assert!(!app.animating());
+        app.busy = true;
+        assert!(app.animating());
+        app.busy = false;
+        app.copy_done(3, Ok(()));
+        assert!(app.animating());
     }
 
     #[test]
