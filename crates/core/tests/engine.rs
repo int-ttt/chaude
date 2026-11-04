@@ -634,6 +634,33 @@ fn slow_agent_result_is_delivered_and_timer_is_paused_without_interrupt() {
     h.shutdown();
 }
 
+// Go markInterrupted: an agent still running at shutdown is stored as interrupted in the agents file.
+#[test]
+fn running_agent_is_stored_interrupted_on_shutdown() {
+    let _g = lock();
+    let (head, tail) = agent_turn_split();
+    // The result would come after 20 s; shutdown happens while the Agent tool_use is still open.
+    let f = fake_gap("agent-store-exit", &head, &tail, "20");
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("scan");
+    loop {
+        let ev = rx.recv_timeout(WAIT).expect("engine went silent");
+        if matches!(ev, UiEvent::AgentStart { .. }) {
+            break;
+        }
+    }
+    let agents = f.dir.join("agents.json");
+    let before = wait_for(&agents, "\"running\"");
+    assert!(
+        before.contains("toolu_agent1") && before.contains("\"running\""),
+        "{before}"
+    );
+    h.shutdown();
+    let after = fs::read_to_string(&agents).unwrap();
+    assert!(after.contains("\"interrupted\""), "{after}");
+    assert!(!after.contains("\"running\""), "{after}");
+}
+
 #[test]
 fn silent_turn_emits_still_running_notice_and_never_interrupts() {
     let _g = lock();

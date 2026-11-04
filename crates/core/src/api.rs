@@ -14,7 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-use crate::agent_store::AgentStore;
+use crate::agent_store::{AgentStore, STO_DONE, STO_RUNNING, SavedAgent};
 use crate::budget::{self, Budget};
 use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
@@ -567,6 +567,8 @@ struct State {
     // Delegated agents by tool_use id. A background agent (launch result said "async") keeps running past the
     // turn, so an abandoned turn does not end it, and it is listed in the handoff snapshot.
     agent_info: HashMap<String, AgentInfo>,
+    // Go agentStore: this session's delegated agents are written here on every change (None = off).
+    agent_store: Option<AgentStore>,
     // agentId from an async launch result -> tool_use id, so a SendMessage resume finds the agent.
     agent_ids: HashMap<String, String>,
     // Start label by tool_use id. Kept after the agent ends, so a later SendMessage resume still shows it.
@@ -788,8 +790,9 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     let model = cfg.model.clone();
     let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));
     // Go repl.go start(): agents a crashed harness left running are marked interrupted (before the reconcile).
-    if let Some(path) = &cfg.agents_file {
-        AgentStore::new(path).interrupt_running(false);
+    let agent_store = cfg.agents_file.as_deref().map(AgentStore::new);
+    if let Some(store) = &agent_store {
+        store.interrupt_running(false);
     }
     let clients = cfg.clients_file.clone().map(ClientRegistry::new);
     let metrics = Arc::new(Metrics::new(
@@ -812,6 +815,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         opus_agents: HashSet::new(),
         rotate_deferred: rotate_defer::Deferral::default(),
         agent_info: HashMap::new(),
+        agent_store,
         agent_ids: HashMap::new(),
         agent_labels: HashMap::new(),
         open_tools: HashSet::new(),
@@ -937,6 +941,10 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     if let Some(path) = st.cfg.handoff_path.clone() {
         let _ = handoff::write_exit_handoff(&path, &st.exit_handoff());
         handoff::remove_live_handoff(&path);
+    }
+    // Go markInterrupted on exit: this process's running agents are stored as interrupted.
+    if let Some(store) = &st.agent_store {
+        store.interrupt_running(true);
     }
     if let Some(mut p) = st.proc.take() {
         p.kill();
@@ -2288,6 +2296,7 @@ impl State {
                 description,
                 started_at,
             });
+            self.persist_agent(&id, STO_RUNNING);
             self.emit_agent_rows();
         }
     }
@@ -2327,6 +2336,7 @@ impl State {
                 info.background = true;
                 info.done = false;
             }
+            self.persist_agent(&tool, STO_RUNNING);
             self.emit(UiEvent::AgentResumed {
                 id: tool,
                 description,
@@ -2383,6 +2393,25 @@ impl State {
         });
     }
 
+    // Go agentTracker persist: writes one delegated agent to the agents file (no-op without one).
+    fn persist_agent(&self, id: &str, status: &str) {
+        let (Some(store), Some(info)) = (&self.agent_store, self.agent_info.get(id)) else {
+            return;
+        };
+        let mut s = SavedAgent::new(
+            id,
+            status,
+            UNIX_EPOCH + Duration::from_secs(info.started_at),
+        );
+        s.model = info.model.clone();
+        s.name = info.session_name.clone();
+        s.task = info.task.clone();
+        s.prompt = info.prompt.clone();
+        s.background = info.background;
+        s.agent_id = info.agent_id.clone();
+        store.put(&[s]);
+    }
+
     // Queued prompt texts, oldest first (Go m.queue), sent with each queue change.
     fn emit_queue(&self) {
         self.emit(UiEvent::QueueTexts(self.queue.iter().cloned().collect()));
@@ -2420,6 +2449,7 @@ impl State {
                 .get(&id)
                 .map(|i| i.model.clone())
                 .unwrap_or_default();
+            self.persist_agent(&id, STO_DONE);
             self.emit(UiEvent::AgentEnd {
                 id,
                 elapsed_ms: t0.elapsed().as_millis() as u64,
@@ -2606,6 +2636,7 @@ impl State {
                 if let Some(i) = self.agent_info.get(&id) {
                     self.stage(&agent_slot(&i.name), StagePhase::Done);
                 }
+                self.persist_agent(&id, STO_DONE);
                 self.emit(UiEvent::AgentEnd {
                     id,
                     elapsed_ms: t0.elapsed().as_millis() as u64,
