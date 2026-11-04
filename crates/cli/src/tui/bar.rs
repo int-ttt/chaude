@@ -117,8 +117,24 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
         Some(s) => format!("{spinner} running {}", fmt_secs(s)),
         None => "idle".to_string(),
     };
+    // Each running agent keeps a visible segment. When they do not all fit, every description is cut to an
+    // equal share of the room left, so a long first agent cannot push later (e.g. resumed) agents off the row.
+    let room = width.saturating_sub(cells(&top));
+    let full: usize = b
+        .agents
+        .iter()
+        .map(|(desc, secs)| cells(&format!(" · agent {desc} {}", fmt_secs(*secs))))
+        .sum();
+    let share = room / b.agents.len().max(1);
     for (desc, secs) in &b.agents {
-        top.push_str(&format!(" · agent {desc} {}", fmt_secs(*secs)));
+        let secs = fmt_secs(*secs);
+        let desc = if full > room && b.agents.len() > 1 {
+            let fixed = cells(&format!(" · agent  {secs}"));
+            clip(desc, share.saturating_sub(fixed))
+        } else {
+            desc.clone()
+        };
+        top.push_str(&format!(" · agent {desc} {secs}"));
     }
     // Go statusLine + ctxBar (tui.go:1193). M is the main context from UiEvent::Status; P/T/C stay 0 because
     // no UiEvent carries per-role context yet.
@@ -139,6 +155,11 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
         bottom.push_str(&format!(" · queued {}", b.queued));
     }
     [clip(&top, width), clip(&bottom, width)]
+}
+
+// Display columns of `s` (the width clip uses).
+fn cells(s: &str) -> usize {
+    grapheme_clusters(s).into_iter().map(cluster_width).sum()
 }
 
 // Cuts `s` to at most `max` display columns. Control characters (newlines, tabs) become spaces.
@@ -423,6 +444,27 @@ mod tests {
             unicode_width::UnicodeWidthStr::width(top.as_str()) <= 20,
             "{top}"
         );
+    }
+
+    // A long first agent must not push a later (resumed) agent off the top row: each keeps a share.
+    #[test]
+    fn every_running_agent_stays_visible_when_row_is_narrow() {
+        let b = BarInput {
+            turn_secs: Some(60),
+            agents: vec![
+                (
+                    "Resume TUI A workstream with a very long description".to_string(),
+                    120,
+                ),
+                ("Resume engine workstream".to_string(), 5),
+            ],
+            ..BarInput::default()
+        };
+        let [top, _] = rows(&b, '⠙', 80);
+        assert!(cells(&top) <= 80, "{top}");
+        assert!(top.contains("agent Resume TUI A"), "{top}");
+        assert!(top.contains("agent Resume engine"), "{top}");
+        assert!(top.contains(" 5s"), "{top}");
     }
 
     // Port of TestAgentStatusFormat (panel_test.go:340), text parts only.
