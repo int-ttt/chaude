@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use crate::budget::{self, Budget};
 use crate::clients::idle_deadline;
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
+use crate::forward::forward_rule_for;
 use crate::handoff::{self, ExitHandoff};
 use crate::import_claude::{ClaudeImport, import_note};
 use crate::mcp;
@@ -678,6 +679,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
             }
         }
     }
+    let rule = main_rule(&cfg);
     let opts = SpawnOpts {
         claude_bin: resolve_bin(&cfg.claude_bin),
         model: cfg.model.clone(),
@@ -686,7 +688,10 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         cache_ttl: cfg.cache_ttl.clone(),
         compact_window: cfg.compact_window,
         max_budget_usd: cfg.task_budget_usd,
-        shape: Shape::default(),
+        shape: Shape {
+            rule,
+            ..Shape::default()
+        },
     };
     let model = cfg.model.clone();
     let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));
@@ -2531,7 +2536,7 @@ impl State {
             opts.shape = Shape {
                 strict_mcp: true,
                 mcp_config: Some(path),
-                rule: CODER_RULE.to_string(),
+                rule: join_rules(&[&main_rule(&self.cfg), CODER_RULE]),
                 ..Shape::default()
             };
         }
@@ -2582,6 +2587,22 @@ fn answer(waiter: Option<Sender<Result<String, String>>>, out: Result<String, St
 }
 
 // Go coderRole: slot 0 is "coder", slot i is "coder{i+1}" (coder2 for the first extra coder).
+// Go start() rule for the main child: the forward rule for its model (none for an Opus main), joined with the
+// category rule when category rotation is on. The resident coder rule is appended by the MCP branch of start_child.
+fn main_rule(cfg: &Config) -> String {
+    join_rules(&[forward_rule_for(&cfg.model)])
+}
+
+// Go TrimSpace(rule + " " + part): non-empty parts joined by one space.
+fn join_rules(parts: &[&str]) -> String {
+    parts
+        .iter()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn coder_role(i: usize) -> String {
     if i == 0 {
         "coder".to_string()
@@ -2687,6 +2708,16 @@ mod tests {
         assert_eq!(resolve_max_workers(None, "", 0), Ok(3));
         assert_eq!(resolve_max_workers(None, "  ", 4), Ok(3));
         assert_eq!(Config::default().max_workers, 3);
+    }
+
+    // Go start(): the main child's rule carries the forward rule unless the model is Opus.
+    #[test]
+    fn main_rule_forwards_for_non_opus_only() {
+        let mut cfg = Config::default();
+        cfg.model = "haiku".into();
+        assert_eq!(main_rule(&cfg), crate::forward::FORWARD_RULE);
+        cfg.model = "claude-OPUS-4".into();
+        assert_eq!(main_rule(&cfg), "");
     }
 
     #[test]
