@@ -25,6 +25,7 @@ use crate::import_claude::{ClaudeImport, import_note};
 use crate::mcp;
 use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
+use crate::orch;
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, Shape, SpawnOpts};
 use crate::record::{self, Stamp};
@@ -2681,13 +2682,32 @@ fn answer(waiter: Option<Sender<Result<String, String>>>, out: Result<String, St
 // Go start() rule for the main child: the forward rule for its model (none for an Opus main), joined with the
 // category rule when category rotation is on. The resident coder rule is appended by the MCP branch of start_child.
 fn main_rule(cfg: &Config) -> String {
+    let orch_mode = std::env::var(orch::ENV_KEY).unwrap_or_default();
+    main_rule_with(cfg, &orch_mode)
+}
+
+// Go start() rule order: delegation, forward, category, orch. orch_mode is the CHAUDE_ORCH value.
+fn main_rule_with(cfg: &Config, orch_mode: &str) -> String {
+    let delegation = if cfg.no_delegation_rule {
+        ""
+    } else {
+        DELEGATION_RULE
+    };
     let category = if cfg.no_category_rotate {
         ""
     } else {
         CATEGORY_RULE
     };
-    join_rules(&[forward_rule_for(&cfg.model), category])
+    join_rules(&[
+        delegation,
+        forward_rule_for(&cfg.model),
+        category,
+        &orch::rule(orch_mode),
+    ])
 }
+
+// Go delegationRule: default delegation of bounded code changes to the haiku-coder agent.
+pub const DELEGATION_RULE: &str = "Default to delegating bounded code changes (implementation steps, small fixes, wiring, tests) to the haiku-coder agent with an exact spec; implement yourself only design-level or tightly coupled parts, then verify Haiku's diff. Log each delegation (agent, tokens, duration, outcome, retries).";
 
 // Go TrimSpace(rule + " " + part): non-empty parts joined by one space.
 fn join_rules(parts: &[&str]) -> String {
@@ -2866,13 +2886,38 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(
-            main_rule(&cfg),
-            join_rules(&[crate::forward::FORWARD_RULE, CATEGORY_RULE])
+            main_rule_with(&cfg, ""),
+            join_rules(&[DELEGATION_RULE, crate::forward::FORWARD_RULE, CATEGORY_RULE])
         );
         cfg.model = "claude-OPUS-4".into();
-        assert_eq!(main_rule(&cfg), CATEGORY_RULE);
+        assert_eq!(
+            main_rule_with(&cfg, ""),
+            join_rules(&[DELEGATION_RULE, CATEGORY_RULE])
+        );
         cfg.no_category_rotate = true;
-        assert_eq!(main_rule(&cfg), "");
+        cfg.no_delegation_rule = true;
+        assert_eq!(main_rule_with(&cfg, ""), "");
+    }
+
+    // Go start(): delegation rule first, orch rule last; both can be switched off.
+    #[test]
+    fn main_rule_order_delegation_forward_category_orch() {
+        let mut cfg = Config {
+            model: "haiku".into(),
+            ..Config::default()
+        };
+        assert_eq!(
+            main_rule_with(&cfg, "b"),
+            join_rules(&[
+                DELEGATION_RULE,
+                crate::forward::FORWARD_RULE,
+                CATEGORY_RULE,
+                &orch::rule("b")
+            ])
+        );
+        cfg.no_delegation_rule = true;
+        cfg.no_category_rotate = true;
+        assert_eq!(main_rule_with(&cfg, "m0"), crate::forward::FORWARD_RULE);
     }
 
     #[test]
