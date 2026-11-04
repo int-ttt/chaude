@@ -1,7 +1,7 @@
 //! Per-turn metrics log (Go metrics.go): one JSON object per line in `<dir>/<YYYY-MM-DD>.jsonl`, UTC date.
 //! `dir == None` disables it; every call is then a no-op.
 
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -44,6 +44,25 @@ impl Metrics {
         let mut f = OpenOptions::new().create(true).append(true).open(path)?;
         writeln!(f, "{}", Value::Object(out))
     }
+}
+
+// Token counts of one API usage object (Go usageFields); ctx is the context-size proxy (Go ctxTokens).
+pub fn usage_fields(usage: &Value) -> Value {
+    let input = num(usage.get("input_tokens"));
+    let cache_read = num(usage.get("cache_read_input_tokens"));
+    let cache_creation = num(usage.get("cache_creation_input_tokens"));
+    json!({
+        "input_tokens": input,
+        "cache_read_input_tokens": cache_read,
+        "cache_creation_input_tokens": cache_creation,
+        "output_tokens": num(usage.get("output_tokens")),
+        "ctx": input + cache_read + cache_creation,
+    })
+}
+
+// Go num: a JSON number as an integer (truncated); anything else is 0.
+pub(crate) fn num(v: Option<&Value>) -> i64 {
+    v.and_then(Value::as_f64).map_or(0, |f| f as i64)
 }
 
 fn unix_secs() -> i64 {
@@ -89,7 +108,23 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 mod tests {
     use super::*;
     use crate::testutil::TempDir;
-    use serde_json::json;
+
+    #[test]
+    fn usage_fields_sums_ctx_and_defaults_missing_to_zero() {
+        let usage = json!({"input_tokens": 3, "cache_read_input_tokens": 10,
+            "cache_creation_input_tokens": 4, "output_tokens": 7});
+        assert_eq!(
+            usage_fields(&usage),
+            json!({"input_tokens": 3, "cache_read_input_tokens": 10,
+                "cache_creation_input_tokens": 4, "output_tokens": 7, "ctx": 17})
+        );
+        assert_eq!(
+            usage_fields(&json!({"output_tokens": 2.9})),
+            json!({"input_tokens": 0, "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0, "output_tokens": 2, "ctx": 0})
+        );
+        assert_eq!(usage_fields(&Value::Null)["ctx"], 0);
+    }
 
     // Port of Go TestMetricsLog.
     #[test]

@@ -9,6 +9,7 @@ pub mod import_view;
 pub mod lean;
 pub mod mcp;
 pub mod metrics;
+pub mod metrics_report;
 pub mod mode;
 pub mod orch;
 pub mod osenv;
