@@ -82,7 +82,7 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 | K2 | Korean IME input, unicode width | tui.go | done | crates/cli/src/tui/render.rs input_view_row | |
 | K3 | spinner | tui.go | done | crates/cli/src/tui/bar.rs spinner_frame | |
 | K4 | idle "still waiting" notice (30 min) | tui.go | done | crates/cli/src/tui | |
-| K5 | clipboard copy | selection.go:115 (clipboard.WriteAll + OSC 52) | differs | crates/cli/src/tui/mod.rs:1508-1520 (OSC 52 + pbcopy) | no non-macOS clipboard tool |
+| K5 | clipboard copy | selection.go:115 (clipboard.WriteAll + OSC 52) | done | crates/cli/src/tui/mod.rs native_copy, clipboard_tool, clipboard_payload | off macOS: wl-copy (WAYLAND_DISPLAY), xclip, xsel, clip.exe (UTF-16LE BOM); Windows native uses clip.exe not win32 API; not run on a non-macOS host |
 | K6 | status bar P/T/C per-role context | tui.go | missing | crates/cli/src/tui/bar.rs | hardcoded 0/80k; blocked, UiEvent lacks per-role context |
 | K7 | thinking row | tui.go | missing | bar.rs / render.rs | blocked, needs core data |
 | K8 | done row | tui.go | missing | bar.rs / render.rs | blocked |

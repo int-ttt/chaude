@@ -1546,9 +1546,64 @@ fn native_copy(text: &str) -> Result<(), String> {
     }
 }
 
+// Off macOS, the first clipboard tool found on PATH: wl-copy under WAYLAND_DISPLAY, then xclip, xsel, clip.exe.
 #[cfg(not(target_os = "macos"))]
-fn native_copy(_text: &str) -> Result<(), String> {
-    Ok(())
+fn native_copy(text: &str) -> Result<(), String> {
+    use chaude_core::osenv;
+    use std::process::{Command, Stdio};
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty());
+    let dirs = osenv::path_dirs();
+    let Some((tool, args)) = clipboard_tool(wayland, |p| osenv::find_on_path(p, &dirs).is_some())
+    else {
+        return Err("no clipboard tool (wl-copy, xclip, xsel, clip.exe)".to_string());
+    };
+    let mut child = Command::new(tool)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(&clipboard_payload(tool, text))
+            .map_err(|e| e.to_string())?;
+    }
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{tool} {status}"))
+    }
+}
+
+// Tool choice as atotto/clipboard makes it (clipboard_unix.go init).
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn clipboard_tool(
+    wayland: bool,
+    has: impl Fn(&str) -> bool,
+) -> Option<(&'static str, &'static [&'static str])> {
+    let mut tools: Vec<(&'static str, &'static [&'static str])> = Vec::new();
+    if wayland {
+        tools.push(("wl-copy", &[]));
+    }
+    tools.push(("xclip", &["-in", "-selection", "clipboard"]));
+    tools.push(("xsel", &["--input", "--clipboard"]));
+    tools.push(("clip.exe", &[]));
+    tools.into_iter().find(|(p, _)| has(p))
+}
+
+// clip.exe reads UTF-16LE with a BOM, so Korean survives; the other tools take UTF-8.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn clipboard_payload(tool: &str, text: &str) -> Vec<u8> {
+    if tool == "clip.exe" {
+        std::iter::once(0xFEFF_u16)
+            .chain(text.encode_utf16())
+            .flat_map(u16::to_le_bytes)
+            .collect()
+    } else {
+        text.as_bytes().to_vec()
+    }
 }
 
 // Standard base64 (RFC 4648, padded) for the OSC 52 payload.
@@ -2252,6 +2307,31 @@ mod tests {
         assert!(out.ends_with("\x1b[?25h"), "{out:?}");
         // Cursor after "cd" on the second input row: 0-based (5, 7), so MoveTo is 1-based row 8, column 6.
         assert!(out.contains("\x1b[8;6H\x1b[?25h"), "{out:?}");
+    }
+
+    #[test]
+    fn clipboard_tool_order_matches_atotto() {
+        let all = |_: &str| true;
+        assert_eq!(clipboard_tool(true, all).map(|t| t.0), Some("wl-copy"));
+        assert_eq!(clipboard_tool(false, all).map(|t| t.0), Some("xclip"));
+        assert_eq!(
+            clipboard_tool(true, |p| p == "xsel").map(|t| t.0),
+            Some("xsel")
+        );
+        assert_eq!(
+            clipboard_tool(false, |p| p == "clip.exe").map(|t| t.0),
+            Some("clip.exe")
+        );
+        assert_eq!(clipboard_tool(true, |_| false), None);
+    }
+
+    #[test]
+    fn clipboard_payload_is_utf16_with_bom_for_clip_exe() {
+        assert_eq!(clipboard_payload("xclip", "가"), "가".as_bytes());
+        assert_eq!(
+            clipboard_payload("clip.exe", "가"),
+            vec![0xFF, 0xFE, 0x00, 0xAC]
+        );
     }
 
     #[test]
