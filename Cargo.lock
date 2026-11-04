@@ -53,6 +53,7 @@ dependencies = [
 name = "chaude-cli"
 version = "0.10.2"
 dependencies = [
+ "chaude-clean",
  "chaude-core",
  "chaude-scripts",
  "crossterm",

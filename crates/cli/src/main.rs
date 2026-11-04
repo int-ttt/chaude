@@ -288,6 +288,7 @@ fn main() {
         None | Some("--orch" | "--model" | "--from-claude" | "--import-dry-run") => run_tui(&args),
         Some(a) if a.starts_with("--model=") || a.starts_with("--from-claude=") => run_tui(&args),
         Some("metrics") => metrics_main(&args[1..]),
+        Some("clean") => chaude_clean::main(&args[1..]),
         Some(cmd) if chaude_scripts::has(cmd) => chaude_scripts::run(cmd, &args[1..]),
         Some(cmd) => {
             eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");

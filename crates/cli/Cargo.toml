@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 chaude-core = { path = "../core" }
 chaude-scripts = { path = "../scripts" }
+chaude-clean = { path = "../clean" }
 serde_json.workspace = true
 crossterm = "0.29"
 unicode-width = "0.2"
