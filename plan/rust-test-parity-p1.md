@@ -41,8 +41,8 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | clean/guard_roundtrip_test.go::TestGuardSettingsRemovedByClean | clean/src/tests.rs::guard_settings_removed_by_clean | covered | |
 | harness/acceptance_test.go::TestLiveRotationCarriesContext | core/tests/engine.rs::context_rotation_hands_off_and_fresh_child_gets_snapshot | covered | name-level match |
 | harness/acceptance_test.go::TestLiveStreamingMultipleDeltas | - | missing | no streaming-delta test in Rust core yet |
-| harness/agentstore_test.go::TestAgentStorePersistsEveryChange | crates/core/src/agent_store.rs::agent_store_persists_every_change | missing | store part only; tracker part (onToolUse/onSubEvent) not ported |
-| harness/agentstore_test.go::TestAgentRestoreMarksInterrupted | crates/core/src/agent_store.rs::agent_restore_marks_interrupted | missing | store part only; restoreAgents/markInterrupted need the tracker port |
+| harness/agentstore_test.go::TestAgentStorePersistsEveryChange | crates/core/src/agent_store.rs::agent_store_persists_every_change | covered | tracker-driven; AgentTracker on_tool_use/on_sub_event, no onUserEvent |
+| harness/agentstore_test.go::TestAgentRestoreMarksInterrupted | crates/core/src/agent_store.rs::agent_restore_marks_interrupted | covered | tracker-driven; restore_agents + mark_interrupted |
 | harness/agentstore_test.go::TestAgentStoreCrashRecoveryAndOwners | crates/core/src/agent_store.rs::agent_store_crash_recovery_and_owners | covered | |
 | harness/agentstore_test.go::TestAgentStoreOffAndNil | crates/core/src/agent_store.rs::agent_store_empty_path_is_off | covered | name-level match; nil store is Option::None at the call site |
 | harness/agentview_test.go::TestAgentViewClickReadOnlyClose | - | missing | Rust TUI has no agent view |
