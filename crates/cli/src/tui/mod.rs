@@ -39,7 +39,6 @@ use crossterm::terminal::{
     self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, ScrollDown, ScrollUp,
 };
 use crossterm::{execute, queue};
-use std::path::Path;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use bar::BarInput;
@@ -90,8 +89,6 @@ pub enum Action {
     Usage,
     // /update: the caller runs the release check off the UI thread; the result returns as Wake::Note (tui.go:1166).
     Update,
-    // /resume <session id>: the caller asks the engine to relaunch that session (EngineHandle::resume_session).
-    ResumeSession(String),
     // Answer to the open permission prompt (Go tui.go key(): y/Enter allow, n/Esc deny, Ctrl+C deny + interrupt).
     Answer {
         id: String,
@@ -184,8 +181,6 @@ pub struct App {
     copy_note: Option<(String, Instant)>,
     // Which mode the previous session loads with (session_mode_note), shown at start and by /view.
     session_mode: Option<String>,
-    // Model and configured rotate threshold, the inputs of handoff::resume_mode for /resume (set in tui()).
-    resume_rule: (String, u64),
     // Session ids of this run (UiEvent::SessionIds: main, residents, owned). /view lists them with the previous run's.
     this_run: BTreeSet<String>,
     // Session id the next rotation replaces (UiEvent::RotatedFrom), read by the Rotated notice.
@@ -278,7 +273,6 @@ impl App {
             dragging: false,
             copy_note: None,
             session_mode: None,
-            resume_rule: (String::new(), 0),
             this_run: BTreeSet::new(),
             rot_from: String::new(),
             tool_rows: HashMap::new(),
@@ -676,9 +670,9 @@ impl App {
             match act {
                 resume_pick::Action::None => {}
                 resume_pick::Action::Close => self.pick = None,
-                resume_pick::Action::Pick(sid) => {
+                resume_pick::Action::Pick(key) => {
                     self.pick = None;
-                    return self.resume_claude(sid);
+                    self.import_view(&key);
                 }
             }
             return Action::Continue;
@@ -1060,14 +1054,8 @@ impl App {
 
     // Go /resume <args> (resumeTarget): "claude <q>", or any arg no record answers, is a Claude Code session query
     // (group picker). Otherwise the record folder answers: several hits open the picker, one hit or a number loads.
-    // A session id from the record folder's .sessions.jsonl resumes that session; anything else is a record lookup.
     fn resume(&mut self, args: &[String]) -> Action {
         let arg = args.join(" ");
-        let exit =
-            handoff::handoff_file(&chaude_core::record::dir_for(Path::new(&self.welcome.cwd)));
-        if let Some(sid) = claude_session_id(&exit, &arg) {
-            return self.resume_claude(sid);
-        }
         let root =
             chaude_core::record::dir_for(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
         let (terms, record) = chaude_core::record_turn::resume_target_in(&root, args);
@@ -1093,31 +1081,22 @@ impl App {
         Action::Continue
     }
 
-    // Go groupList + pick: one matching group resumes its newest session, several open the picker, an error is the note.
+    // Go groupList + pick: one matching group imports it (sendImport), several open the picker, an error is the note.
     fn open_groups(&mut self, terms: &[String]) -> Action {
         match resume_pick::groups(&self.welcome.cwd, terms) {
             Err(e) => {
                 self.note(&e);
                 Action::Continue
             }
-            Ok(gs) if gs.len() == 1 => self.resume_claude(gs[0].latest().id.clone()),
+            Ok(gs) if gs.len() == 1 => {
+                self.import_view(&gs[0].key());
+                Action::Continue
+            }
             Ok(gs) => {
                 self.pick = Some(resume_pick::GroupPicker::new(gs));
                 Action::Continue
             }
         }
-    }
-
-    // A Claude Code session picked or named by /resume: relaunches it unless the previous run's resume rule says fresh.
-    fn resume_claude(&mut self, sid: String) -> Action {
-        let exit =
-            handoff::handoff_file(&chaude_core::record::dir_for(Path::new(&self.welcome.cwd)));
-        let (model, rotate) = self.resume_rule.clone();
-        if !picked_resumes(&exit, &sid, &model, rotate) {
-            self.note("previous session: fresh start, handoff note carried over; not resumed");
-            return Action::Continue;
-        }
-        Action::ResumeSession(sid)
     }
 
     // Enter in the record picker: the whole folder is appended to the transcript (Go loadRecordPick).
@@ -2324,35 +2303,6 @@ fn wait_batch(wakes: &Receiver<Wake>, timeout: Option<Duration>) -> Option<Vec<W
     Some(batch)
 }
 
-// The session id a /resume argument names: a hex/dash prefix (8+ chars) that matches exactly one logged id.
-fn claude_session_id(exit: &Path, arg: &str) -> Option<String> {
-    let hex = arg.len() >= 8 && arg.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
-    if !hex {
-        return None;
-    }
-    let mut hits = handoff::read_sessions(exit)
-        .into_iter()
-        .filter(|r| r.session_id.starts_with(arg));
-    let first = hits.next()?;
-    hits.next().is_none().then_some(first.session_id)
-}
-
-// Whether a picked session relaunches now. The previous run's main session follows handoff::resume_mode
-// (fresh when core would not resume it); any other id is taken as named (core: the caller names the session).
-fn picked_resumes(exit: &Path, sid: &str, model: &str, rotate: u64) -> bool {
-    let Some((prev, killed)) = handoff::previous_run(exit) else {
-        return true;
-    };
-    if prev.main_session != sid {
-        return true;
-    }
-    let threshold = chaude_core::rotate::threshold_for(model, rotate);
-    matches!(
-        handoff::resume_mode(&prev, handoff::MAIN_ROLE, killed, threshold),
-        handoff::Load::Resume(_)
-    )
-}
-
 // Which mode the previous session loads with, as core decides it at start (handoff::resume_mode, same inputs).
 // None when there is no previous run, or when --resume was given explicitly (core takes that one as is).
 fn session_mode_note(
@@ -2395,7 +2345,6 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     .model_id()
     .to_string();
     let threshold = cfg.context_window;
-    let resume_rule = (cfg.model.clone(), cfg.rotate_threshold);
     let session_mode = session_mode_note(
         cfg.handoff_path.as_deref(),
         &cfg.model,
@@ -2420,7 +2369,6 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         app.note(mode);
     }
     app.session_mode = session_mode;
-    app.resume_rule = resume_rule;
     if let Ok(cwd) = std::env::current_dir() {
         app.editor.load_history(&cwd);
     }
@@ -2508,7 +2456,6 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                         }
                         Action::CycleMode => engine.set_mode("next"),
                         Action::SetMode(p) => engine.set_mode(p.name()),
-                        Action::ResumeSession(sid) => engine.resume_session(&sid),
                     }
                     if let Some(imp) = app.import_install.take() {
                         engine.install_import(imp);
@@ -3556,6 +3503,7 @@ mod tests {
         // The busy state no longer adds a chrome row, so only the top bar (unseen or agents) can.
         assert!(!app.shows_bar());
     }
+
     // Go tui.go:383-391: after text started, an opus Agent or a busy resident keeps the thinking row up.
     #[test]
     fn opus_or_resident_busy_keeps_the_thinking_row_after_text() {
@@ -3587,7 +3535,6 @@ mod tests {
         });
         assert!(!thinking(&app), "resident idle again: hidden");
     }
-
 
     #[test]
     fn a_single_escape_interrupts_only_while_busy() {
@@ -3927,6 +3874,34 @@ mod tests {
     }
 
     #[test]
+    fn picked_group_imports_and_never_relaunches() {
+        let mut app = App::new(80, 24);
+        let info = |id: &str| chaude_core::resume_group::SessionInfo {
+            id: id.into(),
+            path: std::path::PathBuf::new(),
+            modified: std::time::SystemTime::UNIX_EPOCH,
+            turns: 1,
+            first: String::new(),
+            last: String::new(),
+            start: None,
+            cwd: String::new(),
+            name: String::new(),
+            cleared: false,
+            clear_head: false,
+        };
+        let group = chaude_core::resume_group::SessionGroup {
+            files: vec![info("new"), info("old")],
+        };
+        app.pick = Some(resume_pick::GroupPicker::new(vec![group]));
+        // Enter closes the picker and goes through the import path (Go sendImport), not a relaunch.
+        assert_eq!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::Continue
+        );
+        assert!(app.pick.is_none());
+    }
+
+    #[test]
     fn import_replaces_the_transcript_view() {
         let path = std::env::temp_dir().join(format!("chaude-import-{}.jsonl", std::process::id()));
         let lines = concat!(
@@ -3958,52 +3933,6 @@ mod tests {
             "{:?}",
             app.transcript
         );
-    }
-
-    #[test]
-    fn resume_argument_names_one_logged_session_id() {
-        let dir = std::env::temp_dir().join(format!("chaude-tui-sid-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let exit = dir.join("exit-handoff.json");
-        let _ = std::fs::remove_file(handoff::sessions_file(&exit));
-        handoff::append_session(
-            &exit,
-            handoff::MAIN_ROLE,
-            "3f2a9c10-0000-4000-8000-000000000001",
-        )
-        .unwrap();
-        handoff::append_session(&exit, "coder", "9b1e7d22-0000-4000-8000-000000000002").unwrap();
-        assert_eq!(
-            claude_session_id(&exit, "3f2a9c10"),
-            Some("3f2a9c10-0000-4000-8000-000000000001".to_string())
-        );
-        // Record names and short prefixes are not session ids.
-        assert_eq!(claude_session_id(&exit, "claude-harness"), None);
-        assert_eq!(claude_session_id(&exit, "3f2a"), None);
-        assert_eq!(claude_session_id(&exit, "0000"), None);
-    }
-
-    #[test]
-    fn picked_previous_main_session_follows_resume_mode() {
-        let dir = std::env::temp_dir().join(format!("chaude-tui-pick-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("exit-handoff.json");
-        let write = |tokens: u64| {
-            let h = handoff::ExitHandoff {
-                main_session: "sess-prev".into(),
-                ctx_tokens: [("main".to_string(), tokens)].into_iter().collect(),
-                ..Default::default()
-            };
-            std::fs::write(&path, serde_json::to_string(&h).unwrap()).unwrap();
-        };
-        // Above the threshold and not killed: core starts fresh, so the pick does not resume.
-        write(u64::MAX / 2);
-        assert!(!picked_resumes(&path, "sess-prev", "haiku", 80_000));
-        // Below the threshold: core resumes it.
-        write(10);
-        assert!(picked_resumes(&path, "sess-prev", "haiku", 80_000));
-        // Any other id is taken as named.
-        assert!(picked_resumes(&path, "sess-other", "haiku", 80_000));
     }
 
     #[test]

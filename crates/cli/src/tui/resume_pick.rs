@@ -1,5 +1,5 @@
 // Go /resume session picker (tui.go pick): the Claude Code session groups of this project that match the
-// /resume terms. Enter resumes the newest session of the chosen group.
+// /resume terms. Enter imports the chosen group.
 
 use std::path::Path;
 use std::time::SystemTime;
@@ -31,7 +31,7 @@ pub enum Action {
     None,
     // esc, q or ctrl+c: close the picker.
     Close,
-    // enter: resume this session (the newest file of the chosen group).
+    // enter: import this group (Go sendImport; the key is the group's id list, see SessionGroup::key).
     Pick(String),
 }
 
@@ -64,7 +64,7 @@ impl GroupPicker {
             KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => return Action::Close,
             KeyCode::Enter => {
                 if let Some(g) = self.groups.get(self.sel) {
-                    return Action::Pick(g.latest().id.clone());
+                    return Action::Pick(g.key());
                 }
             }
             KeyCode::Char(c)
@@ -141,6 +141,14 @@ mod tests {
         assert_eq!(p.key(press(KeyCode::Down)), Action::None);
         assert_eq!(p.sel, 0, "down wraps to the first row");
         assert_eq!(p.key(press(KeyCode::Esc)), Action::Close);
+    }
+
+    #[test]
+    fn enter_picks_the_whole_group_oldest_first() {
+        let mut g = group("new");
+        g.files.push(group("old").files.remove(0));
+        let mut p = GroupPicker::new(vec![g]);
+        assert_eq!(p.key(press(KeyCode::Enter)), Action::Pick("old,new".into()));
     }
 
     #[test]
