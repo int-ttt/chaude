@@ -26,7 +26,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
+use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::handoff;
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::resident::StagePhase;
@@ -56,6 +56,12 @@ const PROMPT: &str = "> ";
 const CHROME: usize = 4;
 // Go maxInputRows (tui.go:988).
 const MAX_INPUT_ROWS: usize = 5;
+// Go queueLines (tui.go:929): most waiting prompts shown above the input box.
+const MAX_QUEUE_ROWS: usize = 5;
+// Go maxPanel (tui.go:1452): most rows in one agent panel (foreground or background).
+const MAX_PANEL_ROWS: usize = 4;
+// Go minViewRows: the transcript keeps at least this many rows before the queue and panels take space.
+const MIN_VIEW_ROWS: usize = 3;
 // Reverse-video cell for the cursor (tui.go View, cursor style).
 const REV_ON: &str = "\x1b[7m";
 const WHEEL_LINES: isize = 3;
@@ -111,6 +117,10 @@ pub struct App {
     agents: Vec<(String, String, Instant)>,
     // Ids of the agents launched in the background (UiEvent::AgentBackground); they have no AgentEnd until done.
     bg_agents: Vec<String>,
+    // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
+    agent_rows: Vec<AgentRow>,
+    // Prompts waiting for the next turn, oldest first (UiEvent::QueueTexts; Go m.queue).
+    queue_texts: Vec<String>,
     // Rotations seen this session (UiEvent::Rotated); Go m.r.rotations.
     rot: u32,
     // Time of the last tick. Elapsed times and the spinner are computed from it, so `frame` stays pure.
@@ -218,6 +228,8 @@ impl App {
             turn_prompt: String::new(),
             agents: Vec::new(),
             bg_agents: Vec::new(),
+            agent_rows: Vec::new(),
+            queue_texts: Vec::new(),
             rot: 0,
             clock: Instant::now(),
             spin: ' ',
@@ -266,7 +278,11 @@ impl App {
     pub fn apply(&mut self, ev: UiEvent) {
         let content = !matches!(
             ev,
-            UiEvent::Status { .. } | UiEvent::Busy(_) | UiEvent::Queued(_)
+            UiEvent::Status { .. }
+                | UiEvent::Busy(_)
+                | UiEvent::Queued(_)
+                | UiEvent::AgentRows { .. }
+                | UiEvent::QueueTexts(_)
         );
         if matches!(
             ev,
@@ -540,6 +556,9 @@ impl App {
                 let notice = bar::budget_notice(spent_usd, cap_usd);
                 self.transcript.push(format!("{GREY_ON}{notice}{FG_OFF}"));
             }
+            // Go agentRows / m.queue: the panels and the queue are redrawn from these lists each frame.
+            UiEvent::AgentRows { rows } => self.agent_rows = rows,
+            UiEvent::QueueTexts(texts) => self.queue_texts = texts,
             // Variants added after the TUI wiring (non_exhaustive in core) render nothing yet.
             _ => {}
         }
@@ -1310,8 +1329,9 @@ impl App {
         rows
     }
 
-    // The status row (with the copy note), the input box and the bar above them, drawn at width `w`.
-    fn chrome(&self, w: usize) -> Vec<String> {
+    // The bar, the queue, the input box, the foreground and background agent rows, then the status row, drawn at
+    // width `w` on a screen `h` rows tall (Go View order: queue, box, panel, bgPanel, statusLine).
+    fn chrome(&self, w: usize, h: usize) -> Vec<String> {
         let width = text_width(w);
         let bi = self.bar_input();
         let [mut top, mut status] = bar::rows(&bi, self.spin, width);
@@ -1322,18 +1342,96 @@ impl App {
         if let Some((note, _)) = &self.copy_note {
             status = format!("{status} · {note}");
         }
+        let (fg, bg) = self.panel_lines(w, h);
         let mut chrome = Vec::with_capacity(CHROME + 1);
         if self.shows_bar() {
             chrome.push(bar::clip(&top, width));
         }
+        chrome.extend(self.queue_lines(w, h));
         chrome.extend(self.input_box(w));
+        chrome.extend(fg);
+        chrome.extend(bg);
         chrome.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&status, width)));
         chrome
     }
 
+    // Go queueLines (tui.go:929-945): waiting prompts above the input box, oldest first, dim. Past the cap the
+    // last row becomes "… +N 대기" with the count still waiting. The transcript keeps MIN_VIEW_ROWS.
+    fn queue_lines(&self, w: usize, h: usize) -> Vec<String> {
+        let room = h.saturating_sub(self.input_height(w) + 3 + MIN_VIEW_ROWS);
+        let max_show = MAX_QUEUE_ROWS.min(room);
+        if max_show == 0 {
+            return Vec::new();
+        }
+        let width = text_width(w);
+        let total = self.queue_texts.len();
+        let mut out = Vec::new();
+        for (i, q) in self.queue_texts.iter().enumerate() {
+            if i + 1 == max_show && total > max_show {
+                out.push(format!("{GREY_ON}  … +{} 대기{FG_OFF}", total - i));
+                break;
+            }
+            let text = format!("  대기 {}", q.replace('\n', " "));
+            out.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&text, width)));
+        }
+        out
+    }
+
+    // Go panelLines / bgLines: the foreground agent rows (below the input box) and the background rows under
+    // them. Only running agents show; the panel above takes its rows out of the room the background panel gets.
+    fn panel_lines(&self, w: usize, h: usize) -> (Vec<String>, Vec<String>) {
+        let queue_h = self.queue_lines(w, h).len();
+        let fg = self.agent_lines(false, w, h, queue_h, 0);
+        let bg = self.agent_lines(true, w, h, queue_h, fg.len());
+        (fg, bg)
+    }
+
+    // Go rowsA (tui.go:1448-1520): one line per running agent of one kind. When they do not fit, the last row is
+    // a "… a-b/n" indicator. The scroll position is not wired yet, so the window always starts at the first agent.
+    fn agent_lines(
+        &self,
+        bg: bool,
+        w: usize,
+        h: usize,
+        queue_h: usize,
+        used: usize,
+    ) -> Vec<String> {
+        let list: Vec<&AgentRow> = self
+            .agent_rows
+            .iter()
+            .filter(|r| r.background == bg && !r.done)
+            .collect();
+        if list.is_empty() || w < 10 {
+            return Vec::new();
+        }
+        let room = h.saturating_sub(self.input_height(w) + 3 + queue_h + MIN_VIEW_ROWS + used);
+        let limit = MAX_PANEL_ROWS.min(room);
+        if limit == 0 {
+            return Vec::new();
+        }
+        let width = text_width(w);
+        let shown = if list.len() > limit {
+            limit - 1
+        } else {
+            list.len()
+        };
+        let mut out: Vec<String> = list
+            .iter()
+            .take(shown)
+            .map(|r| agent_row_line(r, &self.bar.model, width))
+            .collect();
+        if list.len() > limit {
+            out.push(format!(
+                "{GREY_ON}  … 1-{shown}/{} (마우스 휠로 스크롤){FG_OFF}",
+                list.len()
+            ));
+        }
+        out
+    }
+
     // Rows of the transcript viewport on a `w` x `h` screen: what is left after the chrome and the slash menu.
     fn body_h(&self, w: usize, h: usize) -> usize {
-        let chrome_h = self.chrome(w).len();
+        let chrome_h = self.chrome(w, h).len();
         let menu_max = h.saturating_sub(chrome_h + 1);
         let menu = overlay::slash_popup(&self.suggest(), self.sugg_sel, w, menu_max);
         h.saturating_sub(chrome_h + menu.len())
@@ -1558,7 +1656,7 @@ impl App {
 
     // Status row, the input box's top and bottom borders, and the input rows.
     fn chrome_len(&self) -> usize {
-        CHROME - 1 + self.input_height(self.cols) + usize::from(self.shows_bar())
+        self.chrome(self.cols, self.rows).len()
     }
 
     // Go welcome() (tui.go:295-311): a rounded orange box at most 66 columns wide, then one blank row.
@@ -1805,6 +1903,29 @@ fn text_width(w: usize) -> usize {
     w.saturating_sub(1).max(1)
 }
 
+// One agent panel row (Go rowsA): "  ● 상태-모델-이름(작업)" with the dot in Go's running colour (220). Only running
+// agents reach the panel, so the state is always 실행 중. The model falls back to the session model; the summary is
+// the task, else the first prompt line.
+fn agent_row_line(r: &AgentRow, session_model: &str, width: usize) -> String {
+    let summary = if r.task.is_empty() {
+        &r.prompt
+    } else {
+        &r.task
+    };
+    let text = bar::agent_status_text(
+        bar::AgentState::Running,
+        &r.model,
+        session_model,
+        &r.name,
+        summary,
+    );
+    let dot = "\x1b[38;5;220m●\x1b[39m";
+    format!(
+        "  {dot}{GREY_ON} {}{FG_OFF}",
+        bar::clip(&text, width.saturating_sub(4))
+    )
+}
+
 // The whole screen as `h` rows of at most `w` columns. Pure: the same App and size give the same rows.
 #[cfg(test)]
 pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
@@ -1813,8 +1934,12 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
 
 // The rows of `frame`, and how many of the top rows are the body (the part that scrolls with new output).
 fn layout(app: &App, w: usize, h: usize) -> (Vec<String>, usize) {
+    // Go View before the first window size (tui.go:1229): nothing can be laid out yet.
+    if w == 0 || h == 0 {
+        return (vec!["starting…".to_string()], 0);
+    }
     let width = text_width(w);
-    let chrome = app.chrome(w);
+    let chrome = app.chrome(w, h);
     let chrome_h = chrome.len();
     // The slash menu sits right above the input box and never takes the last row of the body.
     let menu_max = h.saturating_sub(chrome_h + 1);
@@ -1851,8 +1976,10 @@ fn cursor(app: &App, w: usize, h: usize) -> (u16, u16) {
     let pw = UnicodeWidthStr::width(PROMPT);
     let (rows, cur_row, cur_col) = app.input_rows(inner.saturating_sub(pw));
     let (top, shown) = input_window(rows.len(), cur_row);
-    // The input rows sit above the box's bottom border and the status row.
-    let y = h.saturating_sub(2 + shown) + (cur_row - top);
+    // The input rows sit above the box's bottom border, and the agent rows (below the box) and the status row.
+    let (fg, bg) = app.panel_lines(w, h);
+    let below = fg.len() + bg.len() + 2;
+    let y = h.saturating_sub(below + shown) + (cur_row - top);
     let x = (1 + pw + cur_col) as i64 + app.ime_shift as i64;
     (x.max(0) as u16, y as u16)
 }
@@ -2625,6 +2752,171 @@ mod tests {
         assert!(out.ends_with("\x1b[?25h"), "{out:?}");
         // Cursor after "cd" on the second input row: 0-based (5, 7), so MoveTo is 1-based row 8, column 6.
         assert!(out.contains("\x1b[8;6H\x1b[?25h"), "{out:?}");
+    }
+
+    fn agent_row(id: &str, background: bool, done: bool) -> AgentRow {
+        AgentRow {
+            id: id.into(),
+            task: format!("task {id}"),
+            prompt: "first line".into(),
+            name: "scout".into(),
+            model: "haiku-4".into(),
+            background,
+            done,
+            agent_id: String::new(),
+            result_path: String::new(),
+            started_at: 0,
+        }
+    }
+
+    // The frame with SGR codes removed, one String per screen row.
+    fn plain_frame(app: &App, w: usize, h: usize) -> Vec<String> {
+        frame(app, w, h)
+            .iter()
+            .map(|r| render::strip_sgr(r))
+            .collect()
+    }
+
+    // Index of the input box's top border: the last ╭ row, below the welcome box.
+    fn box_top(rows: &[String]) -> usize {
+        rows.iter().rposition(|r| r.starts_with('╭')).unwrap()
+    }
+
+    // Queue rows are the ones that start at the left edge with "  대기" or "  …"; the input placeholder sits in a box.
+    fn queue_rows(rows: &[String]) -> Vec<&String> {
+        rows.iter()
+            .filter(|r| r.starts_with("  대기") || r.starts_with("  … +"))
+            .collect()
+    }
+
+    #[test]
+    fn queue_rows_sit_dimmed_above_the_input_box() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::QueueTexts(vec!["one".into(), "two\nlines".into()]));
+        let raw = frame(&app, 60, 20);
+        let rows = plain_frame(&app, 60, 20);
+        let top = box_top(&rows);
+        assert_eq!(rows[top - 2], "  대기 one");
+        assert_eq!(rows[top - 1], "  대기 two lines");
+        assert!(raw[top - 1].starts_with(GREY_ON), "{:?}", raw[top - 1]);
+    }
+
+    #[test]
+    fn queue_overflow_row_counts_the_hidden_prompts() {
+        let mut app = App::new(60, 30);
+        let texts: Vec<String> = (0..7).map(|i| format!("q{i}")).collect();
+        app.apply(UiEvent::QueueTexts(texts));
+        let rows = plain_frame(&app, 60, 30);
+        let top = box_top(&rows);
+        // Go queueLines: four prompts, then "… +3" for the three behind them (indices 4..=6).
+        assert_eq!(rows[top - 1], "  … +3 대기");
+        assert_eq!(rows[top - 2], "  대기 q3");
+        assert_eq!(queue_rows(&rows).len(), 5);
+    }
+
+    #[test]
+    fn foreground_rows_sit_below_the_box_and_list_running_agents_only() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("a", false, false), agent_row("d", false, true)],
+        });
+        let rows = plain_frame(&app, 60, 20);
+        let top = box_top(&rows);
+        let fg = rows.iter().position(|r| r.contains("실행 중-")).unwrap();
+        // Bottom border is top+2 and the status row is last, so the agent row sits between them.
+        assert_eq!(fg, top + 3, "{rows:?}");
+        assert_eq!(rows[fg], "  ● 실행 중-haiku-4-scout(task a)");
+        assert_eq!(rows.iter().filter(|r| r.contains("실행 중-")).count(), 1);
+        assert!(!rows.iter().any(|r| r.contains("task d")));
+    }
+
+    #[test]
+    fn background_rows_follow_the_foreground_rows() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("bg", true, false), agent_row("fg", false, false)],
+        });
+        let rows = plain_frame(&app, 60, 20);
+        let fg = rows.iter().position(|r| r.contains("task fg")).unwrap();
+        let bg = rows.iter().position(|r| r.contains("task bg")).unwrap();
+        assert_eq!(bg, fg + 1, "{rows:?}");
+        assert_eq!(rows.len() - 1, bg + 1, "status row ends the screen");
+    }
+
+    #[test]
+    fn panel_shows_a_scroll_row_when_agents_do_not_fit() {
+        let mut app = App::new(60, 20);
+        let rows_in: Vec<AgentRow> = (0..5)
+            .map(|i| agent_row(&i.to_string(), false, false))
+            .collect();
+        app.apply(UiEvent::AgentRows { rows: rows_in });
+        let rows = plain_frame(&app, 60, 20);
+        // Go maxPanel is 4: three agent rows and the "1-3/5" indicator row.
+        assert_eq!(rows.iter().filter(|r| r.contains("실행 중-")).count(), 3);
+        let more = rows.iter().position(|r| r.contains("1-3/5")).unwrap();
+        assert_eq!(rows[more], "  … 1-3/5 (마우스 휠로 스크롤)");
+    }
+
+    #[test]
+    fn panels_and_queue_never_overflow_small_heights() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::QueueTexts(vec!["a".into(), "b".into()]));
+        app.apply(UiEvent::AgentRows {
+            rows: (0..5)
+                .map(|i| agent_row(&i.to_string(), i % 2 == 0, false))
+                .collect(),
+        });
+        for h in [6, 8, 10, 12, 14, 20] {
+            assert_eq!(frame(&app, 60, h).len(), h, "h={h}");
+        }
+        // Too short for any panel: only the input box and the status row are left.
+        let tiny = plain_frame(&app, 60, 6);
+        assert!(queue_rows(&tiny).is_empty());
+        assert!(!tiny.iter().any(|r| r.contains("실행 중-")));
+    }
+
+    #[test]
+    fn narrow_terminal_hides_agent_rows() {
+        let mut app = App::new(9, 20);
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("a", false, false)],
+        });
+        assert!(
+            !plain_frame(&app, 9, 20)
+                .iter()
+                .any(|r| r.contains("실행 중-"))
+        );
+    }
+
+    #[test]
+    fn cursor_stays_on_the_input_line_above_the_agent_rows() {
+        let mut app = App::new(60, 20);
+        type_str(&mut app, "ab");
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("a", false, false), agent_row("b", true, false)],
+        });
+        let rows = plain_frame(&app, 60, 20);
+        let input = rows.iter().position(|r| r.contains("> ab")).unwrap();
+        let (_, y) = cursor(&app, 60, 20);
+        assert_eq!(y as usize, input, "{rows:?}");
+    }
+
+    #[test]
+    fn empty_size_shows_the_starting_frame() {
+        let app = App::new(0, 0);
+        assert_eq!(frame(&app, 0, 0), vec!["starting…".to_string()]);
+    }
+
+    #[test]
+    fn welcome_box_fits_narrow_terminals() {
+        // Go clamps the box to at least 20 cells and overflows narrower terminals; Rust shrinks it to fit.
+        let app = App::new(0, 0);
+        for w in 8..=70 {
+            for row in app.welcome_rows(w) {
+                let plain = render::strip_sgr(&row);
+                assert!(render::cell_width(&plain) <= w, "w={w} row={plain:?}");
+            }
+        }
     }
 
     #[test]
