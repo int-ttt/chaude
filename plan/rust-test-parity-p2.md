@@ -21,14 +21,15 @@ record_test.go (14) is already mapped in plan/rust-test-parity.md, so group 2 ha
 
 - covered: Rust test of the same behaviour found by name, or body read (noted per row). Name-level rows are not body-compared.
 - unverified: Rust test on the same topic found by name only; body not compared. Needs a body check before counting as covered.
+- partial: Rust test covers part of the Go test (one half or a subset). The uncovered part is an ignored stub with the same tag family. Not counted as covered.
 - missing: no Rust test found for this behaviour. No new test written in this pass (see Remaining).
-- diff: Rust behaviour differs. Intended as `#[ignore = "parity: <reason>"]`, not yet written.
+- diff: Rust behaviour differs. Written as `#[ignore = "parity: <reason>"]` in crates/core/tests/parity_p12_harness.rs.
 - n-a: Go behaviour lives outside the Rust scope (reason in note).
 
 ## Remaining (top of file, per brief)
 
-- 94 unmapped rows: 29 covered, 16 unverified, 24 missing, 1 diff, 24 n-a (tally below).
-- No new file crates/<crate>/tests/parity_harness_p2.rs written in this pass. Missing rows (24) and diff (1) are the add/ignore work for the next pass.
+- 94 unmapped rows: 30 covered, 5 partial, 16 unverified, 19 ignored, 24 n-a (tally below). Table holds 70 rows (30 + 5 + 16 + 19); the 24 n-a are not table rows.
+- Ported and ignored rows added in crates/core/tests/parity_p12_harness.rs (5 partial, 19 ignored, 1 covered). Missing: 0. Diff: 0 (diff rows are now ignored stubs).
 - Body checks still open: 16 unverified rows.
 - Update tests (group 2 has none); group 3 holds update rows, mark "wait: update" there.
 
@@ -41,11 +42,11 @@ record_test.go: 14 rows, see plan/rust-test-parity.md (harness/record_test.go se
 | Go test | Rust test | status | note |
 |---|---|---|---|
 | TestIdleControlRequestAnswered | crates/core/tests/engine.rs::can_use_tool_in_default_mode_asks_ui_and_sends_answer | unverified | topic match (permission answer); Go case is between turns, Rust case is in-turn; body not compared |
-| TestIdleDeniesWhenNoPrompt | none | missing | idle can_use_tool with no UI prompt must deny |
+| TestIdleDeniesWhenNoPrompt | none | ignored | idle can_use_tool with no UI prompt must deny  [p12: idle_denies_when_no_prompt] |
 | TestStrayLateResultSkipped | crates/core/tests/engine.rs::stray_result_of_abandoned_turn_does_not_end_next_turn | covered | name-level match |
-| TestIdleBackgroundFollowupRendered | none | missing | task-notification between turns renders "에이전트 완료" and clears tracker |
-| TestIdleSpendRow | none | missing | background row sub_output_tokens / spawns / result_model_usage |
-| TestIdleSpendLiveReplay | none | missing | Go reads testdata/bg_turn_live.jsonl and skips if absent |
+| TestIdleBackgroundFollowupRendered | none | ignored | task-notification between turns renders "에이전트 완료" and clears tracker  [p12: idle_background_followup_rendered] |
+| TestIdleSpendRow | none | partial | background row sub_output_tokens / spawns / result_model_usage  [p12: idle_spend_row] |
+| TestIdleSpendLiveReplay | none | partial | Go reads testdata/bg_turn_live.jsonl and skips if absent  [p12: idle_spend_live_replay] |
 | TestReadClaudeTranscriptFullView | crates/core/src/import_view.rs::tool_use_result_and_thinking_are_rendered_in_order, crates/core/src/import_view.rs::subagent_renders_after_its_agent_call | unverified | two Rust tests cover the two halves; single body not compared |
 
 ## input_test.go, links_test.go, links_wrap_test.go, localcmd_test.go (13 rows)
@@ -64,7 +65,7 @@ record_test.go: 14 rows, see plan/rust-test-parity.md (harness/record_test.go se
 | TestLinkifyPreservesVisibleText | crates/cli/src/tui/render.rs::linkify_keeps_visible_text_and_width | covered | name-level match |
 | TestWrapLinkedSkipsFence | crates/cli/src/tui/render.rs::wrap_linked_skips_fenced_code | covered | name-level match |
 | TestWrapLinkedColorsWholeTokens | crates/cli/src/tui/render.rs::wrap_linked_colors_whole_tokens | covered | name-level match |
-| TestPlainLocalCmdsNoSend | none | missing | plain local commands must not send a prompt; crates/cli/src/tui/commands.rs::plain_text_is_not_a_command is not the same case |
+| TestPlainLocalCmdsNoSend | none | ignored | plain local commands must not send a prompt; crates/cli/src/tui/commands.rs::plain_text_is_not_a_command is not the same case  [p12: plain_local_cmds_no_send] |
 
 ## metrics_test.go, mode_test.go, orch_test.go, orchws_test.go (13 rows)
 
@@ -101,25 +102,25 @@ TestPlainLoopCallsCloseAll, TestQuitCloseAllWithNilSess.
 |---|---|---|---|
 | TestSessionPanelAndThinking | crates/cli/src/tui/bar.rs::thinking_row_shows_only_for_opus_resident_or_pre_text | unverified | topic match (thinking row) |
 | TestEscInterruptClearsForegroundPanel | crates/cli/src/tui/mod.rs::a_single_escape_interrupts_only_while_busy | unverified | topic match (esc interrupt) |
-| TestIdleTickRefreshesWhenBackgroundFinishes | none | missing | idle tick refresh of panel after background finishes |
-| TestCursorRowMatchesPanelAfterTick | none | missing | cursor row vs panel after tick |
+| TestIdleTickRefreshesWhenBackgroundFinishes | none | ignored | idle tick refresh of panel after background finishes  [p12: idle_tick_refreshes_when_background_finishes] |
+| TestCursorRowMatchesPanelAfterTick | none | ignored | cursor row vs panel after tick  [p12: cursor_row_matches_panel_after_tick] |
 | TestPanelMoreRowAndSmallHeight | crates/cli/src/tui/bar.rs::every_running_agent_stays_visible_when_row_is_narrow | unverified | topic match (small height/narrow row) |
 | TestThinkingOnlyForForeground | crates/cli/src/tui/bar.rs::thinking_row_shows_only_for_opus_resident_or_pre_text | unverified | topic match |
-| TestBackgroundRowsBelowInputBox | none | missing | background rows layout below input |
-| TestBackgroundSmallHeightNoOverflow | none | missing | background rows, small height |
-| TestStalledOutputFileKeepsAgentRunningUntilDoneSignal | none | missing | stalled output file keeps agent running until done |
+| TestBackgroundRowsBelowInputBox | none | ignored | background rows layout below input  [p12: background_rows_below_input_box] |
+| TestBackgroundSmallHeightNoOverflow | none | ignored | background rows, small height  [p12: background_small_height_no_overflow] |
+| TestStalledOutputFileKeepsAgentRunningUntilDoneSignal | none | ignored | stalled output file keeps agent running until done  [p12: stalled_output_file_keeps_agent_running] |
 | TestQueueWhileBusyNotSent | crates/core/tests/engine.rs::submit_while_busy_queues_and_never_interrupts | covered | name-level match |
 | TestQueueSentOnDoneInOrder | crates/core/tests/engine.rs::queued_prompts_go_out_as_one_merged_turn_on_done | covered | body read: Go sends "second\n\nthird" after first done; Rust merges queued prompts into one turn on done. Same order and merge |
-| TestQueueLinesDimAboveInput | none | missing | queued lines dim above input (render) |
+| TestQueueLinesDimAboveInput | none | ignored | queued lines dim above input (render)  [p12: queue_lines_dim_above_input] |
 | TestBackgroundOnlyDoesNotQueue | crates/core/tests/engine.rs::background_only_agent_does_not_queue_next_prompt | covered | name-level match |
-| TestQueueSmallHeightNoOverflow | none | missing | queue rows, small height |
-| TestCursorRowIncludesBackgroundRows | none | missing | cursor row counts background rows |
+| TestQueueSmallHeightNoOverflow | none | ignored | queue rows, small height  [p12: queue_small_height_no_overflow] |
+| TestCursorRowIncludesBackgroundRows | none | ignored | cursor row counts background rows  [p12: cursor_row_includes_background_rows] |
 | TestAgentStatusTextPrefixedName | crates/cli/src/tui/bar.rs::agent_name_with_model_prefix_skips_model_segment | unverified | topic match |
 | TestAgentStatusFormat | crates/cli/src/tui/bar.rs::agent_status_text_uses_state_model_and_name | unverified | topic match |
-| TestPanelScrollWindow | none | missing | panel scroll window |
-| TestUserEventNotificationFinishesBackground | none | missing | user-event notification finishes background row |
-| TestSetRateLogsOnFiveHourChange | none | missing | rate log row (stage "rate") on five-hour change; Rust metrics has no rate stage test |
-| TestSetRateTopLevelFallback | none | missing | rate top-level fallback |
+| TestPanelScrollWindow | none | ignored | panel scroll window  [p12: panel_scroll_window] |
+| TestUserEventNotificationFinishesBackground | none | ignored | user-event notification finishes background row  [p12: user_event_notification_finishes_background] |
+| TestSetRateLogsOnFiveHourChange | none | ignored | rate log row (stage "rate") on five-hour change; Rust metrics has no rate stage test  [p12: set_rate_logs_on_five_hour_change] |
+| TestSetRateTopLevelFallback | none | ignored | rate top-level fallback  [p12: set_rate_top_level_fallback] |
 | TestFmtRateStatus | crates/cli/src/tui/mod.rs::rate_status_follows_go_fmt_rate_status | covered | name-level match |
 | TestRecordSkip | crates/core/src/record_turn.rs::skip_slash_commands_and_empty_prompts | unverified | topic match (skip slash commands and empty prompts) |
 | TestMeasureLine | crates/core/src/record_turn.rs::measure_line_fixed_then_result_keys | unverified | topic match (measure line keys) |
@@ -128,28 +129,30 @@ TestPlainLoopCallsCloseAll, TestQuitCloseAllWithNilSess.
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
-| TestAgentPromptLoaded | none | missing | agent prompt file loaded (crates/core/src/resident.rs::strip_frontmatter_drops_header_block covers frontmatter only) |
-| TestAgentPromptMissingNotice | none | missing | missing agent prompt shows notice |
+| TestAgentPromptLoaded | none | covered | agent prompt file loaded (crates/core/src/resident.rs::strip_frontmatter_drops_header_block covers frontmatter only)  [p12: agent_prompt_loaded] |
+| TestAgentPromptMissingNotice | none | partial | missing agent prompt shows notice  [p12: agent_prompt_missing_is_err] |
 | TestStageLinesOrder | crates/core/tests/engine.rs::resident_stage_rows_bracket_main_turn_and_agent_calls | unverified | topic match (stage row order) |
 | TestSessionArgsMinimal | crates/core/src/proc.rs::args_match_go_session_defaults | covered | body read: Rust args checked against Go session defaults |
 | TestSessionArgsCoder | crates/core/src/proc.rs::resident_shape_args_match_go_session_args | covered | body read: coder session args |
 | TestMainStrictMCP | crates/core/src/proc.rs::mcp_config_flag_only_when_set | unverified | topic match (strict MCP flag); body not compared |
-| TestResidentRunningListShowsOnlyBusySessions | none | missing | running list shows only busy residents |
+| TestResidentRunningListShowsOnlyBusySessions | none | ignored | running list shows only busy residents  [p12: resident_running_list_shows_only_busy_sessions] |
 | TestResidentCoderReply | crates/core/tests/engine.rs::coder_task_emits_working_done_rows_and_reply | covered | body read: coder reply rows |
-| TestResidentCoderSlotReuse | none | missing | coder slot reuse |
-| TestResidentCoderBusyRefuses | none | diff | Go refuses a busy single coder; Rust pool errors "all resident coders are busy" (crates/core/src/api.rs:1046). Planned #[ignore = "parity: single-coder busy refusal vs pool error"] |
-| TestCoderPermissionOnlyWhenBusy | none | missing | coder permission prompt only when busy |
-| TestMCPRoundTripFakeSession | none | missing | MCP round trip with fake session |
-| TestResidentMCPConfigWritten | none | missing | resident MCP config written to disk |
+| TestResidentCoderSlotReuse | none | ignored | coder slot reuse  [p12: resident_coder_slot_reuse] |
+| TestResidentCoderBusyRefuses | none | ignored | Go refuses a busy single coder; Rust pool errors "all resident coders are busy" (crates/core/src/api.rs:1046). Planned #[ignore = "parity: single-coder busy refusal vs pool error"]  [p12: resident_coder_busy_refuses] |
+| TestCoderPermissionOnlyWhenBusy | none | ignored | coder permission prompt only when busy  [p12: coder_permission_only_when_busy] |
+| TestMCPRoundTripFakeSession | none | partial | MCP round trip with fake session  [p12: mcp_round_trip_reply_level] |
+| TestResidentMCPConfigWritten | none | partial | resident MCP config written to disk  [p12: mcp_config_args] |
 
 ## Tally (94 unmapped rows)
 
-- covered: 29
+- covered: 30
+- partial: 5
 - unverified: 16
-- missing: 24
-- diff: 1
-- n-a: 24
-- Sum: 94 (checked: 29 + 16 + 24 + 1 + 24 = 94)
+- ignored: 19
+- missing: 0
+- diff: 0
+- n-a: 24 (not table rows; carried from the previous header, not re-checked)
+- Sum: 94 (checked: 30 + 5 + 16 + 19 + 0 + 0 + 24 = 94; table rows 70 = 30 + 5 + 16 + 19)
 
 ## Pre-existing shared rows check
 
