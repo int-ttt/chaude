@@ -22,11 +22,11 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 
 ## Remaining (top of file)
 
-- Missing rows (26): resident_pipeline 2, resident_respawn 2, resident_route 1, resident_test 2, resume 1,
-  resumeshift 1, selection 1, sessview 1, turn_wait 1, turnspend 4, unit 6, usagepoll 4. Need Rust code or a port first.
+- Missing rows: 0. The 23 rows that were missing are now 10 covered (turn_wait 1, turnspend 4, usagepoll 4, unit ParseSamples 1)
+  and 13 ignored (#[ignore] stubs in crates/core/tests/parity_harness_p3_ignored.rs, reasons in each row).
 - Update/install rows (16): wait: update.
-- Not verified by body: resident_test (EagerSpawn, SlotsFour), resident_respawn, SpawnSlotParksReadingChild were only
-  name-grepped; their status may change after a body read.
+- Not verified by body: resident_test (EagerSpawn, SlotsFour), resident_respawn, SpawnSlotParksReadingChild are ignored
+  stubs now, so no body read is claimed.
 
 ## Commits (this part)
 
@@ -45,22 +45,22 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 |---|---|---|---|
 | TestViaPrompterFailureNotice | crates/core/tests/engine.rs::prompter_failure_falls_back_to_raw_prompt | covered | name-level |
 | TestViaTUITranslates | crates/core/tests/engine.rs::tui_answer_replaces_main_reply_after_turn | covered | name-level |
-| TestViaTUIFailureNotice | none | missing | no Rust test for the TUI translator failure notice |
-| TestRunTurnShowsTUIOutputOnly | none | missing | closest is engine.rs::tui_answer_replaces_main_reply_after_turn, not the same check |
+| TestViaTUIFailureNotice | crates/core/tests/parity_harness_p3_ignored.rs::go_via_t_u_i_failure_notice | ignored | #[ignore] stub: resident TUI translator failure notice seam not wired |
+| TestRunTurnShowsTUIOutputOnly | crates/core/tests/parity_harness_p3_ignored.rs::go_run_turn_shows_t_u_i_output_only | ignored | #[ignore] stub: run_turn TUI-only output seam not wired |
 
 ## harness/resident_respawn_test.go (2 rows)
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
-| TestSendResidentRespawnsDeadSlot | none | missing | respawn of a dead resident slot not found by name grep |
-| TestViaPrompterRawWhenRespawnFails | none | missing | raw fallback exists (engine.rs::prompter_failure_falls_back_to_raw_prompt) but respawn-failure path not covered |
+| TestSendResidentRespawnsDeadSlot | crates/core/tests/parity_harness_p3_ignored.rs::go_send_resident_respawns_dead_slot | ignored | #[ignore] stub: resident dead-slot respawn not wired |
+| TestViaPrompterRawWhenRespawnFails | crates/core/tests/parity_harness_p3_ignored.rs::go_via_prompter_raw_when_respawn_fails | ignored | #[ignore] stub: respawn-failure raw fallback not wired |
 
 ## harness/resident_route_test.go (10 rows)
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
 | TestSendResidentBusyUntilResult | crates/core/tests/engine.rs::coder_task_emits_resident_busy_bracket_before_reply | covered | name-level |
-| TestSpawnSlotParksReadingChild | none | missing | not found by name grep |
+| TestSpawnSlotParksReadingChild | crates/core/tests/parity_harness_p3_ignored.rs::go_spawn_slot_parks_reading_child | ignored | #[ignore] stub: spawnSlot seam not wired |
 | TestViaPrompterSummaryOnly | crates/core/src/resident.rs::summary_is_composed_with_original_and_stage_done | covered | name-level |
 | TestViaPrompterOKNoOriginal | crates/core/src/resident.rs::empty_summary_passes_input_through_without_stage | covered | name-level |
 | TestViaPrompterNeedOriginalFlag | crates/core/src/resident.rs::need_original_flags_exact_inputs | covered | |
@@ -74,8 +74,8 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
-| TestResidentSpawnsEager | none | missing | not body-checked; no name match |
-| TestResidentSlotsFour | none | missing | not body-checked; default pool of 4 is in parity_harness_p3.rs (extra_coders) but slot count check not added |
+| TestResidentSpawnsEager | crates/core/tests/parity_harness_p3_ignored.rs::go_resident_spawns_eager | ignored | #[ignore] stub: eager resident spawn not on a pub core API |
+| TestResidentSlotsFour | crates/core/tests/parity_harness_p3_ignored.rs::go_resident_slots_four | ignored | #[ignore] stub: resident slot count not on a pub core API |
 
 ## harness/resume_group_test.go (7 rows)
 
@@ -101,7 +101,7 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 | Go test | Rust test | status | note |
 |---|---|---|---|
 | TestListClaudeSessions | crates/cli/src/tui/sessview.rs::list_sessions (fn, used by list_draws_sessions_and_esc_closes) | covered | name differs (list_sessions), behaviour same |
-| TestViewHelpers | none | missing | helper set not found by name grep |
+| TestViewHelpers | crates/core/tests/parity_harness_p3_ignored.rs::go_view_helpers | ignored | #[ignore] stub: cli-private sessview helpers; bin-only crate |
 
 ## harness/resumeshift_test.go (3 rows)
 
@@ -109,7 +109,7 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 |---|---|---|---|
 | TestJediTermIMEColumnShift | crates/cli/src/tui/mod.rs::ime_shift_follows_env_override_and_jediterm | covered | |
 | TestImportShowsTurnsInTUI | crates/cli/src/tui/mod.rs::import_replaces_the_transcript_view | covered | |
-| TestRotateKeepsPendingSnapshot | none | missing | model switch must not replace the pending import snapshot; no Rust test (engine.rs::installed_import_snapshot_goes_in_front_of_next_prompt covers only the snapshot placement) |
+| TestRotateKeepsPendingSnapshot | crates/core/tests/parity_harness_p3_ignored.rs::go_rotate_keeps_pending_snapshot | ignored | #[ignore] stub: rotate path does not keep pending import snapshot in Rust |
 
 ## harness/selection_test.go (3 rows)
 
@@ -117,7 +117,7 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 |---|---|---|---|
 | TestSelectionAnchorStaysOnContentAfterAppend | crates/cli/src/tui/render.rs::selection_anchor_stays_on_content_after_append | covered | |
 | TestSelectionMultiLineAndReversedOrder | crates/cli/src/tui/render.rs::selection_text_multi_line_and_reversed | covered | |
-| TestReleaseCopiesSelection | none | missing | clipboard copy on release; K5 clipboard commit has no release-path test found |
+| TestReleaseCopiesSelection | crates/core/tests/parity_harness_p3_ignored.rs::go_release_copies_selection | ignored | #[ignore] stub: cli-private clipboard release; bin-only crate |
 
 ## harness/sessview_test.go (6 rows)
 
@@ -128,7 +128,7 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 | TestViewArgOpensSessionDirectly | crates/cli/src/tui/sessview.rs::view_arg_opens_session_directly | covered | |
 | TestViewListsOnlyOwnSessions | crates/cli/src/tui/sessview.rs::view_lists_only_own_sessions | covered | |
 | TestViewWheelMovesSessionCursor | crates/cli/src/tui/sessview.rs::wheel_moves_session_cursor_and_wraps | covered | |
-| TestViewPromptScrollsInsideTranscript | none | missing | prompt scroll inside transcript not found by name grep |
+| TestViewPromptScrollsInsideTranscript | crates/core/tests/parity_harness_p3_ignored.rs::go_view_prompt_scrolls_inside_transcript | ignored | #[ignore] stub: cli-private sessview prompt scroll; bin-only crate |
 
 ## harness/specter_test.go (2 rows)
 
@@ -148,30 +148,30 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
-| TestTurnWaitsForOpenAgentToolResult | none | missing | engine.rs::silent_turn_emits_still_running_notice_and_never_interrupts has no open tool_use; open-Agent wait not covered |
+| TestTurnWaitsForOpenAgentToolResult | crates/core/tests/engine.rs::slow_agent_result_is_delivered_and_timer_is_paused_without_interrupt | covered | open Agent tool result is waited for; timer paused; no interrupt |
 | TestTurnQuietNoticeKeepsWaiting | crates/core/tests/engine.rs::silent_turn_emits_still_running_notice_and_never_interrupts | covered | |
 
 ## harness/turnspend_test.go (4 rows)
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
-| TestTurnSpendSubagentUsageMaxPerMessage | none | missing | turn spend (subagent usage) not found by name grep |
-| TestTurnSpendMainUsageIgnored | none | missing | same feature |
-| TestTurnSpendSpawnCounting | none | missing | same feature |
-| TestTurnSpendEmptyAndNil | none | missing | same feature; nearest is engine.rs::turn_stats_reports_turn_cost_delegations_and_context (not the same check) |
+| TestTurnSpendSubagentUsageMaxPerMessage | crates/core/tests/parity_harness_p3_spend.rs::go_turnspend_subagent_usage_max_per_message | covered | TurnSpend::on_event/fields; body-level |
+| TestTurnSpendMainUsageIgnored | crates/core/tests/parity_harness_p3_spend.rs::go_turnspend_main_usage_ignored | covered | body-level |
+| TestTurnSpendSpawnCounting | crates/core/tests/parity_harness_p3_spend.rs::go_turnspend_spawn_counting | covered | body-level; duplicate tool id counted once |
+| TestTurnSpendEmptyAndNil | crates/core/tests/parity_harness_p3_spend.rs::go_turnspend_empty_and_no_panic | covered | Go nil receiver has no Rust counterpart; empty and no-panic checked |
 
 ## harness/unit_test.go (8 rows)
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
-| TestParseSamples | none | missing | not found by name grep |
+| TestParseSamples | crates/core/tests/parity_harness_p3_spend.rs::go_parse_samples_probe1 | covered | samples/probe1.jsonl via import_view::parse_event; ctx from usage_fields |
 | TestCtxTokens | crates/core/src/event.rs::usage_context_tokens_sums_input_and_cache | covered | |
 | TestObservedTTL | crates/core/src/cache_ttl.rs::observed_ttl_reads_written_tier_else_prev | covered | helper only; api.rs does not call observed_ttl yet (Go livechild.go touchMain) |
 | TestSnapshot | crates/core/src/import_claude.rs::snapshot_keeps_tail_turns_and_files | covered | name-level |
 | TestCleanEnv | crates/core/src/proc.rs::apply_env_drops_api_key_and_sets_only_valid_ttl | covered | name-level: env delta (ANTHROPIC_API_KEY removed, exact window value), not inherited env |
 | TestWithCacheTTL | crates/core/src/cache_ttl.rs::with_cache_ttl_pins_single_entry_last | covered | name-level: pure helper; proc apply_env sets the TTL entry, not with_cache_ttl |
-| TestFmtK | none | missing | bar.rs fmt_k (line 90) has no test |
-| TestCtxBar | none | missing | not found by name grep |
+| TestFmtK | crates/core/tests/parity_harness_p3_ignored.rs::go_fmt_k | ignored | #[ignore] stub: fmt_k private in cli bar.rs; bin-only crate |
+| TestCtxBar | crates/core/tests/parity_harness_p3_ignored.rs::go_ctx_bar | ignored | #[ignore] stub: cli-private ctx bar; bin-only crate |
 
 ## harness/usagebar_test.go (2 rows)
 
@@ -192,10 +192,10 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
-| TestParseUsage | none | missing | usage text parser (session/week pct, resets) not found by name grep |
-| TestPollUsageLogsRow | none | missing | usage metric row not found in Rust |
-| TestPollUsageError | none | missing | same feature |
-| TestTurnCostUSDDelta | none | missing | per-turn cost delta not found by name grep |
+| TestParseUsage | crates/core/tests/parity_harness_p3_spend.rs::go_parse_usage_session_and_week | covered | usage_poll::parse_usage; body-level |
+| TestPollUsageLogsRow | crates/core/tests/parity_harness_p3_spend.rs::go_poll_usage_logs_row | covered | usage_poll::log_usage row; Go Repl.pollUsageSync seam not in Rust |
+| TestPollUsageError | crates/core/tests/parity_harness_p3_spend.rs::go_poll_usage_error_row | covered | usage_poll::log_usage error row |
+| TestTurnCostUSDDelta | crates/core/tests/parity_harness_p3_spend.rs::go_turn_cost_usd_delta | covered | TurnCost::delta; Go Repl.turnCostUSD seam not in Rust |
 | TestUsageLive | none | n-a | Go hits the real claude CLI, skipped unless HARNESS_LIVE_USAGE=1; Rust usage path is covered by engine.rs::usage_answers_with_result_text_from_one_shot_run |
 
 ## harness/usageview_test.go (4 rows)
@@ -231,15 +231,16 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 ## Totals (group 3)
 
 - Group 3 tests: 103 = harness 75 + update 16 + scripts 2 + settings 10 (last 10 and 2 are mapped in the shared file).
-- Harness 75 rows: covered 43 (of which 2 use the new p3 test: TestExtraCoderPoolFromSetting, TestExtraCoderExpiresAt270s),
-  missing 31, n-a 1 (TestUsageLive).
+- Table-wide (all sections, 91 rows, recounted 11-04 after this run): covered 77, ignored 13, missing 0, n-a 1 (TestUsageLive).
+  The old per-harness split (covered 43, missing 31) was stale and is not restated here.
 - Update 16 rows: wait: update.
 - Added tests: 1 test in crates/core/tests/parity_harness_p3.rs (default_extra_pool_and_idle_ttl_match_go); passes.
-- Ignored diffs (#[ignore = "parity: ..."]): 0. Missing rows are features or crate-private helpers, so no ignored stub was added.
+- Ignored stubs (#[ignore = "parity: ..."]): 13, in crates/core/tests/parity_harness_p3_ignored.rs; each panics with "not ported" when run with --ignored.
+- New covered tests: 9 in crates/core/tests/parity_harness_p3_spend.rs (TurnSpend x4, usage x4, ParseSamples); 1 existing engine test (TurnWaits).
 
 ## Top behaviour differences / gaps
 
-- Turn spend and per-turn cost delta, plus usage poll row logging, are not found in Rust (9 rows).
+- Turn spend, per-turn cost delta and usage poll rows: now covered by parity_harness_p3_spend.rs (Go Repl seams not ported).
 - Clean env and cache-TTL setting in proc.rs are not tested and proc is not pub (2 rows).
 - Model switch with a pending import snapshot (TestRotateKeepsPendingSnapshot) has no Rust test.
-- Open-Agent turn wait (TestTurnWaitsForOpenAgentToolResult) has no Rust test.
+- Open-Agent turn wait (TestTurnWaitsForOpenAgentToolResult): covered by engine.rs::slow_agent_result_is_delivered_and_timer_is_paused_without_interrupt.
