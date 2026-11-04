@@ -48,9 +48,28 @@ fn fake(name: &str, turns: &[&str]) -> Fake {
     for (i, f) in turns.iter().enumerate() {
         fs::copy(fixture(f), dir.join(format!("turn{}.jsonl", i + 1))).unwrap();
     }
+    // The prompter reply; an empty file makes the fake prompter exit on its first prompt.
+    fs::write(
+        dir.join("prompter.jsonl"),
+        "{\"type\":\"result\",\"result\":\"caveman summary\"}\n",
+    )
+    .unwrap();
     let script = r#"#!/bin/sh
 n=0
+case "$*" in
+  *system-prompt*) role=prompter ;;
+  *) role=main ;;
+esac
 while IFS= read -r line; do
+  if [ "$role" = prompter ]; then
+    case "$line" in
+      *'"type":"user"'*)
+        [ -s 'DIR/prompter.jsonl' ] || exit 1
+        cat 'DIR/prompter.jsonl'
+        ;;
+    esac
+    continue
+  fi
   printf '%s\n' "$line" >> 'DIR/stdin.log'
   case "$line" in
     *'"type":"user"'*)
@@ -1167,11 +1186,64 @@ fn resident_stage_rows_bracket_main_turn_and_agent_calls() {
     assert_eq!(
         stages,
         vec![
+            stage("prompter", StagePhase::Working),
+            stage("prompter", StagePhase::Done),
             stage("main", StagePhase::Working),
             stage("agent:scan", StagePhase::Working),
             stage("agent:scan", StagePhase::Done),
             stage("main", StagePhase::Done),
         ],
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
+fn prompter_summary_wraps_prompt_for_main_child() {
+    let _g = lock();
+    let f = fake("prompter_on", &["resume_agent_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let stdin = wait_for(&f.dir.join("stdin.log"), "[original]");
+    assert!(stdin.contains("caveman summary"), "{stdin}");
+    assert!(stdin.contains("[original]"), "{stdin}");
+    assert!(
+        evs.contains(&UiEvent::Stage {
+            slot: "prompter".into(),
+            phase: StagePhase::Done,
+        }),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
+fn prompter_failure_falls_back_to_raw_prompt() {
+    let _g = lock();
+    let f = fake("prompter_fail", &["resume_agent_turn.jsonl"]);
+    fs::write(f.dir.join("prompter.jsonl"), "").unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let stdin = fs::read_to_string(f.dir.join("stdin.log")).unwrap_or_default();
+    assert!(!stdin.contains("[original]"), "{stdin}");
+    assert!(
+        evs.contains(&UiEvent::Stage {
+            slot: "prompter".into(),
+            phase: StagePhase::Failed("prompter exited".into()),
+        }),
+        "{evs:?}"
+    );
+    assert!(
+        evs.contains(&UiEvent::Stage {
+            slot: "main".into(),
+            phase: StagePhase::Done,
+        }),
         "{evs:?}"
     );
     h.shutdown();

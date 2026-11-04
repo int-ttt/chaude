@@ -51,3 +51,18 @@ remaining:
 - test resident_shape_args_match_go_session_args (minimal and coder argv tails)
 - gates: clippy PASS; cargo test -p chaude-core PASS; fmt PASS; build --workspace PASS
 - remaining: prompter child wiring (b), coder+tui slots (c), N14 (d), exit_handoff (e)
+
+## sub-group 4b: prompter child (Go viaPrompter)
+- resident.rs: PROMPTER_RULE = include_str!(rules/resident-prompter.md) (verbatim Go rule); Prompter::fail(reason); unit test fail_passes_input_through_with_reason
+- api.rs: Input::Prompter(epoch, ProcMsg); State prompter / prompter_proc / prompter_epoch / prompter_deadline
+- submit: queues while busy or prompter waiting; begin_turn -> start_prompter (residents on) or dispatch (off)
+- prompter child: haiku, Shape minimal + rule, spawned on first prompt, kept alive; result line = reply
+- finish_prompter: stage prompter Done/Failed from outcome, then dispatch the outcome text (summary+original, or raw)
+- Failed producers: spawn error, start error, write error, child exit (Eof), timeout (PROMPTER_TIMEOUT 60 s via on_quiet/wait_budget)
+- deferred rotation does not run while a prompter wait is pending
+- tests/engine.rs: fake() now plays prompter role when argv has system-prompt (reply from prompter.jsonl; empty file = exit). stage test expects prompter Working/Done rows first.
+- new tests: prompter_summary_wraps_prompt_for_main_child, prompter_failure_falls_back_to_raw_prompt
+- gates: cargo test -p chaude-core 60 lib + 37 engine PASS; clippy --all-targets -D warnings PASS; fmt --check PASS; cargo build --workspace PASS
+- not tested: 60 s prompter timeout path (too slow for suite); queued second prompt during prompter wait
+- doubt: queued merged turns (next_turn) still bypass the prompter, as before
+- remaining: coder+tui slots (c), N14 idlesweep (d), exit_handoff (e)

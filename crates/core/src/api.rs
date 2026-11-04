@@ -18,7 +18,7 @@ use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, Shape, SpawnOpts};
-use crate::resident::StagePhase;
+use crate::resident::{PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter, PrompterOutcome, StagePhase};
 use crate::rotate::{
     HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
     validate_handoff, with_reco,
@@ -241,6 +241,8 @@ enum Input {
     Cmd(Cmd),
     // Child message tagged with the child's generation; messages from a replaced child are dropped.
     Proc(u64, ProcMsg),
+    // Prompter child line, tagged with the prompter's generation like Proc.
+    Prompter(u64, ProcMsg),
 }
 
 pub struct EngineHandle {
@@ -377,6 +379,12 @@ struct State {
     pending_snapshot: String,
     // Set while a hidden handoff turn runs; its text is not shown.
     handoff: Option<Handoff>,
+    // Prompter resident (Go prompter slot): summarizes each prompt before the main child gets it.
+    prompter: Prompter,
+    prompter_proc: Option<ClaudeProc>,
+    prompter_epoch: u64,
+    // When the running prompter wait gives up (Go prompterTimeout).
+    prompter_deadline: Option<Instant>,
 }
 
 // A handoff turn in progress: the rotation reason and how many handoff prompts were sent (Go makeSnapshotN).
@@ -447,6 +455,10 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         turn_reply: String::new(),
         pending_snapshot: String::new(),
         handoff: None,
+        prompter: Prompter::new(),
+        prompter_proc: None,
+        prompter_epoch: 0,
+        prompter_deadline: None,
     };
     st.start_child();
     loop {
@@ -476,9 +488,17 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
                 ProcMsg::Eof => st.on_eof(),
             },
             Input::Proc(_, _) => {}
+            Input::Prompter(epoch, msg) if epoch == st.prompter_epoch => match msg {
+                ProcMsg::Line(line) => st.on_prompter_line(&line),
+                ProcMsg::Eof => st.on_prompter_eof(),
+            },
+            Input::Prompter(_, _) => {}
         }
     }
     if let Some(mut p) = st.proc.take() {
+        p.kill();
+    }
+    if let Some(mut p) = st.prompter_proc.take() {
         p.kill();
     }
 }
@@ -506,15 +526,129 @@ impl State {
             self.emit(UiEvent::Error("claude is not running".to_string()));
             return;
         }
-        if self.busy {
+        if self.busy || self.prompter.waiting() {
             self.queue.push_back(text);
             self.emit(UiEvent::Queued(self.queue.len()));
             return;
         }
-        if self.send_turn(&text) {
+        self.begin_turn(text);
+    }
+
+    // Go viaPrompter: with residents on, the prompt goes through the prompter first.
+    fn begin_turn(&mut self, text: String) {
+        if self.cfg.residents {
+            self.start_prompter(text);
+        } else {
+            self.dispatch(&text);
+        }
+    }
+
+    // Sends text to the main child as a turn; the engine is busy only when it went out.
+    fn dispatch(&mut self, text: &str) {
+        if self.send_turn(text) {
             self.busy = true;
             self.emit(UiEvent::Busy(true));
         }
+    }
+
+    // Sends text to the prompter. A spawn, start or write failure falls back to the raw prompt (Go).
+    fn start_prompter(&mut self, text: String) {
+        if self.prompter_proc.is_none()
+            && let Err(e) = self.spawn_prompter()
+        {
+            self.stage(
+                "prompter",
+                StagePhase::Failed(format!("prompter spawn failed: {e}")),
+            );
+            self.dispatch(&text);
+            return;
+        }
+        let phase = match self.prompter.start(&text) {
+            Ok(phase) => phase,
+            Err(e) => {
+                self.stage("prompter", StagePhase::Failed(e));
+                self.dispatch(&text);
+                return;
+            }
+        };
+        self.stage("prompter", phase);
+        self.prompter_deadline = Some(Instant::now() + PROMPTER_TIMEOUT);
+        let wrote = match self.prompter_proc.as_mut() {
+            Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
+            None => Err("prompter not running".to_string()),
+        };
+        if let Err(e) = wrote {
+            self.prompter_proc = None;
+            if let Some(o) = self.prompter.fail(&format!("prompter write failed: {e}")) {
+                self.finish_prompter(o);
+            }
+        }
+    }
+
+    // Go residentSlots prompter: haiku with the minimal shape and the prompter rule. Kept alive across prompts.
+    fn spawn_prompter(&mut self) -> Result<(), String> {
+        let opts = SpawnOpts {
+            model: "haiku".to_string(),
+            resume: None,
+            max_budget_usd: 0.0,
+            shape: Shape {
+                minimal: true,
+                rule: PROMPTER_RULE.to_string(),
+                ..Shape::default()
+            },
+            ..self.opts.clone()
+        };
+        self.prompter_epoch += 1;
+        let epoch = self.prompter_epoch;
+        let p = proc::spawn(&opts, self.self_tx.clone(), move |m| {
+            Input::Prompter(epoch, m)
+        })
+        .map_err(|e| e.to_string())?;
+        self.prompter_proc = Some(p);
+        Ok(())
+    }
+
+    // The prompter's result line is its reply.
+    fn on_prompter_line(&mut self, line: &str) {
+        let Ok(Event::Result(r)) = parse_line(line) else {
+            return;
+        };
+        if let Some(o) = self.prompter.reply(&r.result.unwrap_or_default()) {
+            self.finish_prompter(o);
+        }
+    }
+
+    fn on_prompter_eof(&mut self) {
+        self.prompter_proc = None;
+        if let Some(o) = self.prompter.fail("prompter exited") {
+            self.finish_prompter(o);
+        }
+    }
+
+    // The prompter gave up waiting. Its child is replaced, so late lines are dropped by epoch.
+    fn prompter_timeout(&mut self) {
+        if let Some(mut p) = self.prompter_proc.take() {
+            p.kill();
+        }
+        self.prompter_epoch += 1;
+        if let Some(o) = self.prompter.timeout() {
+            self.finish_prompter(o);
+        }
+    }
+
+    // Ends the prompter wait: its stage row, then the outcome goes to the main child as a turn.
+    fn finish_prompter(&mut self, o: PrompterOutcome) {
+        self.prompter_deadline = None;
+        if let Some(phase) = o.stage {
+            self.stage("prompter", phase);
+        }
+        self.dispatch(&o.text);
+    }
+
+    // Time left in the running prompter wait. None when no wait is running.
+    fn prompter_left(&self) -> Option<Duration> {
+        self.prompter_deadline
+            .map(|t| t.saturating_duration_since(Instant::now()))
     }
 
     // Writes one user frame and starts the turn clock. Returns false if the write failed.
@@ -1008,6 +1142,10 @@ impl State {
     // How long the actor may block before the inactivity timer must be checked. None means block until input.
     // Idle, or any tool_use without its result, pauses the timer.
     fn wait_budget(&self) -> Option<Duration> {
+        // A prompter wait only starts while idle, so it is the only timer that matters until it ends.
+        if let Some(left) = self.prompter_left() {
+            return Some(left.max(Duration::from_millis(1)));
+        }
         if !self.busy {
             // Idle with a deferred rotation: wake when its defer timeout ends.
             return self
@@ -1031,8 +1169,12 @@ impl State {
     // Inactivity notice. Informational only: the turn is never interrupted, and the clock restarts so the
     // notice repeats once per quiet period rather than on every wakeup.
     fn on_quiet(&mut self) {
+        if self.prompter_left().is_some_and(|d| d.is_zero()) {
+            self.prompter_timeout();
+        }
         if !self.busy {
-            if self.defer_left().is_some_and(|d| d.is_zero()) {
+            // A deferred rotation waits out a prompter wait: it would send its handoff while the prompter runs.
+            if !self.prompter.waiting() && self.defer_left().is_some_and(|d| d.is_zero()) {
                 self.run_deferred_rotation();
             }
             return;

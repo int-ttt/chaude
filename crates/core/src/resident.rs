@@ -3,6 +3,9 @@
 
 use std::time::Duration;
 
+// The prompter's system prompt: the Go resident-prompter rules, copied so the engine does not depend on deprecated/.
+pub const PROMPTER_RULE: &str = include_str!("rules/resident-prompter.md");
+
 // How long the prompter may take to summarize (Go prompterTimeout). On timeout the input goes unchanged.
 pub const PROMPTER_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -62,6 +65,12 @@ impl Prompter {
             text: format!("[prompter summary]\n{summary}\n\n[original]\n{original}"),
             stage: Some(StagePhase::Done),
         })
+    }
+
+    // The prompter failed for reason (child exited, could not spawn or write). None when nothing is pending.
+    pub fn fail(&mut self, reason: &str) -> Option<PrompterOutcome> {
+        let original = self.pending.take()?;
+        Some(failed(original, reason))
     }
 
     // The wait exceeded PROMPTER_TIMEOUT. None when nothing is pending.
@@ -239,6 +248,19 @@ mod tests {
             (false, "plain text".into())
         );
         assert_eq!(parse_prompter_reply("OK"), (false, "".into()));
+    }
+
+    #[test]
+    fn fail_passes_input_through_with_reason() {
+        let mut p = Prompter::new();
+        p.start("go").unwrap();
+        let out = p.fail("prompter exited").unwrap();
+        assert_eq!(out.text, "go");
+        assert_eq!(
+            out.stage,
+            Some(StagePhase::Failed("prompter exited".into()))
+        );
+        assert!(p.fail("again").is_none());
     }
 
     #[test]
