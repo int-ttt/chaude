@@ -2560,3 +2560,30 @@ fn coder_task_emits_resident_busy_bracket_before_reply() {
     assert!(on < off && off < reply, "{evs:?}");
     h.shutdown();
 }
+
+// Go onSubEvent (repl.go:426, 686): a delegated agent's text, tool calls and tool results reach its log.
+#[test]
+fn subagent_stream_lines_reach_agent_log() {
+    let _g = lock();
+    let f = fake("sub_log", &["subagent_log_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let lines: Vec<String> = evs
+        .iter()
+        .filter_map(|e| match e {
+            UiEvent::AgentLog { id, lines } if id == "toolu_sub1" => Some(lines.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert_eq!(
+        lines,
+        vec![
+            "Looking around".to_string(),
+            "● Bash(ls)".to_string(),
+            "  ⎿  a.txt … (+1 lines)".to_string(),
+        ]
+    );
+    h.shutdown();
+}

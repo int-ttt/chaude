@@ -14,7 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-use crate::agent_store::{AgentStore, STO_DONE, STO_RUNNING, SavedAgent};
+use crate::agent_store::{AgentStore, STO_DONE, STO_RUNNING, SavedAgent, sub_event_lines};
 use crate::budget::{self, Budget};
 use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
@@ -151,6 +151,11 @@ pub enum UiEvent {
     // The panel filters them as Go rowsA does (tui.go:1448-1451): foreground = !background, running = !done.
     AgentRows {
         rows: Vec<AgentRow>,
+    },
+    // Lines one delegated agent's stream event adds to its log (Go onSubEvent); the TUI keeps the newest 400.
+    AgentLog {
+        id: String,
+        lines: Vec<String>,
     },
     // Prompt texts waiting behind the running turn, oldest first (Go m.queue; Queued(n) stays the count).
     QueueTexts(Vec<String>),
@@ -1944,6 +1949,7 @@ impl State {
         }
         if let Ok(raw) = serde_json::from_str::<Value>(line) {
             self.spend.on_event(&raw);
+            self.on_sub_agent_line(&raw);
         }
         match parse_line(line) {
             Ok(ev) => self.on_event(ev),
@@ -2391,6 +2397,27 @@ impl State {
         self.emit(UiEvent::AgentRows {
             rows: rows.into_iter().map(|(_, r)| r).collect(),
         });
+    }
+
+    // Go onSubEvent (repl.go:426, 686): a delegated agent's text and tool lines go to its agent-view log.
+    fn on_sub_agent_line(&self, raw: &Value) {
+        let Some(p) = raw
+            .get("parent_tool_use_id")
+            .and_then(Value::as_str)
+            .filter(|p| !p.is_empty())
+        else {
+            return;
+        };
+        if !self.agent_info.contains_key(p) {
+            return;
+        }
+        let lines = sub_event_lines(raw);
+        if !lines.is_empty() {
+            self.emit(UiEvent::AgentLog {
+                id: p.to_string(),
+                lines,
+            });
+        }
     }
 
     // Go agentTracker persist: writes one delegated agent to the agents file (no-op without one).

@@ -123,6 +123,8 @@ pub struct App {
     resident_busy: BTreeSet<String>,
     // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
     agent_rows: Vec<AgentRow>,
+    // Agent-view log by agent tool id (UiEvent::AgentLog; Go agentRec.log, newest MAX_AGENT_LOG lines).
+    agent_logs: HashMap<String, Vec<String>>,
     // First agent row shown in the panels (Go panOff), moved by the wheel over them.
     pan_off: usize,
     // Last tool call of the running turn, cut to 40 runes (Go lastTool); the busy row shows it.
@@ -237,6 +239,7 @@ impl App {
             agents: Vec::new(),
             bg_agents: Vec::new(),
             agent_rows: Vec::new(),
+            agent_logs: HashMap::new(),
             pan_off: 0,
             last_tool: String::new(),
             queue_texts: Vec::new(),
@@ -294,6 +297,7 @@ impl App {
                 | UiEvent::Busy(_)
                 | UiEvent::Queued(_)
                 | UiEvent::AgentRows { .. }
+                | UiEvent::AgentLog { .. }
                 | UiEvent::QueueTexts(_)
                 | UiEvent::OpusBusy(_)
                 | UiEvent::ResidentBusy { .. }
@@ -585,6 +589,9 @@ impl App {
             }
             // Go agentRows / m.queue: the panels and the queue are redrawn from these lists each frame.
             UiEvent::AgentRows { rows } => self.agent_rows = rows,
+            UiEvent::AgentLog { id, lines } => {
+                agentview::push_log(self.agent_logs.entry(id).or_default(), lines)
+            }
             UiEvent::QueueTexts(texts) => self.queue_texts = texts,
             // Go opusRunning / residentBusy: state only, read by the thinking row.
             UiEvent::OpusBusy(on) => self.opus_busy = on,
@@ -1165,6 +1172,7 @@ impl App {
                 task: desc.clone(),
                 name: desc.clone(),
                 started: true,
+                log: self.agent_logs.get(id).cloned().unwrap_or_default(),
                 ..Default::default()
             })
             .collect();
@@ -3541,6 +3549,26 @@ mod tests {
             text: "hi\n".to_string(),
         });
         assert!(!app.body(80).iter().any(|r| r.contains("생각중")));
+    }
+
+    // Go onSubEvent: AgentLog lines land in the running agent's view log, capped, and add no transcript row.
+    #[test]
+    fn agent_log_feeds_the_running_agent_view() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "a1".to_string(),
+            description: "Scan repo".to_string(),
+            started_at: 0,
+        });
+        let before = app.transcript.len();
+        app.apply(UiEvent::AgentLog {
+            id: "a1".to_string(),
+            lines: vec!["Looking around".to_string(), "● Bash(ls)".to_string()],
+        });
+        assert_eq!(app.transcript.len(), before);
+        let recs = app.agent_recs();
+        let rec = recs.iter().find(|r| r.id == "a1").expect("running agent");
+        assert_eq!(rec.log, vec!["Looking around", "● Bash(ls)"]);
     }
 
     #[test]

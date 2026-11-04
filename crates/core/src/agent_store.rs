@@ -543,6 +543,52 @@ fn content_blocks(ev: &Value) -> &[Value] {
     list(ev.get("message").and_then(|m| m.get("content")))
 }
 
+/// Go onSubEvent formatting: the log lines one sub-agent stream event adds (text lines, "● name(summary)"
+/// tool calls, "  ⎿  first line … (+N lines)" tool results). Empty for other event types.
+pub fn sub_event_lines(ev: &Value) -> Vec<String> {
+    let mut add: Vec<String> = Vec::new();
+    match sget(ev, "type") {
+        "assistant" => {
+            for b in content_blocks(ev) {
+                match sget(b, "type") {
+                    "text" => {
+                        let s = sget(b, "text").trim();
+                        if !s.is_empty() {
+                            add.extend(s.split('\n').map(str::to_string));
+                        }
+                    }
+                    "tool_use" => {
+                        let n = sget(b, "name");
+                        let a = tool_summary(b.get("input").unwrap_or(&Value::Null));
+                        add.push(if a.is_empty() {
+                            format!("● {n}")
+                        } else {
+                            format!("● {n}({a})")
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        "user" => {
+            for b in content_blocks(ev) {
+                if sget(b, "type") == "tool_result" {
+                    let s = result_text(b.get("content"));
+                    let s = s.trim();
+                    let l: Vec<&str> = s.split('\n').collect();
+                    let mut x = format!("  ⎿  {}", trunc(l[0], 160));
+                    if l.len() > 1 {
+                        x.push_str(&format!(" … (+{} lines)", l.len() - 1));
+                    }
+                    add.push(x);
+                }
+            }
+        }
+        _ => {}
+    }
+    add
+}
+
 /// Go agentTracker: the sub-agents of one session. Each change is written to `store` (when set),
 /// owned by `parent` with `transcript`. Restored agents are never written back.
 #[derive(Debug)]
@@ -648,46 +694,7 @@ impl<'a> AgentTracker<'a> {
         if p.is_empty() {
             return;
         }
-        let mut add: Vec<String> = Vec::new();
-        match sget(ev, "type") {
-            "assistant" => {
-                for b in content_blocks(ev) {
-                    match sget(b, "type") {
-                        "text" => {
-                            let s = sget(b, "text").trim();
-                            if !s.is_empty() {
-                                add.extend(s.split('\n').map(str::to_string));
-                            }
-                        }
-                        "tool_use" => {
-                            let n = sget(b, "name");
-                            let a = tool_summary(b.get("input").unwrap_or(&Value::Null));
-                            add.push(if a.is_empty() {
-                                format!("● {n}")
-                            } else {
-                                format!("● {n}({a})")
-                            });
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            "user" => {
-                for b in content_blocks(ev) {
-                    if sget(b, "type") == "tool_result" {
-                        let s = result_text(b.get("content"));
-                        let s = s.trim();
-                        let l: Vec<&str> = s.split('\n').collect();
-                        let mut x = format!("  ⎿  {}", trunc(l[0], 160));
-                        if l.len() > 1 {
-                            x.push_str(&format!(" … (+{} lines)", l.len() - 1));
-                        }
-                        add.push(x);
-                    }
-                }
-            }
-            _ => {}
-        }
+        let add = sub_event_lines(ev);
         if add.is_empty() {
             return;
         }
