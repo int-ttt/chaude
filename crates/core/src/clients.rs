@@ -16,15 +16,39 @@ pub const LIVE: &str = "live";
 pub const PARKED: &str = "parked";
 pub const EXPIRED: &str = "expired";
 
-/// Unix seconds and nanoseconds. The zero value is the Unix epoch.
-pub type Stamp = (i64, u32);
+/// A Go time.Time as clients.json holds it: the instant (Unix seconds and nanoseconds) plus the zone
+/// offset in seconds that Go wrote. Go writes time.Now() in local time, so a row may carry "+09:00".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stamp {
+    pub secs: i64,
+    pub nanos: u32,
+    pub off: i32,
+}
 
-/// Current time as a Stamp.
+/// Unix seconds of Go's zero time.Time, 0001-01-01T00:00:00Z.
+const GO_ZERO_SECS: i64 = -62_135_596_800;
+
+impl Default for Stamp {
+    // The zero value is Go's zero time.Time, so an absent last_api serializes as Go does.
+    fn default() -> Self {
+        Stamp {
+            secs: GO_ZERO_SECS,
+            nanos: 0,
+            off: 0,
+        }
+    }
+}
+
+/// Current time as a Stamp (UTC).
 pub fn now_stamp() -> Stamp {
     let d = std::time::SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    (d.as_secs() as i64, d.subsec_nanos())
+    Stamp {
+        secs: d.as_secs() as i64,
+        nanos: d.subsec_nanos(),
+        off: 0,
+    }
 }
 
 /// ~/.chaude/clients.json (Go defaultClientsFile).
@@ -65,17 +89,19 @@ fn is_zero<T: Default + PartialEq>(v: &T) -> bool {
 
 /// RFC3339Nano for ClientRec.last_api, as Go writes it.
 mod rfc3339 {
-    use super::{Stamp, format_stamp};
-    use crate::import_claude::parse_rfc3339;
+    use super::{Stamp, format_stamp, parse_stamp};
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(v: &Stamp, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&format_stamp(*v))
     }
 
+    // Go Unmarshal treats JSON null as a no-op, which leaves the zero time.
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Stamp, D::Error> {
-        let s = String::deserialize(d)?;
-        parse_rfc3339(&s).ok_or_else(|| serde::de::Error::custom("bad RFC3339 time"))
+        match Option::<String>::deserialize(d)? {
+            None => Ok(Stamp::default()),
+            Some(s) => parse_stamp(&s).ok_or_else(|| serde::de::Error::custom("bad RFC3339 time")),
+        }
     }
 }
 
@@ -93,26 +119,82 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     (y, m, d)
 }
 
-// RFC3339Nano in UTC: trailing zeros of the fraction are dropped, as Go does.
+// RFC3339Nano as Go writes it: trailing zeros of the fraction are dropped, and the stamp's own zone
+// offset is kept ("Z" when it is zero).
 fn format_stamp(st: Stamp) -> String {
-    let (days, rem) = (st.0.div_euclid(86_400), st.0.rem_euclid(86_400));
+    let local = st.secs + i64::from(st.off);
+    let (days, rem) = (local.div_euclid(86_400), local.rem_euclid(86_400));
     let (y, m, d) = civil_from_days(days);
-    let frac = if st.1 == 0 {
+    let frac = if st.nanos == 0 {
         String::new()
     } else {
-        format!(".{:09}", st.1).trim_end_matches('0').to_string()
+        format!(".{:09}", st.nanos)
+            .trim_end_matches('0')
+            .to_string()
+    };
+    let zone = if st.off == 0 {
+        "Z".to_string()
+    } else {
+        let a = st.off.abs();
+        format!(
+            "{}{:02}:{:02}",
+            if st.off < 0 { '-' } else { '+' },
+            a / 3600,
+            a % 3600 / 60
+        )
     };
     format!(
-        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}{frac}Z",
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}{frac}{zone}",
         rem / 3600,
         rem % 3600 / 60,
         rem % 60
     )
 }
 
+// Parses an RFC3339 stamp and keeps its zone offset, so a Go-written local time round-trips.
+fn parse_stamp(s: &str) -> Option<Stamp> {
+    let (secs, nanos) = crate::import_claude::parse_rfc3339(s)?;
+    let off = if s.ends_with('Z') {
+        0
+    } else {
+        let t = s.get(s.len().checked_sub(6)?..)?;
+        let hh: i32 = t.get(1..3)?.parse().ok()?;
+        let mm: i32 = t.get(4..6)?.parse().ok()?;
+        let v = hh * 3600 + mm * 60;
+        if t.starts_with('-') { -v } else { v }
+    };
+    Some(Stamp { secs, nanos, off })
+}
+
 // Nanoseconds since the epoch, for signed differences (Go time.Sub).
 fn nanos(s: Stamp) -> i128 {
-    i128::from(s.0) * 1_000_000_000 + i128::from(s.1)
+    i128::from(s.secs) * 1_000_000_000 + i128::from(s.nanos)
+}
+
+// encoding/json (Marshal, not an Encoder with SetEscapeHTML(false)) writes <, > and & and U+2028 and
+// U+2029 as escapes inside strings. serde_json does not. These bytes occur only inside string literals,
+// so one byte pass gives the Go bytes.
+fn go_escape(buf: Vec<u8>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(buf.len());
+    let mut i = 0;
+    while i < buf.len() {
+        match buf[i] {
+            b'<' => out.extend_from_slice(b"\x5cu003c"),
+            b'>' => out.extend_from_slice(b"\x5cu003e"),
+            b'&' => out.extend_from_slice(b"\x5cu0026"),
+            0xE2 if buf[i..].starts_with(&[0xE2, 0x80, 0xA8]) => {
+                out.extend_from_slice(b"\x5cu2028");
+                i += 2;
+            }
+            0xE2 if buf[i..].starts_with(&[0xE2, 0x80, 0xA9]) => {
+                out.extend_from_slice(b"\x5cu2029");
+                i += 2;
+            }
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    out
 }
 
 /// Persisted client rows. An empty path is a no-op registry (Go nil or empty-path registry).
@@ -151,6 +233,7 @@ impl ClientRegistry {
         if serde::Serialize::serialize(&rows, &mut ser).is_err() {
             return;
         }
+        let buf = go_escape(buf);
         let Some(dir) = self.path.parent() else {
             return;
         };
@@ -303,14 +386,16 @@ pub fn expired_zero(deadline: Duration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::import_claude::parse_rfc3339;
     use crate::testutil::TempDir;
 
     type Mutate = fn(&mut ClientRec);
 
     // Stamp `secs` seconds before now.
     fn ago(now: Stamp, secs: i64) -> Stamp {
-        (now.0 - secs, now.1)
+        Stamp {
+            secs: now.secs - secs,
+            ..now
+        }
     }
 
     // Go TestClientRegistryRoundTrip
@@ -447,7 +532,11 @@ mod tests {
     // Go TestIsWarm
     #[test]
     fn is_warm_checks_state_deadline_and_context() {
-        const NOW: Stamp = (1_800_000_000, 0);
+        const NOW: Stamp = Stamp {
+            secs: 1_800_000_000,
+            nanos: 0,
+            off: 0,
+        };
         let now = NOW;
         let (limit, deadline) = (100_000, Duration::from_secs(300));
         let base = ClientRec {
@@ -560,12 +649,80 @@ mod tests {
         for s in [
             "2026-11-04T12:00:00Z",
             "1970-01-01T00:00:00Z",
-            "2024-02-29T23:59:59.5+00:00",
+            "0001-01-01T00:00:00Z",
+            "2026-11-04T21:05:06.123+09:00",
+            "2024-02-29T23:59:59.5-05:30",
         ] {
-            let st = parse_rfc3339(s).unwrap();
-            assert_eq!(parse_rfc3339(&format_stamp(st)), Some(st), "{s}");
+            assert_eq!(format_stamp(parse_stamp(s).unwrap()), s, "{s}");
         }
-        assert_eq!(format_stamp((0, 0)), "1970-01-01T00:00:00Z");
-        assert_eq!(format_stamp((1, 500_000_000)), "1970-01-01T00:00:01.5Z");
+        let at = |secs, nanos| Stamp {
+            secs,
+            nanos,
+            off: 0,
+        };
+        assert_eq!(format_stamp(at(0, 0)), "1970-01-01T00:00:00Z");
+        assert_eq!(format_stamp(at(1, 500_000_000)), "1970-01-01T00:00:01.5Z");
+        assert_eq!(format_stamp(Stamp::default()), "0001-01-01T00:00:00Z");
+        // +00:00 is UTC, which Go writes as Z.
+        assert_eq!(
+            format_stamp(parse_stamp("2024-02-29T23:59:59.5+00:00").unwrap()),
+            "2024-02-29T23:59:59.5Z"
+        );
+    }
+
+    #[test]
+    fn go_escape_matches_encoding_json() {
+        assert_eq!(
+            go_escape(b"\"a<b>&c\xE2\x80\xA8\xE2\x80\xA9\"".to_vec()),
+            b"\"a\x5cu003cb\x5cu003e\x5cu0026c\x5cu2028\x5cu2029\"".to_vec()
+        );
+    }
+
+    // A file as Go writes it: json.MarshalIndent of clientRec rows with TZ=Asia/Seoul (fixture
+    // clients_go.json, generated by a standalone Go 1.23 program mirroring the struct). It covers the
+    // Go zero time, HTML-escaped strings, a +09:00 local time, and omitted empty fields. Upserting each
+    // row back rewrites the file byte for byte.
+    #[test]
+    fn go_written_file_round_trips_unchanged() {
+        const GO_FILE: &[u8] = include_bytes!("../tests/fixtures/clients_go.json");
+        let dir = TempDir::new("clients-go-fixture");
+        let path = dir.path().join("clients.json");
+        fs::write(&path, GO_FILE).unwrap();
+        let rows: Vec<ClientRec> = serde_json::from_slice(GO_FILE).unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].last_api.secs, 1_793_793_600); // 2026-11-04T12:00:00Z
+        assert_eq!(rows[1].last_api, Stamp::default());
+        assert_eq!(rows[1].cwd, "/w/b&c<d>");
+        assert_eq!(rows[2].last_api.off, 9 * 3600);
+        let reg = ClientRegistry::new(&path);
+        for row in rows {
+            reg.upsert(row);
+        }
+        assert_eq!(fs::read(&path).unwrap(), GO_FILE);
+    }
+
+    // Go zero time: a row without last_api writes 0001-01-01T00:00:00Z and omits empty fields (fixture
+    // clients_go_zero.json). Go writes "null" for a nil slice and "[]" for an empty one; both read as no
+    // rows, and this registry only writes after upserting at least one row.
+    #[test]
+    fn go_zero_time_and_empty_lists() {
+        const GO_ZERO: &[u8] = include_bytes!("../tests/fixtures/clients_go_zero.json");
+        let dir = TempDir::new("clients-go-zero");
+        let path = dir.path().join("clients.json");
+        let reg = ClientRegistry::new(&path);
+        reg.upsert(ClientRec {
+            cwd: "/w/z".into(),
+            model: "haiku".into(),
+            state: LIVE.into(),
+            ..Default::default()
+        });
+        assert_eq!(fs::read(&path).unwrap(), GO_ZERO);
+        for empty in ["null", "[]"] {
+            fs::write(&path, empty).unwrap();
+            assert!(
+                ClientRegistry::new(&path).get("/w/z", "haiku").is_none(),
+                "{empty}"
+            );
+        }
     }
 }

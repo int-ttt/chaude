@@ -1,0 +1,27 @@
+[
+ {
+  "cwd": "/w/a",
+  "model": "haiku",
+  "session_id": "s1",
+  "state": "live",
+  "last_api": "2026-11-04T12:00:00Z",
+  "last_ctx": 42,
+  "owner_pid": 123,
+  "child_pid": 7
+ },
+ {
+  "cwd": "/w/b\u0026c\u003cd\u003e",
+  "model": "sonnet",
+  "role": "design",
+  "state": "parked",
+  "last_api": "0001-01-01T00:00:00Z"
+ },
+ {
+  "cwd": "/w/k",
+  "model": "haiku",
+  "state": "expired",
+  "last_api": "2026-11-04T21:05:06.123+09:00",
+  "ended_reason": "idle-rotate",
+  "design_path": "/w/k/design.md"
+ }
+]
