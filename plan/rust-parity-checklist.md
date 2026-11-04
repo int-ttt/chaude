@@ -19,7 +19,7 @@ Counts are rows, not individual flags. Repl flags are one row (F3) covering 26 f
 | C9 | `update` | main.go:51 | missing | crates/update (not wired) | |
 | C10 | `--version`, `-v`, `version` | main.go:53 | done | crates/cli/src/main.rs:195 | |
 | C11 | `-h`, `--help`, `help` text | main.go:20-29, 55 | differs | crates/cli/src/main.rs:16-22 | Rust lists different commands |
-| C12 | 7 helper scripts (`scripts.Has`) | main.go:61, scripts/common.go:364-395 | missing | crates/scripts (not wired) | charcount, claude-history, compress-archive, export-history, extract-transcript, search-history, usage-report |
+| C12 | 7 helper scripts (`scripts.Has`) | main.go:61, deprecated/src/main/intt/internal/scripts/scripts.go:17-27, helpText common.go:364-395 | missing | crates/scripts (logic ported, 7 modules; not wired) | charcount, claude-history, compress-archive, export-history, extract-transcript, search-history, usage-report. Ported and tested (3 unit, 5 charcount, 7 smoke). Binary hookup pending: crates/cli/Cargo.toml dep and one main.rs match arm (`Some(cmd) if chaude_scripts::has(cmd)`). Stays missing until wired |
 | C13 | leading `-flag` runs repl | main.go:58-59 | differs | crates/cli/src/main.rs:203-204 | Rust accepts only --orch and --model |
 | C14 | unknown command error, exit 2 | main.go:64-65 | done | crates/cli/src/main.rs:206-209 | message text differs |
 | C15 | `update.CleanupOld()` at startup | main.go:33 | missing | none | depends on C9 |
@@ -30,7 +30,7 @@ Counts are rows, not individual flags. Repl flags are one row (F3) covering 26 f
 |---|---|---|---|---|---|
 | F1 | `--orch <mode>` | repl.go:1316 | done | crates/cli/src/main.rs:26 apply_orch | |
 | F2 | `--model <id>` | repl.go:1316-1334 | done | crates/cli/src/main.rs:54 parse_model | |
-| F3 | remaining 26 repl flags | repl.go:1276-1306 | missing | none | full list not re-tallied in this pass |
+| F3 | remaining 26 repl flags | repl.go:1276-1306 (28 fs.*Var calls; minus --model and --orch = 26) | missing | none | verified count; --from-claude and --import-dry-run overlap C5/C6 |
 
 ## Environment
 
@@ -38,8 +38,8 @@ Counts are rows, not individual flags. Repl flags are one row (F3) covering 26 f
 |---|---|---|---|---|---|
 | E1 | `CHAUDE_ORCH` export | repl.go:1316 | done | crates/core/src/orch.rs:8 ENV_KEY | |
 | E2 | `CHAUDE_MCP_TOKEN` | mcp (Go) | done | crates/core/src/mcp.rs:71 | |
-| E3 | `CHAUDE_MAX_WORKERS` | Go env handling | missing | none | |
-| E4 | IME env override | Go env handling | missing | none | Go ref not re-verified in this pass |
+| E3 | `CHAUDE_MAX_WORKERS` | repl.go:1305 (flag), repl.go:1345 and 1350 (env read), dispatch.go:16 resolveMaxWorkers | missing | none | only read on the repl path, so it lands with C2/F3 |
+| E4 | `CHAUDE_IME_SHIFT` (IME column shift override) | tui.go:173-178; also TERMINAL_EMULATOR=JetBrains-JediTerm at tui.go:183 | missing | none | verified; TUI-side, not repl |
 | E5 | settings env overrides | Go settings | differs | crates/cli/src/tui/settings.rs | Rust set differs from Go |
 
 ## Slash commands (internal/harness/tui.go:192-217; Rust table crates/cli/src/tui/commands.rs:15-111)
@@ -107,6 +107,6 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 
 ## Notes
 
-- Test count: Go has 320 tests by grep. plan/rust-port.md phase 6 says 312. Reconcile before the parity gate.
-- Go refs for E3, E4 and F3 were not re-read in this pass; treat those rows as unverified.
+- Test count: `grep -rhoE '^func Test' deprecated --include='*_test.go'` gives 320 (68 files, no duplicate names). The 312 in plan/rust-port.md phase 6 was stale (git grep at f970607 gave 313 across the whole repo). Parity gate uses 320.
+- Go refs for E3, E4 and F3 were re-read and verified in this pass (see rows).
 - Rust CLI usage (C11) and the TUI passthrough rows (S11-S19) were not checked line by line.
