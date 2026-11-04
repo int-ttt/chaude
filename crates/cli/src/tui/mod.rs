@@ -676,7 +676,8 @@ impl App {
             }
             return Action::Continue;
         }
-        if let Some(act) = self.sess.as_mut().map(|sv| sv.key(key)) {
+        let (sw, sh) = (text_width(self.cols), self.body_h(self.cols, self.rows));
+        if let Some(act) = self.sess.as_mut().map(|sv| sv.key(key, sw, sh)) {
             match act {
                 sessview::Action::None => {}
                 sessview::Action::Close => {
@@ -1550,12 +1551,13 @@ impl App {
     // Go tui.go MouseMsg order: the open settings picker, /resume pickers and /view list take the wheel as
     // wheelSel; the agent view scrolls its log by 3. Returns false when none of them is open.
     fn overlay_wheel(&mut self, up: bool, row: usize) -> bool {
+        let (sw, sh) = (text_width(self.cols), self.body_h(self.cols, self.rows));
         if let Some(st) = self.settings.as_mut() {
             st.wheel(up);
             return true;
         }
         if let Some(sv) = self.sess.as_mut() {
-            sv.wheel(up);
+            sv.wheel(up, sw, sh);
             return true;
         }
         if let Some(rp) = self.recs.as_mut() {

@@ -246,6 +246,8 @@ pub struct SessView {
     pub id: String,
     pub turns: Option<Vec<String>>,
     pub cur: usize,
+    // Go sv.off: top body line of the shown prompt (level 2 scroll).
+    pub off: usize,
 }
 
 impl SessView {
@@ -285,37 +287,76 @@ impl SessView {
         self.id = s.id.clone();
         self.turns = Some(prompts);
         self.cur = 0;
+        self.off = 0;
         Ok(())
     }
 
-    // Wheel over the level 1 list (Go wheelSel on the /view cursor). Level 2 ignores the wheel.
-    pub fn wheel(&mut self, up: bool) {
+    // Wheel: level 1 moves the list cursor (Go wheelSel); level 2 scrolls the prompt text 3 lines per notch
+    // (Go tui.go svScroll off±3). width and vp_h are the terminal columns and the body rows.
+    pub fn wheel(&mut self, up: bool, width: usize, vp_h: usize) {
         if self.turns.is_none() {
             wheel_sel(&mut self.sel, self.list.len(), up);
+            return;
         }
+        let top = if up {
+            self.off.saturating_sub(3)
+        } else {
+            self.off + 3
+        };
+        self.scroll(width, vp_h, top);
     }
 
-    // Go svKey. Level 2: arrows and paging step through prompts, esc goes back to level 1. Level 1: up/down
-    // (k/j) select, enter opens the prompts, esc/q/ctrl+c leave /view.
-    pub fn key(&mut self, key: KeyEvent) -> Action {
+    // Go svBody: the shown prompt wrapped to the overlay width (at least 10 cells). Empty at level 1.
+    fn body(&self, width: usize) -> Vec<String> {
+        let Some(text) = self.turns.as_ref().and_then(|t| t.get(self.cur)) else {
+            return Vec::new();
+        };
+        wrap_cells(text, width.saturating_sub(2).max(10))
+            .split('\n')
+            .map(str::to_string)
+            .collect()
+    }
+
+    // Go svScroll: sets the top body line, clamped so the last body line can reach the bottom of the
+    // body window (vp_h - 1 rows, at least 1).
+    fn scroll(&mut self, width: usize, vp_h: usize, top: usize) {
+        let len = self.body(width).len();
+        let room = vp_h.saturating_sub(1).max(1);
+        self.off = top.min(len.saturating_sub(room));
+    }
+
+    // Go svKey. Level 2: up/down/k/j/pgup/pgdn/home/end scroll the prompt text, left/right step through the
+    // prompts (resetting the scroll), esc goes back to level 1. Level 1: up/down (k/j) select, enter opens
+    // the prompts, esc/q/ctrl+c leave /view.
+    pub fn key(&mut self, key: KeyEvent, width: usize, vp_h: usize) -> Action {
         let plain = key.modifiers == KeyModifiers::NONE;
         let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL;
         if let Some(turns) = &self.turns {
             let last = turns.len().saturating_sub(1);
+            let room = vp_h.saturating_sub(1).max(1);
             match key.code {
-                KeyCode::Left | KeyCode::Up | KeyCode::PageUp => {
-                    self.cur = self.cur.saturating_sub(1)
+                KeyCode::Left => {
+                    self.cur = self.cur.saturating_sub(1);
+                    self.off = 0;
                 }
-                KeyCode::Char('k') if plain => self.cur = self.cur.saturating_sub(1),
-                KeyCode::Right | KeyCode::Down | KeyCode::PageDown => {
-                    self.cur = (self.cur + 1).min(last)
+                KeyCode::Right => {
+                    self.cur = (self.cur + 1).min(last);
+                    self.off = 0;
                 }
-                KeyCode::Char('j') if plain => self.cur = (self.cur + 1).min(last),
-                KeyCode::Home => self.cur = 0,
-                KeyCode::End => self.cur = last,
+                KeyCode::Up | KeyCode::Char('k') if plain => {
+                    self.scroll(width, vp_h, self.off.saturating_sub(1))
+                }
+                KeyCode::Down | KeyCode::Char('j') if plain => {
+                    self.scroll(width, vp_h, self.off + 1)
+                }
+                KeyCode::PageUp => self.scroll(width, vp_h, self.off.saturating_sub(room)),
+                KeyCode::PageDown => self.scroll(width, vp_h, self.off + room),
+                KeyCode::Home => self.scroll(width, vp_h, 0),
+                KeyCode::End => self.scroll(width, vp_h, usize::MAX),
                 KeyCode::Esc => {
                     self.turns = None;
                     self.cur = 0;
+                    self.off = 0;
                 }
                 KeyCode::Char('q') if plain => return Action::Close,
                 _ if ctrl_c => return Action::Close,
@@ -376,42 +417,38 @@ impl SessView {
     }
 
     // Go svPromptLines: level 2, exactly hh rows that replace the transcript. Empty at level 1.
-    // Prompt text wraps to width-2 cells; when it does not fit, the last shown row is "… (+N lines)".
+    // Row 0 is "<id>  prompt n/N" with the dim "lines a-b/len" counter; the rest is the body window
+    // [off, off + hh - 1). The header is the short session id (Go uses the agent label, which Rust does not carry).
     pub fn prompt_lines(&self, width: usize, hh: usize) -> Vec<String> {
         let Some(turns) = &self.turns else {
             return Vec::new();
         };
-        let Some(text) = turns.get(self.cur) else {
+        if turns.get(self.cur).is_none() {
             return Vec::new();
-        };
+        }
+        let body = self.body(width);
+        let room = hh.saturating_sub(1).max(1);
+        let off = self.off.min(body.len().saturating_sub(room));
+        let end = body.len().min(off + room);
         let head_plain = format!(
-            "Session {}  prompt {}/{}",
+            "{}  prompt {}/{}",
             short_id(&self.id),
             self.cur + 1,
             turns.len()
         );
         let head_text = clip(&head_plain, width);
         let hint = clip(
-            "  ←/→ prev/next · esc back",
+            &format!(
+                "  lines {}-{}/{} · ↑/↓ pgup/pgdn scroll · ←/→ prev/next · esc back",
+                (off + 1).min(end),
+                end,
+                body.len()
+            ),
             width.saturating_sub(UnicodeWidthStr::width(head_text.as_str())),
         );
         let head = format!("{ORANGE_ON}{head_text}{FG_OFF}{DIM_ON}{hint}{RESET}");
-        let cw = width.saturating_sub(2).max(10);
-        let all: Vec<String> = wrap_cells(text, cw)
-            .split('\n')
-            .map(str::to_string)
-            .collect();
-        let room = hh.saturating_sub(1).max(1);
         let mut l = vec![head];
-        if all.len() > room {
-            l.extend(all[..room - 1].iter().cloned());
-            l.push(format!(
-                "{DIM_ON}… (+{} lines){RESET}",
-                all.len() - (room - 1)
-            ));
-        } else {
-            l.extend(all);
-        }
+        l.extend(body[off..end].iter().cloned());
         l.resize(hh, String::new());
         l
     }
@@ -589,7 +626,7 @@ mod tests {
         assert!(rows[0].contains("Sessions"));
         let all = rows.join("\n");
         assert!(all.contains("sessaaa1") && all.contains("● "), "{all}");
-        assert_eq!(v.key(press(KeyCode::Esc)), Action::Close);
+        assert_eq!(v.key(press(KeyCode::Esc), 80, 6), Action::Close);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -599,10 +636,10 @@ mod tests {
         let (dir, list) = fixture("nav");
         let now = SystemTime::now();
         let mut v = SessView::open(list, "").unwrap();
-        assert_eq!(v.key(press(KeyCode::Down)), Action::None);
+        assert_eq!(v.key(press(KeyCode::Down), 80, 6), Action::None);
         assert_eq!(v.sel, 1, "arrow down selects the second session");
-        v.key(press(KeyCode::Up));
-        assert_eq!(v.key(press(KeyCode::Enter)), Action::None);
+        v.key(press(KeyCode::Up), 80, 6);
+        assert_eq!(v.key(press(KeyCode::Enter), 80, 6), Action::None);
         assert!(v.turns.is_some());
         let shown = v.prompt_lines(80, 6).join("\n");
         assert!(
@@ -610,11 +647,11 @@ mod tests {
             "{shown}"
         );
         assert!(v.list_lines(80, now).is_empty(), "level 2 drops the list");
-        v.key(press(KeyCode::Right));
+        v.key(press(KeyCode::Right), 80, 6);
         assert!(v.prompt_lines(80, 6).join("\n").contains("second prompt"));
-        v.key(press(KeyCode::Esc));
+        v.key(press(KeyCode::Esc), 80, 6);
         assert!(v.turns.is_none(), "esc from prompts returns to the list");
-        assert_eq!(v.key(press(KeyCode::Esc)), Action::Close);
+        assert_eq!(v.key(press(KeyCode::Esc), 80, 6), Action::Close);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -669,12 +706,54 @@ mod tests {
     fn wheel_moves_session_cursor_and_wraps() {
         let (dir, list) = fixture("wheel");
         let mut v = SessView::open(list, "").unwrap();
-        v.wheel(false);
+        v.wheel(false, 80, 6);
         assert_eq!(v.sel, 1, "wheel down");
-        v.wheel(false);
+        v.wheel(false, 80, 6);
         assert_eq!(v.sel, 0, "wheel down past end wraps");
-        v.wheel(true);
+        v.wheel(true, 80, 6);
         assert_eq!(v.sel, 1, "wheel up wraps");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Go svKey / svScroll / svPromptLines: level 2 scrolls the body (clamped to vp_h - 1 rows), paging and
+    // home/end move the window, left/right reset it, and the header carries the lines a-b/len counter.
+    #[test]
+    fn prompt_scroll_is_clamped_and_resets_on_switch() {
+        let long: String = (0..10).map(|i| format!("l{i}\n")).collect();
+        let mut v = SessView {
+            id: "sessaaa1".into(),
+            turns: Some(vec![long.trim_end().to_string(), "second".into()]),
+            ..Default::default()
+        };
+        let (w, h) = (80, 6);
+        assert!(v.prompt_lines(w, h)[0].contains("sessaaa1  prompt 1/2"));
+        assert!(v.prompt_lines(w, h)[0].contains("lines 1-5/10"));
+        v.key(press(KeyCode::Down), w, h);
+        assert_eq!(v.off, 1);
+        for _ in 0..10 {
+            v.key(press(KeyCode::Down), w, h);
+        }
+        assert_eq!(
+            v.off, 5,
+            "scroll stops when the last line reaches the bottom"
+        );
+        assert!(v.prompt_lines(w, h)[0].contains("lines 6-10/10"));
+        assert_eq!(v.prompt_lines(w, h)[1], "l5");
+        v.key(press(KeyCode::Home), w, h);
+        assert_eq!(v.off, 0);
+        v.key(press(KeyCode::End), w, h);
+        assert_eq!(v.off, 5);
+        v.key(press(KeyCode::PageUp), w, h);
+        assert_eq!(v.off, 0, "page up saturates at the top");
+        v.wheel(false, w, h);
+        assert_eq!(v.off, 3, "wheel down scrolls three lines");
+        v.key(press(KeyCode::Right), w, h);
+        assert_eq!(
+            (v.cur, v.off),
+            (1, 0),
+            "right steps the prompt and resets the scroll"
+        );
+        assert_eq!(v.key(press(KeyCode::Esc), w, h), Action::None);
+        assert!(v.turns.is_none());
     }
 }
