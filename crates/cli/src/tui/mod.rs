@@ -2,14 +2,20 @@
 // top to bottom: the transcript viewport, the running row, the input line and the model/status row.
 // `frame` is pure and snapshot-tested at fixed sizes; `draw` rewrites only the rows that changed.
 
+pub mod agentview;
 pub mod bar;
 pub mod commands;
 pub mod edit;
 pub mod overlay;
+pub mod records;
 pub mod render;
+pub mod rewind;
 mod runewidth_table;
+pub mod sessview;
+pub mod settings;
 pub mod usage;
 
+use std::collections::HashSet;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::panic;
 use std::sync::mpsc::TryRecvError;
@@ -103,6 +109,11 @@ pub struct App {
     sugg_sel: usize,
     // Full-screen /usage window (Go m.usage); replaces the transcript viewport while open.
     usage: usage::Usage,
+    // Open /settings picker (Go m.settings). Its save note goes to the transcript when it closes.
+    settings: Option<settings::Picker>,
+    // Open /resume record picker (Go m.rpick) and /view session browser (Go m.sv). Both replace the body.
+    recs: Option<records::RecPicker>,
+    sess: Option<sessview::SessView>,
     // Id of the permission request waiting for y/n (UiEvent::PermissionRequest). While set, keys answer it.
     perm: Option<String>,
     // Drag selection in body coordinates (wrapped body row as `line`, cell column as `col`); the Go textSel model.
@@ -155,6 +166,9 @@ impl App {
             mouse: true,
             sugg_sel: 0,
             usage: usage::Usage::default(),
+            settings: None,
+            recs: None,
+            sess: None,
             perm: None,
             sel: render::TextSel::default(),
             dragging: false,
@@ -355,6 +369,36 @@ impl App {
             let (w, h) = self.usage_geom();
             if self.usage.key(key, w, h) {
                 self.follow_tail();
+            }
+            return Action::Continue;
+        }
+        // Go settingsKey / rpick / sessView keys: each picker reads every key while it is open.
+        if let Some(note) = self.settings.as_mut().map(|p| p.key(key)) {
+            if let Some(note) = note {
+                self.settings = None;
+                self.note(&note);
+            }
+            return Action::Continue;
+        }
+        if let Some(act) = self.recs.as_mut().map(|rp| rp.key(key)) {
+            match act {
+                records::Action::None => {}
+                records::Action::Close => self.recs = None,
+                records::Action::Load(p) => {
+                    self.recs = None;
+                    self.load_record(&p);
+                }
+            }
+            return Action::Continue;
+        }
+        if let Some(act) = self.sess.as_mut().map(|sv| sv.key(key)) {
+            match act {
+                sessview::Action::None => {}
+                sessview::Action::Close => {
+                    self.sess = None;
+                    self.follow_tail();
+                }
+                sessview::Action::Note(n) => self.note(&n),
             }
             return Action::Continue;
         }
@@ -571,6 +615,23 @@ impl App {
                 self.usage.open();
                 return Action::Usage;
             }
+            Some(Dispatch::OpenSettings) => {
+                self.settings = Some(settings::Picker::open(
+                    std::env::current_dir().ok().as_deref(),
+                ));
+                return Action::Continue;
+            }
+            Some(Dispatch::OpenView { arg }) => {
+                self.open_view(&arg);
+                return Action::Continue;
+            }
+            // /resume claude (Claude Code sessions) still goes to the engine; only record lookups open here.
+            Some(Dispatch::Resume { args })
+                if args.first().map(String::as_str) != Some("claude") =>
+            {
+                self.resume(&args.join(" "));
+                return Action::Continue;
+            }
             Some(Dispatch::Note(s)) if !matches!(first, "/status" | "/version" | "/mode") => {
                 self.note(&s);
                 return Action::Continue;
@@ -578,6 +639,81 @@ impl App {
             _ => {}
         }
         Action::Submit(text)
+    }
+
+    // Go /view: the sessions this process spawned. TODO(view-owned): Go ownSessionList needs the spawned
+    // session ids (main, rotated, resident child), which no UiEvent carries yet, so the owned set is empty.
+    fn open_view(&mut self, arg: &str) {
+        let result = sessview::session_list(&self.welcome.cwd)
+            .and_then(|all| sessview::own_sessions(all, &HashSet::new()))
+            .and_then(|list| sessview::SessView::open(list, arg));
+        match result {
+            Ok(sv) => self.sess = Some(sv),
+            Err(msg) => self.note(&msg),
+        }
+    }
+
+    // Go /resume <arg> over the record folder: several hits open the picker, one hit or a number loads.
+    fn resume(&mut self, arg: &str) {
+        let root = records::record_dir(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
+        match records::pick(&root, arg) {
+            Err(e) => self.note(&e),
+            Ok(Some(ps)) => self.recs = Some(records::RecPicker::new(ps)),
+            Ok(None) => match records::resume(&root, arg) {
+                Err(e) => self.note(&e),
+                Ok((lines, entries)) => {
+                    for l in &lines {
+                        self.note(l);
+                    }
+                    for e in &entries {
+                        self.record_block(&e.kind, &e.text);
+                    }
+                    self.follow_tail();
+                }
+            },
+        }
+    }
+
+    // Enter in the record picker: the whole folder is appended to the transcript (Go loadRecordPick).
+    fn load_record(&mut self, p: &records::RecordProject) {
+        match records::load_project(&p.dir) {
+            Err(e) => self.note(&e),
+            Ok(entries) => {
+                for e in &entries {
+                    self.record_block(&e.kind, &e.text);
+                }
+                self.follow_tail();
+            }
+        }
+    }
+
+    // One record block in the transcript. User blocks use the prompt echo; other kinds are plain text rows.
+    // TODO(record-kinds): Go renders assistant blocks through the markdown path; plain rows for now.
+    fn record_block(&mut self, kind: &str, text: &str) {
+        if kind == "user" {
+            for (i, line) in text.split('\n').enumerate() {
+                let lead = if i == 0 { PROMPT } else { "  " };
+                self.transcript
+                    .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
+            }
+        } else {
+            self.note(text);
+        }
+        self.transcript.push(String::new());
+    }
+
+    // Body rows of the open /settings, /resume or /view picker (same geometry as /usage). None when none is open.
+    fn overlay_lines(&self, width: usize, h: usize) -> Option<Vec<String>> {
+        if let Some(p) = &self.settings {
+            return Some(p.lines(width, h));
+        }
+        if let Some(rp) = &self.recs {
+            return Some(rp.lines(width, h));
+        }
+        self.sess.as_ref().map(|sv| match sv.turns {
+            Some(_) => sv.prompt_lines(width, h),
+            None => sv.list_lines(width, std::time::SystemTime::now()),
+        })
     }
 
     // Width and body rows of the viewport, as the usage window sees them (no slash menu while it is open).
@@ -1044,8 +1180,15 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
     let menu = overlay::slash_popup(&app.suggest(), app.sugg_sel, w, menu_max);
     let body_h = h.saturating_sub(chrome_h + menu.len());
     let mut rows = Vec::with_capacity(h);
+    let overlay = if body_h > 0 && !app.usage.is_open() {
+        app.overlay_lines(width, body_h)
+    } else {
+        None
+    };
     if body_h > 0 && app.usage.is_open() {
         rows.extend(app.usage.lines(width, body_h));
+    } else if let Some(lines) = overlay {
+        rows.extend(lines);
     } else if body_h > 0 {
         let body = app.body(width);
         let start = app.start_row(body.len(), body_h);
