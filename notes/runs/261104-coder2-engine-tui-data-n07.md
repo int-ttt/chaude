@@ -45,3 +45,9 @@ remaining:
 - gates: clippy -D warnings PASS; cargo test -p chaude-core PASS (58 unit + 35 engine); fmt --check PASS; cargo build --workspace PASS
 - open: settings key. Go has no residents toggle; the only related key is extra_coders (0-8, settings_picker.go:74-99), not yet ported.
 - remaining: prompter wiring into submit, tui/coder slots, Failed producer, N14 idlesweep, exit_handoff.go
+
+## sub-group 4a: SpawnOpts.shape (Go sessionArgs resident shape)
+- proc.rs: Shape {minimal, tools, strict_mcp, no_slash, rule}; SpawnOpts.shape; build_args(model, resume, &Shape) emits Go order
+- test resident_shape_args_match_go_session_args (minimal and coder argv tails)
+- gates: clippy PASS; cargo test -p chaude-core PASS; fmt PASS; build --workspace PASS
+- remaining: prompter child wiring (b), coder+tui slots (c), N14 (d), exit_handoff (e)

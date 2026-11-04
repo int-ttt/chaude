@@ -17,7 +17,7 @@ use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line}
 use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
-use crate::proc::{self, ClaudeProc, ProcMsg, SpawnOpts};
+use crate::proc::{self, ClaudeProc, ProcMsg, Shape, SpawnOpts};
 use crate::resident::StagePhase;
 use crate::rotate::{
     HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
@@ -401,6 +401,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         cache_ttl: cfg.cache_ttl.clone(),
         compact_window: cfg.compact_window,
         max_budget_usd: cfg.task_budget_usd,
+        shape: Shape::default(),
     };
     let model = cfg.model.clone();
     let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));

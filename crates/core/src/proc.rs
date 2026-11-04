@@ -22,6 +22,21 @@ pub enum ProcMsg {
     Eof,
 }
 
+// Go SessionOpts tool/prompt shape for resident children (sessionArgs). Default = plain main session.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Shape {
+    // Go Minimal: no tools, no MCP, no slash commands, no setting sources; the rule replaces the system prompt.
+    pub minimal: bool,
+    // Go Tools: --tools <list> when non-empty and not minimal.
+    pub tools: String,
+    // Go StrictMCP: --strict-mcp-config when not minimal.
+    pub strict_mcp: bool,
+    // Go NoSlash: --disable-slash-commands when not minimal.
+    pub no_slash: bool,
+    // Go Rule body: --system-prompt when minimal, else --append-system-prompt. Empty = none.
+    pub rule: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct SpawnOpts {
     pub claude_bin: String,
@@ -34,6 +49,8 @@ pub struct SpawnOpts {
     pub compact_window: u32,
     // Go --task-budget-usd; zero leaves the child without --max-budget-usd.
     pub max_budget_usd: f64,
+    // Resident child shape (prompter/tui/coder). Default for the main session.
+    pub shape: Shape,
 }
 
 // Go --task-budget-usd also passes --max-budget-usd to the child as a backstop. Zero adds nothing.
@@ -45,7 +62,7 @@ pub fn budget_args(cap: f64) -> Vec<String> {
     }
 }
 
-pub fn build_args(model: &str, resume: Option<&str>) -> Vec<String> {
+pub fn build_args(model: &str, resume: Option<&str>, shape: &Shape) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p",
         "--input-format",
@@ -69,6 +86,40 @@ pub fn build_args(model: &str, resume: Option<&str>) -> Vec<String> {
     {
         args.push("--resume".to_string());
         args.push(id.to_string());
+    }
+    // Same order as Go sessionArgs: tool/MCP/slash block, then the rule.
+    if shape.minimal {
+        args.extend(
+            [
+                "--tools",
+                "",
+                "--strict-mcp-config",
+                "--disable-slash-commands",
+                "--setting-sources",
+                "",
+            ]
+            .map(str::to_string),
+        );
+    } else {
+        if !shape.tools.is_empty() {
+            args.push("--tools".to_string());
+            args.push(shape.tools.clone());
+        }
+        if shape.strict_mcp {
+            args.push("--strict-mcp-config".to_string());
+        }
+        if shape.no_slash {
+            args.push("--disable-slash-commands".to_string());
+        }
+    }
+    if !shape.rule.is_empty() {
+        let flag = if shape.minimal {
+            "--system-prompt"
+        } else {
+            "--append-system-prompt"
+        };
+        args.push(flag.to_string());
+        args.push(shape.rule.clone());
     }
     args
 }
@@ -125,7 +176,7 @@ pub fn spawn<T: Send + 'static>(
     wrap: impl Fn(ProcMsg) -> T + Send + 'static,
 ) -> io::Result<ClaudeProc> {
     let mut cmd = Command::new(&opts.claude_bin);
-    cmd.args(build_args(&opts.model, opts.resume.as_deref()))
+    cmd.args(build_args(&opts.model, opts.resume.as_deref(), &opts.shape))
         .args(budget_args(opts.max_budget_usd))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -247,7 +298,7 @@ mod tests {
 
     #[test]
     fn args_match_go_session_defaults() {
-        let a = build_args("opus", None);
+        let a = build_args("opus", None, &Shape::default());
         let want = [
             "-p",
             "--input-format",
@@ -268,15 +319,55 @@ mod tests {
 
     #[test]
     fn resume_is_appended_only_when_set() {
-        let a = build_args("opus", Some("abc"));
+        let a = build_args("opus", Some("abc"), &Shape::default());
         assert_eq!(
             a[a.len() - 2..],
             ["--resume".to_string(), "abc".to_string()]
         );
         assert_eq!(
-            build_args("opus", Some("")).len(),
-            build_args("opus", None).len()
+            build_args("opus", Some(""), &Shape::default()).len(),
+            build_args("opus", None, &Shape::default()).len()
         );
+    }
+
+    #[test]
+    fn resident_shape_args_match_go_session_args() {
+        let minimal = Shape {
+            minimal: true,
+            rule: "RULE".into(),
+            ..Shape::default()
+        };
+        let a = build_args("haiku", None, &minimal);
+        assert_eq!(
+            a[a.len() - 8..],
+            [
+                "--tools",
+                "",
+                "--strict-mcp-config",
+                "--disable-slash-commands",
+                "--setting-sources",
+                "",
+                "--system-prompt",
+                "RULE",
+            ]
+        );
+        let coder = Shape {
+            tools: "Read,Edit".into(),
+            strict_mcp: true,
+            no_slash: true,
+            rule: "AGENT".into(),
+            ..Shape::default()
+        };
+        let a = build_args("haiku", None, &coder);
+        let tail = [
+            "--tools",
+            "Read,Edit",
+            "--strict-mcp-config",
+            "--disable-slash-commands",
+            "--append-system-prompt",
+            "AGENT",
+        ];
+        assert_eq!(a[a.len() - tail.len()..], tail);
     }
 
     #[test]
