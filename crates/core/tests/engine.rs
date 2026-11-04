@@ -1644,6 +1644,40 @@ fn resumed_background_agent_is_active_again_until_task_notification() {
 }
 
 #[test]
+fn idle_reply_without_notice_finishes_oldest_background_agent() {
+    let _g = lock();
+    let f = fake("bg_idle", &["bg_idle_reply_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let mut evs = until_idle(&rx);
+    // The child speaks up on its own after the turn: the reply has no notice, so the oldest background agent ends.
+    let ended = |evs: &[UiEvent]| {
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_idle1"))
+    };
+    while !ended(&evs) {
+        evs.push(rx.recv_timeout(WAIT).expect("engine went silent"));
+    }
+    h.shutdown();
+}
+
+#[test]
+fn text_block_notice_finishes_background_agent() {
+    let _g = lock();
+    let f = fake("bg_text_block", &["bg_text_block_notice_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    // A task-notification sent as a text block (not string content) ends the named agent.
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_tb1")),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
 fn resume_after_agent_ended_keeps_start_label() {
     let _g = lock();
     let f = fake("resume_late", &["resume_after_end_turn.jsonl"]);

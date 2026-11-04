@@ -570,6 +570,8 @@ struct State {
     interrupted_at: Option<Instant>,
     // Results still owed by abandoned turns (Go core.go Session.skip). Each one is discarded so it cannot end a later turn.
     stray_results: u32,
+    // Go repl.go idleTurn: a child-initiated turn that runs while no user turn does (reply to a background notice).
+    idle_turn: IdleTurn,
     // Session cost when the running turn started, and Agent/Task calls made in it (for TurnStats).
     turn_cost_base: f64,
     // Go r.spend: subagent usage and spawn counts of the running turn, merged into its turn row.
@@ -658,6 +660,14 @@ struct State {
     mcp_cfg: Option<mcp::McpConfig>,
     // Go recordSave state: the reply and measurement of the turn that just ended, the topic, the /clear split.
     record: RecordState,
+}
+
+// Go repl.go idleTurn: what a child-initiated turn showed. active: a main reply was seen; notif: a
+// task-notification was seen, so the completion is already known.
+#[derive(Default)]
+struct IdleTurn {
+    active: bool,
+    notif: bool,
 }
 
 // One coder resident. A running deadline means a task is in flight (Go busyRec).
@@ -797,6 +807,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         last_activity: Instant::now(),
         interrupted_at: None,
         stray_results: 0,
+        idle_turn: IdleTurn::default(),
         turn_cost_base: 0.0,
         spend: TurnSpend::new(),
         delegations: 0,
@@ -1935,6 +1946,9 @@ impl State {
                     StreamInner::ContentBlockDelta {
                         delta: Delta::TextDelta { text },
                     } => {
+                        if matches!(role, Role::Main) && !self.busy {
+                            self.idle_turn.active = true;
+                        }
                         // The raw reply keeps the [cat: X] marker for category_rotation; the screen gets it filtered.
                         let shown = if matches!(role, Role::Main) {
                             self.turn_reply.push_str(&text);
@@ -1966,6 +1980,9 @@ impl State {
                 if env.parent_tool_use_id.is_some() {
                     return;
                 }
+                if !self.busy {
+                    self.idle_turn.active = true;
+                }
                 if let Some(u) = &env.message.usage {
                     self.ctx_tokens = u.context_tokens();
                     self.persist_live();
@@ -1986,17 +2003,18 @@ impl State {
                     return;
                 }
                 if let Some(Content::Text(text)) = &env.message.content {
-                    self.on_task_notification(text);
+                    self.on_user_notice(text);
                 }
                 if let Some(Content::Blocks(blocks)) = env.message.content {
                     for b in blocks {
-                        if let Block::ToolResult {
-                            tool_use_id,
-                            content,
-                            is_error,
-                        } = b
-                        {
-                            self.on_tool_result(tool_use_id, content, is_error == Some(true));
+                        match b {
+                            Block::Text { text } => self.on_user_notice(&text),
+                            Block::ToolResult {
+                                tool_use_id,
+                                content,
+                                is_error,
+                            } => self.on_tool_result(tool_use_id, content, is_error == Some(true)),
+                            _ => {}
                         }
                     }
                 }
@@ -2007,6 +2025,7 @@ impl State {
                     return;
                 }
                 if !self.busy {
+                    self.idle_result();
                     return;
                 }
                 if let Some(c) = r.total_cost_usd {
@@ -2351,19 +2370,55 @@ impl State {
         }
     }
 
-    // A <task-notification> names the background agents that finished (Go drain.go onNotification).
-    fn on_task_notification(&mut self, text: &str) {
-        if !text.contains("<task-notification>") {
-            return;
+    // A user text (string content or text block) that carries a notice (Go onUserEvent). While no turn runs,
+    // a seen notice is recorded for the idle turn (Go idleEvent sawNotif).
+    fn on_user_notice(&mut self, text: &str) {
+        if self.on_task_notification(text) && !self.busy {
+            self.idle_turn.notif = true;
         }
+    }
+
+    // A <task-notification> names the background agents that finished (Go drain.go onNotification).
+    // Returns whether it names a tracked agent, finished or not.
+    fn on_task_notification(&mut self, text: &str) -> bool {
+        if !text.contains("<task-notification>") {
+            return false;
+        }
+        let mut found = false;
         for part in text.split("<tool-use-id>").skip(1) {
             let id: String = part
                 .chars()
                 .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
                 .collect();
+            if self.agent_info.contains_key(&id) {
+                found = true;
+            }
             if self.agents.contains_key(&id) {
                 self.finish_agent(id);
             }
+        }
+        found
+    }
+
+    // Go repl.go idleFinish: a child-initiated turn ends. Its reply with no visible completion notice means
+    // the oldest background agent finished (Go drain.go finishOldestBackground).
+    fn idle_result(&mut self) {
+        let idle = std::mem::take(&mut self.idle_turn);
+        if idle.active && !idle.notif {
+            self.finish_oldest_background();
+        }
+    }
+
+    // Go drain.go finishOldestBackground: the longest-running background agent ends.
+    fn finish_oldest_background(&mut self) {
+        let oldest = self
+            .agents
+            .iter()
+            .filter(|(id, _)| self.agent_info.get(*id).is_some_and(|i| i.background))
+            .min_by_key(|(_, t0)| **t0)
+            .map(|(id, _)| id.clone());
+        if let Some(id) = oldest {
+            self.finish_agent(id);
         }
     }
 
