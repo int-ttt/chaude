@@ -1471,6 +1471,36 @@ mod tests {
     }
 
     #[test]
+    fn width_matches_go_runewidth_sentences() {
+        // Expected (EA off, EA on) from go-runewidth v0.0.16 StringWidth, probe /tmp/rwgo/linesbin (UTF-8 lines in).
+        let cases: &[(&str, usize, usize)] = &[
+            ("한국어 ─ 테스트 ①", 17, 19),
+            ("🇰🇷🇺🇸", 2, 2),
+            ("👍🏽x", 3, 3),
+            ("❤️\u{200d}🔥", 1, 1),
+            ("e\u{fe0f}", 1, 1),
+            ("a\u{301}", 1, 1),
+            ("漢字テスト", 10, 10),
+            ("ＡＢＣ", 6, 6),
+            ("ｶﾀｶﾅ", 4, 4),
+            ("→ ● ✓ ✗ ⚠", 9, 11),
+            ("⚠️ 경고", 6, 6),
+            ("⏳ 대기", 7, 7),
+            ("✅ 완료", 7, 7),
+            ("🔥🔥", 4, 4),
+            ("é中", 3, 4),
+            ("日本語ひらがな", 14, 14),
+            ("‼️", 1, 1),
+            ("•°±×÷", 5, 10),
+            ("“quoted”", 8, 10),
+        ];
+        for &(s, off, on) in cases {
+            assert_eq!(display_width_ea(s, false), off, "EA off: {s:?}");
+            assert_eq!(display_width_ea(s, true), on, "EA on: {s:?}");
+        }
+    }
+
+    #[test]
     fn east_asian_locale_rule() {
         // runewidth_posix.go isEastAsian/IsEastAsian (the RUNEWIDTH_EASTASIAN override is not read here).
         assert!(!is_east_asian_locale(""));
@@ -1489,6 +1519,9 @@ mod tests {
         assert!(is_east_asian_locale("ja_JP.eucJP"));
         assert!(is_east_asian_locale("ko_KR.euckr"));
         assert!(is_east_asian_locale("zh_TW.Big5"));
+        assert!(is_east_asian_locale("ja_JP.SJIS"));
+        assert!(is_east_asian_locale("ko_KR.UTF-8@cjk"));
+        assert!(!is_east_asian_locale("de_DE.ISO-8859-1"));
     }
 
     #[test]
