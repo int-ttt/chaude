@@ -332,6 +332,22 @@ fn queued_prompts_go_out_as_one_merged_turn_on_done() {
             UiEvent::Busy(false),
         ]
     );
+    // Each queue change sends the waiting texts, oldest first; the merged turn empties them.
+    let texts: Vec<Vec<String>> = evs
+        .iter()
+        .filter_map(|e| match e {
+            UiEvent::QueueTexts(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        texts,
+        vec![
+            vec!["second".to_string()],
+            vec!["second".to_string(), "third".to_string()],
+            vec![],
+        ]
+    );
     let log = wait_for(&f.dir.join("stdin.log"), r"second\n\nthird");
     assert_eq!(log.matches(r#""type":"user""#).count(), 2, "{log}");
     assert!(log.contains(r"second\n\nthird"), "{log}");
@@ -1208,6 +1224,58 @@ fn rotation_waits_for_background_agent_then_runs_at_defer_timeout() {
     h.shutdown();
 }
 
+// Go TestRotateKeepsPendingSnapshot (resumeshift_test.go:65): a rotation with a pending import snapshot must not
+// send the handoff prompt to the child (its reply would be empty and replace the snapshot). The rotation is held
+// by a background agent; the import lands while idle, so the deferred rotation runs with the snapshot pending.
+#[test]
+fn go_rotate_keeps_pending_snapshot() {
+    let _g = lock();
+    let f = fake(
+        "rotate_keep",
+        &["bg_rotate_turn.jsonl", "handoff_turn.jsonl"],
+    );
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_secs(2);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::Rotated { .. })),
+        "{evs:?}"
+    );
+    h.install_import(ClaudeImport {
+        path: PathBuf::from("/home/u/.claude/projects/p/abc123.jsonl"),
+        turns: vec![("earlier question".into(), "earlier answer".into())],
+        files: vec!["src/lib.rs".into()],
+        reco: "RECO-KEEP".into(),
+        ..Default::default()
+    });
+    let mut rotated = false;
+    while let Ok(e) = rx.recv_timeout(WAIT) {
+        if matches!(e, UiEvent::Rotated { .. }) {
+            rotated = true;
+            break;
+        }
+    }
+    assert!(rotated, "deferred rotation never ran");
+    // The snapshot was kept: no handoff prompt reached any child.
+    let stdin = fs::read_to_string(f.dir.join("stdin.log")).unwrap_or_default();
+    assert!(!stdin.contains("Write a handoff note"), "{stdin}");
+    h.submit("again");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    let frame = log
+        .lines()
+        .find(|l| l.contains("## Current user message"))
+        .expect("snapshot frame");
+    assert!(
+        frame.contains("imported from a plain Claude Code session abc123"),
+        "{frame}"
+    );
+    h.shutdown();
+}
+
 #[test]
 fn handoff_snapshot_lists_running_background_agent_with_result_path() {
     let _g = lock();
@@ -1239,6 +1307,40 @@ fn handoff_snapshot_lists_running_background_agent_with_result_path() {
     assert!(frame.contains(r"## Background agents (results in notes/runs/)\n\n- scan (toolu_bg1)"));
     assert!(frame.contains("- scan (toolu_bg1): running, result file: notes/runs/"));
     assert!(frame.contains("-agent-toolu_bg1.md"));
+    h.shutdown();
+}
+
+#[test]
+fn agent_rows_carry_panel_fields_for_a_background_launch() {
+    let _g = lock();
+    let f = fake(
+        "agentrows",
+        &["bg_agentid_turn.jsonl", "handoff_turn.jsonl"],
+    );
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("first");
+    let evs = until_idle(&rx);
+    // Rows follow each agent change: the launch result is the last one that matters here.
+    let rows = evs
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            UiEvent::AgentRows { rows } => Some(rows.clone()),
+            _ => None,
+        })
+        .expect("AgentRows after the background launch");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let row = &rows[0];
+    assert_eq!(row.id, "toolu_bg1");
+    // Go agentRec: Task = description, Prompt = first line of prompt, Name = name else subagent_type.
+    assert_eq!(row.task, "scan");
+    assert_eq!(row.prompt, "look around");
+    assert_eq!(row.name, "general");
+    assert_eq!(row.model, "");
+    assert!(row.background && !row.done, "{row:?}");
+    assert_eq!(row.agent_id, "abc123");
+    assert!(row.result_path.ends_with("-agent-toolu_bg1.md"), "{row:?}");
+    assert!(row.started_at > 0);
     h.shutdown();
 }
 

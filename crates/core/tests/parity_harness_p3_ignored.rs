@@ -60,13 +60,6 @@ fn go_view_helpers() {
     panic!("not ported: sessview helper set (cli-private)");
 }
 
-// Go TestRotateKeepsPendingSnapshot (resumeshift_test.go:65)
-#[test]
-#[ignore = "parity: model switch must keep pending import snapshot; rotate path not wired to the snapshot in Rust"]
-fn go_rotate_keeps_pending_snapshot() {
-    panic!("not ported: rotate keeps pending import snapshot");
-}
-
 // Go TestReleaseCopiesSelection (selection_test.go:50)
 #[test]
 #[ignore = "parity: clipboard copy on release is cli-private; bin-only crate has no lib target"]

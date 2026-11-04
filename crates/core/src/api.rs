@@ -146,6 +146,13 @@ pub enum UiEvent {
     AgentBackground {
         id: String,
     },
+    // Every delegated agent in start order (Go agentTracker, drain.go agentRec), sent after each agent change.
+    // The panel filters them as Go rowsA does (tui.go:1448-1451): foreground = !background, running = !done.
+    AgentRows {
+        rows: Vec<AgentRow>,
+    },
+    // Prompt texts waiting behind the running turn, oldest first (Go m.queue; Queued(n) stays the count).
+    QueueTexts(Vec<String>),
     // The running turn ended after an interrupt (before its TurnEnd).
     Interrupted,
     // Raw rate_limit_info object from a rate_limit_event (Go livechild.go setRate: rateLimitType, unifiedWindows, ...).
@@ -672,6 +679,27 @@ struct Handoff {
     attempts: u32,
 }
 
+// One panel/background row (Go agentRec fields the TUI shows). Field order follows agentRec in drain.go:17-38.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentRow {
+    pub id: String,
+    // Go Task: the Agent call's `description` input.
+    pub task: String,
+    // Go Prompt: first line of the Agent call's `prompt` input.
+    pub prompt: String,
+    // Go Name: the `name` input, else `subagent_type`. Empty when neither is set.
+    pub name: String,
+    // Go Model: the `model` input; empty = inherits the session model.
+    pub model: String,
+    pub background: bool,
+    pub done: bool,
+    // Go AgentID: handle from the launch result ("agentId: <id>"); empty until a background launch reports it.
+    pub agent_id: String,
+    pub result_path: String,
+    // Unix seconds, as AgentStart.started_at.
+    pub started_at: u64,
+}
+
 // What the handoff snapshot needs about a delegated agent (Go agentRec: Name, ResultPath, Background, Started,
 // Done, ResultDone). The entry stays after the agent ends, marked done, so the snapshot can list it.
 struct AgentInfo {
@@ -684,6 +712,12 @@ struct AgentInfo {
     result_done: bool,
     // The Agent call's `model` input; empty when the agent inherits the session model.
     model: String,
+    // Go agentRec Task, Prompt, Name (session name), AgentID, Started (unix secs) for AgentRow.
+    task: String,
+    prompt: String,
+    session_name: String,
+    agent_id: String,
+    started_at: u64,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -958,6 +992,7 @@ impl State {
         if self.busy || self.prompter.waiting() {
             self.queue.push_back(text);
             self.emit(UiEvent::Queued(self.queue.len()));
+            self.emit_queue();
             return;
         }
         self.begin_turn(text);
@@ -1061,7 +1096,7 @@ impl State {
             row.as_ref(),
             limit,
             SystemTime::now(),
-            self.idle_deadline(),
+            warm_deadline(self.idle_deadline()),
         )
     }
 
@@ -1832,6 +1867,7 @@ impl State {
             p.kill();
         }
         self.queue.clear();
+        self.emit_queue();
         if self.busy {
             self.busy = false;
             self.turn_started = None;
@@ -2131,6 +2167,7 @@ impl State {
             }
             self.agents.insert(id.clone(), Instant::now());
             self.agent_labels.insert(id.clone(), description.clone());
+            let started_at = now_secs();
             self.agent_info.insert(
                 id.clone(),
                 AgentInfo {
@@ -2145,14 +2182,38 @@ impl State {
                         .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string(),
+                    task: input
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    prompt: input
+                        .get("prompt")
+                        .and_then(Value::as_str)
+                        .and_then(|p| p.lines().next())
+                        .unwrap_or_default()
+                        .to_string(),
+                    session_name: ["name", "subagent_type"]
+                        .iter()
+                        .find_map(|k| {
+                            input
+                                .get(*k)
+                                .and_then(Value::as_str)
+                                .filter(|s| !s.is_empty())
+                        })
+                        .unwrap_or_default()
+                        .to_string(),
+                    agent_id: String::new(),
+                    started_at,
                 },
             );
             self.stage(&agent_slot(&description), StagePhase::Working);
             self.emit(UiEvent::AgentStart {
-                id,
+                id: id.clone(),
                 description,
-                started_at: now_secs(),
+                started_at,
             });
+            self.emit_agent_rows();
         }
     }
 
@@ -2196,23 +2257,62 @@ impl State {
                 description,
                 started_at: now_secs(),
             });
+            self.emit_agent_rows();
             return;
         }
         // A background agent keeps running after its launch result; it ends later, which E1 does not track.
         if text.contains(ASYNC_AGENT_MARK) {
             if let Some(aid) = after_marker(&text, "agentId: ") {
-                self.agent_ids.insert(aid, id.clone());
+                self.agent_ids.insert(aid.clone(), id.clone());
+                if let Some(info) = self.agent_info.get_mut(&id) {
+                    info.agent_id = aid;
+                }
             }
             if let Some(info) = self.agent_info.get_mut(&id) {
                 info.background = true;
             }
             self.emit(UiEvent::AgentBackground { id });
+            self.emit_agent_rows();
             return;
         }
         self.finish_agent(id);
     }
 
     // Ends a delegated agent: AgentEnd, and the deferred rotation runs if this was the last agent.
+    // Go agentTracker rows: every delegated agent in start order, for the panel and background lines.
+    fn emit_agent_rows(&self) {
+        let mut rows: Vec<(Instant, AgentRow)> = self
+            .agent_info
+            .iter()
+            .map(|(id, i)| {
+                (
+                    i.started,
+                    AgentRow {
+                        id: id.clone(),
+                        task: i.task.clone(),
+                        prompt: i.prompt.clone(),
+                        name: i.session_name.clone(),
+                        model: i.model.clone(),
+                        background: i.background,
+                        done: i.done,
+                        agent_id: i.agent_id.clone(),
+                        result_path: i.result_path.clone(),
+                        started_at: i.started_at,
+                    },
+                )
+            })
+            .collect();
+        rows.sort_by_key(|(started, _)| *started);
+        self.emit(UiEvent::AgentRows {
+            rows: rows.into_iter().map(|(_, r)| r).collect(),
+        });
+    }
+
+    // Queued prompt texts, oldest first (Go m.queue), sent with each queue change.
+    fn emit_queue(&self) {
+        self.emit(UiEvent::QueueTexts(self.queue.iter().cloned().collect()));
+    }
+
     // Go repl.go stage rows ("· main 처리중", "· agent X 호출"): sent only while residents run.
     fn stage(&mut self, slot: &str, phase: StagePhase) {
         if self.cfg.residents {
@@ -2243,6 +2343,7 @@ impl State {
                 elapsed_ms: t0.elapsed().as_millis() as u64,
                 model,
             });
+            self.emit_agent_rows();
         }
         // The last background agent finished while the child is idle: the deferred rotation runs now.
         if !self.busy && self.deferred_due() {
@@ -2394,6 +2495,7 @@ impl State {
                 });
             }
         }
+        self.emit_agent_rows();
         let duration_ms = elapsed_ms(self.turn_started);
         // The abandoned turn's prompts can no longer be answered by the child; drop them.
         self.pending_perm.clear();
@@ -2542,6 +2644,7 @@ impl State {
         }
         let next = self.queue.drain(..).collect::<Vec<_>>().join("\n\n");
         self.emit(UiEvent::Queued(0));
+        self.emit_queue();
         if !self.send_turn(&next) {
             self.busy = false;
             self.emit(UiEvent::Busy(false));
@@ -3172,6 +3275,11 @@ fn observe_ttl(line: &str, seen: &str) -> Option<String> {
 
 // Go switchChild: the handoff turn runs only for a switch that starts a fresh child, with no pending snapshot
 // (a kept import snapshot wins), turns to hand off, a running session, and no handoff already in flight.
+// Go warmDeadline (switchchild.go:26-31): idle_deadline when set, else NEVER_COLD. Used by pickChild.
+fn warm_deadline(idle: Duration) -> Duration {
+    if idle.is_zero() { NEVER_COLD } else { idle }
+}
+
 fn switch_needs_handoff(
     pending: &str,
     recent: usize,
@@ -3376,6 +3484,32 @@ mod tests {
         );
         assert_eq!(idle_deadline(Duration::ZERO, "1h"), Duration::ZERO);
         assert_eq!(idle_deadline(Duration::ZERO, "5m"), Duration::ZERO);
+    }
+
+    // Go warmDeadline: idle expiry off still keeps a parked child warm for neverCold (pickChild is never cold).
+    #[test]
+    fn warm_deadline_uses_never_cold_when_idle_expiry_off() {
+        assert_eq!(warm_deadline(Duration::ZERO), NEVER_COLD);
+        assert_eq!(
+            warm_deadline(Duration::from_secs(290)),
+            Duration::from_secs(290)
+        );
+        let now = SystemTime::now();
+        let day_old = now - Duration::from_secs(86_400);
+        assert_eq!(
+            pick_child::pick_child(
+                Some((day_old, 0)),
+                None,
+                80_000,
+                now,
+                warm_deadline(Duration::ZERO)
+            ),
+            pick_child::ChildAction::UseLive
+        );
+        assert_eq!(
+            pick_child::pick_child(Some((day_old, 0)), None, 80_000, now, Duration::ZERO),
+            pick_child::ChildAction::StartNew
+        );
     }
 
     #[test]
