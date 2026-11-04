@@ -92,6 +92,8 @@ pub enum UiEvent {
     AgentEnd {
         id: String,
         elapsed_ms: u64,
+        // The Agent call's `model` input (Go agentRec.Model, shown by doneLine); empty = inherits the session model.
+        model: String,
     },
     // A background agent resumed by SendMessage runs again under its original tool id until its AgentEnd.
     AgentResumed {
@@ -649,6 +651,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
                 .map(|(role, pid)| {
                     let model = prev.child_models.get(&role).cloned().unwrap_or_default();
                     (role, pid, model)
+    // The Agent call's `model` input; empty when the agent inherits the session model.
+    model: String,
                 })
                 .collect();
         }
@@ -1818,6 +1822,11 @@ impl State {
         self.open_tools.remove(&id);
         self.emit(UiEvent::ToolEnd {
             id: id.clone(),
+                    model: input
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
             ok: !is_error,
         });
         let text = result_text(content.as_ref());
@@ -1906,9 +1915,15 @@ impl State {
     fn on_task_notification(&mut self, text: &str) {
         if !text.contains("<task-notification>") {
             return;
+            let model = self
+                .agent_info
+                .get(&id)
+                .map(|i| i.model.clone())
+                .unwrap_or_default();
         }
         for part in text.split("<tool-use-id>").skip(1) {
             let id: String = part
+                model,
                 .chars()
                 .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
                 .collect();
@@ -2046,12 +2061,18 @@ impl State {
         self.stray_results += 1;
         self.end_turn(duration_ms);
     }
+                let model = self
+                    .agent_info
+                    .get(&id)
+                    .map(|i| i.model.clone())
+                    .unwrap_or_default();
 
     // Go repl.go turn record (stage "turn"). Keys the Rust engine does not produce yet (draining, rotations,
     // result_* usage) are left out until their groups land. Write errors are ignored, as in Go.
     // Go recordSave: the turn that just ended goes to its project folder under the record root (slash
     // commands and empty replies are skipped by RecordState). A failed write is reported as an Error.
     fn record_turn_save(&mut self, duration_ms: u64) {
+                    model,
         let cost_turn = (self.cost_usd - self.turn_cost_base).max(0.0);
         let mut fields = serde_json::Map::new();
         fields.insert("duration_ms".into(), json!(duration_ms));

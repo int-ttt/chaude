@@ -41,10 +41,10 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | clean/guard_roundtrip_test.go::TestGuardSettingsRemovedByClean | clean/src/tests.rs::guard_settings_removed_by_clean | covered | |
 | harness/acceptance_test.go::TestLiveRotationCarriesContext | core/tests/engine.rs::context_rotation_hands_off_and_fresh_child_gets_snapshot | covered | name-level match |
 | harness/acceptance_test.go::TestLiveStreamingMultipleDeltas | - | missing | no streaming-delta test in Rust core yet |
-| harness/agentstore_test.go::TestAgentStorePersistsEveryChange | - | missing | Rust has no agent store |
-| harness/agentstore_test.go::TestAgentRestoreMarksInterrupted | - | missing | Rust has no agent store |
-| harness/agentstore_test.go::TestAgentStoreCrashRecoveryAndOwners | - | missing | Rust has no agent store |
-| harness/agentstore_test.go::TestAgentStoreOffAndNil | - | missing | Rust has no agent store |
+| harness/agentstore_test.go::TestAgentStorePersistsEveryChange | crates/core/src/agent_store.rs::agent_store_persists_every_change | missing | store part only; tracker part (onToolUse/onSubEvent) not ported |
+| harness/agentstore_test.go::TestAgentRestoreMarksInterrupted | crates/core/src/agent_store.rs::agent_restore_marks_interrupted | missing | store part only; restoreAgents/markInterrupted need the tracker port |
+| harness/agentstore_test.go::TestAgentStoreCrashRecoveryAndOwners | crates/core/src/agent_store.rs::agent_store_crash_recovery_and_owners | covered | |
+| harness/agentstore_test.go::TestAgentStoreOffAndNil | crates/core/src/agent_store.rs::agent_store_empty_path_is_off | covered | name-level match; nil store is Option::None at the call site |
 | harness/agentview_test.go::TestAgentViewClickReadOnlyClose | - | missing | Rust TUI has no agent view |
 | harness/agentview_test.go::TestUsagePopupOpenClose | cli/src/tui/usage.rs::esc_closes_and_returns_true | covered | name-level: usage popup close |
 | harness/agentview_test.go::TestWheelScrollHoldsPosition | cli/src/tui/usage.rs::wheel_and_refresh_keep_scroll | covered | name-level: usage popup, not agent view |
@@ -66,8 +66,8 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/budget_test.go::TestBudgetInterruptMidTurn | core/tests/engine.rs::budget_interrupts_turn_once_when_in_flight_estimate_reaches_cap | covered | |
 | harness/budget_test.go::TestBudgetExtraAppends | - | missing | Rust budget_args test covers only set/unset, not extra args |
 | harness/budget_test.go::TestBudgetDisabledByDefault | core/src/proc.rs::budget_args_only_when_cap_is_set | covered | name-level: no budget args when off |
-| harness/budget_test.go::TestChildPIDRecordedOnPark | - | missing | Rust has no child set/park |
-| harness/budget_test.go::TestReconcileParkedAliveChild | - | missing | Rust has no parked-child reconcile |
+| harness/budget_test.go::TestChildPIDRecordedOnPark | - | missing | needs Repl.parkOld and the client registry (not ported) |
+| harness/budget_test.go::TestReconcileParkedAliveChild | - | missing | needs Repl.parkOld and the client registry (not ported) |
 | harness/budget_test.go::TestBudgetFullModelIDPriced | core/src/budget.rs::full_model_id_is_priced_like_alias | covered | |
 | harness/busyslash_test.go::TestBusySlashAllowedAndRefused | - | missing | busy-slash allow/refuse rule not in Rust |
 | harness/busyslash_test.go::TestVersionNoteShowsChaudeVersion | - | missing | version note not covered in Rust tests |
@@ -90,11 +90,11 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/chaude_settings_test.go::TestSettingsFileIsPerProject | cli/src/tui/settings.rs::settings_file_is_per_project | covered | |
 | harness/chaude_settings_test.go::TestSettingsFileEmptyCwdUsesWorkingDir | - | missing | empty-cwd fallback not tested in Rust |
 | harness/childkey_test.go::TestChildKeyRoleCoexist | - | missing | Rust has no child key registry |
-| harness/childkey_test.go::TestAdmitEvictsOldestParked | - | missing | Rust has no admit/evict of parked children |
-| harness/childkey_test.go::TestAdmitRefusesWhenNothingEvictable | - | missing | Rust has no admit/evict of parked children |
-| harness/children_test.go::TestChildKey | - | missing | Rust has no child key registry |
-| harness/children_test.go::TestChildSetParkTake | - | missing | Rust has no child set/park |
-| harness/children_test.go::TestCloseAllParallel | - | missing | Rust has no child set |
+| harness/childkey_test.go::TestAdmitEvictsOldestParked | crates/core/src/child_set.rs::admit_evicts_oldest_parked | covered | |
+| harness/childkey_test.go::TestAdmitRefusesWhenNothingEvictable | crates/core/src/child_set.rs::admit_refuses_when_nothing_evictable | covered | |
+| harness/children_test.go::TestChildKey | crates/core/src/child_set.rs::child_key_matches_empty_dot_and_working_dir | covered | name-level match; role-coexist case is harness/childkey_test.go::TestChildKeyRoleCoexist (missing) |
+| harness/children_test.go::TestChildSetParkTake | crates/core/src/child_set.rs::park_take_replaces_closes_once_and_expires | covered | |
+| harness/children_test.go::TestCloseAllParallel | crates/core/src/child_set.rs::close_all_closes_in_parallel | covered | |
 | harness/cleanenv_test.go::TestCleanEnvDropsAPIKey | - | missing | apply_env is private in core/src/proc.rs; no public test seam |
 | harness/clients_test.go::TestClientRegistryRoundTrip | - | missing | Rust has no client registry |
 | harness/clients_test.go::TestClientRegistryBrokenJSON | - | missing | Rust has no client registry |
@@ -104,12 +104,12 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/clients_test.go::TestReconcileKilledOwner | - | missing | Rust has no client reconcile (handoff orphans test is different) |
 | harness/clients_test.go::TestIdleDeadline | - | missing | idle_deadline is private in core/src/api.rs |
 | harness/clients_test.go::TestExpiredZeroDeadline | - | missing | idle deadline is private in core/src/api.rs |
-| harness/conductor_test.go::TestWorkerPool | - | missing | Rust engine has no worker pool |
+| harness/conductor_test.go::TestWorkerPool | crates/core/src/haiku_pool.rs::worker_pool_notes_edits_and_dedups_files | covered | name-level match; nil pool is Option at the call site; 80-rune cut in worker_pool_truncates_task_to_80_runes |
 | harness/conductor_test.go::TestThresholdFor | core/src/rotate.rs::threshold_for_opus_and_configured | covered | |
 | harness/conductor_test.go::TestShouldRotateBoundary | core/src/rotate.rs::should_rotate_fires_at_threshold | covered | name-level: threshold boundary |
 | harness/delegation_test.go::TestDelegationRuleNamesHaikuCoder | core/src/orch.rs::rule_per_mode | covered | name-level: RULE_B names haiku-coder |
 | harness/delegation_test.go::TestForwardRuleFor | - | missing | Rust has no forward rule |
-| harness/dispatch_test.go::TestPickChild | - | missing | Rust has no pick-child |
+| harness/dispatch_test.go::TestPickChild | crates/core/src/pick_child.rs::pick_child_matches_go_cases | covered | name-level match; owner case is pick_child_refuses_row_owned_by_other_live_pid (pid 1 instead of parent pid) |
 | harness/dispatch_test.go::TestMaxWorkersDefault | crates/core/tests/parity_harness_p1.rs::max_workers_default_is_three | ignored | parity: Go default 3; Rust default is max(3, 8 + extra_coders) |
 | harness/dispatch_test.go::TestMaxWorkersEnvOverride | crates/core/tests/parity_harness_p1.rs::max_workers_env_override_and_flag_precedence | covered | added in parity_harness_p1.rs |
 | harness/dispatch_test.go::TestMaxWorkersRejectZero | crates/core/tests/parity_harness_p1.rs::max_workers_rejects_zero_from_flag_and_env | covered | added in parity_harness_p1.rs |

@@ -360,7 +360,7 @@ impl App {
                     self.bg_agents.push(id);
                 }
             }
-            UiEvent::AgentEnd { id, elapsed_ms } => {
+            UiEvent::AgentEnd { id, elapsed_ms, .. } => {
                 let desc = self
                     .agents
                     .iter()
@@ -2750,6 +2750,7 @@ mod tests {
         app.apply(UiEvent::AgentEnd {
             id: "a1".to_string(),
             elapsed_ms: 1500,
+            model: String::new(),
         });
         assert!(
             app.transcript

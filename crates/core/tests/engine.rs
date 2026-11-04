@@ -1508,10 +1508,12 @@ fn resume_after_agent_ended_keeps_start_label() {
             elapsed_ms: evs
                 .iter()
                 .find_map(|e| match e {
-                    UiEvent::AgentEnd { id, elapsed_ms } if id == "toolu_bg2" => Some(*elapsed_ms),
+                    UiEvent::AgentEnd { id, elapsed_ms, .. } if id == "toolu_bg2" =>
+                        Some(*elapsed_ms),
                     _ => None,
                 })
                 .unwrap_or_else(|| panic!("{evs:?}")),
+            model: String::new(),
         }),
         "{evs:?}"
     );
@@ -2190,6 +2192,12 @@ fn opus_agent_emits_opus_busy_bracket_around_its_run() {
         2,
         "{evs:?}"
     );
+    // The Agent call's model input rides on AgentEnd (Go doneLine model); the inherited case stays empty.
+    let end_model = evs.iter().find_map(|e| match e {
+        UiEvent::AgentEnd { model, .. } => Some(model.clone()),
+        _ => None,
+    });
+    assert_eq!(end_model.as_deref(), Some("opus"), "{evs:?}");
     h.shutdown();
 }
 
