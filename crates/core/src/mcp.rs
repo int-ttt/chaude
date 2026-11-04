@@ -5,8 +5,9 @@ use std::collections::hash_map::RandomState;
 use std::fs;
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::mem::ManuallyDrop;
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -131,8 +132,32 @@ fn serve_conn(conn: TcpStream, run: &CoderFn, token: &str) {
     }
 }
 
-// Starts the server and writes mcp.json into a fresh temp directory. Returns the config path.
-pub fn start(run: Arc<CoderFn>) -> io::Result<PathBuf> {
+// Owns the temp dir that holds mcp.json. Dropping it removes the dir (the listener thread stays up until exit).
+pub struct McpConfig {
+    dir: PathBuf,
+    path: PathBuf,
+}
+
+impl McpConfig {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    // Gives up the cleanup: the dir stays on disk. Only for callers that cannot hold the guard yet.
+    pub fn into_path(self) -> PathBuf {
+        let this = ManuallyDrop::new(self);
+        this.path.clone()
+    }
+}
+
+impl Drop for McpConfig {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
+// Starts the server and writes mcp.json into a fresh temp directory. The guard removes that dir on drop.
+pub fn start_owned(run: Arc<CoderFn>) -> io::Result<McpConfig> {
     let token = new_token();
     let addr = serve(run, &token)?;
     let exe = std::env::current_exe()?;
@@ -143,6 +168,10 @@ pub fn start(run: Arc<CoderFn>) -> io::Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!("chaude-mcp-{}-{nanos}", std::process::id()));
     fs::create_dir_all(&dir)?;
     let path = dir.join("mcp.json");
+    let cfg = McpConfig {
+        dir,
+        path: path.clone(),
+    };
     fs::write(
         &path,
         config_json(&exe.display().to_string(), &addr, &token),
@@ -152,7 +181,12 @@ pub fn start(run: Arc<CoderFn>) -> io::Result<PathBuf> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
     }
-    Ok(path)
+    Ok(cfg)
+}
+
+// Same as start_owned, but the dir is never removed (the old behaviour; api.rs still uses it).
+pub fn start(run: Arc<CoderFn>) -> io::Result<PathBuf> {
+    start_owned(run).map(McpConfig::into_path)
 }
 
 // Go MCPResidentBridge: copies MCP lines between the main child's stdio and the socket at addr.
@@ -258,6 +292,16 @@ mod tests {
             !srv["args"].to_string().contains("tok"),
             "token stays out of argv"
         );
+    }
+
+    #[test]
+    fn owned_config_removes_its_dir_on_drop() {
+        let cfg = start_owned(Arc::new(ok_run)).expect("start");
+        let path = cfg.path().to_path_buf();
+        let dir = path.parent().expect("dir").to_path_buf();
+        assert!(path.is_file());
+        drop(cfg);
+        assert!(!dir.exists(), "{}", dir.display());
     }
 
     #[test]
