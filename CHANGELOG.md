@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.10.2 - 2026-11-04
+- Project setup: when chaude opens a folder, it writes the agent definitions (`haiku-*.md`, `opus-architect.md`) into `<cwd>/.claude/agents`. Existing files are never overwritten.
+- Project setup: if `.claude/settings.json` already exists, the main-thread guard is merged into it instead of being skipped. Existing keys and hooks are kept, and a second run changes nothing.
+- Guard: from the main thread, `Agent`/`Task` calls are allowed only for `haiku-*`, `opus-architect` and `claude-code-guide`. The default general-purpose agent is blocked.
+
 ## 0.10.1 - 2026-11-04
 - Resume: a background agent resumed with SendMessage (`resumedAgentId`) goes back to the active agent list. The launch `agentId` is kept and saved with the agent store, so restored agents can be matched after a restart.
 - /view: session rows and the prompt header show the agent name (for example `coder`, `prompter`) instead of the session id. Sessions from an earlier run still show their transcript title.
