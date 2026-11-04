@@ -18,9 +18,11 @@ use crate::agent_store::AgentStore;
 use crate::budget::{self, Budget};
 use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
-use crate::clients::{ClientRec, ClientRegistry, LIVE, idle_deadline, now_stamp};
+use crate::child_set::{ChildSet, Close, Parked, child_key};
+use crate::clients::{ClientRec, ClientRegistry, LIVE, PARKED, idle_deadline, now_stamp};
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
 use crate::forward::forward_rule_for;
+use crate::haiku_pool::WorkerPool;
 use crate::handoff::{self, ExitHandoff};
 use crate::import_claude::{ClaudeImport, import_note};
 use crate::mcp;
@@ -28,6 +30,7 @@ use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::orch;
 use crate::osenv::resolve_bin;
+use crate::pick_child::{self, ChildAction, RegRow};
 use crate::proc::{self, ClaudeProc, ProcMsg, Shape, SpawnOpts};
 use crate::record::{self, Stamp};
 use crate::record_turn::{self, RecordState};
@@ -598,6 +601,13 @@ struct State {
     opts: SpawnOpts,
     // Bumped on every fresh child so the old child's late lines and EOF are ignored.
     epoch: u64,
+    // Source of new epochs. A restored parked child takes its old epoch back, so new ones never reuse a value.
+    epoch_seq: u64,
+    // Parked-live main children by (cwd, model) (Go childSet).
+    children: ChildSet<ParkedProc>,
+    // Haiku sessions that edited files (Go r.pool), and the prompt those edits belong to (Go curTask).
+    pool: WorkerPool,
+    cur_task: String,
     // Files written by Write/Edit/NotebookEdit in this session (Go r.files), for the handoff snapshot.
     files: Vec<String>,
     // Last recommendation line of a normal turn (Go lastReco), carried verbatim into the snapshot.
@@ -771,6 +781,10 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         self_tx,
         opts,
         epoch: 0,
+        epoch_seq: 0,
+        children: ChildSet::new(),
+        pool: WorkerPool::new(),
+        cur_task: String::new(),
         files: Vec::new(),
         last_reco: String::new(),
         recent: VecDeque::new(),
@@ -973,22 +987,124 @@ impl State {
             }
             orch::Target::Fresh { .. } => self.orch_child("haiku".to_string(), None),
         }
+        self.cur_task = routed.text.clone();
         if self.send_turn(&routed.text) {
             self.busy = true;
             self.emit(UiEvent::Busy(true));
         }
     }
 
-    // Restarts the main child on model; resume keeps a live workspace session, None starts a fresh one.
+    // Go switchChild: the active main child is parked, then the child for the new model is reused live,
+    // resumed from its registry row, or started new with the handoff snapshot in front of its first prompt.
+    // resume keeps a live workspace session, None starts a fresh one.
     fn orch_child(&mut self, model: String, resume: Option<String>) {
+        let switched = model != self.model;
+        if switched {
+            self.park_active();
+        }
         self.model = model.clone();
-        self.opts.model = model;
-        match resume {
-            Some(sid) => self.resume_session(&sid),
+        self.opts.model = model.clone();
+        if let Some(sid) = resume {
+            self.resume_session(&sid);
+            return;
+        }
+        let cwd = self.client_cwd();
+        let key = child_key(&cwd, &model, "");
+        let live = self.children.warm_info(&key);
+        let row = self
+            .clients
+            .as_ref()
+            .and_then(|reg| reg.get(&cwd, &model))
+            .map(|r| RegRow {
+                parked: r.state == PARKED,
+                session_id: r.session_id,
+                owner_pid: r.owner_pid,
+                last_api: stamp_time(r.last_api),
+                last_ctx: u64::try_from(r.last_ctx).unwrap_or(0),
+            });
+        let deadline = self.idle_deadline();
+        let limit = self.cfg.rotate_threshold;
+        let action = pick_child::pick_child(live, row.as_ref(), limit, SystemTime::now(), deadline);
+        let parked = match action {
+            ChildAction::UseLive => self.children.take(&key),
+            ChildAction::Resume => {
+                if let Some(r) = row {
+                    self.resume_session(&r.session_id);
+                }
+                return;
+            }
+            ChildAction::StartNew => None,
+        };
+        match parked {
+            Some(p) => self.restore_child(p),
             None => {
                 self.restart_child();
+                if switched && !self.recent.is_empty() {
+                    let note = format!("route {model}");
+                    self.pending_snapshot = with_reco(&self.last_reco, &self.build_snapshot(&note));
+                }
             }
         }
+    }
+
+    // Go parkOld: the active main child stays alive under its (cwd, model) key and its registry row is parked.
+    fn park_active(&mut self) {
+        let Some(proc) = self.proc.take() else {
+            return;
+        };
+        let now = SystemTime::now();
+        let last_api = self
+            .last_api
+            .and_then(|t| now.checked_sub(t.elapsed()))
+            .unwrap_or(UNIX_EPOCH);
+        let cwd = self.client_cwd();
+        let key = child_key(&cwd, &self.model, "");
+        let sid = self.sid.clone();
+        let ctx = self.ctx_tokens;
+        if let Some(reg) = &self.clients {
+            reg.upsert(ClientRec {
+                cwd: cwd.clone(),
+                model: self.model.clone(),
+                session_id: sid.clone(),
+                state: PARKED.to_string(),
+                last_api: now_stamp(),
+                last_ctx: i64::try_from(ctx).unwrap_or(i64::MAX),
+                owner_pid: std::process::id(),
+                child_pid: proc.pid(),
+                ..Default::default()
+            });
+        }
+        let epoch = self.epoch;
+        self.children.park(
+            &key,
+            Parked {
+                sess: ParkedProc { proc, epoch, sid },
+                model: self.model.clone(),
+                last_api,
+                last_ctx: ctx,
+            },
+        );
+    }
+
+    // Go switchChild with actUseLive: the parked child becomes the active one again under its own epoch.
+    fn restore_child(&mut self, p: Parked<ParkedProc>) {
+        let ParkedProc { proc, epoch, sid } = p.sess;
+        let pid = proc.pid();
+        self.proc = Some(proc);
+        self.epoch = epoch;
+        self.sid = sid.clone();
+        self.ctx_tokens = p.last_ctx;
+        self.last_api = SystemTime::now()
+            .duration_since(p.last_api)
+            .ok()
+            .and_then(|age| Instant::now().checked_sub(age));
+        self.open_tools.clear();
+        self.interrupted_at = None;
+        self.stray_results = 0;
+        self.pending_perm.clear();
+        self.opts.resume = None;
+        self.upsert_live(pid, sid);
+        self.emit_status(self.cost_usd);
     }
 
     // Adds or removes an opus Agent and emits OpusBusy only when the running state changes.
@@ -1914,6 +2030,14 @@ impl State {
         {
             self.files.push(fp.to_string());
         }
+        // Go repl.go:743: an edit by a Haiku session that has a session id joins the worker pool.
+        if self.model == "haiku"
+            && !self.sid.is_empty()
+            && matches!(name.as_str(), "Write" | "Edit" | "NotebookEdit")
+            && let Some(fp) = input.get("file_path").and_then(Value::as_str)
+        {
+            self.pool.note_edit(&self.sid, &self.cur_task, fp);
+        }
         self.open_tools.insert(id.clone());
         let summary = tool_summary(&input);
         self.emit(UiEvent::ToolStart {
@@ -2586,7 +2710,7 @@ impl State {
         if let Some(mut p) = self.proc.take() {
             p.kill();
         }
-        self.epoch += 1;
+        self.next_epoch();
         self.rotations += 1;
         self.open_tools.clear();
         self.interrupted_at = None;
@@ -2598,6 +2722,12 @@ impl State {
         self.opts.resume = None;
         self.start_child();
         old
+    }
+
+    // Takes the next epoch from the monotonic counter, so a restored parked child keeps a unique tag.
+    fn next_epoch(&mut self) {
+        self.epoch_seq += 1;
+        self.epoch = self.epoch_seq;
     }
 
     // Go rotate with a pending snapshot (snapshot_kept): the child has not received it yet, so a handoff from
@@ -2673,7 +2803,7 @@ impl State {
         if let Some(mut p) = self.proc.take() {
             p.kill();
         }
-        self.epoch += 1;
+        self.next_epoch();
         self.open_tools.clear();
         self.interrupted_at = None;
         self.stray_results = 0;
@@ -2769,6 +2899,27 @@ impl State {
             cost_usd,
             context_pct: pct,
         });
+    }
+}
+
+// A parked main child: its process, the epoch its reader threads are tagged with, and its session id.
+pub struct ParkedProc {
+    proc: ClaudeProc,
+    epoch: u64,
+    sid: String,
+}
+
+impl Close for ParkedProc {
+    fn close(&mut self) {
+        self.proc.kill();
+    }
+}
+
+// Registry Go time as a SystemTime. Go's zero time (negative Unix seconds) reads as the epoch, which is never warm.
+fn stamp_time(s: crate::clients::Stamp) -> SystemTime {
+    match u64::try_from(s.secs) {
+        Ok(secs) => UNIX_EPOCH + Duration::new(secs, s.nanos),
+        Err(_) => UNIX_EPOCH,
     }
 }
 
@@ -3003,6 +3154,18 @@ mod tests {
         ));
         assert!(usage_poll_due(Some(t0), t0 + every, false));
         assert!(!usage_poll_due(None, t0, true));
+    }
+
+    #[test]
+    fn stamp_time_maps_go_zero_to_epoch_and_keeps_instant() {
+        let zero = crate::clients::Stamp::default();
+        assert_eq!(stamp_time(zero), UNIX_EPOCH);
+        let s = crate::clients::Stamp {
+            secs: 1_700_000_000,
+            nanos: 5,
+            off: 0,
+        };
+        assert_eq!(stamp_time(s), UNIX_EPOCH + Duration::new(1_700_000_000, 5));
     }
 
     #[test]
