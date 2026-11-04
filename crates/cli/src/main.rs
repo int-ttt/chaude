@@ -8,7 +8,7 @@ use std::env;
 use std::process;
 
 use chaude_core::api::Config;
-use chaude_core::settings;
+use chaude_core::{orch, settings};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -18,6 +18,20 @@ const USAGE: &str = "usage: chaude [command] [args]
   gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]   OS-specific .claude/settings.json
   --version, -v          print version
   -h, --help             print this help";
+
+// Go repl.go:1316 + applyOrchEnv: --orch <mode> (default m0) is normalized and exported as CHAUDE_ORCH for
+// child processes and hooks. Runs before any thread starts, so the environment write is sound.
+fn apply_orch(args: &[String]) -> Result<(), String> {
+    let raw = args
+        .iter()
+        .position(|a| a == "--orch")
+        .and_then(|i| args.get(i + 1))
+        .map_or("", String::as_str);
+    let mode = orch::parse(raw)?;
+    // SAFETY: called from main before any other thread is spawned.
+    unsafe { env::set_var(orch::ENV_KEY, mode) };
+    Ok(())
+}
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -36,12 +50,18 @@ fn main() {
             eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");
             2
         }
-        None => match tui::run(Config::default()) {
-            Ok(()) => 0,
+        None => match apply_orch(&args) {
             Err(e) => {
-                eprintln!("chaude: {e}");
-                1
+                eprintln!("chaude: {e}\n{USAGE}");
+                2
             }
+            Ok(()) => match tui::run(Config::default()) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("chaude: {e}");
+                    1
+                }
+            },
         },
     };
     process::exit(code);
