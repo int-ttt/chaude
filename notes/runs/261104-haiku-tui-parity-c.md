@@ -46,3 +46,13 @@ status: done (audit 15 rows; fix 1)
 ## commit scope
 - staged: crates/cli/src/tui/commands.rs (all mine), plan/tui-parity.md (C rows only), crates/cli/src/tui/mod.rs (index blob = HEAD + 2 lines; other coder's hunks not staged), notes/runs/261104-haiku-tui-parity-c.md
 - not staged: crates/cli/src/tui/mod.rs working hunks (opus/resident), plan/caveman-structure.md, sessview.rs-E, other notes
+
+## follow-up (C06 C22 C23, C10 C30 already committed)
+- C22 fixed (core, api.rs): /clear intercepted in submit; clear_session runs handoff turn with snapshot, then finish_clear restarts child. Go repl.go:1401-1430. Tests: clear_command_carries_snapshot_to_a_fresh_session (engine.rs).
+- C23 fixed (core, api.rs): /rotate intercepted in submit; manual_rotate runs start_handoff("manual"). Go repl.go:1231. Test: rotate_command_hands_off_to_a_fresh_session (engine.rs).
+- C06 fixed (mod.rs): /status answered locally (Go tui.go:1079-1083), real ctx/threshold/rotations. session id shows "-". Test: status_is_answered_locally_not_sent_to_claude.
+- engine.rs session_ids_new_session_and_tool_input_are_emitted: /clear half removed (old contract, timed out). ToolInput/SessionIds assertions kept.
+- gaps: parked children (Go endAllParked) not handled in finish_clear; TUI transcript clear on /clear unverified; /status session id "-".
+- checks: `HOME=$(mktemp -d) cargo test --workspace` run1 and run2: 636 passed, 0 failed, 64 ignored each. clippy --workspace --all-targets: 0 warnings. cargo fmt --all --check: PASS.
+- env: rustup re-sync failed on full disk when HOME was a fresh temp dir; ran with RUSTUP_HOME/CARGO_HOME pointed at real home.
+- open `[ ]` rows in plan/tui-parity.md: 56 (I27-I35, C01-05, C07-09, C14-15, C26, E01-13, E16-17, E20-22, E24-28, X01-02, X05-13, A01-02).

@@ -940,9 +940,10 @@ impl App {
         let dispatched = {
             let ctx = Ctx {
                 model: &self.bar.model,
-                last_ctx: 0,
-                threshold: 0,
-                rotations: 0,
+                last_ctx: self.bar.tokens,
+                threshold: self.welcome.threshold,
+                rotations: u64::from(self.rot),
+                // The TUI does not track the session id yet (UiEvent has no current-session field).
                 session_id: None,
                 mode: commands::parse_mode(&self.bar.mode).unwrap_or(PermMode::Default),
                 chaude_version: env!("CARGO_PKG_VERSION"),
@@ -950,7 +951,7 @@ impl App {
             };
             commands::dispatch(&text, &ctx)
         };
-        // /status still goes to the engine (its state is not in UiEvent yet). /mode and /model are handled here.
+        // Go tui.go /status: answered locally from the TUI state, never sent to the child. /mode and /model are handled here too.
         match dispatched {
             Some(Dispatch::Quit) => return Action::Quit,
             Some(Dispatch::ToggleMouse) => {
@@ -981,7 +982,7 @@ impl App {
                 return Action::Continue;
             }
             Some(Dispatch::Resume { args }) => return self.resume(&args),
-            Some(Dispatch::Note(s)) if first != "/status" => {
+            Some(Dispatch::Note(s)) => {
                 self.note(&s);
                 return Action::Continue;
             }
@@ -3358,6 +3359,21 @@ mod tests {
                 .iter()
                 .any(|r| r == commands::UPDATE_START_NOTE)
         );
+    }
+
+    #[test]
+    fn status_is_answered_locally_not_sent_to_claude() {
+        let mut app = App::new(80, 24);
+        for c in "/status".chars() {
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        assert_eq!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::Continue
+        );
+        let text = app.transcript.join("\n");
+        assert!(text.contains("rotations 0"), "{text}");
+        assert!(text.contains("session -"), "{text}");
     }
 
     #[test]

@@ -163,7 +163,7 @@ Counts (filled at end): see the "Counts" section.
 - [ ] C03 /help shows command list and key help (runSlash tui.go:1057) · test: none · core: none
 - [ ] C04 /exit and /quit exit (tui.go:1055) · test: none · core: none
 - [ ] C05 /mouse toggles wheel/select mode (tui.go:1063) · test: none · core: none
-- [ ] C06 /status shows model, ctx tokens, rotations, session (tui.go:1071-1079) · test: none · core: lastCtx, rotations, session id
+- [x] C06 /status shows model, ctx tokens, rotations, session (tui.go:1071-1079) · test: none · core: lastCtx, rotations, session id · audited (fixed): /status answered locally in mod.rs submit (Go tui.go:1079-1083), never sent to the child; ctx/threshold/rotations from TUI state · session id shows "-" (UiEvent has no current-session field) · test status_is_answered_locally_not_sent_to_claude
 - [ ] C07 /model shows or switches; switch rotates with new model (tui.go:1080; submit path runTUI repl.go:1385-1395) · test: none · core: rotate with model
 - [ ] C08 /settings opens picker: retention {0,7,30,90,365}, extra coders 0..settingsMaxExtraCoders, main model opus/sonnet/fable; saved on esc, applies next session (settings_picker.go:17-117; tui.go:1090) · test: none · core: settings file write
 - [ ] C09 /settings save message "설정 저장: <path> · ..." (settings_picker.go; closeSettings settings_picker.go:47) · test: none · core: settings file
