@@ -513,8 +513,8 @@ struct State {
     // Coder residents (Go coder, coder2..): slot 0 is "coder", slot i is "coder{i+1}". Grown on demand.
     coders: Vec<Coder>,
     coder_epoch: u64,
-    // Go residentMCPConfig path, created on first use when residents are on.
-    mcp_cfg: Option<PathBuf>,
+    // Go residentMCPConfig, created on first use when residents are on. Its guard removes the temp dir on drop.
+    mcp_cfg: Option<mcp::McpConfig>,
 }
 
 // One coder resident. A running deadline means a task is in flight (Go busyRec).
@@ -2293,9 +2293,9 @@ impl State {
             let caller = CoderCaller {
                 tx: self.self_tx.clone(),
             };
-            self.mcp_cfg = mcp::start(Arc::new(move |task: &str| caller.call(task))).ok();
+            self.mcp_cfg = mcp::start_owned(Arc::new(move |task: &str| caller.call(task))).ok();
         }
-        self.mcp_cfg.clone()
+        self.mcp_cfg.as_ref().map(|c| c.path().to_path_buf())
     }
 
     fn start_child(&mut self) {

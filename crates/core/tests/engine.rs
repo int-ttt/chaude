@@ -1837,6 +1837,39 @@ fn mcp_coder_call_blocks_for_summary_and_rejects_empty_task() {
     h.shutdown();
 }
 
+// The mcp.json temp dir is owned by the engine: it exists while residents run and is removed on shutdown.
+#[test]
+fn mcp_config_dir_is_removed_on_shutdown() {
+    let _g = lock();
+    let f = fake("mcp_dir", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let before = mcp_dirs();
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    until_idle(&rx);
+    assert_eq!(mcp_dirs().len(), before.len() + 1, "{:?}", mcp_dirs());
+    h.shutdown();
+    assert_eq!(mcp_dirs(), before);
+}
+
+// chaude-mcp-<pid>-* dirs in the temp dir, this process only.
+fn mcp_dirs() -> Vec<PathBuf> {
+    let prefix = format!("chaude-mcp-{}-", process::id());
+    let mut out: Vec<PathBuf> = fs::read_dir(std::env::temp_dir())
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(&prefix))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
 // EngineHandle::resume_session relaunches the idle main child with --resume and records the ids it ran.
 #[test]
 fn resume_session_relaunches_main_with_resume_flag() {
