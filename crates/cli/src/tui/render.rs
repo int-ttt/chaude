@@ -313,7 +313,6 @@ pub fn cell_width(s: &str) -> usize {
 }
 
 // R14 ansi.Truncate(s, w, "…") (tui.go:1429): unchanged when it fits, else cut to w-1 cells plus "…".
-#[allow(dead_code)] // unwired: header clip (Go ansiTrunc) not called yet
 pub fn trunc_ellipsis(s: &str, w: usize) -> String {
     if cell_width(s) <= w {
         return s.to_string();

@@ -173,6 +173,8 @@ pub struct App {
     tool_rows: HashMap<String, (usize, String)>,
     // Agent outcome by tool id until its AgentEnd: failed (ToolEnd ok=false) and the result's first line.
     agent_outcome: HashMap<String, (bool, String)>,
+    // Foreground agents already finished by an interrupt (Go finishForeground); core's later AgentEnd for them is dropped.
+    finished_fg: Vec<String>,
     // Main text streamed in this turn (Go gotText). Cleared when a turn starts.
     got_text: bool,
     welcome: Welcome,
@@ -254,6 +256,7 @@ impl App {
             rot_from: String::new(),
             tool_rows: HashMap::new(),
             agent_outcome: HashMap::new(),
+            finished_fg: Vec::new(),
             got_text: false,
             wraps: RefCell::new(WrapCache::default()),
         }
@@ -382,23 +385,13 @@ impl App {
                 }
             }
             UiEvent::AgentEnd { id, elapsed_ms, .. } => {
-                let desc = self
-                    .agents
-                    .iter()
-                    .find(|(aid, _, _)| *aid == id)
-                    .map(|(_, d, _)| d.clone())
-                    .unwrap_or_default();
-                let (failed, what) = self.agent_outcome.remove(&id).unwrap_or_default();
-                self.agents.retain(|(aid, _, _)| *aid != id);
-                self.bg_agents.retain(|aid| *aid != id);
-                self.transcript.push(format!(
-                    "◆ agent done in {}",
-                    bar::fmt_secs(elapsed_ms / 1000)
-                ));
-                // Go doneLine: the result's first line, else the description. The model is not in the event.
-                let what = if what.is_empty() { desc.clone() } else { what };
-                let notice = bar::done_line(failed, "", &desc, &what);
-                self.note(&format!("{GREY_ON}{notice}{FG_OFF}"));
+                // Already finished by an interrupt (finish_foreground): drop the late duplicate.
+                if let Some(pos) = self.finished_fg.iter().position(|f| *f == id) {
+                    self.finished_fg.remove(pos);
+                    self.agent_outcome.remove(&id);
+                } else {
+                    self.agent_done(&id, elapsed_ms / 1000);
+                }
             }
             UiEvent::Status {
                 model,
@@ -416,6 +409,8 @@ impl App {
                 self.turn_start = if b { Some(Instant::now()) } else { None };
                 if b {
                     self.got_text = false;
+                    // A new turn is past any late AgentEnd of the interrupted one.
+                    self.finished_fg.clear();
                 }
                 // A new turn starts its quiet count now, not at the last event of the previous turn.
                 self.quiet_since = Some(self.clock);
@@ -479,7 +474,12 @@ impl App {
                 let (w, h) = self.usage_geom();
                 self.usage.set_text(&usage::failed(&msg), w, h);
             }
-            UiEvent::Error(msg) => self.transcript.push(format!("! {msg}")),
+            // Go repl.go error paths: a dim note block, then a blank row (tui.go:379 note rendering).
+            UiEvent::Error(msg) => {
+                self.end_main_block();
+                self.transcript.push(format!("{GREY_ON}{msg}{FG_OFF}"));
+                self.transcript.push(String::new());
+            }
             // Core relaunched the idle main child with --resume; the view moves to the session list.
             UiEvent::SessionResumed {
                 old_session,
@@ -1178,6 +1178,40 @@ impl App {
 
     fn note(&mut self, text: &str) {
         self.transcript.extend(text.split('\n').map(str::to_string));
+    }
+
+    // Go finishForeground: on interrupt the foreground panel agents are done at once, not when core reports them.
+    // Background agents (bg_agents) keep running.
+    fn finish_foreground(&mut self) {
+        let fg: Vec<(String, Instant)> = self
+            .agents
+            .iter()
+            .filter(|(id, _, _)| !self.bg_agents.contains(id))
+            .map(|(id, _, started)| (id.clone(), *started))
+            .collect();
+        for (id, started) in fg {
+            self.agent_done(&id, started.elapsed().as_secs());
+            self.finished_fg.push(id);
+        }
+    }
+
+    // One agent's done lines (Go markDoneLocked): the elapsed row, then the doneLine notice in grey.
+    fn agent_done(&mut self, id: &str, elapsed_secs: u64) {
+        let desc = self
+            .agents
+            .iter()
+            .find(|(aid, _, _)| aid == id)
+            .map(|(_, d, _)| d.clone())
+            .unwrap_or_default();
+        let (failed, what) = self.agent_outcome.remove(id).unwrap_or_default();
+        self.agents.retain(|(aid, _, _)| aid != id);
+        self.bg_agents.retain(|aid| aid != id);
+        self.transcript
+            .push(format!("◆ agent done in {}", bar::fmt_secs(elapsed_secs)));
+        // Go doneLine: the result's first line, else the description. The model is not in the event.
+        let what = if what.is_empty() { desc.clone() } else { what };
+        let notice = bar::done_line(failed, "", &desc, &what);
+        self.note(&format!("{GREY_ON}{notice}{FG_OFF}"));
     }
 
     // Marks the rows pushed since `at` as assistant or user rows, whose links body() styles.
@@ -1981,7 +2015,9 @@ impl Drop for TermGuard {
 // Entry point for `chaude` with no arguments. Non-TTY stdin falls back to plain line mode.
 pub fn run(cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     // Go repl.go: the TUI needs an interactive stdin and HARNESS_PLAIN unset (empty counts as unset).
-    let plain_forced = !std::env::var("HARNESS_PLAIN").unwrap_or_default().is_empty();
+    let plain_forced = !std::env::var("HARNESS_PLAIN")
+        .unwrap_or_default()
+        .is_empty();
     if io::stdin().is_terminal() && !plain_forced {
         tui(cfg, startup)
     } else {
@@ -2237,7 +2273,10 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                     match app.on_key(key) {
                         Action::Continue => {}
                         Action::Submit(text) => engine.submit(&text),
-                        Action::Interrupt(src) => engine.interrupt(src),
+                        Action::Interrupt(src) => {
+                            app.finish_foreground();
+                            engine.interrupt(src);
+                        }
                         Action::Quit => break 'main,
                         Action::Usage => engine.usage(),
                         Action::Update => {
@@ -2255,6 +2294,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                         } => {
                             engine.answer_permission(&id, allow);
                             if interrupt {
+                                app.finish_foreground();
                                 engine.interrupt(InterruptSource::CtrlC);
                             }
                         }
@@ -2988,6 +3028,57 @@ mod tests {
         );
     }
 
+    // E15: an interrupt finishes the foreground panel agents at once (Go finishForeground); a background agent keeps its row.
+    #[test]
+    fn interrupt_finishes_foreground_agents_only() {
+        let mut app = App::new(80, 24);
+        for id in ["fg", "bg"] {
+            app.apply(UiEvent::AgentStart {
+                id: id.to_string(),
+                description: id.to_string(),
+                started_at: 0,
+            });
+        }
+        app.apply(UiEvent::AgentBackground { id: "bg".into() });
+        app.finish_foreground();
+        assert_eq!(app.agents.len(), 1);
+        assert_eq!(app.agents[0].0, "bg");
+        assert!(app.transcript.iter().any(|r| r.contains("◆ agent done in")));
+        // Core's late AgentEnd for the finished foreground agent adds no second done line.
+        let before = app.transcript.len();
+        app.apply(UiEvent::AgentEnd {
+            id: "fg".into(),
+            elapsed_ms: 900,
+            model: String::new(),
+        });
+        assert_eq!(app.transcript.len(), before);
+        assert!(app.finished_fg.is_empty());
+    }
+
+    // E23: a background agent's AgentEnd removes its row and adds the done notice (Go onUserEvent path).
+    #[test]
+    fn background_agent_end_removes_row_and_notes_done() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "b1".into(),
+            description: "Watch".into(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentBackground { id: "b1".into() });
+        app.apply(UiEvent::AgentEnd {
+            id: "b1".into(),
+            elapsed_ms: 2000,
+            model: String::new(),
+        });
+        assert!(app.agents.is_empty());
+        assert!(app.bg_agents.is_empty());
+        assert!(
+            app.transcript
+                .iter()
+                .any(|r| r.contains("◆ agent done in") && r.contains("2s"))
+        );
+    }
+
     #[test]
     fn orphan_notice_names_the_child_and_its_model() {
         let mut app = App::new(80, 24);
@@ -3109,6 +3200,16 @@ mod tests {
             app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
             Action::Continue
         );
+    }
+
+    // E14: a process error is a dim note block followed by a blank row (Go note rendering), not a plain "! " line.
+    #[test]
+    fn error_event_is_a_dim_note_then_blank_row() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::Error("boom".into()));
+        let n = app.transcript.len();
+        assert_eq!(app.transcript[n - 2], format!("{GREY_ON}boom{FG_OFF}"));
+        assert_eq!(app.transcript[n - 1], "");
     }
 
     #[test]

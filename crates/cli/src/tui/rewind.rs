@@ -8,7 +8,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::bar::clip;
-use super::render::{DIM_ON, FG_OFF, ORANGE_ON, RESET};
+use super::render::{DIM_ON, FG_OFF, ORANGE_ON, RESET, trunc_ellipsis};
 
 // I28: shown when Esc Esc finds no prompt to rewind to.
 pub const NOTHING: &str = "nothing to rewind to";
@@ -113,10 +113,13 @@ impl Rewind {
             let row = if idx == self.sel {
                 format!(
                     "{ORANGE_ON}> {}{FG_OFF}",
-                    clip(&row, width.saturating_sub(2))
+                    trunc_ellipsis(&row, width.saturating_sub(2))
                 )
             } else {
-                format!("{DIM_ON}  {}{RESET}", clip(&row, width.saturating_sub(2)))
+                format!(
+                    "{DIM_ON}  {}{RESET}",
+                    trunc_ellipsis(&row, width.saturating_sub(2))
+                )
             };
             out.push(row);
             i += 1;
@@ -232,9 +235,9 @@ mod tests {
         assert!(rows[27].contains("41) a b"), "{:?}", rows[27]);
         assert!(rows[28].starts_with(ORANGE_ON));
         assert!(rows[28].contains("42) "));
-        // Go ansiTrunc(t, m.w): "> 42) " takes 6 columns, so 94 x's fit at width 100.
-        assert!(rows[28].contains(&"x".repeat(94)));
-        assert!(!rows[28].contains(&"x".repeat(95)));
+        // Go ansiTrunc(t, m.w): "> 42) " takes 6 columns, so 93 x's fit and the row ends with "…" at width 100.
+        assert!(rows[28].contains(&format!("{}…", "x".repeat(93))));
+        assert!(!rows[28].contains(&"x".repeat(94)));
         // The prompt itself is cut at 100 chars (Go trunc(text, 100)) when the width allows it.
         let wide = s.lines(&refs, 200, 30);
         assert!(wide[28].contains(&"x".repeat(100)));
