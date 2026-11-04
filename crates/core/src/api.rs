@@ -219,6 +219,10 @@ pub struct Config {
     // Go extra_coders (.chaude/settings.json): coders coder2..coder(1+n) beyond the always-on coder, 0-8.
     // Extra coders start on demand and expire after 270 s idle (N14 idle sweep).
     pub extra_coders: usize,
+    // Go extraCoderTTL: an idle extra coder (coder2 and up) is ended after this long. The base coder stays.
+    pub coder_idle_ttl: Duration,
+    // Go exit_handoff.go: JSON of this run's session ids, written on shutdown or disconnect. None = off.
+    pub handoff_path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -242,6 +246,8 @@ impl Default for Config {
             rotate_defer_timeout: Duration::from_secs(600),
             residents: true,
             extra_coders: 4,
+            coder_idle_ttl: Duration::from_secs(270),
+            handoff_path: None,
         }
     }
 }
@@ -432,6 +438,8 @@ struct Coder {
     // Generation of the child in this slot; a replaced child's lines are dropped by epoch.
     epoch: u64,
     deadline: Option<Instant>,
+    // When the last task ended; drives the idle expiry of extra coders.
+    idle_since: Option<Instant>,
 }
 
 // A handoff turn in progress: the rotation reason and how many handoff prompts were sent (Go makeSnapshotN).
@@ -557,6 +565,9 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
             },
             Input::Coder(_, _, _) => {}
         }
+    }
+    if let Some(path) = st.cfg.handoff_path.clone() {
+        write_handoff(&path, st.opts.cwd.as_deref(), &st.sid);
     }
     if let Some(mut p) = st.proc.take() {
         p.kill();
@@ -783,11 +794,15 @@ impl State {
         if self.coders[i].proc.is_none()
             && let Err(e) = self.spawn_coder(i)
         {
-            self.stage(&role, StagePhase::Failed(format!("coder spawn failed: {e}")));
+            self.stage(
+                &role,
+                StagePhase::Failed(format!("coder spawn failed: {e}")),
+            );
             return;
         }
         self.stage(&role, StagePhase::Working);
         self.coders[i].deadline = Some(Instant::now() + CODER_TIMEOUT);
+        self.coders[i].idle_since = None;
         let text = format!("{task}{CODER_REPLY_FORMAT}");
         let wrote = match self.coders[i].proc.as_mut() {
             Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
@@ -839,6 +854,18 @@ impl State {
         }
         self.coder_epoch += 1;
         self.coders[i].epoch = self.coder_epoch;
+        self.coders[i].idle_since = None;
+    }
+
+    // Time left before an idle extra coder expires (Go extraCoderTTL). None for the base coder, a busy
+    // slot, or an empty slot.
+    fn coder_idle_left(&self, i: usize) -> Option<Duration> {
+        let c = self.coders.get(i)?;
+        if i == 0 || c.deadline.is_some() || c.proc.is_none() {
+            return None;
+        }
+        let since = c.idle_since?;
+        Some(self.cfg.coder_idle_ttl.saturating_sub(since.elapsed()))
     }
 
     // The coder's result line is its reply. An empty reply is a failure, as for the tui.
@@ -873,6 +900,7 @@ impl State {
     // Ends a coder task: its stage row, then the reply (or the failure reason) goes to the UI.
     fn finish_coder(&mut self, i: usize, out: Result<String, String>) {
         self.coders[i].deadline = None;
+        self.coders[i].idle_since = Some(Instant::now());
         let role = coder_role(i);
         match out {
             Ok(text) => {
@@ -1435,15 +1463,17 @@ impl State {
     // How long the actor may block before the inactivity timer must be checked. None means block until input.
     // A coder wait can run during a busy main turn, so its deadline is only added to the main timers.
     fn wait_budget(&self) -> Option<Duration> {
+        // A busy coder wakes at its deadline; an idle extra coder wakes at its expiry.
         let own = self
             .coders
             .iter()
-            .filter_map(|c| c.deadline)
+            .enumerate()
+            .filter_map(|(i, c)| match c.deadline {
+                Some(t) => Some(t.saturating_duration_since(Instant::now())),
+                None => self.coder_idle_left(i),
+            })
             .min()
-            .map(|t| {
-                t.saturating_duration_since(Instant::now())
-                    .max(Duration::from_millis(1))
-            });
+            .map(|d| d.max(Duration::from_millis(1)));
         match (self.main_wait_budget(), own) {
             (Some(a), Some(b)) => Some(a.min(b)),
             (a, b) => a.or(b),
@@ -1492,6 +1522,9 @@ impl State {
         for i in 0..self.coders.len() {
             if self.coders[i].deadline.is_some_and(|t| t <= Instant::now()) {
                 self.coder_timeout(i);
+            }
+            if self.coder_idle_left(i).is_some_and(|d| d.is_zero()) {
+                self.drop_coder(i);
             }
         }
         // A running tui wait is not an inactivity case: the main child is idle.
@@ -1834,6 +1867,37 @@ impl State {
             cost_usd,
             context_pct: pct,
         });
+    }
+}
+
+// Go writeExitHandoff: this run's session ids, so the next start in the same cwd can find them. Written via a
+// temp file and rename. Errors are ignored so a failed write never blocks exit. saved_at_unix stands in for
+// Go's RFC 3339 saved_at. main_session is omitted when empty (Go omitempty).
+fn write_handoff(path: &std::path::Path, cwd: Option<&std::path::Path>, main_session: &str) {
+    let saved = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut body = json!({
+        "version": 1,
+        "cwd": cwd.map(|p| p.display().to_string()).unwrap_or_default(),
+        "main_session": main_session,
+        "saved_at_unix": saved,
+    });
+    if main_session.is_empty()
+        && let Some(m) = body.as_object_mut()
+    {
+        m.remove("main_session");
+    }
+    let Ok(text) = serde_json::to_string_pretty(&body) else {
+        return;
+    };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, format!("{text}\n")).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
     }
 }
 

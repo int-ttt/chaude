@@ -66,14 +66,40 @@ fn fake(name: &str, turns: &[&str]) -> Fake {
         "---\nname: haiku-tui\n---\n\nTUIMARK translator body\n",
     )
     .unwrap();
+    // The coder reply: status and changed lines, which summarize_reply keeps. Its agent body carries CODERMARK.
+    fs::write(
+        dir.join("coder.jsonl"),
+        "{\"type\":\"result\",\"result\":\"status: done\\nchanged: a.rs: edit\"}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".claude").join("agents").join("haiku-coder.md"),
+        "---\nname: haiku-coder\n---\n\nCODERMARK coder body\n",
+    )
+    .unwrap();
     let script = r#"#!/bin/sh
 n=0
 case "$*" in
   *TUIMARK*) role=tui ;;
+  *CODERMARK*) role=coder ;;
   *system-prompt*) role=prompter ;;
   *) role=main ;;
 esac
 while IFS= read -r line; do
+  if [ "$role" = coder ]; then
+    case "$line" in
+      *'"type":"user"'*)
+        # Record this child's pid against its task: "first" is slot 0 (base), anything else an extra slot.
+        case "$line" in
+          *first*) echo "$$ base" >> 'DIR/coder.pids' ;;
+          *) echo "$$ extra" >> 'DIR/coder.pids' ;;
+        esac
+        sleep 0.2
+        cat 'DIR/coder.jsonl'
+        ;;
+    esac
+    continue
+  fi
   if [ "$role" = tui ]; then
     case "$line" in
       *'"type":"user"'*)
@@ -1413,4 +1439,120 @@ fn abandoned_turn_ends_foreground_agent_but_not_background_agent() {
         "{evs:?}"
     );
     h.shutdown();
+}
+
+// Collects events until a coder reply (or a failed coder stage) arrives.
+fn until_coder_reply(rx: &Receiver<UiEvent>) -> Vec<UiEvent> {
+    let mut out = Vec::new();
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("engine went silent");
+        let done = matches!(ev, UiEvent::CoderReply { .. })
+            || matches!(&ev, UiEvent::Stage { slot, phase: StagePhase::Failed(_) } if slot.starts_with("coder"));
+        out.push(ev);
+        if done {
+            return out;
+        }
+    }
+}
+
+#[test]
+fn coder_task_emits_working_done_rows_and_reply() {
+    let _g = lock();
+    let f = fake("coder_on", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.coder("rename the helper");
+    let evs = until_coder_reply(&rx);
+    let working = evs.iter().position(|e| {
+        *e == UiEvent::Stage {
+            slot: "coder".into(),
+            phase: StagePhase::Working,
+        }
+    });
+    let reply = evs.iter().position(|e| {
+        matches!(e, UiEvent::CoderReply { role, text }
+            if role == "coder" && text == "status: done\nchanged: a.rs: edit")
+    });
+    let done = evs.iter().position(|e| {
+        *e == UiEvent::Stage {
+            slot: "coder".into(),
+            phase: StagePhase::Done,
+        }
+    });
+    assert!(
+        working.is_some() && reply.is_some() && done.is_some(),
+        "{evs:?}"
+    );
+    assert!(working < done && done < reply, "{evs:?}");
+    h.shutdown();
+}
+
+#[test]
+fn idle_extra_coder_expires_and_base_coder_stays() {
+    let _g = lock();
+    let f = fake("coder_idle", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    cfg.coder_idle_ttl = Duration::from_millis(300);
+    let (h, rx) = Engine::start(cfg);
+    // Back to back, so the second task finds slot 0 busy and takes slot 1 (coder2).
+    h.coder("first");
+    h.coder("second");
+    let mut replies = 0;
+    while replies < 2 {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("engine went silent");
+        if matches!(ev, UiEvent::CoderReply { .. }) {
+            replies += 1;
+        }
+    }
+    let pids_file = f.dir.join("coder.pids");
+    wait_for(&pids_file, " base");
+    let log = wait_for(&pids_file, " extra");
+    let pid_of = |tag: &str| {
+        log.lines()
+            .find_map(|l| l.strip_suffix(tag).map(|p| p.trim().to_string()))
+            .unwrap_or_else(|| panic!("{tag} pid missing: {log}"))
+    };
+    let base = pid_of(" base");
+    let extra = pid_of(" extra");
+    let alive = |pid: &str| {
+        process::Command::new("kill")
+            .args(["-0", pid])
+            .status()
+            .unwrap()
+            .success()
+    };
+    let t0 = Instant::now();
+    while alive(&extra) && t0.elapsed() < Duration::from_secs(5) {
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!alive(&extra), "extra coder not expired");
+    assert!(alive(&base), "base coder must stay");
+    h.shutdown();
+}
+
+#[test]
+fn exit_handoff_records_main_session_on_shutdown() {
+    let _g = lock();
+    let f = fake("handoff_on", &["text_turn.jsonl"]);
+    let path = f.dir.join(".exit-handoff.json");
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.handoff_path = Some(path.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    until_idle(&rx);
+    h.shutdown();
+    let text = fs::read_to_string(&path).expect("handoff written");
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["version"], 1, "{text}");
+    assert_eq!(v["main_session"], "s1", "{text}");
+    assert_eq!(v["cwd"], f.dir.display().to_string().as_str(), "{text}");
 }
