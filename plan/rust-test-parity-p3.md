@@ -22,7 +22,7 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 
 ## Remaining (top of file)
 
-- Missing rows (31): resident_pipeline 2, resident_respawn 2, resident_route 1, resident_test 2, resume_group 5, resume 1,
+- Missing rows (26): resident_pipeline 2, resident_respawn 2, resident_route 1, resident_test 2, resume 1,
   resumeshift 1, selection 1, sessview 1, turn_wait 1, turnspend 4, unit 6, usagepoll 4. Need Rust code or a port first.
 - Update/install rows (16): wait: update.
 - Not verified by body: resident_test (EagerSpawn, SlotsFour), resident_respawn, SpawnSlotParksReadingChild were only
@@ -81,13 +81,13 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
-| TestGroupSessions | none | missing | session grouping (groupSessions) not found in Rust |
-| TestGroupOrderAndKey | none | missing | same feature as above |
-| TestMatchGroups | none | missing | same feature as above (typo match via edit distance also not found) |
+| TestGroupSessions | crates/core/src/resume_group.rs::group_sessions_joins_or_splits_by_clear_gap_and_overlap | covered | 7 cases as Go: gap, clear at tail/head, day gap, overlap, TUI clear mark |
+| TestGroupOrderAndKey | crates/core/src/resume_group.rs::group_order_and_key | covered | |
+| TestMatchGroups | crates/core/src/resume_group.rs::match_groups_terms_typos_and_cwd | covered | Levenshtein <=1 for 4+ char terms |
 | TestLoadImportArgMergesInTimeOrder | crates/core/src/import_claude.rs::merge_orders_files_by_start_and_returns_newest_path | covered | |
 | TestReadClaudeTranscriptClearFlags | crates/core/src/import_claude.rs::transcript_extracts_turns_files_name_and_clear_markers | covered | name-level; head-clear flag not body-compared |
-| TestClearMarks | none | missing | recordClearMark / loadClearMarks not found in Rust |
-| TestResumeTarget | none | missing | resume target parsing not found by name grep |
+| TestClearMarks | crates/core/src/resume_group.rs::clear_marks_are_per_cwd_and_missing_file_is_empty | covered | |
+| TestResumeTarget | crates/core/src/record_turn.rs::resume_target_picks_record_claude_or_sessions | covered | record_turn::resume_target_in; Go cwd arg maps to record dir |
 
 ## harness/resume_picker_test.go (2 rows)
 
@@ -239,7 +239,6 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 
 ## Top behaviour differences / gaps
 
-- Resume session grouping (groupSessions, matchGroups, clear marks, resume target) is not in Rust (8 rows).
 - Turn spend and per-turn cost delta, plus usage poll row logging, are not found in Rust (9 rows).
 - Clean env and cache-TTL setting in proc.rs are not tested and proc is not pub (2 rows).
 - Model switch with a pending import snapshot (TestRotateKeepsPendingSnapshot) has no Rust test.

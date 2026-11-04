@@ -210,6 +210,27 @@ pub fn pick(root: &Path, arg: &str) -> io::Result<Vec<Project>> {
     Ok(matches)
 }
 
+// Go resumeTarget: what "/resume args..." means. record=true: the answer comes from the record (no arg, or
+// an arg that resume answers: a project number or a name/content match). Otherwise terms is the Claude Code
+// session query ("claude <q>" or "<q>"; no terms = all groups). root is the record root.
+pub fn resume_target_in(root: &Path, args: &[String]) -> (Vec<String>, bool) {
+    if args.is_empty() {
+        return (Vec::new(), true);
+    }
+    if args[0].eq_ignore_ascii_case("claude") {
+        return (args[1..].to_vec(), false);
+    }
+    if resume(root, &args.join(" "), &|_| String::new()).is_ok() {
+        return (Vec::new(), true);
+    }
+    (args.to_vec(), false)
+}
+
+// resume_target_in over the record root of cwd (record::dir_for).
+pub fn resume_target(cwd: &Path, args: &[String]) -> (Vec<String>, bool) {
+    resume_target_in(&record::dir_for(cwd), args)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,5 +363,37 @@ mod tests {
         assert_eq!(pick(&root, "").unwrap().len(), 2);
         assert!(pick(&root, "1").unwrap().is_empty());
         assert!(pick(&root, "needle").unwrap().is_empty());
+    }
+
+    #[test]
+    fn resume_target_picks_record_claude_or_sessions() {
+        let tmp = TempDir::new("rt-target");
+        let root = tmp.path().join("record");
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<String>>();
+        // Empty record: no topic matches, so the args are the session query.
+        let cases: [(&[&str], &[&str], bool); 5] = [
+            (&[], &[], true),
+            (&["claude"], &[], false),
+            (&["claude", "x", "y"], &["x", "y"], false),
+            (&["x"], &["x"], false),
+            (&["1"], &["1"], false),
+        ];
+        for (args, terms, record) in cases {
+            assert_eq!(
+                resume_target_in(&root, &s(args)),
+                (s(terms), record),
+                "{args:?}"
+            );
+        }
+        // A project in the record answers the arg.
+        let stamp = Stamp::new(2026, 11, 4, 9, 5, 7);
+        let turn = [Block {
+            kind: "asst".to_string(),
+            text: "needle".to_string(),
+        }];
+        record::append_turn(&root.join("alpha"), &stamp, "a", &turn, false).unwrap();
+        assert_eq!(resume_target_in(&root, &s(&["1"])), (Vec::new(), true));
+        assert_eq!(resume_target_in(&root, &s(&["alpha"])), (Vec::new(), true));
+        assert_eq!(resume_target_in(&root, &s(&["zzz"])), (s(&["zzz"]), false));
     }
 }
