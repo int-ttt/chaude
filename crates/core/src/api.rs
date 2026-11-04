@@ -31,6 +31,7 @@ use crate::rotate::{
     HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
     validate_handoff, with_reco,
 };
+use crate::rotate_defer::{self, Hold};
 
 // Text tool results of background agents say this; the agent keeps running after the tool result.
 const ASYNC_AGENT_MARK: &str = "Async agent launched";
@@ -230,6 +231,9 @@ const CODER_TOOLS: &str = "Read,Edit,Write,Bash,Grep,Glob";
 const MAX_EXTRA_CODERS: usize = 8;
 const TURN_CHARS: usize = 1_500;
 const SNAPSHOT_CHARS: usize = 24_000;
+// A held rotation is checked this often while idle. Deferral keeps the hold start private, so the wait is
+// polled rather than timed to the exact deadline.
+const DEFER_POLL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -440,8 +444,8 @@ struct State {
     agents: HashMap<String, Instant>,
     // Running Agent tool ids on the opus model; OpusBusy follows whether this set is empty.
     opus_agents: HashSet<String>,
-    // A rotation that was due while background agents ran: when it was first deferred (Go rotate_defer).
-    rotate_deferred: Option<Instant>,
+    // A rotation that was due while background agents ran, and when its hold started (Go rotate_defer).
+    rotate_deferred: rotate_defer::Deferral,
     // Delegated agents by tool_use id. A background agent (launch result said "async") keeps running past the
     // turn, so an abandoned turn does not end it, and it is listed in the handoff snapshot.
     agent_info: HashMap<String, AgentInfo>,
@@ -606,7 +610,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         tools: HashSet::new(),
         agents: HashMap::new(),
         opus_agents: HashSet::new(),
-        rotate_deferred: None,
+        rotate_deferred: rotate_defer::Deferral::default(),
         agent_info: HashMap::new(),
         agent_ids: HashMap::new(),
         agent_labels: HashMap::new(),
@@ -1798,11 +1802,7 @@ impl State {
             });
         }
         // The last background agent finished while the child is idle: the deferred rotation runs now.
-        if self.agents.is_empty()
-            && !self.busy
-            && self.rotate_deferred.is_some()
-            && self.rotation_wanted()
-        {
+        if !self.busy && self.deferred_due() {
             self.run_deferred_rotation();
         }
     }
@@ -1854,11 +1854,10 @@ impl State {
             return Some(left.max(Duration::from_millis(1)));
         }
         if !self.busy {
-            // Idle with a deferred or idle rotation: wake at the nearer of the two.
-            let left = [self.defer_left(), self.idle_left()]
-                .into_iter()
-                .flatten()
-                .min();
+            // Idle with a held rotation: poll it, or wake for the idle rotation, whichever is nearer.
+            let poll =
+                (self.rotate_deferred.pending() && self.rotation_wanted()).then_some(DEFER_POLL);
+            let left = [poll, self.idle_left()].into_iter().flatten().min();
             return left.map(|left| left.max(Duration::from_millis(1)));
         }
         if let Some(t0) = self.interrupted_at {
@@ -1898,7 +1897,7 @@ impl State {
         }
         if !self.busy {
             // A deferred rotation waits out a prompter wait: it would send its handoff while the prompter runs.
-            if !self.prompter.waiting() && self.defer_left().is_some_and(|d| d.is_zero()) {
+            if !self.prompter.waiting() && self.deferred_due() {
                 self.run_deferred_rotation();
             } else if self.idle_left().is_some_and(|d| d.is_zero()) {
                 self.run_idle_rotation();
@@ -2035,16 +2034,16 @@ impl State {
     // Rotation and the queued turn, once the reply is final (Go runs these after viaTUI).
     fn after_turn(&mut self) {
         if self.rotation_wanted() {
-            if self.rotation_due() {
-                self.rotate_deferred = None;
-                if self.start_handoff(self.ctx_reason()) {
-                    return;
-                }
-            } else {
-                self.rotate_deferred.get_or_insert_with(Instant::now);
+            let reason = self.ctx_reason();
+            let timeout = self.cfg.rotate_defer_timeout;
+            let hold =
+                self.rotate_deferred
+                    .hold(self.agents.len(), &reason, Instant::now(), timeout);
+            if matches!(hold, Hold::Proceed { .. }) && self.start_handoff(reason) {
+                return;
             }
         } else {
-            self.rotate_deferred = None;
+            self.clear_deferral();
         }
         self.next_turn();
     }
@@ -2082,23 +2081,27 @@ impl State {
         self.cfg.rotate_threshold > 0 && self.proc.is_some() && should_rotate(self.ctx_tokens, thr)
     }
 
-    // Time left before a deferred rotation runs anyway. None when nothing is deferred.
-    fn defer_left(&self) -> Option<Duration> {
-        self.rotate_deferred
-            .map(|t0| self.cfg.rotate_defer_timeout.saturating_sub(t0.elapsed()))
+    // A held rotation may run now: still wanted, and no background agent runs or the defer timeout passed.
+    fn deferred_due(&self) -> bool {
+        self.rotate_deferred.pending()
+            && self.rotation_wanted()
+            && self.rotate_deferred.is_due(
+                self.agents.len(),
+                Instant::now(),
+                self.cfg.rotate_defer_timeout,
+            )
     }
 
-    // A wanted rotation may start now: no background agents, the defer timeout passed, or zero timeout.
-    fn rotation_due(&self) -> bool {
-        self.rotation_wanted()
-            && (self.agents.is_empty()
-                || self.cfg.rotate_defer_timeout.is_zero()
-                || self.defer_left().is_some_and(|d| d.is_zero()))
+    // Drops a held rotation. hold(0) is due at once, so it ends the hold and its start (Deferral has no clear).
+    fn clear_deferral(&mut self) {
+        let _ = self
+            .rotate_deferred
+            .hold(0, "", Instant::now(), Duration::ZERO);
     }
 
     // Go runDeferredRotation: the held handoff runs while the child is idle, so the turn is marked busy.
     fn run_deferred_rotation(&mut self) {
-        self.rotate_deferred = None;
+        self.clear_deferral();
         self.busy = true;
         self.emit(UiEvent::Busy(true));
         if !self.start_handoff(self.ctx_reason()) {
