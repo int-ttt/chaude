@@ -199,6 +199,15 @@ impl AgentView {
         }
     }
 
+    // Go tui.go wheel branch on the agent view: up adds 3 lines of scroll back, down removes 3 (floored at the tail).
+    pub fn wheel(&mut self, up: bool) {
+        self.off = if up {
+            self.off + 3
+        } else {
+            self.off.saturating_sub(3)
+        };
+    }
+
     // Go openAgentKey: the first agent of the sorted list (`recs` must already be sorted with sort_all).
     // None when there are no agents; the caller then shows NO_AGENTS as a note.
     pub fn open_first(recs: &[AgentRec]) -> Option<Self> {
@@ -391,6 +400,16 @@ mod tests {
         assert_eq!(v.off, MAX_AGENT_LOG + 1000);
         v.key(press(KeyCode::End), &recs, 12);
         assert_eq!(v.off, 0);
+    }
+
+    #[test]
+    fn wheel_scrolls_the_log_by_three_like_go() {
+        let mut v = AgentView::open("a");
+        v.wheel(true);
+        assert_eq!(v.off, 3);
+        v.wheel(false);
+        v.wheel(false);
+        assert_eq!(v.off, 0, "floored at the tail");
     }
 
     // Go onSubEvent: text lines, "● tool(summary)" and "  ⎿  result … (+N lines)". No parent: ignored.

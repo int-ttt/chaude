@@ -1426,9 +1426,13 @@ impl App {
         if self.follow { max } else { self.top.min(max) }
     }
 
-    // Moves the viewport by `delta` rows. Landing on the last page follows the tail again.
-    // Go wheelSel on the open /resume picker or /view list. Returns false when neither is open.
+    // Go tui.go MouseMsg order: the open settings picker, /resume pickers and /view list take the wheel as
+    // wheelSel; the agent view scrolls its log by 3. Returns false when none of them is open.
     fn overlay_wheel(&mut self, up: bool) -> bool {
+        if let Some(st) = self.settings.as_mut() {
+            st.wheel(up);
+            return true;
+        }
         if let Some(sv) = self.sess.as_mut() {
             sv.wheel(up);
             return true;
@@ -1441,9 +1445,14 @@ impl App {
             gp.wheel(up);
             return true;
         }
+        if let Some(av) = self.av.as_mut() {
+            av.wheel(up);
+            return true;
+        }
         false
     }
 
+    // Moves the viewport by `delta` rows. Landing on the last page follows the tail again.
     fn scroll(&mut self, delta: isize) {
         if self.usage.is_open() {
             let (w, h) = self.usage_geom();
@@ -1671,14 +1680,14 @@ fn input_window(n: usize, cur: usize) -> (usize, usize) {
     (top, shown)
 }
 
-// Copies `text` like Go copyToClipboard: OSC 52 to the terminal (reaches the local clipboard over SSH) and,
-// on macOS, pbcopy. The error is the native copy's; elsewhere only OSC 52 is written, so success there is unverified.
+// Copies `text` like Go copyToClipboard (selection.go:115-120): the native copy runs first, then OSC 52 is written
+// to the terminal (reaches the local clipboard over SSH) even when the native copy failed. The error is the native copy's;
+// elsewhere only OSC 52 is written, so success there is unverified.
 fn copy_text(out: &mut impl Write, text: &str) -> Result<(), String> {
+    let native = native_copy(text);
     let osc = format!("\x1b]52;c;{}\x07", base64(text.as_bytes()));
-    out.write_all(osc.as_bytes())
-        .and_then(|()| out.flush())
-        .map_err(|e| e.to_string())?;
-    native_copy(text)
+    let _ = out.write_all(osc.as_bytes()).and_then(|()| out.flush());
+    native
 }
 
 #[cfg(target_os = "macos")]

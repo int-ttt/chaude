@@ -162,6 +162,11 @@ impl Picker {
         }
     }
 
+    // Go tui.go wheel branch on the settings picker: wheelSel over the three rows.
+    pub fn wheel(&mut self, up: bool) {
+        super::sessview::wheel_sel(&mut self.sel, ROWS, up);
+    }
+
     // Go settingsKey. Returns the note to append when the key closes the picker (after saving), else None.
     pub fn key(&mut self, key: KeyEvent) -> Option<String> {
         match key.code {

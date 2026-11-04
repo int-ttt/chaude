@@ -37,3 +37,18 @@ core: not touched
 - L03 note: Rust reads the terminal size at startup, so the "starting…" frame never shows; left as diff.
 - check: not run (docs-only change)
 - remaining: S01-S10, B01-B25, C01-C33
+
+## batch 2: group S (done)
+- audited: 17 of 17 (S01-S17 in plan/tui-parity.md; the brief said 10 but the plan has 17 rows), marks written
+- same: S01, S02, S03, S04, S05, S06, S07, S08, S09, S10, S13, S14, S15 (13)
+- fixed: S11 (copy_text: native copy first, then OSC 52 even on native error; mod.rs copy_text, Go selection.go:115-119), S12 (wheel ±3 for agent view; PgUp/PgDn still diff, see plan row)
+- diff: S12 (PgUp/PgDn page = CHROME-based height, not live vp.Height-2), S16 (panelWheel not ported, blocked by L06), S17 (scroll_range_text bar.rs:354 unwired)
+- code fixes: settings.rs Picker::wheel (Go settingsRows=3); agentview.rs AgentView::wheel (+3 up, -3 down floored at tail, Go tui.go:560-567) with test wheel_scrolls_the_log_by_three_like_go; mod.rs overlay_wheel routes settings then sess, recs, pick, then av (Go tui.go MouseMsg order 540-567)
+- test: wheel filter 4 passed (agentview, usage, sessview, records)
+- check: HOME=$(mktemp -d) cargo test -p chaude-cli -> 220 passed, 0 failed, 1 ignored (includes the other coder's uncommitted panel tests in the working tree)
+- check: cargo clippy -p chaude-cli --all-targets -> 0 warning/error lines
+- check: cargo fmt -p chaude-cli -- --check -> FAIL, but only in the other coder's uncommitted panel code (mod.rs:1388 agent_lines, 1900 agent_row_line, 2828/2851/2860 panel tests). None of my hunks are in the reported ranges. Not touched.
+- staging: mod.rs staged from HEAD + my hunks only (overlay_wheel, scroll comment restore, copy_text) via a blob built from HEAD; working tree keeps the other coder's panel edits. settings.rs and agentview.rs staged whole (only my changes).
+- commit: see git log for the S group commit (message: fix(tui): S11 copy order, agent view and settings wheel)
+- remaining: B01-B25, C01-C33
+- blocked-core: B21-B23 (queue text, core emits Queued(usize) only)
