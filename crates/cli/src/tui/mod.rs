@@ -1222,15 +1222,9 @@ impl App {
             let (top, shown) = input_window(rows.len(), cur_row);
             for (i, row) in rows.iter().enumerate().skip(top).take(shown) {
                 let pre = if i == 0 { PROMPT } else { "  " };
-                let mid = if i == cur_row {
-                    let (before, after) = split_cells(row, cur_col);
-                    let mut rest = after.chars();
-                    let under = rest.next().map_or(" ".to_string(), String::from);
-                    format!("{before}{REV_ON}{under}{RESET}{}", rest.as_str())
-                } else {
-                    row.clone()
-                };
-                out.push(side(&format!("{pre}{mid}")));
+                // Go input.go View: reverse-video cursor cell (I33 input_view_row), byte index from the cell column.
+                let cursor = (i == cur_row).then(|| split_cells(row, cur_col).0.len());
+                out.push(side(&format!("{pre}{}", render::input_view_row(row, cursor))));
             }
         }
         out.push(edge("╰", "╯"));
