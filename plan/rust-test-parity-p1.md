@@ -72,7 +72,7 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/busyslash_test.go::TestBusySlashAllowedAndRefused | - | missing | busy-slash allow/refuse rule not in Rust |
 | harness/busyslash_test.go::TestVersionNoteShowsChaudeVersion | - | missing | version note not covered in Rust tests |
 | harness/cachettl_test.go::TestParseCacheTTL | crates/core/src/cache_ttl.rs::parse_cache_ttl_accepts_three_values_only | covered | |
-| harness/cachettl_test.go::TestRegistryNilWhenNoFile | - | missing | Rust has no cache-TTL registry |
+| harness/cachettl_test.go::TestRegistryNilWhenNoFile | crates/core/src/clients.rs::empty_path_is_noop_registry | partial | nil/empty-path half only; Repl wiring (reg, children, ttl, idleRotate) stays in api.rs |
 | harness/category_test.go::TestParseCategory | crates/core/src/category.rs::parse_category_takes_last_marker_line | covered | |
 | harness/category_test.go::TestCategoryRotation | crates/core/src/category.rs::category_rotation_rules | covered | |
 | harness/category_test.go::TestCategoryRuleSize | crates/core/src/category.rs::category_rule_fits_budget | covered | |
@@ -96,14 +96,14 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/children_test.go::TestChildSetParkTake | crates/core/src/child_set.rs::park_take_replaces_closes_once_and_expires | covered | |
 | harness/children_test.go::TestCloseAllParallel | crates/core/src/child_set.rs::close_all_closes_in_parallel | covered | |
 | harness/cleanenv_test.go::TestCleanEnvDropsAPIKey | - | missing | apply_env is private in core/src/proc.rs; no public test seam |
-| harness/clients_test.go::TestClientRegistryRoundTrip | - | missing | Rust has no client registry |
-| harness/clients_test.go::TestClientRegistryBrokenJSON | - | missing | Rust has no client registry |
-| harness/clients_test.go::TestClientRegistryAtomicWrite | - | missing | Rust has no client registry |
-| harness/clients_test.go::TestClientRegistryKeyedByCwdModel | - | missing | Rust has no client registry |
-| harness/clients_test.go::TestIsWarm | - | missing | Rust has no warm-client check |
-| harness/clients_test.go::TestReconcileKilledOwner | - | missing | Rust has no client reconcile (handoff orphans test is different) |
-| harness/clients_test.go::TestIdleDeadline | - | missing | idle_deadline is private in core/src/api.rs |
-| harness/clients_test.go::TestExpiredZeroDeadline | - | missing | idle deadline is private in core/src/api.rs |
+| harness/clients_test.go::TestClientRegistryRoundTrip | crates/core/src/clients.rs::round_trip_upsert_get_mark_ended | covered | |
+| harness/clients_test.go::TestClientRegistryBrokenJSON | crates/core/src/clients.rs::broken_json_reads_as_empty | covered | |
+| harness/clients_test.go::TestClientRegistryAtomicWrite | crates/core/src/clients.rs::atomic_write_leaves_no_tmp_file | covered | |
+| harness/clients_test.go::TestClientRegistryKeyedByCwdModel | crates/core/src/clients.rs::rows_keyed_by_cwd_and_model | covered | |
+| harness/clients_test.go::TestIsWarm | crates/core/src/clients.rs::is_warm_checks_state_deadline_and_context | covered | |
+| harness/clients_test.go::TestReconcileKilledOwner | crates/core/src/clients.rs::reconcile_marks_dead_owner_rows | covered | |
+| harness/clients_test.go::TestIdleDeadline | crates/core/src/clients.rs::idle_deadline_by_ttl_and_cap | covered | |
+| harness/clients_test.go::TestExpiredZeroDeadline | crates/core/src/clients.rs::expired_zero_deadline | covered | Go negative case not representable in Duration |
 | harness/conductor_test.go::TestWorkerPool | crates/core/src/haiku_pool.rs::worker_pool_notes_edits_and_dedups_files | covered | name-level match; nil pool is Option at the call site; 80-rune cut in worker_pool_truncates_task_to_80_runes |
 | harness/conductor_test.go::TestThresholdFor | core/src/rotate.rs::threshold_for_opus_and_configured | covered | |
 | harness/conductor_test.go::TestShouldRotateBoundary | core/src/rotate.rs::should_rotate_fires_at_threshold | covered | name-level: threshold boundary |
