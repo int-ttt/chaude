@@ -87,15 +87,15 @@ Counts (filled at end): see the "Counts" section.
 - [x] I24 A new model loads previously recorded history (recordHistory tui.go:273; loadHistory tui.go:266) · test: TestRecordHistoryPersistsAndNewModelLoads (history_file_test.go:54) · core: none → done: edit.rs:215 load_history; test edit.rs:638
 - [x] I25 Esc+Esc on empty input opens rewind picker within 600ms (tui.go:696-711) · test: none · core: transcript turns (rewind unit = user turn) → done: mod.rs:760-783 double Esc 600ms
 - [x] I26 Rewind picker: Open/Move/Cancel/Confirm (rewindState history.go:124-152) · test: none · core: transcript turns · audited: rewind.rs:36-98 matches history.go:124-152 (Open filter, wrap Move, Cancel, Confirm cut); wiring mod.rs:638-654, open mod.rs:774
-- [ ] I27 Rewind excludes slash commands from the unit list (history.go:124) · test: none · core: transcript turns
-- [ ] I28 Rewind with no turns shows note "nothing to rewind to" (tui.go:700-703) · test: none · core: none
-- [ ] I29 IME preedit: real terminal cursor placed in the input row via cursor up/col escape each frame (cursorWriter tui.go:232-260; imeColShift tui.go:177) · test: TestJediTermIMEColumnShift (resumeshift_test.go:28) · core: none
-- [ ] I30 Wide-char cursor column computed with runewidth (cells input.go:24) · test: TestInputWrapWide (input_test.go:30) · core: none
-- [ ] I31 Typing while scrolled keeps the scroll position (TestTypingKeepsScroll agentview_test.go:103) · test: TestTypingKeepsScroll (agentview_test.go:103) · core: none
-- [ ] I32 Placeholder text when empty (placeholder tui.go:879; View input.go:211) · test: none · core: none
-- [ ] I33 Input cursor drawn as reverse-video cell (View input.go:211) · test: none · core: none
-- [ ] I34 Ctrl+C with input and not busy quits (tui.go:685-690; quit tui.go:1188) · test: none · core: none
-- [ ] I35 Ctrl+D quits (tui.go:691) · test: none · core: none
+- [x] I27 Rewind excludes slash commands from the unit list (history.go:124) · test: none · core: transcript turns · audited (same, final-1)
+- [x] I28 Rewind with no turns shows note "nothing to rewind to" (tui.go:700-703) · test: none · core: none · audited (same, final-1)
+- [x] I29 IME preedit: real terminal cursor placed in the input row via cursor up/col escape each frame (cursorWriter tui.go:232-260; imeColShift tui.go:177) · test: TestJediTermIMEColumnShift (resumeshift_test.go:28) · core: none · audited (same, final-1)
+- [x] I30 Wide-char cursor column computed with runewidth (cells input.go:24) · test: TestInputWrapWide (input_test.go:30) · core: none · audited (same, final-1)
+- [x] I31 Typing while scrolled keeps the scroll position (TestTypingKeepsScroll agentview_test.go:103) · test: TestTypingKeepsScroll (agentview_test.go:103) · core: none · audited (same, final-1)
+- [x] I32 Placeholder text when empty (placeholder tui.go:879; View input.go:211) · test: none · core: none · audited (same, final-1)
+- [x] I33 Input cursor drawn as reverse-video cell (View input.go:211) · test: none · core: none · audited (same, final-1)
+- [x] I34 Ctrl+C with input and not busy quits (tui.go:685-690; quit tui.go:1188) · test: none · core: none · audited (same, final-1)
+- [x] I35 Ctrl+D quits (tui.go:691) · test: none · core: none · audited (same, final-1)
 
 ## Scrolling
 
@@ -158,11 +158,11 @@ Counts (filled at end): see the "Counts" section.
 
 ## Slash commands
 
-- [ ] C01 Slash list (`slashCmds`) with descriptions: help, clear, status, model, settings, resume, import, view, rotate, usage, cost, context, compact, config, mcp, agents, init, review, doctor, mode, mouse, version, update, exit, quit (tui.go:192-230) · test: none · core: see per-command rows
-- [ ] C02 Suggestions filter by prefix as user types (suggestions tui.go:974) · test: none · core: none
-- [ ] C03 /help shows command list and key help (runSlash tui.go:1057) · test: none · core: none
-- [ ] C04 /exit and /quit exit (tui.go:1055) · test: none · core: none
-- [ ] C05 /mouse toggles wheel/select mode (tui.go:1063) · test: none · core: none
+- [x] C01 Slash list (`slashCmds`) with descriptions: help, clear, status, model, settings, resume, import, view, rotate, usage, cost, context, compact, config, mcp, agents, init, review, doctor, mode, mouse, version, update, exit, quit (tui.go:192-230) · test: none · core: see per-command rows · audited (same): 25 names and descriptions match Go slashCmds (tui.go:192-217); test help_text_lists_every_command_then_keys
+- [x] C02 Suggestions filter by prefix as user types (suggestions tui.go:974) · test: none · core: none · audited (same): suggestions() commands.rs:344 = Go suggestions (tui.go:982-994)
+- [x] C03 /help shows command list and key help (runSlash tui.go:1057) · test: none · core: none · audited (same): help_text commands.rs:239 + HELP_KEYS:141 = Go runSlash /help (tui.go:1057-1061)
+- [x] C04 /exit and /quit exit (tui.go:1055) · test: none · core: none · audited (same): Dispatch::Quit for /exit and /quit (commands.rs:379, mod.rs:972), Go quit() tui.go:1196
+- [x] C05 /mouse toggles wheel/select mode (tui.go:1063) · test: none · core: none · audited (same): ToggleMouse mod.rs:973, mouse_note commands.rs:230, capture sync mod.rs:2572; test mouse_notes_match_go
 - [x] C06 /status shows model, ctx tokens, rotations, session (tui.go:1071-1079) · test: none · core: lastCtx, rotations, session id · audited (fixed): /status answered locally in mod.rs submit (Go tui.go:1079-1083), never sent to the child; ctx/threshold/rotations from TUI state · session id shows "-" (UiEvent has no current-session field) · test status_is_answered_locally_not_sent_to_claude
 - [ ] C07 /model shows or switches; switch rotates with new model (tui.go:1080; submit path runTUI repl.go:1385-1395) · test: none · core: rotate with model
 - [ ] C08 /settings opens picker: retention {0,7,30,90,365}, extra coders 0..settingsMaxExtraCoders, main model opus/sonnet/fable; saved on esc, applies next session (settings_picker.go:17-117; tui.go:1090) · test: none · core: settings file write
@@ -183,7 +183,7 @@ Counts (filled at end): see the "Counts" section.
 - [x] C23 /rotate: hand off to fresh session (runTUI submit repl.go:1366-1385) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff · audited (fixed): api.rs submit intercepts /rotate, manual_rotate runs start_handoff("manual") (repl.go:1231 r.rotate("manual")); tests rotate_command_hands_off_to_a_fresh_session
 - [x] C24 /cost, /context, /compact, /config, /mcp, /agents, /init, /review, /doctor: passthrough to Claude child (passthroughCmds; passthrough) · test: none · core: passthrough to claude child · audit: same (PASSTHROUGH commands.rs:132-135 falls through to Action::Submit = child turn, as Go tui.go:1174-1181)
 - [x] C25 /init, /review, /doctor run as a conversation turn (tui.go:1163 area) · test: none · core: runTurn · audit: same (/init /review /doctor are conversation turns in Go tui.go:1174-1181 and in Rust Submit fallthrough)
-- [ ] C26 Busy-allowed slash set: /usage, /version, /help, /status, /mode, /mouse, /view (busyOK tui.go:841; busySlashMsg tui.go:844 Korean) · test: TestBusySlashAllowedAndRefused (busyslash_test.go:12) · core: none
+- [x] C26 Busy-allowed slash set: /usage, /version, /help, /status, /mode, /mouse, /view (busyOK tui.go:841; busySlashMsg tui.go:844 Korean) · test: TestBusySlashAllowedAndRefused (busyslash_test.go:12) · core: none · audited (same): BUSY_OK commands.rs:118 = Go busyOK (tui.go:849, incl /settings); BUSY_SLASH_MSG text identical (tui.go:852)
 - [x] C27 Other slash commands while busy are refused with busySlashMsg (tui.go:844; enter path tui.go:~800-815) · test: TestBusySlashAllowedAndRefused (busyslash_test.go:12) · core: none · audit: same (BUSY_OK commands.rs:117-128, gate commands.rs:332-334, BUSY_SLASH_MSG byte-identical)
 - [x] C28 Unknown slash command handling (runSlash default) · test: none · core: none · audit: same (unknown command note commands.rs unknown arm matches tui.go runSlash default)
 - [x] C29 Agent view open via ctrl+t; cycle with tab/shift+tab/left/right; close with esc/ctrl+c/q (openAgentKey agentview.go:113; avKey agentview.go:135) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: sub-agent log events · audit: same: avKey agentview.rs:229-250 matches agentview.go:135-158
