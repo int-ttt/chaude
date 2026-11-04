@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::handoff;
+use chaude_core::import_claude::ClaudeImport;
 use chaude_core::resident::StagePhase;
 
 // Scripts are written and exec'd per test; serializing tests avoids ETXTBSY races.
@@ -2035,6 +2036,38 @@ fn resume_session_is_refused_while_busy() {
             .any(|e| matches!(e, UiEvent::SessionResumed { .. })),
         "{evs:?}"
     );
+    h.shutdown();
+}
+
+#[test]
+fn installed_import_snapshot_goes_in_front_of_next_prompt() {
+    let _g = lock();
+    let f = fake("install_import", &["text_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.install_import(ClaudeImport {
+        path: PathBuf::from("/home/u/.claude/projects/p/abc123.jsonl"),
+        turns: vec![("earlier question".into(), "earlier answer".into())],
+        files: vec!["src/lib.rs".into()],
+        reco: "RECO-KEEP".into(),
+        ..Default::default()
+    });
+    h.submit("next");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    let frame = log
+        .lines()
+        .find(|l| l.contains("## Current user message"))
+        .expect("snapshot frame");
+    assert!(
+        frame.contains("imported from a plain Claude Code session abc123"),
+        "{frame}"
+    );
+    assert!(
+        frame.contains("earlier question") && frame.contains("src/lib.rs"),
+        "{frame}"
+    );
+    assert!(frame.contains("RECO-KEEP"), "{frame}");
+    assert!(frame.contains("next"), "{frame}");
     h.shutdown();
 }
 

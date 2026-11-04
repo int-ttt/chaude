@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use crate::budget::{self, Budget};
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
 use crate::handoff::{self, ExitHandoff};
+use crate::import_claude::{ClaudeImport, import_note};
 use crate::mcp;
 use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
@@ -320,6 +321,8 @@ enum Cmd {
     SetMode(String),
     // Go /resume (mid-run): relaunches the main child with --resume on this session id. Rejected while busy.
     ResumeSession(String),
+    // Go applyImport: a transcript from import_claude::load_import_arg, installed for the next prompt.
+    Import(Box<ClaudeImport>),
     Permission { id: String, allow: bool },
     Usage,
     Shutdown,
@@ -380,6 +383,12 @@ impl EngineHandle {
         let _ = self
             .tx
             .send(Input::Cmd(Cmd::ResumeSession(session_id.to_string())));
+    }
+
+    // Go applyImport: makes imp the session's history and queues its snapshot in front of the next prompt.
+    // Refused while a turn runs (answers UiEvent::Error). Load imp with import_claude::load_import_arg.
+    pub fn install_import(&self, imp: ClaudeImport) {
+        let _ = self.tx.send(Input::Cmd(Cmd::Import(Box::new(imp))));
     }
 
     // Answers a UiEvent::PermissionRequest. allow=false denies with the Go empty-message reply.
@@ -685,6 +694,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
             Input::Cmd(Cmd::Interrupt(src)) => st.interrupt(src),
             Input::Cmd(Cmd::SetMode(name)) => st.set_mode(&name),
             Input::Cmd(Cmd::ResumeSession(sid)) => st.resume_session(&sid),
+            Input::Cmd(Cmd::Import(imp)) => st.install_import(*imp),
             Input::Cmd(Cmd::Permission { id, allow }) => st.answer_permission(&id, allow),
             Input::Cmd(Cmd::Usage) => st.usage(),
             Input::Proc(epoch, msg) if epoch == st.epoch => match msg {
@@ -2300,6 +2310,29 @@ impl State {
 
     // Relaunches the main child on an existing session with --resume (EngineHandle::resume_session).
     // The caller names the session, so resume_mode does not apply here. Idle only, like a fresh start.
+    // Go applyImport: the imported turns, files and recommendation become this session's history, and the
+    // snapshot built from them goes in front of the next prompt (send_turn). Turns beyond TAIL_TURNS are dropped.
+    fn install_import(&mut self, imp: ClaudeImport) {
+        if self.busy || self.prompter.waiting() {
+            self.emit(UiEvent::Error(
+                "cannot import while a turn is running".to_string(),
+            ));
+            return;
+        }
+        let stem = imp
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let skip = imp.turns.len().saturating_sub(TAIL_TURNS);
+        self.recent = imp.turns.into_iter().skip(skip).collect();
+        self.files = imp.files;
+        self.last_reco = imp.reco;
+        let note = import_note(&stem);
+        self.pending_snapshot = with_reco(&self.last_reco, &self.build_snapshot(&note));
+    }
+
     fn resume_session(&mut self, session_id: &str) {
         if session_id.is_empty() {
             self.emit(UiEvent::Error("resume needs a session id".to_string()));
