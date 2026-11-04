@@ -225,13 +225,13 @@ pub enum UiEvent {
     },
 }
 
-// Recent turns kept for the handoff snapshot (Go --tail-turns) and their size limits (Go --snapshot-chars).
-const TAIL_TURNS: usize = 4;
 // Go coderSlot tools and the extra coder cap (settingsMaxExtraCoders).
 const CODER_TOOLS: &str = "Read,Edit,Write,Bash,Grep,Glob";
 const MAX_EXTRA_CODERS: usize = 8;
 const TURN_CHARS: usize = 1_500;
-const SNAPSHOT_CHARS: usize = 24_000;
+// Go --max-workers default and resident.go residentMaxWorkers (the floor when neither flag nor env is set).
+const DEFAULT_MAX_WORKERS: usize = 3;
+const RESIDENT_MAX_WORKERS: usize = 8;
 // A held rotation is checked this often while idle. Deferral keeps the hold start private, so the wait is
 // polled rather than timed to the exact deadline.
 const DEFER_POLL: Duration = Duration::from_secs(1);
@@ -280,10 +280,64 @@ pub struct Config {
     pub coder_idle_ttl: Duration,
     // Go exit_handoff.go: JSON of this run's session ids, written on shutdown or disconnect. None = off.
     pub handoff_path: Option<PathBuf>,
+    // Go --max-workers (env CHAUDE_MAX_WORKERS): cap on concurrent live worker sessions. Resolve with
+    // resolve_max_workers. No engine effect yet: the Rust engine runs no worker pool.
+    pub max_workers: usize,
+    // Go --max-auto-rotations: automatic rotations allowed per engine run. Negative = unlimited, 0 = none.
+    pub max_auto_rotations: i64,
+    // Go --tail-turns: recent turns kept for the handoff snapshot and the imported-session snapshot.
+    pub tail_turns: usize,
+    // Go --snapshot-chars: cap on the handoff snapshot length, in chars.
+    pub snapshot_chars: usize,
+    // Go --show-rotation: print a one-line rotation marker. No engine effect yet: the TUI always shows Rotated.
+    pub show_rotation: bool,
+    // Go --no-handoff-validate: accept the handoff note without the section and file checks (no retry).
+    pub no_handoff_validate: bool,
+    // Go --max-drain: concurrently draining old sessions (0 = never drain). No engine effect yet.
+    pub max_drain: usize,
+    // Go --drain-timeout: how long a draining agent is awaited. No engine effect yet.
+    pub drain_timeout: Duration,
+    // Go --rotate-cooldown: after a held rotation, no automatic context rotation for this long.
+    pub rotate_cooldown: Duration,
+    // Go --no-category-rotate: disable category-based session rotation. No engine effect yet.
+    pub no_category_rotate: bool,
+    // Go --no-delegation-rule: skip the haiku delegation rule in the child's system prompt. No engine effect yet.
+    pub no_delegation_rule: bool,
+    // Go --agents-file (default ~/.chaude/agents.json): persisted sub-agent state. None = off. No engine effect yet.
+    pub agents_file: Option<PathBuf>,
+    // Go --clients-file (default ~/.chaude/clients.json): per-(cwd,model) client registry. None = off. No engine effect yet.
+    pub clients_file: Option<PathBuf>,
+}
+
+// Resolves the worker cap (Go resolveMaxWorkers): the flag when set, else the CHAUDE_MAX_WORKERS value when
+// non-empty, else DEFAULT_MAX_WORKERS. With neither set, the cap is at least RESIDENT_MAX_WORKERS plus the
+// extra coders, because extra coders are parked children too (Go repl.go floor). Values below 1 are errors.
+pub fn resolve_max_workers(
+    flag: Option<usize>,
+    env: &str,
+    extra_coders: usize,
+) -> Result<usize, String> {
+    if let Some(n) = flag {
+        if n < 1 {
+            return Err(format!("max-workers must be >= 1 (got {n})"));
+        }
+        return Ok(n);
+    }
+    let s = env.trim();
+    if !s.is_empty() {
+        return match s.parse::<usize>() {
+            Ok(n) if n >= 1 => Ok(n),
+            _ => Err(format!(
+                "CHAUDE_MAX_WORKERS must be an integer >= 1 (got {env:?})"
+            )),
+        };
+    }
+    Ok(DEFAULT_MAX_WORKERS.max(RESIDENT_MAX_WORKERS + extra_coders))
 }
 
 impl Default for Config {
     fn default() -> Self {
+        let state = crate::osenv::home_dir().join(".chaude");
         Config {
             claude_bin: resolve_bin("claude"),
             model: "opus".to_string(),
@@ -306,6 +360,19 @@ impl Default for Config {
             extra_coders: 4,
             coder_idle_ttl: Duration::from_secs(270),
             handoff_path: None,
+            max_workers: DEFAULT_MAX_WORKERS,
+            max_auto_rotations: -1,
+            tail_turns: 4,
+            snapshot_chars: 24_000,
+            show_rotation: false,
+            no_handoff_validate: false,
+            max_drain: 3,
+            drain_timeout: Duration::from_secs(60 * 60),
+            rotate_cooldown: Duration::from_secs(2 * 60),
+            no_category_rotate: false,
+            no_delegation_rule: false,
+            agents_file: Some(state.join("agents.json")),
+            clients_file: Some(state.join("clients.json")),
         }
     }
 }
@@ -507,6 +574,10 @@ struct State {
     last_reco: String,
     // Last normal turns as (prompt, reply), newest last (Go tr.turns).
     recent: VecDeque<(String, String)>,
+    // Automatic rotations done this run (Go rotations, checked against max_auto_rotations).
+    rotations: u64,
+    // When the last held rotation failed (Go lastRotFail), for rotate_cooldown.
+    last_rot_fail: Option<Instant>,
     // Prompt and assistant text of the running turn.
     turn_prompt: String,
     turn_reply: String,
@@ -654,6 +725,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         files: Vec::new(),
         last_reco: String::new(),
         recent: VecDeque::new(),
+        rotations: 0,
+        last_rot_fail: None,
         turn_prompt: String::new(),
         turn_reply: String::new(),
         pending_snapshot: String::new(),
@@ -2092,7 +2165,7 @@ impl State {
         }
         self.recent
             .push_back((self.turn_prompt.clone(), self.turn_reply.clone()));
-        while self.recent.len() > TAIL_TURNS {
+        while self.recent.len() > self.cfg.tail_turns {
             self.recent.pop_front();
         }
     }
@@ -2100,7 +2173,21 @@ impl State {
     // Go shouldRotate at turn end: the context is at or past the threshold.
     fn rotation_wanted(&self) -> bool {
         let thr = threshold_for(&self.model, self.cfg.rotate_threshold);
-        self.cfg.rotate_threshold > 0 && self.proc.is_some() && should_rotate(self.ctx_tokens, thr)
+        self.cfg.rotate_threshold > 0
+            && self.proc.is_some()
+            && should_rotate(self.ctx_tokens, thr)
+            && self.auto_rotate_allowed()
+    }
+
+    // Go maxAutoRotations and rotate-cooldown: a negative cap is unlimited, and a held rotation blocks automatic
+    // context rotation until the cooldown has passed.
+    fn auto_rotate_allowed(&self) -> bool {
+        let capped = self.cfg.max_auto_rotations >= 0
+            && self.rotations >= self.cfg.max_auto_rotations as u64;
+        let cooling = self
+            .last_rot_fail
+            .is_some_and(|t| t.elapsed() < self.cfg.rotate_cooldown);
+        !capped && !cooling
     }
 
     // A held rotation may run now: still wanted, and no background agent runs or the defer timeout passed.
@@ -2197,7 +2284,11 @@ impl State {
             return;
         };
         let note = self.turn_reply.trim().to_string();
-        let problems = validate_handoff(&note, &self.files);
+        let problems = if self.cfg.no_handoff_validate {
+            Vec::new()
+        } else {
+            validate_handoff(&note, &self.files)
+        };
         let valid = problems.is_empty();
         if !valid && h.attempts < 2 {
             self.handoff = Some(Handoff {
@@ -2211,6 +2302,7 @@ impl State {
         }
         if !valid && note.is_empty() && self.recent.is_empty() {
             // Go: nothing to carry, so the rotation is held and the session keeps running.
+            self.last_rot_fail = Some(Instant::now());
             self.emit(UiEvent::Error(
                 "context rotation held: handoff failed".to_string(),
             ));
@@ -2230,7 +2322,7 @@ impl State {
         self.next_turn();
     }
 
-    // Go buildSnapshot: preamble, handoff note, changed files, and the last turns, capped at SNAPSHOT_CHARS.
+    // Go buildSnapshot: preamble, handoff note, changed files, and the last turns, capped at snapshot_chars.
     fn build_snapshot(&self, note: &str) -> String {
         let note = if note.is_empty() { "(empty)" } else { note };
         // Each header and its body are separate parts, joined with a blank line (Go buildSnapshot).
@@ -2275,7 +2367,7 @@ impl State {
             }
             parts.push(turns.join("\n\n"));
         }
-        clip(&parts.join("\n\n"), SNAPSHOT_CHARS)
+        clip(&parts.join("\n\n"), self.cfg.snapshot_chars)
     }
 
     // Closes the current child and starts a fresh one (no --resume) that gets the snapshot with its next prompt.
@@ -2285,6 +2377,7 @@ impl State {
             p.kill();
         }
         self.epoch += 1;
+        self.rotations += 1;
         self.open_tools.clear();
         self.interrupted_at = None;
         self.stray_results = 0;
@@ -2311,7 +2404,7 @@ impl State {
     // Relaunches the main child on an existing session with --resume (EngineHandle::resume_session).
     // The caller names the session, so resume_mode does not apply here. Idle only, like a fresh start.
     // Go applyImport: the imported turns, files and recommendation become this session's history, and the
-    // snapshot built from them goes in front of the next prompt (send_turn). Turns beyond TAIL_TURNS are dropped.
+    // snapshot built from them goes in front of the next prompt (send_turn). Turns beyond tail_turns are dropped.
     fn install_import(&mut self, imp: ClaudeImport) {
         if self.busy || self.prompter.waiting() {
             self.emit(UiEvent::Error(
@@ -2325,7 +2418,7 @@ impl State {
             .and_then(|s| s.to_str())
             .unwrap_or_default()
             .to_string();
-        let skip = imp.turns.len().saturating_sub(TAIL_TURNS);
+        let skip = imp.turns.len().saturating_sub(self.cfg.tail_turns);
         self.recent = imp.turns.into_iter().skip(skip).collect();
         self.files = imp.files;
         self.last_reco = imp.reco;
@@ -2518,4 +2611,29 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_workers_flag_wins_and_rejects_zero() {
+        assert_eq!(resolve_max_workers(Some(5), "9", 4), Ok(5));
+        assert!(resolve_max_workers(Some(0), "", 0).is_err());
+    }
+
+    #[test]
+    fn max_workers_env_when_flag_unset() {
+        assert_eq!(resolve_max_workers(None, " 12 ", 0), Ok(12));
+        assert!(resolve_max_workers(None, "0", 0).is_err());
+        assert!(resolve_max_workers(None, "many", 0).is_err());
+    }
+
+    #[test]
+    fn max_workers_default_has_resident_floor() {
+        assert_eq!(resolve_max_workers(None, "", 0), Ok(8));
+        assert_eq!(resolve_max_workers(None, "  ", 4), Ok(12));
+        assert_eq!(Config::default().max_workers, 3);
+    }
 }

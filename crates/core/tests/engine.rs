@@ -2072,6 +2072,103 @@ fn installed_import_snapshot_goes_in_front_of_next_prompt() {
 }
 
 #[test]
+fn max_auto_rotations_zero_blocks_context_rotation() {
+    let _g = lock();
+    let f = fake("rotate_cap", &["rotate_turn.jsonl", "handoff_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.max_auto_rotations = 0;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let evs = until_idle(&rx);
+    assert!(!evs.iter().any(|e| matches!(e, UiEvent::Rotated { .. })));
+    h.shutdown();
+}
+
+#[test]
+fn no_handoff_validate_accepts_short_note_without_retry() {
+    let _g = lock();
+    let f = fake(
+        "no_validate",
+        &["rotate_turn.jsonl", "handoff_short_turn.jsonl"],
+    );
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.no_handoff_validate = true;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::Rotated { reason } if reason == "ctx 100 >= 50"))
+    );
+    // The short note is not retried: the handoff prompt is sent once before the child rotates.
+    let log = wait_for(&f.dir.join("stdin.log"), "Write a handoff note");
+    assert_eq!(log.matches("Write a handoff note").count(), 1, "{log}");
+    h.submit("again");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    let frame = log
+        .lines()
+        .find(|l| l.contains("## Current user message"))
+        .expect("snapshot frame");
+    assert!(frame.contains("Short note."), "{frame}");
+    assert!(!frame.contains("failed validation"), "{frame}");
+    h.shutdown();
+}
+
+#[test]
+fn tail_turns_limits_imported_turns_in_snapshot() {
+    let _g = lock();
+    let f = fake("tail_turns", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.tail_turns = 1;
+    let (h, rx) = Engine::start(cfg);
+    h.install_import(ClaudeImport {
+        path: PathBuf::from("/home/u/.claude/projects/p/abc123.jsonl"),
+        turns: vec![
+            ("older question".into(), "older answer".into()),
+            ("newer question".into(), "newer answer".into()),
+        ],
+        ..Default::default()
+    });
+    h.submit("next");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    let frame = log
+        .lines()
+        .find(|l| l.contains("## Current user message"))
+        .expect("snapshot frame");
+    assert!(frame.contains("newer question"), "{frame}");
+    assert!(!frame.contains("older question"), "{frame}");
+    h.shutdown();
+}
+
+#[test]
+fn snapshot_chars_clips_the_snapshot() {
+    let _g = lock();
+    let f = fake("snapshot_chars", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.snapshot_chars = 400;
+    let (h, rx) = Engine::start(cfg);
+    h.install_import(ClaudeImport {
+        path: PathBuf::from("/home/u/.claude/projects/p/abc123.jsonl"),
+        turns: vec![("question".into(), format!("{}ZZTAIL", "x".repeat(1_000)))],
+        ..Default::default()
+    });
+    h.submit("next");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    let frame = log
+        .lines()
+        .find(|l| l.contains("## Current user message"))
+        .expect("snapshot frame");
+    assert!(frame.contains("[Context carried over"), "{frame}");
+    assert!(!frame.contains("ZZTAIL"), "{frame}");
+    h.shutdown();
+}
+
+#[test]
 fn opus_agent_emits_opus_busy_bracket_around_its_run() {
     let _g = lock();
     let f = fake("opus_agent", &["opus_agent_turn.jsonl"]);
