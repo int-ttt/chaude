@@ -69,11 +69,18 @@ pub fn reply(line: &str, run: &CoderFn) -> Option<String> {
 // Env var that carries the per-run token from mcp.json to the bridge (mcp.json is written 0600).
 pub const TOKEN_ENV: &str = "CHAUDE_MCP_TOKEN";
 
-// A 256-bit random token from std only: each RandomState is seeded from OS randomness.
+// A 256-bit random token from std only: 32 bytes from /dev/urandom. Where that is missing (Windows), it
+// falls back to RandomState, which is seeded from OS randomness once per thread (about 128 bits).
 pub fn new_token() -> String {
-    (0..4)
-        .map(|_| format!("{:016x}", RandomState::new().build_hasher().finish()))
-        .collect()
+    let mut bytes = [0u8; 32];
+    let os = fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes));
+    if os.is_err() {
+        for chunk in bytes.chunks_mut(8) {
+            let n = RandomState::new().build_hasher().finish().to_le_bytes();
+            chunk.copy_from_slice(&n[..chunk.len()]);
+        }
+    }
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 // Go residentMCPConfig: the mcp.json the main child reads with --mcp-config. The token rides in env.
