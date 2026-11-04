@@ -950,7 +950,6 @@ impl App {
                 session_id: None,
                 mode: PermMode::Default,
                 chaude_version: env!("CARGO_PKG_VERSION"),
-                claude_version: "",
                 busy: self.busy,
             };
             commands::dispatch(&text, &ctx)
@@ -986,7 +985,7 @@ impl App {
                 return Action::Continue;
             }
             Some(Dispatch::Resume { args }) => return self.resume(&args),
-            Some(Dispatch::Note(s)) if !matches!(first, "/status" | "/version" | "/mode") => {
+            Some(Dispatch::Note(s)) if !matches!(first, "/status" | "/mode") => {
                 self.note(&s);
                 return Action::Continue;
             }

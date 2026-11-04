@@ -201,7 +201,6 @@ pub struct Ctx<'a> {
     pub session_id: Option<&'a str>,
     pub mode: PermMode,
     pub chaude_version: &'a str,
-    pub claude_version: &'a str,
     pub busy: bool,
 }
 
@@ -297,6 +296,49 @@ pub fn version_note(chaude: &str, claude: &str) -> String {
     format!("chaude {} · Claude Code {}", chaude, claude)
 }
 
+// version.go:23-36 claudeVersion: `claude --version`, looked up once, 3s cap, "unknown" when missing,
+// failing, or timing out.
+pub fn claude_version() -> &'static str {
+    static CLAUDE_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CLAUDE_VERSION.get_or_init(|| {
+        let bin = chaude_core::osenv::resolve_bin("claude");
+        let Ok(mut child) = std::process::Command::new(bin)
+            .arg("--version")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        else {
+            return "unknown".to_string();
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return "unknown".to_string();
+                }
+            }
+        }
+        let mut out = String::new();
+        if let Some(mut stdout) = child.stdout.take() {
+            use std::io::Read;
+            let _ = stdout.read_to_string(&mut out);
+        }
+        let v = out.trim();
+        if v.is_empty() {
+            "unknown".to_string()
+        } else {
+            v.to_string()
+        }
+    })
+}
+
 // tui.go:974-986 (suggestions). Empty when the input is not a slash word, has a space or tab,
 // or while busy or a permission prompt is open.
 pub fn suggestions(input: &str, busy: bool, perm_open: bool) -> Vec<&'static SlashCmd> {
@@ -367,7 +409,7 @@ pub fn dispatch(line: &str, ctx: &Ctx) -> Option<Dispatch> {
                 )),
             },
         },
-        "/version" => Dispatch::Note(version_note(ctx.chaude_version, ctx.claude_version)),
+        "/version" => Dispatch::Note(version_note(ctx.chaude_version, claude_version())),
         "/update" => Dispatch::Update,
         "/usage" => Dispatch::OpenUsage,
         "/clear" => Dispatch::Clear,
@@ -398,7 +440,6 @@ mod tests {
             session_id: Some("abcdef0123456789"),
             mode: PermMode::Default,
             chaude_version: "9.9.9",
-            claude_version: "1.2.3",
             busy,
         }
     }
@@ -427,11 +468,14 @@ mod tests {
     #[test]
     fn version_note_shows_chaude_version() {
         assert_eq!(
-            dispatch("/version", &ctx(false)),
-            Some(Dispatch::Note(
-                "chaude 9.9.9 · Claude Code 1.2.3".to_string()
-            ))
+            version_note("9.9.9", "1.2.3"),
+            "chaude 9.9.9 · Claude Code 1.2.3"
         );
+        let Some(Dispatch::Note(s)) = dispatch("/version", &ctx(false)) else {
+            panic!("/version must be a local Note");
+        };
+        assert!(s.starts_with("chaude 9.9.9 · Claude Code "), "{s}");
+        assert!(!claude_version().is_empty());
     }
 
     // Port of usagebusy_test.go TestUsageSlashAcceptedWhileBusy.
