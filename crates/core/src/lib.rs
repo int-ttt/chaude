@@ -29,6 +29,8 @@ pub mod resident;
 pub mod rotate;
 pub mod rotate_defer;
 pub mod settings;
+pub mod turn_spend;
+pub mod usage_poll;
 
 #[cfg(test)]
 pub(crate) mod testutil {
