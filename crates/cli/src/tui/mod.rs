@@ -1995,7 +1995,68 @@ enum Wake {
     Engine(UiEvent),
     // Result of an off-thread job (/update), shown as a note.
     Note(String),
+    // SIGINT or SIGTERM (see forward_signals): interrupts a running turn, ignored when idle (Go repl.go).
+    Signal,
     Closed,
+}
+
+// Go repl.go: SIGINT and SIGTERM are forwarded to the interrupt path instead of ending the process.
+// The C handler only writes a byte to a pipe; a thread turns each byte into a Wake::Signal.
+#[cfg(unix)]
+static SIGNAL_PIPE_W: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+#[cfg(unix)]
+extern "C" fn on_signal(_sig: libc::c_int) {
+    let byte = 1u8;
+    let fd = SIGNAL_PIPE_W.load(std::sync::atomic::Ordering::Relaxed);
+    // SAFETY: write(2) is async-signal-safe; fd is the pipe write end set before the handler was installed.
+    unsafe {
+        libc::write(fd, (&byte as *const u8).cast(), 1);
+    }
+}
+
+#[cfg(unix)]
+fn forward_signals(tx: mpsc::Sender<Wake>) -> io::Result<()> {
+    let mut fds = [0 as libc::c_int; 2];
+    // SAFETY: fds has room for the two descriptors pipe(2) writes.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    for fd in fds {
+        // SAFETY: fd is a valid descriptor just returned by pipe(2). Keeps child processes from inheriting it.
+        unsafe {
+            libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+        }
+    }
+    SIGNAL_PIPE_W.store(fds[1], std::sync::atomic::Ordering::Relaxed);
+    let handler: extern "C" fn(libc::c_int) = on_signal;
+    for sig in [libc::SIGINT, libc::SIGTERM] {
+        // SAFETY: on_signal is an extern "C" fn that only calls async-signal-safe functions.
+        unsafe {
+            libc::signal(sig, handler as libc::sighandler_t);
+        }
+    }
+    let rd = fds[0];
+    thread::spawn(move || {
+        let mut byte = 0u8;
+        loop {
+            // SAFETY: reads one byte into a valid stack buffer from the pipe read end.
+            let n = unsafe { libc::read(rd, (&mut byte as *mut u8).cast(), 1) };
+            if n == 1 {
+                if tx.send(Wake::Signal).is_err() {
+                    return;
+                }
+            } else if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                return;
+            }
+        }
+    });
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn forward_signals(_tx: mpsc::Sender<Wake>) -> io::Result<()> {
+    Ok(())
 }
 
 // Blocks until a wake arrives (or `timeout` passes), then takes every queued wake too.
@@ -2136,6 +2197,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
             let _ = tx.send(Wake::Closed);
         });
     }
+    forward_signals(wake_tx.clone())?;
     let update_tx = wake_tx.clone();
     thread::spawn(move || {
         for ev in rx {
@@ -2166,6 +2228,11 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
             match wake {
                 Wake::Engine(ev) => app.apply(ev),
                 Wake::Note(text) => app.note(&text),
+                Wake::Signal => {
+                    if app.busy {
+                        engine.interrupt(InterruptSource::Signal);
+                    }
+                }
                 Wake::Term(Event::Key(key)) if key.kind == KeyEventKind::Press => {
                     match app.on_key(key) {
                         Action::Continue => {}
@@ -2979,6 +3046,21 @@ mod tests {
             app.on_key(ctrl_c()),
             Action::Interrupt(InterruptSource::CtrlC)
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sigterm_is_forwarded_as_wake_signal() {
+        let (tx, rx) = mpsc::channel();
+        forward_signals(tx).expect("pipe");
+        // SAFETY: raise(3) with a signal whose handler is installed by forward_signals above.
+        unsafe {
+            libc::raise(libc::SIGTERM);
+        }
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(2)),
+            Ok(Wake::Signal)
+        ));
     }
 
     #[test]

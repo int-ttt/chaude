@@ -201,12 +201,12 @@ Counts (filled at end): see the "Counts" section.
 - [ ] E16 After interrupt: "[interrupted]" then waits up to 20s for result (repl.go:~800-805) · test: none · core: Interrupt + result
 - [ ] E17 Stale Ctrl+C dropped at start of runTurn (repl.go:~690-695 select default) · test: none · core: none
 - [x] E18 Ctrl+C with no turn running quits (tui.go:600-606) · fixed: mod.rs:704 idle Ctrl+C quits even with text · test: ctrl_c_interrupts_when_busy_and_quits_when_idle_even_with_text (mod.rs:2970) · core: none
-- [ ] E19 OS SIGINT/SIGTERM forwarded to intr channel (repl.go:1384-1388) · test: none · core: none
+- [x] E19 OS SIGINT/SIGTERM forwarded to intr channel (repl.go:1384-1388) · fixed: mod.rs forward_signals + Wake::Signal arm in tui loop · test: sigterm_is_forwarded_as_wake_signal (mod.rs) · core: none · note: plain line mode does not forward (Go forwards before the TTY check)
 - [ ] E20 Interrupt marks running agents interrupted on exit (markInterrupted repl.go:1207; interruptRunning agentview.go:314) · test: none · core: agent registry
 - [ ] E21 Idle child-initiated turn: reply shown with idle timers and finish (idleFinish repl.go:~530-545) · test: none · core: idle turn events
 - [ ] E22 Agents counter in status: "agents N running (bg M)" (statusLine tui.go:1203-1205) · test: TestAgentStatusFormat (panel_test.go:340) · core: agent tracker
 - [ ] E23 Agent done notice and background row finish (TestUserEventNotificationFinishesBackground panel_test.go:384) · test: TestUserEventNotificationFinishesBackground (panel_test.go:384) · core: task-notification
-- [ ] E24 Restored agents from prior run shown and dismissed (sortedRestored agentview.go:326; dismissRestored agentview.go:346) · test: none · core: agents file restore
+- [ ] E24 Restored agents from prior run shown and dismissed (sortedRestored agentview.go:326; dismissRestored agentview.go:346) · test: none · core: agents file restore · differs: core agent_store.rs:780-792 has sorted_restored/dismiss_restored, but no engine startup restore and no UiEvent carries restored agents; TUI agent_recs (mod.rs:1105) has no restored view. Core-owned, not changed.
 - [ ] E25 Resident coders: "stage" notices for residents (resident.go:255-277) · test: none · core: resident children
 - [ ] E26 Live rotation carries context and keeps pending snapshot (TestRotateKeepsPendingSnapshot resumeshift_test.go:65; TestLiveRotationCarriesContext acceptance_test.go:21) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff/snapshot
 - [ ] E27 Drain of old child before rotate (drain.go; TestDrain in drain_test.go, not opened) · test: drain_test.go (not read) · core: drain
