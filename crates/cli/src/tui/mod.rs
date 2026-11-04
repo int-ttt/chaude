@@ -3819,12 +3819,13 @@ mod tests {
             app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
             Action::SetMode(PermMode::Plan)
         );
+        // C07: /model NAME is sent to the engine as the full line (tui.go /model NAME), not handled locally.
         for c in "/model sonnet".chars() {
             app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
         }
         assert_eq!(
             app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
-            Action::Continue
+            Action::Submit("/model sonnet".to_string())
         );
     }
 
