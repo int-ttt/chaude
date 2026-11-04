@@ -75,6 +75,8 @@ fn config(f: &Fake) -> Config {
     Config {
         claude_bin: f.bin.clone(),
         model: "opus".into(),
+        // Baseline tests assert the non-resident event stream; stage tests opt in.
+        residents: false,
         ..Config::default()
     }
 }

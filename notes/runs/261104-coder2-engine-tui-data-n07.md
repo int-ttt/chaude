@@ -38,3 +38,10 @@ remaining:
 - tests: resident_stage_rows_bracket_main_turn_and_agent_calls (exact sequence on resume_agent_turn.jsonl), no_stage_rows_without_residents
 - gates: cargo test chaude-core 58 lib + 35 engine PASS; clippy --all-targets -D warnings PASS; fmt --check PASS; cargo build --workspace PASS
 - NOT done: coder and tui child slots (second claude child, Input tag per slot, IPC), prompter wiring into submit (Prompter state machine has no caller yet), tui translation (viaTUI), coder flow, Failed phase producer (no failing path mapped yet), resumed-agent Working row (AgentResumed not staged), N14 idle sweep, exit_handoff.go port
+
+## sub-group 3a: Config.residents default (Go repl.go:1354 always creates resident slots)
+- api.rs Config::default residents: false -> true
+- engine.rs config() helper pins residents: false (baseline event-stream tests unchanged); stage test opts in
+- gates: clippy -D warnings PASS; cargo test -p chaude-core PASS (58 unit + 35 engine); fmt --check PASS; cargo build --workspace PASS
+- open: settings key. Go has no residents toggle; the only related key is extra_coders (0-8, settings_picker.go:74-99), not yet ported.
+- remaining: prompter wiring into submit, tui/coder slots, Failed producer, N14 idlesweep, exit_handoff.go

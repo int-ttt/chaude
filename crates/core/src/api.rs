@@ -222,7 +222,7 @@ impl Default for Config {
             transcript: None,
             rotate_threshold: HAIKU_THRESHOLD,
             rotate_defer_timeout: Duration::from_secs(600),
-            residents: false,
+            residents: true,
         }
     }
 }
