@@ -1,0 +1,112 @@
+# Rust parity checklist (Go user-facing features)
+
+Date: 2026-11-04. Go reference: deprecated/src/main/intt. Rust: crates/cli, crates/core.
+Status: done = Rust matches; differs = present but behavior or text differs; missing = not in Rust.
+Counts are rows, not individual flags. Repl flags are one row (F3) covering 26 flags.
+
+## Commands (cmd/chaude/main.go)
+
+| id | feature | Go ref | status | Rust ref | note |
+|---|---|---|---|---|---|
+| C1 | no-arg interactive session | main.go:34-36 | done | crates/cli/src/main.rs:203 run_tui | inline TUI; plain line mode when not a TTY |
+| C2 | `repl [flags]` subcommand | main.go:39 | missing | crates/cli/src/main.rs:206 | falls to "not ported" |
+| C3 | `metrics [--dir D] [--csv]` | main.go:41 | done | crates/cli/src/main.rs:102 metrics_main | |
+| C4 | `mcp-resident` | main.go:43 | done | crates/cli/src/mcp_resident.rs | |
+| C5 | `--from-claude ID\|latest\|PATH` | main.go:45, repl.go | missing | crates/core/src/import_claude.rs | core done, no CLI call site |
+| C6 | `--import-dry-run` | main.go:45 | missing | crates/core/src/import_claude.rs | core takes dry_run, no CLI |
+| C7 | `gen-settings [os] [--out] [--src] [--python]` | main.go:47, settings.go:269-300 | done | crates/core/src/settings/mod.rs:187 | |
+| C8 | `clean [dir] [--yes]` | main.go:49, clean.go | missing | crates/clean (not wired) | |
+| C9 | `update` | main.go:51 | missing | crates/update (not wired) | |
+| C10 | `--version`, `-v`, `version` | main.go:53 | done | crates/cli/src/main.rs:195 | |
+| C11 | `-h`, `--help`, `help` text | main.go:20-29, 55 | differs | crates/cli/src/main.rs:16-22 | Rust lists different commands |
+| C12 | 7 helper scripts (`scripts.Has`) | main.go:61, scripts/common.go:364-395 | missing | crates/scripts (not wired) | charcount, claude-history, compress-archive, export-history, extract-transcript, search-history, usage-report |
+| C13 | leading `-flag` runs repl | main.go:58-59 | differs | crates/cli/src/main.rs:203-204 | Rust accepts only --orch and --model |
+| C14 | unknown command error, exit 2 | main.go:64-65 | done | crates/cli/src/main.rs:206-209 | message text differs |
+| C15 | `update.CleanupOld()` at startup | main.go:33 | missing | none | depends on C9 |
+
+## Repl flags (internal/harness/repl.go:1276-1306)
+
+| id | feature | Go ref | status | Rust ref | note |
+|---|---|---|---|---|---|
+| F1 | `--orch <mode>` | repl.go:1316 | done | crates/cli/src/main.rs:26 apply_orch | |
+| F2 | `--model <id>` | repl.go:1316-1334 | done | crates/cli/src/main.rs:54 parse_model | |
+| F3 | remaining 26 repl flags | repl.go:1276-1306 | missing | none | full list not re-tallied in this pass |
+
+## Environment
+
+| id | feature | Go ref | status | Rust ref | note |
+|---|---|---|---|---|---|
+| E1 | `CHAUDE_ORCH` export | repl.go:1316 | done | crates/core/src/orch.rs:8 ENV_KEY | |
+| E2 | `CHAUDE_MCP_TOKEN` | mcp (Go) | done | crates/core/src/mcp.rs:71 | |
+| E3 | `CHAUDE_MAX_WORKERS` | Go env handling | missing | none | |
+| E4 | IME env override | Go env handling | missing | none | Go ref not re-verified in this pass |
+| E5 | settings env overrides | Go settings | differs | crates/cli/src/tui/settings.rs | Rust set differs from Go |
+
+## Slash commands (internal/harness/tui.go:192-217; Rust table crates/cli/src/tui/commands.rs:15-111)
+
+Both tables have 25 entries (the earlier estimate of 24 was off by one).
+
+| id | command | status | Rust ref | note |
+|---|---|---|---|---|
+| S01 | /help | done | commands.rs:15 | |
+| S02 | /clear | differs | crates/cli/src/tui | new-session notice blocked (no engine event) |
+| S03 | /status | done | Dispatch to engine | |
+| S04 | /model | done | Dispatch::Model | |
+| S05 | /settings | done | crates/cli/src/tui/settings.rs | |
+| S06 | /resume | done | record /resume in TUI | |
+| S07 | /import | done | Dispatch::Import | last commit 9bbe876 |
+| S08 | /view | differs | crates/cli/src/tui | prev-run owned sessions done; this run's session ids blocked |
+| S09 | /rotate | done | Dispatch::Rotate | |
+| S10 | /usage | done | Dispatch::OpenUsage | |
+| S11 | /cost | done | passthrough to claude | not verified per command |
+| S12 | /context | done | passthrough to claude | not verified per command |
+| S13 | /compact | done | passthrough to claude | not verified per command |
+| S14 | /config | done | passthrough to claude | not verified per command |
+| S15 | /mcp | done | passthrough to claude | not verified per command |
+| S16 | /agents | done | passthrough to claude | not verified per command |
+| S17 | /init | done | passthrough to claude | runs a turn |
+| S18 | /review | done | passthrough to claude | runs a turn |
+| S19 | /doctor | done | passthrough to claude | runs a turn |
+| S20 | /mode | done | engine | |
+| S21 | /mouse | done | Dispatch::ToggleMouse | |
+| S22 | /version | done | engine | |
+| S23 | /update | differs | crates/cli/src/tui/mod.rs (stub, TODO(update-check)) | no update check yet |
+| S24 | /exit | done | Dispatch::Quit | |
+| S25 | /quit | done | Dispatch::Quit | |
+
+## TUI elements and keys
+
+| id | feature | Go ref | status | Rust ref | note |
+|---|---|---|---|---|---|
+| K1 | permission prompt keys | tui.go | done | crates/cli/src/tui/mod.rs:621-627 | |
+| K2 | Korean IME input, unicode width | tui.go | done | crates/cli/src/tui/render.rs input_view_row | |
+| K3 | spinner | tui.go | done | crates/cli/src/tui/bar.rs spinner_frame | |
+| K4 | idle "still waiting" notice (30 min) | tui.go | done | crates/cli/src/tui | |
+| K5 | clipboard copy | selection.go:115 (clipboard.WriteAll + OSC 52) | differs | crates/cli/src/tui/mod.rs:1508-1520 (OSC 52 + pbcopy) | no non-macOS clipboard tool |
+| K6 | status bar P/T/C per-role context | tui.go | missing | crates/cli/src/tui/bar.rs | hardcoded 0/80k; blocked, UiEvent lacks per-role context |
+| K7 | thinking row | tui.go | missing | bar.rs / render.rs | blocked, needs core data |
+| K8 | done row | tui.go | missing | bar.rs / render.rs | blocked |
+| K9 | rotated notice | tui.go | missing | render.rs | blocked |
+| K10 | orphan notice | tui.go | missing | render.rs | blocked |
+| K11 | tool summary | tui.go | missing | render.rs | blocked |
+| K12 | assistant link wrap | render | missing | render.rs | blocked |
+
+## Settings (internal/harness/chaude_settings.go:11-15)
+
+| id | feature | status | Rust ref | note |
+|---|---|---|---|---|
+| T1 | session_retention_days | done | crates/cli/src/tui/settings.rs DEFAULT_RETAIN | |
+| T2 | extra_coders (max 8, default 4) | done | crates/cli/src/tui/settings.rs MAX_EXTRA_CODERS, DEFAULT_EXTRA_CODERS | |
+| T3 | main_model | done | crates/core/src/settings/chaude_settings.rs main_model_from_json | |
+
+## Totals
+
+- Rows: 63 (C 15, F 3, E 5, S 25, K 12, T 3).
+- done: 39. differs: 7. missing: 17.
+- Missing, top: (1) `repl` subcommand and 26 repl flags (C2, F3); (2) `--from-claude` and `--import-dry-run` CLI (C5, C6); (3) `clean` (C8); (4) `update` CLI and startup cleanup (C9, C15); (5) 7 helper scripts (C12); (6) `CHAUDE_MAX_WORKERS` (E3); (7) status bar P/T/C (K6, blocked).
+
+## Notes
+
+- Test count: Go has 320 tests by grep. plan/rust-port.md phase 6 says 312. Reconcile before the parity gate.
+- Go refs for E3, E4 and F3 were not re-read in this pass; treat those rows as unverified.
+- Rust CLI usage (C11) and the TUI passthrough rows (S11-S19) were not checked line by line.
