@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod budget;
+pub mod child_set;
 pub mod event;
 pub mod handoff;
 pub mod import_claude;
