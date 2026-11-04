@@ -41,6 +41,9 @@ pub struct ExitHandoff {
     // role -> claude child pid while the child runs (Go child_pid). Only the live marker needs it.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub child_pids: BTreeMap<String, u32>,
+    // role -> model alias of that child. Only the orphan notice shows it; empty for files from older runs.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub child_models: BTreeMap<String, String>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -482,6 +485,30 @@ mod tests {
             !text.contains("owner_pid") && !text.contains("child_pids"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn child_models_round_trip_and_stay_out_of_clean_files() {
+        let dir = TempDir::new("handoff-models");
+        let path = handoff_file(dir.path());
+        let mut h = sample();
+        h.child_models = BTreeMap::from([
+            ("main".to_string(), "opus".to_string()),
+            ("coder".to_string(), "haiku".to_string()),
+        ]);
+        write_exit_handoff(&path, &h).unwrap();
+        let got = read_exit_handoff(&path).expect("readable");
+        assert_eq!(
+            got.child_models.get("coder").map(String::as_str),
+            Some("haiku")
+        );
+        assert_eq!(
+            got.child_models.get("main").map(String::as_str),
+            Some("opus")
+        );
+        write_exit_handoff(&path, &sample()).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("child_models"), "{text}");
     }
 
     #[cfg(unix)]

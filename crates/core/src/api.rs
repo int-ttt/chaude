@@ -213,9 +213,11 @@ pub enum UiEvent {
     },
     // A claude child a dead harness left running; sent at start and never killed (Go "[orphan]" notice).
     // role is the handoff role (MAIN_ROLE or a resident role).
+    // model is the child's model alias (haiku for a resident); empty when the handoff file had none.
     OrphanNotice {
         role: String,
         pid: u32,
+        model: String,
     },
 }
 
@@ -549,7 +551,13 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     let mut orphans = Vec::new();
     if let Some((prev, killed)) = cfg.handoff_path.as_deref().and_then(handoff::previous_run) {
         if killed {
-            orphans = handoff::orphans(&prev, handoff::pid_alive);
+            orphans = handoff::orphans(&prev, handoff::pid_alive)
+                .into_iter()
+                .map(|(role, pid)| {
+                    let model = prev.child_models.get(&role).cloned().unwrap_or_default();
+                    (role, pid, model)
+                })
+                .collect();
         }
         let main_thr = threshold_for(&cfg.model, cfg.rotate_threshold);
         if let handoff::Load::Resume(sid) =
@@ -637,8 +645,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         coders: Vec::new(),
         coder_epoch: 0,
     };
-    for (role, pid) in orphans {
-        st.emit(UiEvent::OrphanNotice { role, pid });
+    for (role, pid, model) in orphans {
+        st.emit(UiEvent::OrphanNotice { role, pid, model });
     }
     st.persist_live();
     st.start_child();
@@ -1105,6 +1113,27 @@ impl State {
             ctx_tokens.insert(handoff::MAIN_ROLE.to_string(), self.ctx_tokens);
         }
         // Live children by role (Go child_pid), so a dead harness's leftovers can be found at the next start.
+        // Go residentSlots: every resident runs haiku; the main child runs the session model.
+        let child_models: BTreeMap<String, String> = self
+            .proc
+            .iter()
+            .map(|_| (handoff::MAIN_ROLE.to_string(), self.model.clone()))
+            .chain(
+                self.prompter_proc
+                    .iter()
+                    .map(|_| ("prompter".to_string(), "haiku".to_string())),
+            )
+            .chain(
+                self.tui_proc
+                    .iter()
+                    .map(|_| ("tui".to_string(), "haiku".to_string())),
+            )
+            .chain(self.coders.iter().enumerate().filter_map(|(i, c)| {
+                c.proc
+                    .as_ref()
+                    .map(|_| (coder_role(i), "haiku".to_string()))
+            }))
+            .collect();
         let child_pids: BTreeMap<String, u32> = self
             .proc
             .iter()
@@ -1135,6 +1164,7 @@ impl State {
             ctx_tokens,
             owner_pid: std::process::id(),
             child_pids,
+            child_models,
             ..Default::default()
         }
     }

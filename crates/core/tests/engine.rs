@@ -1721,6 +1721,10 @@ fn orphan_notice_for_alive_child_of_dead_owner() {
             ("main".to_string(), process::id()),
             ("coder".to_string(), dead.id()),
         ]),
+        child_models: BTreeMap::from([
+            ("main".to_string(), "opus".to_string()),
+            ("coder".to_string(), "haiku".to_string()),
+        ]),
         ..Default::default()
     };
     handoff::write_exit_handoff(&handoff::live_handoff_file(&path), &live).unwrap();
@@ -1740,6 +1744,7 @@ fn orphan_notice_for_alive_child_of_dead_owner() {
         vec![&UiEvent::OrphanNotice {
             role: "main".into(),
             pid: process::id(),
+            model: "opus".into(),
         }],
         "{evs:?}"
     );

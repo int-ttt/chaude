@@ -405,10 +405,12 @@ impl App {
             // Go repl.go:1412: /clear starts a new session.
             UiEvent::NewSession { .. } => self.note(bar::NEW_SESSION_NOTICE),
             UiEvent::RotatedFrom { old_session } => self.rot_from = old_session,
-            // Go repl.go:1436: a claude child left by a dead harness. Core sends only the role and pid, so the
-            // model is the main model for main and the role name for a resident (the model is not in the event).
-            UiEvent::OrphanNotice { role, pid } => {
-                let model = if role == handoff::MAIN_ROLE {
+            // Go repl.go:1436: a claude child left by a dead harness. Core sends the model alias when the handoff
+            // file had one; otherwise it is the main model for main and the role name for a resident.
+            UiEvent::OrphanNotice { role, pid, model } => {
+                let model = if !model.is_empty() {
+                    model
+                } else if role == handoff::MAIN_ROLE {
                     self.welcome.model.clone()
                 } else {
                     role
@@ -2499,6 +2501,7 @@ mod tests {
         app.apply(UiEvent::OrphanNotice {
             role: "main".to_string(),
             pid: 4242,
+            model: String::new(),
         });
         assert!(
             app.transcript
