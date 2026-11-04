@@ -534,6 +534,8 @@ struct State {
     turn_started: Option<Instant>,
     queue: VecDeque<String>,
     model: String,
+    // Go orch mode f: workspace routing of each turn (inert in other modes).
+    router: orch::Router,
     ctx_tokens: u64,
     cost_usd: f64,
     tools: HashSet<String>,
@@ -735,6 +737,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         turn_started: None,
         queue: VecDeque::new(),
         model,
+        router: orch::Router::new(&std::env::var(orch::ENV_KEY).unwrap_or_default()),
         ctx_tokens: 0,
         cost_usd: 0.0,
         tools: HashSet::new(),
@@ -954,9 +957,37 @@ impl State {
 
     // Sends text to the main child as a turn; the engine is busy only when it went out.
     fn dispatch(&mut self, text: &str) {
-        if self.send_turn(text) {
+        // Go routeOrch: mode f sends a workspace-tagged line to its haiku session and an untagged line to the main model.
+        let routed = self.router.route(text, &self.cfg.model, Instant::now());
+        match routed.target {
+            orch::Target::Current => {}
+            orch::Target::Main => {
+                if let Some(m) = self.router.main_model().map(str::to_string)
+                    && m != self.opts.model
+                {
+                    self.orch_child(m, None);
+                }
+            }
+            orch::Target::Resume { session_id, .. } => {
+                self.orch_child("haiku".to_string(), Some(session_id));
+            }
+            orch::Target::Fresh { .. } => self.orch_child("haiku".to_string(), None),
+        }
+        if self.send_turn(&routed.text) {
             self.busy = true;
             self.emit(UiEvent::Busy(true));
+        }
+    }
+
+    // Restarts the main child on model; resume keeps a live workspace session, None starts a fresh one.
+    fn orch_child(&mut self, model: String, resume: Option<String>) {
+        self.model = model.clone();
+        self.opts.model = model;
+        match resume {
+            Some(sid) => self.resume_session(&sid),
+            None => {
+                self.restart_child();
+            }
         }
     }
 
@@ -2260,6 +2291,13 @@ impl State {
             ctx: self.ctx_tokens,
             delegations: self.delegations,
         });
+        let sid = (!self.sid.is_empty()).then(|| self.sid.clone());
+        self.router.record(
+            &self.turn_reply,
+            sid.as_deref(),
+            self.ctx_tokens,
+            Instant::now(),
+        );
         self.log_turn(duration_ms);
         self.turn_started = None;
         self.interrupted_at = None;
