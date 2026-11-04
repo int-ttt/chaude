@@ -211,22 +211,22 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 
 | Go test | Rust test | status | note |
 |---|---|---|---|
-| TestCompareVersion | none | wait: update | crates/update port in progress |
-| TestUpToDateDownloadsNothing | none | wait: update | |
-| TestUpdateUnixReplacesBinaryAtomically | none | wait: update | |
-| TestUpdateWindowsRenamesOldAndCleanupRemovesIt | none | wait: update | |
-| TestChecksumMismatchInstallsNothing | none | wait: update | |
-| TestChecksumsRequired | none | wait: update | |
-| TestNoAssetForPlatform | none | wait: update | |
-| TestOfflineIsClearError | none | wait: update | |
-| TestRejectedTokenIsDroppedAndRetried | none | wait: update | |
-| TestUnknownCurrentVersionIsRefused | none | wait: update | |
-| TestMainUsage | none | wait: update | |
-| TestAssetNamePlatforms | none | wait: update | |
-| TestNotWritableChangesNothing | none | wait: update | install path port |
-| TestMigrateLegacyRemovesOldInstallAndPathLine | none | wait: update | install path port |
-| TestMigrateLegacySkipsWhenRunningLegacyBinary | none | wait: update | install path port |
-| TestMigrateLegacyNoopWithoutLegacyFiles | none | wait: update | install path port |
+| TestCompareVersion | crates/update/tests/parity_update.rs::compare_version | covered | added; Version parse+Ord |
+| TestUpToDateDownloadsNothing | crates/update/tests/parity_update.rs::up_to_date_downloads_nothing | covered | added |
+| TestUpdateUnixReplacesBinaryAtomically | crates/update/tests/parity_update.rs::update_unix_replaces_binary_atomically | covered | added; mode 0755, no leftovers |
+| TestUpdateWindowsRenamesOldAndCleanupRemovesIt | crates/update/tests/parity_update.rs::update_windows_renames_old_and_cleanup_removes_it | covered | added; uses cleanup::remove_old seam |
+| TestChecksumMismatchInstallsNothing | crates/update/tests/parity_update.rs::checksum_mismatch_installs_nothing | covered | added |
+| TestChecksumsRequired | crates/update/tests/parity_update.rs::checksums_required | covered | added |
+| TestNoAssetForPlatform | crates/update/tests/parity_update.rs::no_asset_for_platform | covered | added |
+| TestOfflineIsClearError | crates/update/tests/parity_update.rs::offline_is_clear_error | covered | added; Fake returns Error::Offline (no httptest) |
+| TestRejectedTokenIsDroppedAndRetried | crates/update/tests/parity_update.rs::rejected_token_is_dropped_and_retried | covered | added; via run() |
+| TestUnknownCurrentVersionIsRefused | crates/update/tests/parity_update.rs::unknown_current_version_is_refused | covered | added; Rust has no ErrUnknownVersion, Error::Failed with same text |
+| TestMainUsage | crates/update/tests/parity_update.rs::main_usage | covered | added; run_cli |
+| TestAssetNamePlatforms | crates/update/tests/parity_update.rs::asset_name_platforms | covered | added; asset_name is pub(crate), checked via run() error text |
+| TestNotWritableChangesNothing | crates/update/tests/parity_update.rs::not_writable_changes_nothing | covered | added; unix; skips if probe write succeeds (root) |
+| TestMigrateLegacyRemovesOldInstallAndPathLine | crates/update/tests/parity_update.rs::migrate_legacy_removes_old_install_and_path_line | covered | added |
+| TestMigrateLegacySkipsWhenRunningLegacyBinary | crates/update/tests/parity_update.rs::migrate_legacy_skips_when_running_legacy_binary | covered | added |
+| TestMigrateLegacyNoopWithoutLegacyFiles | crates/update/tests/parity_update.rs::migrate_legacy_noop_without_legacy_files | covered | added |
 
 ## Totals (group 3)
 

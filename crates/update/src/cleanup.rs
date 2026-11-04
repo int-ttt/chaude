@@ -12,10 +12,15 @@ pub fn cleanup_old() {
     let Ok(exe) = running_exe() else {
         return;
     };
-    let _ = fs::remove_file(fsutil::with_suffix(&exe, ".old"));
+    remove_old(&exe);
     if let Some(home) = home_dir() {
         migrate_legacy(&home, host_goos(), &exe);
     }
+}
+
+/// Go removeOld: deletes the `exe.old` a windows self-update left behind. Errors are ignored.
+pub fn remove_old(exe: &Path) {
+    let _ = fs::remove_file(fsutil::with_suffix(exe, ".old"));
 }
 
 /// Go os.UserHomeDir: $HOME on unix, USERPROFILE on windows.
