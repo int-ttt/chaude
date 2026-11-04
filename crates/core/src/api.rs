@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use crate::budget::{self, Budget};
 use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
-use crate::clients::idle_deadline;
+use crate::clients::{ClientRec, ClientRegistry, LIVE, idle_deadline, now_stamp};
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
 use crate::forward::forward_rule_for;
 use crate::handoff::{self, ExitHandoff};
@@ -246,6 +246,8 @@ const RESIDENT_MAX_WORKERS: usize = 8;
 // A held rotation is checked this often while idle. Deferral keeps the hold start private, so the wait is
 // polled rather than timed to the exact deadline.
 const DEFER_POLL: Duration = Duration::from_secs(1);
+// Go switchchild.go neverCold: the warm deadline when the idle rotate is disabled.
+const NEVER_COLD: Duration = Duration::from_secs(24 * 365 * 3600);
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -577,6 +579,8 @@ struct State {
     // Go usagePollAt/usagePolling: last background /usage poll start, and whether one is in flight.
     usage_poll_at: Option<Instant>,
     usage_polling: Arc<AtomicBool>,
+    // Go r.reg: client rows in clients.json; None when cfg.clients_file is unset.
+    clients: Option<ClientRegistry>,
     // Session id from the child's system event (Go sess.SessionID); "" until the child reports one.
     sid: String,
     // Every main and resident session id this run started (Go r.owned), kept for the handoff.
@@ -713,6 +717,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     };
     let model = cfg.model.clone();
     let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));
+    let clients = cfg.clients_file.clone().map(ClientRegistry::new);
     let metrics = Arc::new(Metrics::new(
         cfg.metrics_dir.clone(),
         json!({"compact_window": cfg.compact_window, "context_window": cfg.context_window, "cache_ttl": cfg.cache_ttl}),
@@ -781,9 +786,22 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         coder_epoch: 0,
         usage_poll_at: None,
         usage_polling: Arc::new(AtomicBool::new(false)),
+        clients,
     };
     for (role, pid, model) in orphans {
         st.emit(UiEvent::OrphanNotice { role, pid, model });
+    }
+    // Go repl.go reconcileStart: repair rows a killed harness left open; show, never kill, orphaned children.
+    if let Some(reg) = &st.clients {
+        let idle = idle_deadline(st.cfg.idle_rotate, &st.cfg.cache_ttl);
+        let deadline = if idle.is_zero() { NEVER_COLD } else { idle };
+        for row in reg.reconcile(now_stamp(), deadline) {
+            st.emit(UiEvent::OrphanNotice {
+                role: String::new(),
+                pid: row.child_pid,
+                model: row.model,
+            });
+        }
     }
     st.persist_live();
     st.start_child();
@@ -1502,6 +1520,7 @@ impl State {
                 if text.trim() == "/clear" {
                     self.record.split = true;
                     self.clear_mark();
+                    self.clear_client_row();
                 }
                 true
             }
@@ -2655,9 +2674,47 @@ impl State {
         }
         let epoch = self.epoch;
         match proc::spawn(&opts, self.self_tx.clone(), move |m| Input::Proc(epoch, m)) {
-            Ok(p) => self.proc = Some(p),
+            Ok(p) => {
+                self.upsert_live(p.pid(), opts.resume.clone().unwrap_or_default());
+                self.proc = Some(p);
+            }
             Err(e) => self.emit(UiEvent::Error(format!("claude spawn failed: {e}"))),
         }
+    }
+
+    // Go switchchild.go:263: the live row for this harness's main child, owned by this process.
+    fn upsert_live(&self, child_pid: u32, session_id: String) {
+        let Some(reg) = &self.clients else {
+            return;
+        };
+        reg.upsert(ClientRec {
+            cwd: self.client_cwd(),
+            model: self.model.clone(),
+            session_id,
+            state: LIVE.to_string(),
+            last_api: now_stamp(),
+            owner_pid: std::process::id(),
+            child_pid,
+            ..Default::default()
+        });
+    }
+
+    // Go repl.go clear(): the old row ends with "clear", then the new session gets a fresh live row.
+    fn clear_client_row(&self) {
+        let Some(reg) = &self.clients else {
+            return;
+        };
+        reg.mark_ended(&self.client_cwd(), &self.model, "clear", now_stamp());
+        let child_pid = self.proc.as_ref().map_or(0, |p| p.pid());
+        self.upsert_live(child_pid, String::new());
+    }
+
+    // Go r.a.Cwd as text; "." when the engine has no cwd option.
+    fn client_cwd(&self) -> String {
+        self.opts
+            .cwd
+            .as_ref()
+            .map_or_else(|| ".".to_string(), |p| p.to_string_lossy().into_owned())
     }
 
     fn emit_status(&self, cost_usd: f64) {
