@@ -4,6 +4,7 @@ pub mod agent_store;
 pub mod api;
 pub mod budget;
 pub mod cache_ttl;
+pub mod category;
 pub mod child_set;
 pub mod event;
 pub mod handoff;

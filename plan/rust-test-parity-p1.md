@@ -73,11 +73,11 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/busyslash_test.go::TestVersionNoteShowsChaudeVersion | - | missing | version note not covered in Rust tests |
 | harness/cachettl_test.go::TestParseCacheTTL | crates/core/src/cache_ttl.rs::parse_cache_ttl_accepts_three_values_only | covered | |
 | harness/cachettl_test.go::TestRegistryNilWhenNoFile | - | missing | Rust has no cache-TTL registry |
-| harness/category_test.go::TestParseCategory | - | missing | Rust has no category rotation |
-| harness/category_test.go::TestCategoryRotation | - | missing | Rust has no category rotation |
-| harness/category_test.go::TestCategoryRuleSize | - | missing | Rust has no category rotation |
-| harness/category_test.go::TestMarkerFilter | - | missing | Rust has no marker filter |
-| harness/category_test.go::TestMarkerFilterInline | - | missing | Rust has no marker filter |
+| harness/category_test.go::TestParseCategory | crates/core/src/category.rs::parse_category_takes_last_marker_line | covered | |
+| harness/category_test.go::TestCategoryRotation | crates/core/src/category.rs::category_rotation_rules | covered | |
+| harness/category_test.go::TestCategoryRuleSize | crates/core/src/category.rs::category_rule_fits_budget | covered | |
+| harness/category_test.go::TestMarkerFilter | crates/core/src/category.rs::marker_filter_hides_split_marker_line | covered | |
+| harness/category_test.go::TestMarkerFilterInline | crates/core/src/category.rs::marker_filter_hides_inline_marker | covered | |
 | harness/chaude_settings_test.go::TestSettingsDefaultsWhenMissing | cli/src/tui/settings.rs::defaults_when_missing | covered | |
 | harness/chaude_settings_test.go::TestSettingsClamp | cli/src/tui/settings.rs::clamp_fixes_out_of_range | covered | |
 | harness/chaude_settings_test.go::TestSettingsSaveLoadRoundTrip | cli/src/tui/settings.rs::save_load_round_trip_leaves_no_tmp | covered | |
