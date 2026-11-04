@@ -2,6 +2,8 @@
 //! Lists the real prompts of the transcript (slash commands excluded), newest selected first.
 //! Confirm returns the cut index (blocks[..cut] are kept) and the prompt text to put back in the input.
 //! Pure over `(kind, text)` pairs: the caller owns the transcript and applies the cut.
+// Not wired into mod.rs yet (TUI A owns it), so dead-code warnings are allowed until the hook calls land.
+#![allow(dead_code)]
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -207,5 +209,39 @@ mod tests {
         assert!(rows[2].starts_with(ORANGE_ON));
         assert!(rows[2].contains(" 2) two"));
         assert!(rows[1].contains(" 1) one"));
+    }
+
+    // Go rewind draw at the 100x30 transcript size: the window follows the selection, the header is row 0,
+    // the last row is left blank, and a multi-line prompt is folded to one line and cut at 100 chars.
+    #[test]
+    fn draw_100x30_window_follows_selection() {
+        let long = "x".repeat(150);
+        let mut b: Vec<(&str, String)> = (1..=40).map(|i| ("user", format!("p{i}"))).collect();
+        b.push(("user", "a\nb".to_string()));
+        b.push(("user", long));
+        let refs: Vec<(&str, &str)> = b.iter().map(|(k, t)| (*k, t.as_str())).collect();
+        let mut s = Rewind::default();
+        assert!(s.open(&refs));
+        assert_eq!(s.sel, 41, "newest prompt is selected");
+        let rows = s.lines(&refs, 100, 30);
+        assert_eq!(rows.len(), 30);
+        assert!(rows[0].contains(HEADER));
+        assert!(rows[29].is_empty(), "one blank row under the list");
+        // from = min(41 - 15, 42 - 28) = 14: rows 1..=28 show prompts 15..=42, row 29 is blank.
+        assert!(rows[1].contains("15) p15"), "{:?}", rows[1]);
+        assert!(rows[27].contains("41) a b"), "{:?}", rows[27]);
+        assert!(rows[28].starts_with(ORANGE_ON));
+        assert!(rows[28].contains("42) "));
+        // Go ansiTrunc(t, m.w): "> 42) " takes 6 columns, so 94 x's fit at width 100.
+        assert!(rows[28].contains(&"x".repeat(94)));
+        assert!(!rows[28].contains(&"x".repeat(95)));
+        // The prompt itself is cut at 100 chars (Go trunc(text, 100)) when the width allows it.
+        let wide = s.lines(&refs, 200, 30);
+        assert!(wide[28].contains(&"x".repeat(100)));
+        assert!(!wide[28].contains(&"x".repeat(101)));
+        // The earlier selection moves the window back to the top of the list.
+        s.move_by(-41);
+        let rows = s.lines(&refs, 100, 30);
+        assert!(rows[1].contains(" 1) p1"), "{:?}", rows[1]);
     }
 }
