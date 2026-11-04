@@ -2089,6 +2089,38 @@ fn rotate_command_hands_off_to_a_fresh_session() {
     h.shutdown();
 }
 
+// Go /model NAME (runTUI): a rotation with reason "model NAME"; the fresh child starts on NAME, the command is not sent.
+#[test]
+fn model_command_rotates_to_the_new_model() {
+    let _g = lock();
+    let f = fake("model_cmd", &["rotate_turn.jsonl", "handoff_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("first");
+    until_idle(&rx);
+    h.submit("/model sonnet");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::Rotated { reason } if reason == "model sonnet")),
+        "/model reports a rotation with its reason: {evs:?}"
+    );
+    h.submit("again");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    assert!(log.contains("Write a handoff note"), "{log}");
+    assert!(
+        !log.contains("/model"),
+        "/model is not sent to claude: {log}"
+    );
+    let args = fs::read_to_string(f.dir.join("args.log")).expect("main child ran");
+    let last = args.lines().last().unwrap_or_default();
+    assert!(
+        last.contains("--model sonnet"),
+        "fresh child runs sonnet: {args}"
+    );
+    h.shutdown();
+}
+
 // Go /clear (clearWithHandoff): the snapshot of the conversation goes to a fresh session, not to the old one.
 #[test]
 fn clear_command_carries_snapshot_to_a_fresh_session() {

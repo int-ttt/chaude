@@ -1021,6 +1021,17 @@ impl State {
             }
             return;
         }
+        // Go /model NAME (tui.go runTUI): a session command too, handled as a rotation to the new model.
+        if let Some(model) = cmd.strip_prefix("/model ").map(str::trim)
+            && !model.is_empty()
+        {
+            if self.busy || self.prompter.waiting() {
+                self.emit(UiEvent::Error("/model needs an idle session".to_string()));
+                return;
+            }
+            self.model_switch(model.to_string());
+            return;
+        }
         if self.busy || self.prompter.waiting() {
             self.queue.push_back(text);
             self.emit(UiEvent::Queued(self.queue.len()));
@@ -3023,6 +3034,31 @@ impl State {
         if !self.start_handoff("manual".to_string()) {
             self.busy = false;
             self.emit(UiEvent::Busy(false));
+        }
+    }
+
+    // Go /model NAME (repl.go runTUI): the parked child for NAME is ended, the session model changes, and a rotation
+    // runs with reason "model NAME". The handoff runs on the current child; the fresh child starts on NAME.
+    fn model_switch(&mut self, model: String) {
+        self.end_parked(&model);
+        self.model = model.clone();
+        self.opts.model = model.clone();
+        self.busy = true;
+        self.emit(UiEvent::Busy(true));
+        if !self.start_handoff(format!("model {model}")) {
+            self.busy = false;
+            self.emit(UiEvent::Busy(false));
+        }
+    }
+
+    // Go endParked(key, reason): the parked child under (cwd, model) is closed and its registry row marked ended.
+    fn end_parked(&mut self, model: &str) {
+        let cwd = self.client_cwd();
+        if let Some(mut p) = self.children.take(&child_key(&cwd, model, "")) {
+            p.sess.close();
+            if let Some(reg) = &self.clients {
+                reg.mark_ended(&cwd, model, "model-switch", now_stamp());
+            }
         }
     }
 

@@ -1004,11 +1004,7 @@ impl App {
             }
             // Go tui.go /mode: setMode; the engine answers ModeChanged, which prints "mode: <name>".
             Some(Dispatch::SetMode(p)) => return Action::SetMode(p),
-            // Model switch needs core rotate-with-model (C07); until then it is not sent to the engine as text.
-            Some(Dispatch::Model { .. }) => {
-                self.note("model switch is not supported yet");
-                return Action::Continue;
-            }
+            // Go tui.go /model NAME: sent to the engine as the full line, which rotates to the new model.
             _ => {}
         }
         Action::Submit(text)
