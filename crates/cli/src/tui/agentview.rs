@@ -2,6 +2,8 @@
 //! onSubEvent and sortedAll). Read-only live view of one sub-agent.
 //! Pure over `AgentRec` snapshots: the caller owns the tracker, feeds sub-agent stream events through
 //! `sub_event_lines` + `push_log`, sorts with `sort_all`, and closes the view when the agent is gone.
+// Not wired into mod.rs yet (TUI A owns it), so dead-code warnings are allowed until the hook calls land.
+#![allow(dead_code)]
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
@@ -451,6 +453,25 @@ mod tests {
         v.off = 0;
         let rows = v.lines(&r, "opus", 80, 6);
         assert_eq!((rows[2].as_str(), rows[5].as_str()), ("row7", "row10"));
+    }
+
+    // 100x30 transcript size: the title shows the agent name, never the id; the body is exactly 30 rows
+    // and the scroll offset clamps to the last 28 log rows (header and title use 2 rows).
+    #[test]
+    fn draw_100x30_shows_name_not_id_and_clamps_scroll() {
+        let mut r = rec("agent-zz9", 1, false);
+        r.log = (1..=300).map(|i| format!("row{i}")).collect();
+        let mut v = AgentView::open("agent-zz9");
+        let rows = v.lines(&r, "opus", 100, 30);
+        assert_eq!(rows.len(), 30);
+        assert!(rows[1].contains("worker"), "{:?}", rows[1]);
+        assert!(!rows[0].contains("agent-zz9") && !rows[1].contains("agent-zz9"));
+        assert_eq!((rows[2].as_str(), rows[29].as_str()), ("row273", "row300"));
+
+        v.off = 10_000;
+        let rows = v.lines(&r, "opus", 100, 30);
+        assert_eq!(v.off, 272, "clamped to 300 - 28");
+        assert_eq!((rows[2].as_str(), rows[29].as_str()), ("row1", "row28"));
     }
 
     // Go agentViewLines: body wraps to max(10, width - 2) columns.
