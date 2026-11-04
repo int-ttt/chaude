@@ -1850,3 +1850,71 @@ fn resume_session_rejects_empty_id() {
     assert!(matches!(ev, UiEvent::Error(_)), "{ev:?}");
     h.shutdown();
 }
+
+// A resident's session id from its result line is logged to the record folder's session file, once per change.
+#[test]
+fn resident_session_id_is_logged_to_session_file() {
+    let _g = lock();
+    let f = fake("resident_sid", &["text_turn.jsonl"]);
+    fs::write(
+        f.dir.join("prompter.jsonl"),
+        "{\"type\":\"result\",\"result\":\"caveman summary\",\"session_id\":\"pr7\"}\n",
+    )
+    .unwrap();
+    let path = f.dir.join(".exit-handoff.json");
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.residents = true;
+    cfg.handoff_path = Some(path.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            UiEvent::SessionIds { residents, .. } if residents.get("prompter").map(String::as_str) == Some("pr7")
+        )),
+        "{evs:?}"
+    );
+    h.shutdown();
+    let logged = handoff::read_sessions(&path);
+    assert!(
+        logged
+            .iter()
+            .any(|r| r.session_id == "pr7" && r.role == "prompter"),
+        "{logged:?}"
+    );
+}
+
+// A resume request while a turn runs is refused with an Error; the running turn finishes unchanged.
+#[test]
+fn resume_session_is_refused_while_busy() {
+    let _g = lock();
+    let f = fake("resume_busy", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("engine went silent");
+        if ev == UiEvent::Busy(true) {
+            break;
+        }
+    }
+    h.resume_session("old9");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.contains(&UiEvent::Error(
+            "cannot resume while a turn is running".into()
+        )),
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::SessionResumed { .. })),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
