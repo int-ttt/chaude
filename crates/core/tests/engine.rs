@@ -12,6 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
+use chaude_core::resident::StagePhase;
 
 // Scripts are written and exec'd per test; serializing tests avoids ETXTBSY races.
 static LOCK: Mutex<()> = Mutex::new(());
@@ -1140,6 +1141,51 @@ fn handoff_snapshot_lists_running_background_agent_with_result_path() {
     assert!(frame.contains("## Background agents (results in notes/runs/)"));
     assert!(frame.contains("- scan (toolu_bg1): running, result file: notes/runs/"));
     assert!(frame.contains("-agent-toolu_bg1.md"));
+    h.shutdown();
+}
+
+#[test]
+fn resident_stage_rows_bracket_main_turn_and_agent_calls() {
+    let _g = lock();
+    let f = fake("stage_on", &["resume_agent_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let stages: Vec<UiEvent> = evs
+        .iter()
+        .filter(|e| matches!(e, UiEvent::Stage { .. }))
+        .cloned()
+        .collect();
+    let stage = |slot: &str, phase: StagePhase| UiEvent::Stage {
+        slot: slot.into(),
+        phase,
+    };
+    assert_eq!(
+        stages,
+        vec![
+            stage("main", StagePhase::Working),
+            stage("agent:scan", StagePhase::Working),
+            stage("agent:scan", StagePhase::Done),
+            stage("main", StagePhase::Done),
+        ],
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
+fn no_stage_rows_without_residents() {
+    let _g = lock();
+    let f = fake("stage_off", &["resume_agent_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::Stage { .. })),
+        "{evs:?}"
+    );
     h.shutdown();
 }
 

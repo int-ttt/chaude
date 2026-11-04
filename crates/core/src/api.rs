@@ -18,6 +18,7 @@ use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, SpawnOpts};
+use crate::resident::StagePhase;
 use crate::rotate::{
     HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
     validate_handoff, with_reco,
@@ -197,6 +198,9 @@ pub struct Config {
     // Go --rotate-defer-timeout: how long a due rotation waits for background agents before it runs anyway.
     // Zero = rotate at once.
     pub rotate_defer_timeout: Duration,
+    // Resident slots are running (Go len(resident) > 0): the engine emits UiEvent::Stage rows for the main turn
+    // and each agent call. Off = no stage rows.
+    pub residents: bool,
 }
 
 impl Default for Config {
@@ -218,6 +222,7 @@ impl Default for Config {
             transcript: None,
             rotate_threshold: HAIKU_THRESHOLD,
             rotate_defer_timeout: Duration::from_secs(600),
+            residents: false,
         }
     }
 }
@@ -541,6 +546,7 @@ impl State {
                 self.turn_prompt = text.to_string();
                 self.turn_reply.clear();
                 self.turn_started = Some(Instant::now());
+                self.stage("main", StagePhase::Working);
                 self.last_activity = Instant::now();
                 self.turn_cost_base = self.cost_usd;
                 self.delegations = 0;
@@ -894,6 +900,7 @@ impl State {
                     background: false,
                 },
             );
+            self.stage(&agent_slot(&description), StagePhase::Working);
             self.emit(UiEvent::AgentStart {
                 id,
                 description,
@@ -950,9 +957,22 @@ impl State {
     }
 
     // Ends a delegated agent: AgentEnd, and the deferred rotation runs if this was the last agent.
+    // Go repl.go stage rows ("· main 처리중", "· agent X 호출"): sent only while residents run.
+    fn stage(&mut self, slot: &str, phase: StagePhase) {
+        if self.cfg.residents {
+            self.emit(UiEvent::Stage {
+                slot: slot.to_string(),
+                phase,
+            });
+        }
+    }
+
     fn finish_agent(&mut self, id: String) {
-        self.agent_info.remove(&id);
+        let info = self.agent_info.remove(&id);
         if let Some(t0) = self.agents.remove(&id) {
+            if let Some(i) = info {
+                self.stage(&agent_slot(&i.name), StagePhase::Done);
+            }
             self.emit(UiEvent::AgentEnd {
                 id,
                 elapsed_ms: t0.elapsed().as_millis() as u64,
@@ -1047,6 +1067,9 @@ impl State {
             .collect();
         for id in ids {
             if let Some(t0) = self.agents.remove(&id) {
+                if let Some(i) = self.agent_info.get(&id) {
+                    self.stage(&agent_slot(&i.name), StagePhase::Done);
+                }
                 self.emit(UiEvent::AgentEnd {
                     id,
                     elapsed_ms: t0.elapsed().as_millis() as u64,
@@ -1105,6 +1128,7 @@ impl State {
         self.turn_started = None;
         self.interrupted_at = None;
         self.open_tools.clear();
+        self.stage("main", StagePhase::Done);
         self.emit(UiEvent::TurnEnd { duration_ms });
         self.remember_turn();
         if self.rotation_wanted() {
@@ -1337,6 +1361,10 @@ impl State {
 // First short string field of a tool input, for the one-line ToolStart summary.
 // Go tui.go resultText: a plain string, or the "text" of each block joined by newlines.
 // The id that follows `marker` in `text`, e.g. the agentId in "agentId: a1b2".
+fn agent_slot(description: &str) -> String {
+    format!("agent:{description}")
+}
+
 fn after_marker(text: &str, marker: &str) -> Option<String> {
     let rest = &text[text.find(marker)? + marker.len()..];
     let id: String = rest

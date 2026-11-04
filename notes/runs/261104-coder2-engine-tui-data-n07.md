@@ -30,3 +30,11 @@ remaining:
 - gates: cargo test chaude-core 58 lib + 33 engine PASS; clippy --all-targets -D warnings PASS; fmt --check PASS; cargo build --workspace PASS (27 cli dead-code warnings from other in-progress work, none from Stage)
 - remaining sub-groups 2+: tui/coder slots (residentSlots, residentMaxWorkers 8, extraCoderTTL 270s), socket IPC, prompter routing in send path (viaPrompter stage flow), tui translation (viaTUI, 120s), Stage producers
 - doubt: need_original path rule is a hand approximation of Go regex; edge cases may differ
+
+## resident sub-group 2a: stage producers (coordinator)
+- item 1 verified: af3a743 (resumedAgentId JSON parser + fixture) committed; present on rust-port
+- Go gate: repl.go emits stage rows only when len(r.resident) > 0. Rust mirrors it with Config.residents (default false).
+- producers: Stage{slot:"main", Working} on successful send_turn; Stage{slot:"main", Done} in end_turn before TurnEnd; Stage{slot:"agent:<description>", Working} on AgentStart; Stage{slot:"agent:<description>", Done} in finish_agent and abandon_turn.
+- tests: resident_stage_rows_bracket_main_turn_and_agent_calls (exact sequence on resume_agent_turn.jsonl), no_stage_rows_without_residents
+- gates: cargo test chaude-core 58 lib + 35 engine PASS; clippy --all-targets -D warnings PASS; fmt --check PASS; cargo build --workspace PASS
+- NOT done: coder and tui child slots (second claude child, Input tag per slot, IPC), prompter wiring into submit (Prompter state machine has no caller yet), tui translation (viaTUI), coder flow, Failed phase producer (no failing path mapped yet), resumed-agent Working row (AgentResumed not staged), N14 idle sweep, exit_handoff.go port
