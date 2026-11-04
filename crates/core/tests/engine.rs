@@ -1112,6 +1112,38 @@ fn rotation_waits_for_background_agent_then_runs_at_defer_timeout() {
 }
 
 #[test]
+fn handoff_snapshot_lists_running_background_agent_with_result_path() {
+    let _g = lock();
+    let f = fake("bgsnap", &["bg_async_turn.jsonl", "handoff_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    until_idle(&rx);
+    // The async agent never reports a result, so the rotation runs at the defer timeout.
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("rotation never ran");
+        if matches!(ev, UiEvent::Rotated { .. }) {
+            break;
+        }
+    }
+    h.submit("again");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    let frame = log
+        .lines()
+        .find(|l| l.contains("## Current user message"))
+        .expect("snapshot frame");
+    assert!(frame.contains("## Background agents (results in notes/runs/)"));
+    assert!(frame.contains("- scan (toolu_bg1): running, result file: notes/runs/"));
+    assert!(frame.contains("-agent-toolu_bg1.md"));
+    h.shutdown();
+}
+
+#[test]
 fn abandoned_turn_ends_foreground_agent_but_not_background_agent() {
     let _g = lock();
     let hang = concat!(

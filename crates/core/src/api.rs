@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 use crate::budget::{self, Budget};
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
-use crate::metrics::Metrics;
+use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, SpawnOpts};
@@ -314,9 +314,9 @@ struct State {
     agents: HashMap<String, Instant>,
     // A rotation that was due while background agents ran: when it was first deferred (Go rotate_defer).
     rotate_deferred: Option<Instant>,
-    // Agents whose launch result said "async": they keep running past the turn (Go background agents),
-    // so an abandoned turn does not end them.
-    background: HashSet<String>,
+    // Delegated agents by tool_use id. A background agent (launch result said "async") keeps running past the
+    // turn, so an abandoned turn does not end it, and it is listed in the handoff snapshot.
+    agent_info: HashMap<String, AgentInfo>,
     // tool_use ids still waiting for their tool_result; the inactivity timer is paused while non-empty.
     open_tools: HashSet<String>,
     // Last claude line or turn start; the inactivity timer measures from here.
@@ -367,6 +367,13 @@ struct Handoff {
     attempts: u32,
 }
 
+// What the handoff snapshot needs about a delegated agent (Go agentRec: Task, ResultPath, Background).
+struct AgentInfo {
+    name: String,
+    result_path: String,
+    background: bool,
+}
+
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
     let opts = SpawnOpts {
         claude_bin: resolve_bin(&cfg.claude_bin),
@@ -396,7 +403,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         tools: HashSet::new(),
         agents: HashMap::new(),
         rotate_deferred: None,
-        background: HashSet::new(),
+        agent_info: HashMap::new(),
         open_tools: HashSet::new(),
         last_activity: Instant::now(),
         interrupted_at: None,
@@ -862,6 +869,14 @@ impl State {
                 .map(|s| clip(s, 80))
                 .unwrap_or_default();
             self.agents.insert(id.clone(), Instant::now());
+            self.agent_info.insert(
+                id.clone(),
+                AgentInfo {
+                    name: description.clone(),
+                    result_path: format!("notes/runs/{}-agent-{}.md", yymmdd_today(), id),
+                    background: false,
+                },
+            );
             self.emit(UiEvent::AgentStart {
                 id,
                 description,
@@ -883,11 +898,13 @@ impl State {
         });
         // A background agent keeps running after its launch result; it ends later, which E1 does not track.
         if text.contains(ASYNC_AGENT_MARK) {
-            self.background.insert(id.clone());
+            if let Some(info) = self.agent_info.get_mut(&id) {
+                info.background = true;
+            }
             self.emit(UiEvent::AgentBackground { id });
             return;
         }
-        self.background.remove(&id);
+        self.agent_info.remove(&id);
         if let Some(t0) = self.agents.remove(&id) {
             self.emit(UiEvent::AgentEnd {
                 id,
@@ -962,7 +979,7 @@ impl State {
         let ids: Vec<String> = self
             .agents
             .keys()
-            .filter(|id| !self.background.contains(*id))
+            .filter(|id| !self.agent_info.get(*id).is_some_and(|i| i.background))
             .cloned()
             .collect();
         for id in ids {
@@ -1164,6 +1181,27 @@ impl State {
             PREAMBLE.to_string(),
             format!("## Handoff note (written by previous session)\n{note}"),
         ];
+        // Go bgHandoffLines: background agents still running, oldest first, with their result file.
+        let mut bg: Vec<(Instant, String)> = self
+            .agents
+            .iter()
+            .filter_map(|(id, t0)| {
+                let info = self.agent_info.get(id).filter(|i| i.background)?;
+                let line = format!(
+                    "- {} ({}): running, result file: {}",
+                    info.name, id, info.result_path
+                );
+                Some((*t0, line))
+            })
+            .collect();
+        bg.sort();
+        if !bg.is_empty() {
+            let lines: Vec<String> = bg.into_iter().map(|(_, l)| l).collect();
+            parts.push(format!(
+                "## Background agents (results in notes/runs/)\n{}",
+                lines.join("\n")
+            ));
+        }
         if !self.files.is_empty() {
             let list: Vec<String> = self.files.iter().map(|f| format!("- {f}")).collect();
             parts.push(format!("## Files changed\n{}", list.join("\n")));
