@@ -1532,11 +1532,18 @@ impl State {
             .ok()
             .filter(|v| v["success"] != false)
             .and_then(|v| v["resumedAgentId"].as_str().map(str::to_string));
-        let known = resume.and_then(|aid| self.agent_ids.get(&aid).cloned());
-        if let Some((tool, description)) = known.and_then(|t| {
-            let name = self.agent_info.get(&t)?.name.clone();
-            Some((t, name))
-        }) {
+        // agent_info is dropped when the agent ends, so a resume after that falls back to the agent id as label.
+        let known = resume.and_then(|aid| {
+            let tool = self.agent_ids.get(&aid).cloned()?;
+            Some((tool, aid))
+        });
+        if let Some((tool, aid)) = known {
+            let description = self
+                .agent_info
+                .get(&tool)
+                .map(|i| i.name.clone())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| format!("agent {}", aid.chars().take(8).collect::<String>()));
             self.agents.insert(tool.clone(), Instant::now());
             if let Some(info) = self.agent_info.get_mut(&tool) {
                 info.background = true;

@@ -1504,6 +1504,44 @@ fn resumed_background_agent_is_active_again_until_task_notification() {
 }
 
 #[test]
+fn resume_after_agent_ended_still_emits_resumed_with_fallback_label() {
+    let _g = lock();
+    let f = fake("resume_late", &["resume_after_end_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    // The task-notification ended the agent and dropped its name, so the resume has no description.
+    assert!(
+        evs.contains(&UiEvent::AgentEnd {
+            id: "toolu_bg2".into(),
+            elapsed_ms: evs
+                .iter()
+                .find_map(|e| match e {
+                    UiEvent::AgentEnd { id, elapsed_ms } if id == "toolu_bg2" => Some(*elapsed_ms),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{evs:?}")),
+        }),
+        "{evs:?}"
+    );
+    assert!(
+        evs.contains(&UiEvent::AgentResumed {
+            id: "toolu_bg2".into(),
+            description: "agent b92c452c".into(),
+            started_at: evs
+                .iter()
+                .find_map(|e| match e {
+                    UiEvent::AgentResumed { started_at, .. } => Some(*started_at),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{evs:?}")),
+        }),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
 fn abandoned_turn_ends_foreground_agent_but_not_background_agent() {
     let _g = lock();
     let hang = concat!(
