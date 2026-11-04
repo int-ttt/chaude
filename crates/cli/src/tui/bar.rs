@@ -350,7 +350,6 @@ pub fn quiet_notice(idle: Duration) -> String {
 
 // Agent list scroll indicator (tui.go:1490). `off` is the 0-based first shown row, `shown` the rows in the
 // window, `total` all agents. Shows 1-based bounds, e.g. "  … 3-5/12 (마우스 휠로 스크롤)".
-#[allow(dead_code)] // unwired: agent list scroll indicator not drawn yet (tui.go:1490)
 pub fn scroll_range_text(off: usize, shown: usize, total: usize) -> String {
     format!(
         "  … {}-{}/{} (마우스 휠로 스크롤)",

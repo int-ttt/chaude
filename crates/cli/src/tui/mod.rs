@@ -60,6 +60,8 @@ const MAX_INPUT_ROWS: usize = 5;
 const MAX_QUEUE_ROWS: usize = 5;
 // Go maxPanel (tui.go:1452): most rows in one agent panel (foreground or background).
 const MAX_PANEL_ROWS: usize = 4;
+// Go lastTool: `trunc(t, 40)` in runes.
+const LAST_TOOL_RUNES: usize = 40;
 // Go minViewRows: the transcript keeps at least this many rows before the queue and panels take space.
 const MIN_VIEW_ROWS: usize = 3;
 // Reverse-video cell for the cursor (tui.go View, cursor style).
@@ -119,6 +121,10 @@ pub struct App {
     bg_agents: Vec<String>,
     // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
     agent_rows: Vec<AgentRow>,
+    // First agent row shown in the panels (Go panOff), moved by the wheel over them.
+    pan_off: usize,
+    // Last tool call of the running turn, cut to 40 runes (Go lastTool); the busy row shows it.
+    last_tool: String,
     // Prompts waiting for the next turn, oldest first (UiEvent::QueueTexts; Go m.queue).
     queue_texts: Vec<String>,
     // Rotations seen this session (UiEvent::Rotated); Go m.r.rotations.
@@ -229,6 +235,8 @@ impl App {
             agents: Vec::new(),
             bg_agents: Vec::new(),
             agent_rows: Vec::new(),
+            pan_off: 0,
+            last_tool: String::new(),
             queue_texts: Vec::new(),
             rot: 0,
             clock: Instant::now(),
@@ -338,6 +346,7 @@ impl App {
                 } else {
                     format!("{name}({summary})")
                 };
+                self.last_tool = trunc_runes(&head, LAST_TOOL_RUNES);
                 self.tool_rows.insert(id, (self.transcript.len(), name));
                 self.transcript.push(format!("{TOOL_ON}● {head}{FG_OFF}"));
             }
@@ -352,6 +361,7 @@ impl App {
                     } else {
                         format!("{name}({summary})")
                     };
+                    self.last_tool = trunc_runes(&head, LAST_TOOL_RUNES);
                     *line = format!("{TOOL_ON}● {head}{FG_OFF}");
                 }
             }
@@ -425,6 +435,8 @@ impl App {
                 self.turn_start = if b { Some(Instant::now()) } else { None };
                 if b {
                     self.got_text = false;
+                    // Go sendPrompt resets lastTool at the start of each turn.
+                    self.last_tool.clear();
                     // A new turn is past any late AgentEnd of the interrupted one.
                     self.finished_fg.clear();
                 }
@@ -698,7 +710,7 @@ impl App {
         // Go avKey: read-only agent view. Only close, switch and scroll keys act; the rest is dropped.
         if self.av.is_some() {
             let recs = self.agent_recs();
-            let vp_h = self.rows.saturating_sub(CHROME);
+            let vp_h = self.body_h(self.cols, self.rows);
             if let Some(av) = self.av.as_mut()
                 && av.key(key, &recs, vp_h) == agentview::Action::Close
             {
@@ -1260,7 +1272,7 @@ impl App {
         if let Some(t) = self.turn_start {
             text.push_str(&bar::elapsed_suffix(
                 self.clock.duration_since(t).as_secs(),
-                "",
+                &self.last_tool,
             ));
         }
         if esc {
@@ -1359,7 +1371,7 @@ impl App {
     // Go queueLines (tui.go:929-945): waiting prompts above the input box, oldest first, dim. Past the cap the
     // last row becomes "… +N 대기" with the count still waiting. The transcript keeps MIN_VIEW_ROWS.
     fn queue_lines(&self, w: usize, h: usize) -> Vec<String> {
-        let room = h.saturating_sub(self.input_height(w) + 3 + MIN_VIEW_ROWS);
+        let room = h.saturating_sub(self.input_height(w) + 3 + self.popup_h() + MIN_VIEW_ROWS);
         let max_show = MAX_QUEUE_ROWS.min(room);
         if max_show == 0 {
             return Vec::new();
@@ -1387,8 +1399,8 @@ impl App {
         (fg, bg)
     }
 
-    // Go rowsA (tui.go:1448-1520): one line per running agent of one kind. When they do not fit, the last row is
-    // a "… a-b/n" indicator. The scroll position is not wired yet, so the window always starts at the first agent.
+    // Go rowsA (tui.go:1448-1520): one line per running agent of one kind. When they do not fit, the rows start at
+    // `pan_off` (shared by both panels, Go panOff) and the last row is the "… a-b/n" indicator.
     fn agent_lines(
         &self,
         bg: bool,
@@ -1405,29 +1417,39 @@ impl App {
         if list.is_empty() || w < 10 {
             return Vec::new();
         }
-        let room = h.saturating_sub(self.input_height(w) + 3 + queue_h + MIN_VIEW_ROWS + used);
+        let room = h.saturating_sub(
+            self.input_height(w) + 3 + queue_h + self.popup_h() + MIN_VIEW_ROWS + used,
+        );
         let limit = MAX_PANEL_ROWS.min(room);
         if limit == 0 {
             return Vec::new();
         }
         let width = text_width(w);
-        let shown = if list.len() > limit {
-            limit - 1
+        // limit-1 agent rows and one indicator row when the list does not fit (Go rowsA).
+        let (off, shown) = if list.len() > limit {
+            let n = limit - 1;
+            (self.pan_off.min(list.len() - n), n)
         } else {
-            list.len()
+            (0, list.len())
         };
         let mut out: Vec<String> = list
             .iter()
+            .skip(off)
             .take(shown)
             .map(|r| agent_row_line(r, &self.bar.model, width))
             .collect();
         if list.len() > limit {
             out.push(format!(
-                "{GREY_ON}  … 1-{shown}/{} (마우스 휠로 스크롤){FG_OFF}",
-                list.len()
+                "{GREY_ON}{}{FG_OFF}",
+                bar::scroll_range_text(off, shown, list.len())
             ));
         }
         out
+    }
+
+    // Go popH: the slash menu rows (at most maxPop = 8) that take room from the queue and the panels.
+    fn popup_h(&self) -> usize {
+        self.suggest().len().min(overlay::SLASH_MAX_ROWS)
     }
 
     // Rows of the transcript viewport on a `w` x `h` screen: what is left after the chrome and the slash menu.
@@ -1527,7 +1549,7 @@ impl App {
 
     // Go tui.go MouseMsg order: the open settings picker, /resume pickers and /view list take the wheel as
     // wheelSel; the agent view scrolls its log by 3. Returns false when none of them is open.
-    fn overlay_wheel(&mut self, up: bool) -> bool {
+    fn overlay_wheel(&mut self, up: bool, row: usize) -> bool {
         if let Some(st) = self.settings.as_mut() {
             st.wheel(up);
             return true;
@@ -1544,11 +1566,29 @@ impl App {
             gp.wheel(up);
             return true;
         }
+        // Go panelWheel: only with no agent view and no permission prompt open, and only over the panels.
+        if self.av.is_none() && self.perm.is_none() && self.panel_wheel(up, row) {
+            return true;
+        }
         if let Some(av) = self.av.as_mut() {
             av.wheel(up);
             return true;
         }
         false
+    }
+
+    // Go panelWheel: moves the panel window one agent row per wheel notch, clamped to the running agents.
+    // Returns false when no panel is shown or the row is above the panels.
+    fn panel_wheel(&mut self, up: bool, row: usize) -> bool {
+        let (fg, bg) = self.panel_lines(self.cols, self.rows);
+        let panel_rows = fg.len() + bg.len();
+        if panel_rows == 0 || row < self.rows.saturating_sub(panel_rows + 1) {
+            return false;
+        }
+        let total = self.agent_rows.iter().filter(|r| !r.done).count() as isize;
+        let d: isize = if up { -1 } else { 1 };
+        self.pan_off = (self.pan_off as isize + d).clamp(0, total) as usize;
+        true
     }
 
     // Moves the viewport by `delta` rows. Landing on the last page follows the tail again.
@@ -1897,6 +1937,11 @@ fn split_cells(s: &str, col: usize) -> (&str, &str) {
         acc += UnicodeWidthChar::width(c).unwrap_or(0);
     }
     (s, "")
+}
+
+// Go trunc (repl.go:217): the first `n` runes of `s`.
+fn trunc_runes(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
 }
 
 // Columns usable for text. The last column stays empty so a full row never auto-wraps.
@@ -2444,8 +2489,8 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                 }
                 Wake::Term(Event::Paste(text)) => app.editor.insert_str(&text),
                 Wake::Term(Event::Mouse(m)) if app.mouse => match m.kind {
-                    MouseEventKind::ScrollUp if app.overlay_wheel(true) => {}
-                    MouseEventKind::ScrollDown if app.overlay_wheel(false) => {}
+                    MouseEventKind::ScrollUp if app.overlay_wheel(true, m.row as usize) => {}
+                    MouseEventKind::ScrollDown if app.overlay_wheel(false, m.row as usize) => {}
                     MouseEventKind::ScrollUp => app.scroll(-WHEEL_LINES),
                     MouseEventKind::ScrollDown => app.scroll(WHEEL_LINES),
                     MouseEventKind::Down(MouseButton::Left) => app.select_press(m.column, m.row),
@@ -2874,6 +2919,77 @@ mod tests {
         let tiny = plain_frame(&app, 60, 6);
         assert!(queue_rows(&tiny).is_empty());
         assert!(!tiny.iter().any(|r| r.contains("실행 중-")));
+    }
+
+    // Go panelWheel (tui.go:541-567): a wheel notch over the panels moves the shared panel window one row.
+    #[test]
+    fn wheel_over_the_panels_scrolls_the_agent_window() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::AgentRows {
+            rows: (0..5)
+                .map(|i| agent_row(&i.to_string(), false, false))
+                .collect(),
+        });
+        let rows = plain_frame(&app, 60, 20);
+        let first = rows.iter().position(|r| r.contains("실행 중-")).unwrap();
+        assert!(app.overlay_wheel(false, first));
+        assert_eq!(app.pan_off, 1);
+        let rows = plain_frame(&app, 60, 20);
+        assert!(rows.iter().any(|r| r.contains("task 1")), "{rows:?}");
+        assert!(!rows.iter().any(|r| r.contains("task 0")), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("2-4/5")), "{rows:?}");
+        // Wheel up stops at the first row.
+        app.overlay_wheel(true, first);
+        app.overlay_wheel(true, first);
+        assert_eq!(app.pan_off, 0);
+    }
+
+    // A wheel notch above the panels is not taken by them (Go panelWheel row check).
+    #[test]
+    fn wheel_above_the_panels_is_not_taken_by_them() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::AgentRows {
+            rows: (0..5)
+                .map(|i| agent_row(&i.to_string(), false, false))
+                .collect(),
+        });
+        assert!(!app.overlay_wheel(false, 0));
+        assert_eq!(app.pan_off, 0);
+    }
+
+    // Go lastTool (tui.go:900-906): the busy row ends with the last tool, cut to 40 runes; a new turn clears it.
+    #[test]
+    fn busy_row_shows_the_last_tool_and_a_new_turn_clears_it() {
+        let mut app = App::new(100, 30);
+        app.apply(UiEvent::Busy(true));
+        app.apply(UiEvent::ToolStart {
+            id: "t1".into(),
+            name: "Agent".into(),
+            summary: "x".repeat(60),
+        });
+        assert_eq!(app.last_tool.chars().count(), LAST_TOOL_RUNES);
+        let body = app.body(100);
+        assert!(
+            body.iter()
+                .any(|r| r.contains(&format!("0m00s · {}", app.last_tool))),
+            "{body:?}"
+        );
+        app.apply(UiEvent::Busy(true));
+        assert!(app.last_tool.is_empty());
+    }
+
+    // The slash menu takes room from the queue (Go popH): an open menu leaves fewer queue rows.
+    #[test]
+    fn slash_menu_takes_room_from_the_queue() {
+        let mut app = App::new(60, 14);
+        app.apply(UiEvent::QueueTexts(
+            (0..5).map(|i| format!("q{i}")).collect(),
+        ));
+        let before = queue_rows(&plain_frame(&app, 60, 14)).len();
+        type_str(&mut app, "/");
+        assert!(app.popup_h() > 0);
+        let after = queue_rows(&plain_frame(&app, 60, 14)).len();
+        assert!(after < before, "{before} -> {after}");
     }
 
     #[test]
