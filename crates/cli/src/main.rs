@@ -280,6 +280,8 @@ mod tests {
 }
 
 fn main() {
+    // Go main.go: update.CleanupOld() runs before dispatch.
+    chaude_update::cleanup_old();
     let args: Vec<String> = env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
         Some("gen-settings") => settings::gen_settings_main(&args[1..]),
@@ -297,6 +299,7 @@ fn main() {
         Some(a) if a.starts_with('-') => run_tui(&args),
         Some("metrics") => metrics_main(&args[1..]),
         Some("clean") => chaude_clean::main(&args[1..]),
+        Some("update") => chaude_update::run_cli(VERSION, &args[1..]),
         Some(cmd) if chaude_scripts::has(cmd) => chaude_scripts::run(cmd, &args[1..]),
         Some(cmd) => {
             eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");

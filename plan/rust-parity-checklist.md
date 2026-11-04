@@ -16,13 +16,13 @@ Counts are rows, not individual flags. Repl flags are one row (F3) covering 26 f
 | C6 | `--import-dry-run` | main.go:45 | done | crates/cli/src/main.rs import_dry_run | prints dry_run_report; exit 0 when reco preserved, else 1 |
 | C7 | `gen-settings [os] [--out] [--src] [--python]` | main.go:47, settings.go:269-300 | done | crates/core/src/settings/mod.rs:187 | |
 | C8 | `clean [dir] [--yes]` | main.go:49, clean.go | done | crates/cli/src/main.rs arm `clean` -> chaude_clean::main | smoke: empty dir exit 0 |
-| C9 | `update` | main.go:51 | missing | crates/update (not wired) | |
+| C9 | `update` | main.go:51 | done | crates/update run_cli wired in main.rs | eed9116 |
 | C10 | `--version`, `-v`, `version` | main.go:53 | done | crates/cli/src/main.rs:195 | |
 | C11 | `-h`, `--help`, `help` text | main.go:20-29, 55 | done | crates/cli/src/main.rs USAGE | verbatim Go usage; scripts list from NAMES text |
 | C12 | 7 helper scripts (`scripts.Has`) | main.go:61, deprecated/src/main/intt/internal/scripts/scripts.go:17-27, helpText common.go:364-395 | done | crates/cli/src/main.rs match arm chaude_scripts::has (7 modules) | charcount, claude-history, compress-archive, export-history, extract-transcript, search-history, usage-report. Ported and tested (3 unit, 5 charcount, 7 smoke). Wired: crates/cli/Cargo.toml dep chaude-scripts and main.rs arm `Some(cmd) if chaude_scripts::has(cmd)`. Smoke: `chaude charcount FILE` exit 0 |
 | C13 | leading `-flag` runs repl | main.go:58-59 | done | crates/cli/src/main.rs main() arm `Some(a) if a.starts_with('-')` | routing only; repl flag parsing (unknown-flag rejection) waits on C2/F3 |
 | C14 | unknown command error, exit 2 | main.go:64-65 | done | crates/cli/src/main.rs:206-209 | message text differs |
-| C15 | `update.CleanupOld()` at startup | main.go:33 | missing | none | depends on C9 |
+| C15 | `update.CleanupOld()` at startup | main.go:33 | done | chaude_update::cleanup_old() first in main | |
 
 ## Repl flags (internal/harness/repl.go:1276-1306)
 
