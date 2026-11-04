@@ -1232,6 +1232,47 @@ fn handoff_snapshot_lists_running_background_agent_with_result_path() {
 }
 
 #[test]
+fn category_switch_hides_marker_and_starts_new_session() {
+    let _g = lock();
+    let f = fake(
+        "catswitch",
+        &[
+            "cat_marker_turn.jsonl",
+            "cat_switch_turn.jsonl",
+            "handoff_turn.jsonl",
+        ],
+    );
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("first");
+    let first = until_idle(&rx);
+    let shown: String = first
+        .iter()
+        .filter_map(|e| match e {
+            UiEvent::TextDelta { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        shown.contains("Done with the parser."),
+        "text lost: {shown}"
+    );
+    assert!(!shown.contains("[ca"), "marker leaked: {shown}");
+    // The [cat-switch: beta] reply starts a new session after the turn (Go repl.go category rotation).
+    h.submit("write release notes");
+    let reason = loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { reason } => break reason,
+            UiEvent::TextDelta { text, .. } => {
+                assert!(!text.contains("[cat"), "marker leaked: {text}")
+            }
+            _ => {}
+        }
+    };
+    assert_eq!(reason, "category alpha -> beta");
+    h.shutdown();
+}
+
+#[test]
 fn resident_stage_rows_bracket_main_turn_and_agent_calls() {
     let _g = lock();
     let f = fake("stage_on", &["resume_agent_turn.jsonl"]);

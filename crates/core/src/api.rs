@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 use crate::budget::{self, Budget};
+use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
 use crate::clients::idle_deadline;
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
 use crate::forward::forward_rule_for;
@@ -592,6 +593,10 @@ struct State {
     // Prompt and assistant text of the running turn.
     turn_prompt: String,
     turn_reply: String,
+    // Hides [cat: X] markers from the streamed text of the main child (Go markerFilter).
+    mark: MarkerFilter,
+    // Current task category from the last normal turn (Go r.cat).
+    cat: String,
     // Snapshot for the next prompt sent to a fresh child; empty when none is pending.
     pending_snapshot: String,
     // Set while a hidden handoff turn runs; its text is not shown.
@@ -746,6 +751,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         last_rot_fail: None,
         turn_prompt: String::new(),
         turn_reply: String::new(),
+        mark: MarkerFilter::default(),
+        cat: String::new(),
         pending_snapshot: String::new(),
         handoff: None,
         prompter: Prompter::new(),
@@ -1433,6 +1440,7 @@ impl State {
                 self.pending_snapshot.clear();
                 self.turn_prompt = text.to_string();
                 self.turn_reply.clear();
+                self.mark = MarkerFilter::default();
                 self.turn_started = Some(Instant::now());
                 self.stage("main", StagePhase::Working);
                 self.last_activity = Instant::now();
@@ -1601,14 +1609,27 @@ impl State {
                     StreamInner::ContentBlockDelta {
                         delta: Delta::TextDelta { text },
                     } => {
-                        if matches!(role, Role::Main) {
+                        // The raw reply keeps the [cat: X] marker for category_rotation; the screen gets it filtered.
+                        let shown = if matches!(role, Role::Main) {
                             self.turn_reply.push_str(&text);
-                        }
-                        if self.handoff.is_none() {
-                            self.emit(UiEvent::TextDelta { role, text });
+                            self.mark.feed(&text)
+                        } else {
+                            text
+                        };
+                        if self.handoff.is_none() && !shown.is_empty() {
+                            self.emit(UiEvent::TextDelta { role, text: shown });
                         }
                     }
                     StreamInner::MessageStop if self.handoff.is_none() => {
+                        if matches!(role, Role::Main) {
+                            let rest = self.mark.flush();
+                            if !rest.is_empty() {
+                                self.emit(UiEvent::TextDelta {
+                                    role: role.clone(),
+                                    text: rest,
+                                });
+                            }
+                        }
                         self.emit(UiEvent::MessageDone { role })
                     }
                     _ => {}
@@ -2162,6 +2183,24 @@ impl State {
 
     // Rotation and the queued turn, once the reply is final (Go runs these after viaTUI).
     fn after_turn(&mut self) {
+        // Go repl.go: a category switch starts a new session before the context check, unless cooling down.
+        let (cat, switched) = category_rotation(
+            &self.turn_prompt,
+            &self.turn_reply,
+            &self.cat,
+            self.cfg.no_category_rotate,
+        );
+        let prev = std::mem::replace(&mut self.cat, cat.clone());
+        let cooled = self
+            .last_rot_fail
+            .is_none_or(|t| t.elapsed() >= self.cfg.rotate_cooldown);
+        if switched
+            && cooled
+            && self.proc.is_some()
+            && self.start_handoff(format!("category {prev} -> {cat}"))
+        {
+            return;
+        }
         if self.rotation_wanted() {
             let reason = self.ctx_reason();
             let timeout = self.cfg.rotate_defer_timeout;
@@ -2590,7 +2629,12 @@ fn answer(waiter: Option<Sender<Result<String, String>>>, out: Result<String, St
 // Go start() rule for the main child: the forward rule for its model (none for an Opus main), joined with the
 // category rule when category rotation is on. The resident coder rule is appended by the MCP branch of start_child.
 fn main_rule(cfg: &Config) -> String {
-    join_rules(&[forward_rule_for(&cfg.model)])
+    let category = if cfg.no_category_rotate {
+        ""
+    } else {
+        CATEGORY_RULE
+    };
+    join_rules(&[forward_rule_for(&cfg.model), category])
 }
 
 // Go TrimSpace(rule + " " + part): non-empty parts joined by one space.
@@ -2712,11 +2756,16 @@ mod tests {
 
     // Go start(): the main child's rule carries the forward rule unless the model is Opus.
     #[test]
-    fn main_rule_forwards_for_non_opus_only() {
+    fn main_rule_forwards_for_non_opus_and_adds_category() {
         let mut cfg = Config::default();
         cfg.model = "haiku".into();
-        assert_eq!(main_rule(&cfg), crate::forward::FORWARD_RULE);
+        assert_eq!(
+            main_rule(&cfg),
+            join_rules(&[crate::forward::FORWARD_RULE, CATEGORY_RULE])
+        );
         cfg.model = "claude-OPUS-4".into();
+        assert_eq!(main_rule(&cfg), CATEGORY_RULE);
+        cfg.no_category_rotate = true;
         assert_eq!(main_rule(&cfg), "");
     }
 
