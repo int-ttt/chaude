@@ -71,7 +71,7 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/budget_test.go::TestBudgetFullModelIDPriced | core/src/budget.rs::full_model_id_is_priced_like_alias | covered | |
 | harness/busyslash_test.go::TestBusySlashAllowedAndRefused | - | missing | busy-slash allow/refuse rule not in Rust |
 | harness/busyslash_test.go::TestVersionNoteShowsChaudeVersion | - | missing | version note not covered in Rust tests |
-| harness/cachettl_test.go::TestParseCacheTTL | - | missing | Rust has no cache-TTL registry |
+| harness/cachettl_test.go::TestParseCacheTTL | crates/core/src/cache_ttl.rs::parse_cache_ttl_accepts_three_values_only | covered | |
 | harness/cachettl_test.go::TestRegistryNilWhenNoFile | - | missing | Rust has no cache-TTL registry |
 | harness/category_test.go::TestParseCategory | - | missing | Rust has no category rotation |
 | harness/category_test.go::TestCategoryRotation | - | missing | Rust has no category rotation |
