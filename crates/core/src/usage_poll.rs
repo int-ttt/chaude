@@ -156,7 +156,8 @@ Current week (all models): 27% used · resets Nov 1 at 4:59pm (Asia/Seoul)";
         // Bad session number fails the whole parse, even when a later session line is valid (Go FindStringSubmatch).
         assert!(parse_usage("Current session: 1.2.3% used\nCurrent session: 4% used").is_none());
         // Week line with a bad number is dropped, session kept.
-        let rec = parse_usage("Current session: 2% used\nCurrent week (all models): 1.2.3% used").expect("ok");
+        let rec = parse_usage("Current session: 2% used\nCurrent week (all models): 1.2.3% used")
+            .expect("ok");
         assert_eq!(rec["session_pct"], 2.0);
         assert!(!rec.contains_key("week_pct"));
         // Label without "used" or "%" does not match.

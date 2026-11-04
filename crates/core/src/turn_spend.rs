@@ -44,9 +44,15 @@ impl TurnSpend {
             return;
         }
         let empty = Map::new();
-        let m = ev.get("message").and_then(Value::as_object).unwrap_or(&empty);
+        let m = ev
+            .get("message")
+            .and_then(Value::as_object)
+            .unwrap_or(&empty);
         let id = m.get("id").and_then(Value::as_str).unwrap_or("");
-        let usage = m.get("usage").and_then(Value::as_object).filter(|u| !u.is_empty());
+        let usage = m
+            .get("usage")
+            .and_then(Value::as_object)
+            .filter(|u| !u.is_empty());
         if let Some(u) = usage.filter(|_| !is_main_event(ev) && !id.is_empty()) {
             let row = self.sub.entry(id.to_string()).or_default();
             for k in SPEND_KEYS {
@@ -183,7 +189,12 @@ mod tests {
         let mut s = TurnSpend::new();
         s.on_event(&sub_assist(None, "m1", json!({"output_tokens": 7.0})));
         let f = s.fields();
-        assert!(f.as_object().unwrap().keys().all(|k| !k.starts_with("sub_")));
+        assert!(
+            f.as_object()
+                .unwrap()
+                .keys()
+                .all(|k| !k.starts_with("sub_"))
+        );
     }
 
     // Go TestTurnSpendSpawnCounting
@@ -217,7 +228,10 @@ mod tests {
         let mut c = TurnCost::new();
         let check = |c: &mut TurnCost, sess: &str, cost: Option<f64>, want: f64| {
             let got = c.delta(sess, cost).expect("numeric cost");
-            assert!((got - want).abs() < 1e-9, "delta({sess}) = {got}, want {want}");
+            assert!(
+                (got - want).abs() < 1e-9,
+                "delta({sess}) = {got}, want {want}"
+            );
         };
         check(&mut c, "a", Some(0.438), 0.438);
         check(&mut c, "a", Some(0.963), 0.525);
