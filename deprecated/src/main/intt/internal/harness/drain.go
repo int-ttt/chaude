@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -23,6 +24,7 @@ type agentRec struct {
 	Log         []string // live transcript lines of the sub-agent (text, tool calls, results)
 	OutPath     string
 	Background  bool
+	AgentID     string // handle from the launch result ("agentId: <id>"); SendMessage resumes the agent by it
 	Started     time.Time
 	ResultPath  string // durable result file, relative to cwd: notes/runs/<YYMMDD>-agent-<id>.md
 	ResultDone  bool   // the result block was appended to ResultPath (background agents)
@@ -124,21 +126,54 @@ func (t *agentTracker) onToolUse(id, name string, input map[string]any, now time
 // onToolResult: foreground agents finish with their tool_result; background ones only "launch".
 func (t *agentTracker) onToolResult(id string) { t.onToolResultText(id, "") }
 
+var launchIDRe = regexp.MustCompile(`agentId:\s*([A-Za-z0-9_-]+)`)
+
 // onToolResultText: an "Async agent launched" result means the agent runs in the background even
-// when run_in_background was absent from the input (agent-definition default); it stays running.
+// when run_in_background was absent from the input (agent-definition default); it stays running and
+// its agentId is kept for SendMessage. A SendMessage result that resumed an agent puts it back on the
+// active list.
 func (t *agentTracker) onToolResultText(id, text string) {
 	t.mu.Lock()
 	var lines []string
-	if a := t.agents[id]; a != nil && !a.Background {
+	if a := t.agents[id]; a != nil {
 		if strings.Contains(text, "Async agent launched") {
 			a.Background = true
-		} else if l := markDoneLocked(a); l != "" {
-			lines = append(lines, l)
+			if m := launchIDRe.FindStringSubmatch(text); m != nil {
+				a.AgentID = m[1]
+			}
+			t.persistLocked()
+		} else if !a.Background {
+			if l := markDoneLocked(a); l != "" {
+				lines = append(lines, l)
+			}
+			t.persistLocked()
 		}
-		t.persistLocked()
 	}
+	t.resumeLocked(text, time.Now())
 	t.mu.Unlock()
 	t.emit(lines)
+}
+
+// resumeLocked (caller holds t.mu): a SendMessage result {"success":true,...,"resumedAgentId":"<id>"}
+// restarts that agent (Done=false, Started=now). success:false changes nothing.
+func (t *agentTracker) resumeLocked(text string, now time.Time) {
+	if !strings.Contains(text, "resumedAgentId") {
+		return
+	}
+	var r struct {
+		Success        bool   `json:"success"`
+		ResumedAgentID string `json:"resumedAgentId"`
+	}
+	if json.Unmarshal([]byte(strings.TrimSpace(text)), &r) != nil || !r.Success || r.ResumedAgentID == "" {
+		return
+	}
+	for _, a := range t.agents {
+		if a.AgentID != "" && (a.AgentID == r.ResumedAgentID || len(a.AgentID) >= 8 && strings.HasPrefix(r.ResumedAgentID, a.AgentID)) {
+			a.Done, a.Started = false, now
+			t.persistLocked()
+			return
+		}
+	}
 }
 
 var notifIDRe = regexp.MustCompile(`<tool-use-id>([^<]+)</tool-use-id>`)

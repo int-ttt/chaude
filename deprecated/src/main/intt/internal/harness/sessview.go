@@ -21,8 +21,22 @@ type sessView struct {
 	list  []sessionInfo
 	sel   int
 	id    string
+	name  string   // agent name of the chosen session (shown instead of its id)
 	turns []string // user prompts of the chosen session; nil while at level 1
 	cur   int
+	off   int // top body line of the shown prompt (↑/↓, pgup/pgdn, home/end, wheel)
+}
+
+// agentLabel: the name /view shows for a session: its agent (main, prompter, tui, coder…), else the
+// transcript title. Never the session id.
+func (s sessionInfo) agentLabel() string {
+	switch {
+	case s.Agent != "":
+		return s.Agent
+	case s.Name != "":
+		return trunc(s.Name, 24)
+	}
+	return "session"
 }
 
 // noteOwn records a claude child this process started; its session id is known once it has spoken.
@@ -52,16 +66,21 @@ func (r *Repl) ownSessionList() ([]sessionInfo, string) {
 	}
 	r.ownMu.Lock()
 	ids := map[string]bool{}
+	roles := map[string]string{}
 	for id := range r.prevOwned {
 		ids[id] = true
 	}
 	for _, s := range r.owned {
 		if id := s.ID(); id != "" {
 			ids[id] = true
+			roles[id] = s.Role
 		}
 	}
 	r.ownMu.Unlock()
 	out := filterOwn(l, ids)
+	for i := range out {
+		out[i].Agent = roles[out[i].ID]
+	}
 	if len(out) == 0 {
 		return nil, "no Claude Code sessions from this chaude session yet"
 	}
@@ -108,7 +127,7 @@ func (m *tuiModel) openSessPrompts(s sessionInfo) string {
 	for _, t := range imp.Turns {
 		prompts = append(prompts, t[0])
 	}
-	m.sv.id, m.sv.turns, m.sv.cur = s.ID, prompts, 0
+	m.sv.id, m.sv.name, m.sv.turns, m.sv.cur, m.sv.off = s.ID, s.agentLabel(), prompts, 0, 0
 	return ""
 }
 
@@ -128,21 +147,41 @@ func (m *tuiModel) closeSessView() {
 	m.vp.GotoBottom()
 }
 
-// svKey: esc backs out one level (prompts -> list -> normal screen); arrows select or step through prompts.
+// svBody: the shown prompt wrapped to the view width.
+func (m *tuiModel) svBody() []string {
+	return strings.Split(lipgloss.NewStyle().Width(max(10, m.w-2)).Render(m.sv.turns[m.sv.cur]), "\n")
+}
+
+// svScroll sets the top body line of the shown prompt, clamped so its last line can reach the bottom.
+func (m *tuiModel) svScroll(top int) {
+	m.sv.off = max(0, min(top, len(m.svBody())-max(1, m.vp.Height-1)))
+}
+
+// svKey: esc backs out one level (prompts -> list -> normal screen). Level 2: up/down/pgup/pgdn/home/end
+// scroll the prompt text, left/right step through prompts.
 func (m *tuiModel) svKey(k tea.KeyMsg) {
 	v := m.sv
 	if v.turns != nil {
+		room := max(1, m.vp.Height-1)
 		switch k.String() {
-		case "left", "up", "k", "pgup":
-			v.cur = max(0, v.cur-1)
-		case "right", "down", "j", "pgdown":
-			v.cur = min(len(v.turns)-1, v.cur+1)
+		case "left":
+			v.cur, v.off = max(0, v.cur-1), 0
+		case "right":
+			v.cur, v.off = min(len(v.turns)-1, v.cur+1), 0
+		case "up", "k":
+			m.svScroll(v.off - 1)
+		case "down", "j":
+			m.svScroll(v.off + 1)
+		case "pgup":
+			m.svScroll(v.off - room)
+		case "pgdown":
+			m.svScroll(v.off + room)
 		case "home":
-			v.cur = 0
+			m.svScroll(0)
 		case "end":
-			v.cur = len(v.turns) - 1
+			m.svScroll(len(m.svBody()))
 		case "esc":
-			v.turns, v.cur = nil, 0
+			v.turns, v.cur, v.off = nil, 0, 0
 		case "q", "ctrl+c":
 			m.closeSessView()
 		}
@@ -179,7 +218,7 @@ func (m *tuiModel) sessLines() []string {
 		if time.Since(s.Mod) < sessActiveWindow {
 			mark = "● "
 		}
-		t := fmt.Sprintf("%s%s  %s", mark, shortID(s.ID), s.label())
+		t := fmt.Sprintf("%s%-12s  %s", mark, s.agentLabel(), s.label())
 		if i == v.sel {
 			t = lipgloss.NewStyle().Foreground(orange).Render("> " + t)
 		} else {
@@ -193,15 +232,13 @@ func (m *tuiModel) sessLines() []string {
 // svPromptLines renders level 2 as an overlay of exactly hh lines that replaces the transcript.
 func (m *tuiModel) svPromptLines(hh int) string {
 	v := m.sv
-	head := lipgloss.NewStyle().Foreground(orange).Render(fmt.Sprintf("Session %s  prompt %d/%d", shortID(v.id), v.cur+1, len(v.turns))) +
-		dimSt.Render("  ←/→ prev/next · esc back")
-	cw := max(10, m.w-2)
-	all := strings.Split(lipgloss.NewStyle().Width(cw).Render(v.turns[v.cur]), "\n")
-	body := all
-	if room := max(1, hh-1); len(all) > room {
-		body = append(append([]string(nil), all[:room-1]...), dimSt.Render(fmt.Sprintf("… (+%d lines)", len(all)-(room-1))))
-	}
-	l := append([]string{ansiTrunc(head, m.w)}, body...)
+	body := m.svBody()
+	m.svScroll(v.off) // window size or prompt may have changed
+	room := max(1, hh-1)
+	end := min(len(body), v.off+room)
+	head := lipgloss.NewStyle().Foreground(orange).Render(fmt.Sprintf("%s  prompt %d/%d", v.name, v.cur+1, len(v.turns))) +
+		dimSt.Render(fmt.Sprintf("  lines %d-%d/%d · ↑/↓ pgup/pgdn scroll · ←/→ prev/next · esc back", min(v.off+1, end), end, len(body)))
+	l := append([]string{ansiTrunc(head, m.w)}, body[v.off:end]...)
 	for len(l) < hh {
 		l = append(l, "")
 	}

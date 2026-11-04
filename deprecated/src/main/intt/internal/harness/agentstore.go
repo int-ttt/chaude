@@ -37,6 +37,7 @@ type savedAgent struct {
 	OutPath    string    `json:"out_path,omitempty"`
 	Background bool      `json:"background,omitempty"`
 	Owner      int       `json:"owner_pid,omitempty"` // harness process that tracked it
+	AgentID    string    `json:"agent_id,omitempty"`  // launch handle, for SendMessage resume
 	Started    time.Time `json:"started"`
 	Updated    time.Time `json:"updated"`
 }
@@ -200,7 +201,7 @@ func (a *agentRec) saved(parent, transcript string) savedAgent {
 		st = stoDone
 	}
 	return savedAgent{ID: a.ID, Model: a.Model, Name: a.Name, Task: a.Task, Prompt: a.Prompt, Status: st, Summary: a.Summary,
-		Parent: parent, Transcript: transcript, OutPath: a.OutPath, Background: a.Background, Started: a.Started}
+		Parent: parent, Transcript: transcript, OutPath: a.OutPath, Background: a.Background, AgentID: a.AgentID, Started: a.Started}
 }
 
 // lastSummary: the agent's last plain text line (not a tool call / result line).

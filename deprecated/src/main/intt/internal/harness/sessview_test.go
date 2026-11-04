@@ -25,7 +25,7 @@ func svModel(t *testing.T) *tuiModel {
 	writeSess(t, dir, "sessbbb2", now.Add(-time.Hour), "older prompt")
 	r := &Repl{tracker: newAgentTracker()}
 	r.a.Cwd = cwd
-	r.noteOwn(&Session{SessionID: "sessaaa1"})
+	r.noteOwn(&Session{SessionID: "sessaaa1", Role: "coder"})
 	r.noteOwn(&Session{SessionID: "sessbbb2"})
 	m := newTUIModel(r, make(chan string, 1))
 	m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
@@ -41,7 +41,7 @@ func TestViewEscBacksOutToNormalScreen(t *testing.T) {
 	if msg := m.openSessView(""); msg != "" || m.sv == nil {
 		t.Fatalf("/view did not open: %q", msg)
 	}
-	if v := m.View(); !strings.Contains(v, "Sessions") || !strings.Contains(v, "sessaaa1") || !strings.Contains(v, "● ") {
+	if v := m.View(); !strings.Contains(v, "Sessions") || !strings.Contains(v, "coder") || strings.Contains(v, "sessaaa1") || !strings.Contains(v, "● ") {
 		t.Fatalf("session list not drawn below input:\n%s", v)
 	}
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -133,5 +133,45 @@ func TestViewWheelMovesSessionCursor(t *testing.T) {
 	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
 	if m.sv.sel != 1 {
 		t.Fatalf("wheel up: sel=%d, want 1", m.sv.sel)
+	}
+}
+
+func TestViewPromptScrollsInsideTranscript(t *testing.T) {
+	m := svModel(t)
+	m.openSessView("")
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // open the first session: level 2
+	m.sv.turns = []string{strings.Repeat("long prompt text ", 200)}
+	m.sv.cur, m.sv.off = 0, 0
+	last := len(m.svBody()) - max(1, m.vp.Height-1)
+	if last <= 3 {
+		t.Fatalf("prompt too short to scroll: body=%d lines", len(m.svBody()))
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.sv.off != 1 {
+		t.Fatalf("down: off=%d, want 1", m.sv.off)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if m.sv.off <= 1 {
+		t.Fatalf("pgdown did not move: off=%d", m.sv.off)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	if m.sv.off != last {
+		t.Fatalf("end: off=%d, want %d", m.sv.off, last)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if m.sv.off != last {
+		t.Fatalf("down past end: off=%d, want clamp at %d", m.sv.off, last)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	if m.sv.off != 0 {
+		t.Fatalf("home: off=%d, want 0", m.sv.off)
+	}
+	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	if m.sv.off != 3 {
+		t.Fatalf("wheel down: off=%d, want 3", m.sv.off)
+	}
+	m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	if m.sv.off != 0 {
+		t.Fatalf("wheel up: off=%d, want 0", m.sv.off)
 	}
 }

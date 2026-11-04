@@ -302,7 +302,7 @@ func (t *agentTracker) restore(s savedAgent) {
 		return
 	}
 	a := &agentRec{ID: s.ID, Task: s.Task, Prompt: s.Prompt, Model: s.Model, Name: s.Name, OutPath: s.OutPath,
-		Background: s.Background, Started: s.Started, Summary: s.Summary, Restored: true, Done: true,
+		Background: s.Background, AgentID: s.AgentID, Started: s.Started, Summary: s.Summary, Restored: true, Done: true,
 		Failed: s.Status == stoFailed, Interrupted: s.Status == stoInterrupted || s.Status == stoRunning}
 	if a.Interrupted && s.Summary != "" {
 		a.Log = []string{"(restored) " + s.Summary}

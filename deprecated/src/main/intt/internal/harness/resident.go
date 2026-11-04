@@ -147,6 +147,7 @@ func (r *Repl) spawnSlot(slot residentSlot) (*liveChild, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.Role = slot.Role
 	r.noteOwn(s)
 	c := &liveChild{Sess: s, Tracker: newAgentTracker(), Model: slot.Model, Role: slot.Role}
 	c.setLastAPI(time.Now())

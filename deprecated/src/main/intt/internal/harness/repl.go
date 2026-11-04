@@ -374,6 +374,7 @@ func (r *Repl) start() error {
 		return err
 	}
 	r.sess = s
+	s.Role = "main"
 	r.noteOwn(s)
 	r.clockMu.Lock()
 	r.lastAPI = time.Time{} // new child: no API call yet (idleDue needs a turn)

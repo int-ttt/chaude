@@ -21,8 +21,9 @@ type sessionInfo struct {
 	First, Last string
 	Start       time.Time // first event time (zero: Mod is used)
 	Cwd, Name   string
-	Cleared     bool // a user /clear is in the file: the next file starts a new group
-	ClearHead   bool // the /clear is before the first turn: this file starts a new group
+	Agent       string // owning agent name (Session.Role) for /view; empty for sessions of an earlier run
+	Cleared     bool   // a user /clear is in the file: the next file starts a new group
+	ClearHead   bool   // the /clear is before the first turn: this file starts a new group
 }
 
 func claudeProjectDir(cwd string) (string, error) {

@@ -122,3 +122,29 @@ func TestAgentDoneNotice(t *testing.T) {
 		t.Fatalf("background notices: %q", got)
 	}
 }
+
+// A SendMessage result that resumed a finished background agent puts it back on the active list;
+// success:false leaves it finished.
+func TestResumeSendMessageReactivatesAgent(t *testing.T) {
+	tr := newAgentTracker()
+	now := time.Now()
+	tr.onToolUse("u1", "Agent", map[string]any{"description": "review", "subagent_type": "reviewer", "run_in_background": true}, now)
+	tr.onToolResultText("u1", "Async agent launched successfully.\nagentId: a1b2c3d4e5f6 (use SendMessage with to: 'a1b2c3d4e5f6' to continue this agent)\noutput_file: /tmp/x")
+	if a := tr.agents["u1"]; a.AgentID != "a1b2c3d4e5f6" || !a.Background {
+		t.Fatalf("launch id not kept: %+v", a)
+	}
+	tr.onNotification("<task-notification><tool-use-id>u1</tool-use-id></task-notification>")
+	if len(tr.running()) != 0 {
+		t.Fatal("finished agent still running")
+	}
+	tr.onToolResultText("s1", `{"success":false,"resumedAgentId":"a1b2c3d4e5f6"}`)
+	if len(tr.running()) != 0 {
+		t.Fatal("success:false must not resume")
+	}
+	before := time.Now()
+	tr.onToolResultText("s2", `{"success":true,"message":"resumed","resumedAgentId":"a1b2c3d4e5f6"}`)
+	r := tr.running()
+	if len(r) != 1 || r[0].ID != "u1" || r[0].Done || r[0].Started.Before(before) {
+		t.Fatalf("resumed agent not active: %+v", r)
+	}
+}

@@ -126,6 +126,7 @@ type SessionOpts struct {
 // Session is one `claude -p` child. Send() a user message, then Events() until result.
 type Session struct {
 	SessionID string
+	Role      string // agent name shown in /view: main, prompter, tui, coder…
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	lines     chan string // closed at process stdout EOF

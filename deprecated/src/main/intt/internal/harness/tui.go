@@ -542,6 +542,14 @@ func (m *tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			wheelSel(&m.rpickSel, len(m.rpick), v.Button)
 			break
 		}
+		if m.sv != nil && m.sv.turns != nil { // /view prompt: wheel scrolls its text
+			if v.Button == tea.MouseButtonWheelUp {
+				m.svScroll(m.sv.off - 3)
+			} else if v.Button == tea.MouseButtonWheelDown {
+				m.svScroll(m.sv.off + 3)
+			}
+			break
+		}
 		if m.sv != nil && m.sv.turns == nil && len(m.sv.list) > 0 { // /view session list: same cursor picker
 			wheelSel(&m.sv.sel, len(m.sv.list), v.Button)
 			break
