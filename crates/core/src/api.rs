@@ -2757,8 +2757,10 @@ mod tests {
     // Go start(): the main child's rule carries the forward rule unless the model is Opus.
     #[test]
     fn main_rule_forwards_for_non_opus_and_adds_category() {
-        let mut cfg = Config::default();
-        cfg.model = "haiku".into();
+        let mut cfg = Config {
+            model: "haiku".into(),
+            ..Config::default()
+        };
         assert_eq!(
             main_rule(&cfg),
             join_rules(&[crate::forward::FORWARD_RULE, CATEGORY_RULE])
