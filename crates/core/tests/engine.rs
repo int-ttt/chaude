@@ -1179,20 +1179,15 @@ fn rotation_waits_for_background_agent_then_runs_at_defer_timeout() {
     let (h, rx) = Engine::start(cfg);
     h.submit("first");
     let evs = until_idle(&rx);
-    // The agent never reports a result, so the rotation is deferred: no handoff prompt yet.
+    // The agent never reports a result, so the rotation is deferred: no Rotated event before the turn ends.
+    // Only event order is checked. A stdin.log or elapsed-time check would race the 300 ms defer timer.
     assert!(
         !evs.iter().any(|e| matches!(e, UiEvent::Rotated { .. })),
         "{evs:?}"
     );
-    assert!(
-        !f.dir.join("stdin.log").exists()
-            || !fs::read_to_string(f.dir.join("stdin.log"))
-                .unwrap()
-                .contains("Write a handoff note")
-    );
-    // After the defer timeout the rotation runs while idle.
+    // After the defer timeout the rotation runs while idle. WAIT is a generous upper bound only.
     let mut rotated = false;
-    while let Ok(e) = rx.recv_timeout(Duration::from_secs(5)) {
+    while let Ok(e) = rx.recv_timeout(WAIT) {
         if matches!(e, UiEvent::Rotated { .. }) {
             rotated = true;
             break;
