@@ -189,8 +189,6 @@ pub fn parse_mode(s: &str) -> Option<PermMode> {
 }
 
 // tui.go:1100-1110 (note text for /update, shown before the off-thread check starts).
-// Not wired yet: /update is not dispatched to a check (C20).
-#[allow(dead_code)]
 pub const UPDATE_START_NOTE: &str = "checking for updates...";
 
 // Runtime values the Go handlers read from the Repl. The caller fills these in.

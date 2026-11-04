@@ -250,6 +250,17 @@ impl App {
                     .push(format!("◆ agent started: {description}"));
                 self.agents.push((id, description, Instant::now()));
             }
+            // A background agent resumed by SendMessage runs again under its original tool id (core keeps background=true).
+            UiEvent::AgentResumed {
+                id, description, ..
+            } => {
+                if !self.agents.iter().any(|(aid, _, _)| *aid == id) {
+                    self.agents.push((id.clone(), description, Instant::now()));
+                }
+                if !self.bg_agents.contains(&id) {
+                    self.bg_agents.push(id);
+                }
+            }
             UiEvent::AgentEnd { id, elapsed_ms } => {
                 self.agents.retain(|(aid, _, _)| *aid != id);
                 self.bg_agents.retain(|aid| *aid != id);
@@ -626,6 +637,11 @@ impl App {
                 self.settings = Some(settings::Picker::open(
                     std::env::current_dir().ok().as_deref(),
                 ));
+                return Action::Continue;
+            }
+            // TODO(update-check): Go runs the release check off the UI thread (tui.go:1100). No update client in cli yet.
+            Some(Dispatch::Update) => {
+                self.note(commands::UPDATE_START_NOTE);
                 return Action::Continue;
             }
             Some(Dispatch::OpenView { arg }) => {
