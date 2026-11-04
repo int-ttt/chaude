@@ -18,6 +18,7 @@ fn parked(model: &str, now: SystemTime) -> Parked<NoopClose> {
         model: model.to_string(),
         last_api: now,
         last_ctx: 0,
+        busy: false,
     }
 }
 

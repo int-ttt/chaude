@@ -1,23 +1,33 @@
-# 261104 haiku core engine wiring
-task: wire WorkerPool + pick_child/ChildSet into crates/core/src/api.rs (Go truth deprecated/src/main/intt/internal/harness/)
-changed: crates/core/src/api.rs
-done:
-- WorkerPool in State (pool, cur_task); dispatch sets cur_task; on_tool_use calls note_edit for Write/Edit/NotebookEdit when model == haiku and sid non-empty
-- ChildSet<ParkedProc> in State (children); orch_child: park_active on model switch (parks under child_key(cwd, model, ""), upserts PARKED row), pick_child -> UseLive (restore_child, own epoch) | Resume (resume_session) | StartNew (restart_child + pending_snapshot = with_reco(build_snapshot("route MODEL")) when switched and recent turns exist)
-- epoch_seq monotonic allocator (next_epoch) replaces epoch += 1 in restart_child and resume_session; restored parked child keeps its old epoch
-- unit test api::tests::stamp_time_maps_go_zero_to_epoch_and_keeps_instant
+task: core-engine wiring (Go truth deprecated/src/main/intt/internal/harness/)
+branch: rust-port (not pushed)
+owned: crates/core/src only
+
+item1: model-switch handoff snapshot
+  go_ref: repl.go switchChild (snapshot only when live==nil && resumeID=="" && sess!=nil; keep pending; else makeSnapshot("route "+target) when turns>0); makeSnapshotN handoff turn
+  rust: api.rs switch_needs_handoff (pure), start_switch_handoff (dispatch Target::Main holds prompt), finish_handoff -> complete_switch; orch_child no longer overwrites pending snapshot
+  test: api::tests::switch_handoff_only_for_fresh_child_without_pending_snapshot -> PASS
+  parity stub NOT un-ignored: crates/core/tests/parity_harness_p3_ignored.rs:64-68 is out of owned scope and its body is panic!("not ported"); un-ignoring would fail. Left ignored.
+  gaps: Fresh/Resume targets do not run handoff (Go only route switch); send-failure fallback drops old snapshot; idle_deadline ZERO vs Go neverCold; resume with busy child leaves no proc (pre-existing)
+
+item2: pick_child limit
+  go_ref: dispatch.go pickChild compares thresholdFor(target); opusThreshold 200_000
+  rust: api.rs pick_for uses rotate::threshold_for(model, cfg.rotate_threshold)
+  test: pick_child::tests::pick_child_uses_threshold_for_model -> PASS
+
+item3: parking skips busy children
+  go_ref: idlesweep.go sweepIdle busy = Tracker.running()>0, expiry requires !busy. EvictLRU does not check busy (kept as Go).
+  rust: child_set.rs Parked.busy, expired() filters busy; api.rs park_active sets busy = !agents.is_empty()
+  test: child_set::tests::expired_skips_busy_parked_children -> PASS
+  doubt: busy is a park-time snapshot (no tracker for parked children); can go stale.
+
 checks:
-- cargo test -p chaude-core: 227 lib + integration all pass
-- HOME=$(mktemp -d) cargo test --workspace: exit 0; passed 591, failed 0, ignored 51 (sum of "test result" lines)
-- temp HOME: no .chaude (only .cargo, .rustup created by toolchain); live ~/.chaude untouched
-- cargo fmt --all --check: exit 0
-- cargo clippy --workspace --all-targets: exit 0, 0 warnings
-config test audit: Config::default() in crates/core tests always overrides agents_file and clients_file (parity_harness_p2.rs:159, parity_harness_p3.rs:17, engine.rs:165, lib.rs:64 helper). cli/src/repl_args.rs:297 is an args-only test helper (no engine). cli/src/main.rs:101 is production.
-not done / remaining:
-- parity_harness_p3_ignored go_rotate_keeps_pending_snapshot still ignored stub (no rotate-with-pending-snapshot test ported)
-- no new dispatch/Router unit test; orch.rs route_f_mode_new_resume_rotate already covers Router
-- Go makeSnapshot runs an LLM handoff turn; Rust uses build_snapshot directly (deviation)
-doubts:
-- pick_child limit uses cfg.rotate_threshold; Go limit source not verified
-- park_active does not check busy; a parked busy child's late lines are dropped by epoch
-- resume branch: resume_session refuses while busy, leaving no proc (pre-existing behavior)
+  cargo test --workspace (HOME=mktemp, CARGO_HOME/RUSTUP_HOME pointed at real caches): exit 0; passed 596, ignored 51, failed 0
+  cargo test -p chaude-core --lib: 231 passed, 0 failed
+  cargo clippy --workspace --all-targets: exit 0, 0 warnings
+  cargo fmt --all --check: exit 0 (after cargo fmt -p chaude-core, changed api.rs only)
+
+env:
+  disk ~714Mi free; fresh HOME re-downloads toolchain (~1.5GB) -> used CARGO_HOME/RUSTUP_HOME override.
+  temp HOME dirs left in $TMPDIR (cleanup denied by auto-mode classifier; not retried).
+
+commit: crates/core/src/api.rs, child_set.rs, pick_child.rs, role_coexist.rs, notes/runs/261104-haiku-core-wiring-final.md, notes/runs/261104-haiku-core-engine-wiring.md

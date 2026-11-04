@@ -41,6 +41,9 @@ pub struct Parked<S: Close> {
     pub model: String,
     pub last_api: SystemTime,
     pub last_ctx: u64,
+    /// Delegated agents were running when the child was parked (Go Tracker.running() > 0).
+    /// Busy children are not expired by the idle sweep (Go sweepIdle `!busy`).
+    pub busy: bool,
 }
 
 /// Parked-live children of one process, keyed by `child_key`.
@@ -103,11 +106,13 @@ impl<S: Close> ChildSet<S> {
         self.map().get(key).map(|c| (c.last_api, c.last_ctx))
     }
 
-    /// Sorted keys of children whose last API call is at least `deadline` old. Does not remove them.
+    /// Sorted keys of idle children whose last API call is at least `deadline` old. Busy children
+    /// are skipped (Go sweepIdle). Does not remove them.
     pub fn expired(&self, now: SystemTime, deadline: Duration) -> Vec<String> {
         let mut keys: Vec<String> = self
             .map()
             .iter()
+            .filter(|(_, c)| !c.busy)
             .filter(|(_, c)| match now.duration_since(c.last_api) {
                 Ok(age) => age >= deadline,
                 Err(_) => false,
@@ -195,6 +200,7 @@ mod tests {
             model: model.to_string(),
             last_api,
             last_ctx: 0,
+            busy: false,
         }
     }
 
@@ -210,6 +216,24 @@ mod tests {
         assert_ne!(
             child_key(&wd, "sonnet", ""),
             child_key(&wd, "sonnet", "exec")
+        );
+    }
+
+    // Go sweepIdle: a parked child with agents still running is not expired, even when cold.
+    #[test]
+    fn expired_skips_busy_parked_children() {
+        let n = Arc::new(AtomicUsize::new(0));
+        let s = ChildSet::new();
+        let now = SystemTime::now();
+        let old = now - Duration::from_secs(7200);
+        s.park("idle", fake(&n, Duration::ZERO, "", old));
+        let mut busy = fake(&n, Duration::ZERO, "", old);
+        busy.busy = true;
+        s.park("busy", busy);
+        assert_eq!(
+            s.expired(now, Duration::from_secs(3600)),
+            vec!["idle".to_string()],
+            "busy child must stay parked"
         );
     }
 

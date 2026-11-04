@@ -164,6 +164,24 @@ mod tests {
         );
     }
 
+    // Go pickChild compares against thresholdFor(target): an Opus child at 150k stays warm, a Haiku child does not.
+    #[test]
+    fn pick_child_uses_threshold_for_model() {
+        let now = SystemTime::now();
+        let live = Some((now, 150_000));
+        let opus = crate::rotate::threshold_for("claude-opus-5-5", LIMIT);
+        let haiku = crate::rotate::threshold_for("haiku", LIMIT);
+        assert_eq!(opus, 200_000);
+        assert_eq!(
+            pick_child(live, None, opus, now, DEADLINE),
+            ChildAction::UseLive
+        );
+        assert_eq!(
+            pick_child(live, None, haiku, now, DEADLINE),
+            ChildAction::StartNew
+        );
+    }
+
     #[test]
     fn is_warm_treats_future_last_api_as_warm() {
         let now = SystemTime::now();

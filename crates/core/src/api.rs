@@ -631,6 +631,8 @@ struct State {
     pending_snapshot: String,
     // Set while a hidden handoff turn runs; its text is not shown.
     handoff: Option<Handoff>,
+    // Model switch waiting for its handoff turn (Go switchChild): target model and the held prompt.
+    switch_to: Option<(String, String)>,
     // Prompter resident (Go prompter slot): summarizes each prompt before the main child gets it.
     prompter: Prompter,
     prompter_proc: Option<ClaudeProc>,
@@ -797,6 +799,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         ttl_seen: String::new(),
         pending_snapshot: String::new(),
         handoff: None,
+        switch_to: None,
         prompter: Prompter::new(),
         prompter_proc: None,
         prompter_epoch: 0,
@@ -979,6 +982,9 @@ impl State {
                 if let Some(m) = self.router.main_model().map(str::to_string)
                     && m != self.opts.model
                 {
+                    if self.start_switch_handoff(&m, &routed.text) {
+                        return;
+                    }
                     self.orch_child(m, None);
                 }
             }
@@ -1010,25 +1016,10 @@ impl State {
         }
         let cwd = self.client_cwd();
         let key = child_key(&cwd, &model, "");
-        let live = self.children.warm_info(&key);
-        let row = self
-            .clients
-            .as_ref()
-            .and_then(|reg| reg.get(&cwd, &model))
-            .map(|r| RegRow {
-                parked: r.state == PARKED,
-                session_id: r.session_id,
-                owner_pid: r.owner_pid,
-                last_api: stamp_time(r.last_api),
-                last_ctx: u64::try_from(r.last_ctx).unwrap_or(0),
-            });
-        let deadline = self.idle_deadline();
-        let limit = self.cfg.rotate_threshold;
-        let action = pick_child::pick_child(live, row.as_ref(), limit, SystemTime::now(), deadline);
-        let parked = match action {
+        let parked = match self.pick_for(&model) {
             ChildAction::UseLive => self.children.take(&key),
             ChildAction::Resume => {
-                if let Some(r) = row {
+                if let Some(r) = self.child_row(&cwd, &model) {
                     self.resume_session(&r.session_id);
                 }
                 return;
@@ -1037,13 +1028,81 @@ impl State {
         };
         match parked {
             Some(p) => self.restore_child(p),
+            // A pending snapshot (import or kept rotation) stays for the new child (Go switchChild).
             None => {
                 self.restart_child();
-                if switched && !self.recent.is_empty() {
-                    let note = format!("route {model}");
-                    self.pending_snapshot = with_reco(&self.last_reco, &self.build_snapshot(&note));
-                }
             }
+        }
+    }
+
+    // Registry row for (cwd, model), as pickChild reads it.
+    fn child_row(&self, cwd: &str, model: &str) -> Option<RegRow> {
+        self.clients
+            .as_ref()
+            .and_then(|reg| reg.get(cwd, model))
+            .map(|r| RegRow {
+                parked: r.state == PARKED,
+                session_id: r.session_id,
+                owner_pid: r.owner_pid,
+                last_api: stamp_time(r.last_api),
+                last_ctx: u64::try_from(r.last_ctx).unwrap_or(0),
+            })
+    }
+
+    // Go pickChild for the (cwd, model) child: reuse live, resume the registry row, or start new.
+    fn pick_for(&self, model: &str) -> ChildAction {
+        let cwd = self.client_cwd();
+        let live = self.children.warm_info(&child_key(&cwd, model, ""));
+        let row = self.child_row(&cwd, model);
+        // Go pickChild compares against thresholdFor(target): Opus gets its own 200k limit.
+        let limit = threshold_for(model, self.cfg.rotate_threshold);
+        pick_child::pick_child(
+            live,
+            row.as_ref(),
+            limit,
+            SystemTime::now(),
+            self.idle_deadline(),
+        )
+    }
+
+    // Go switchChild snapshot: a switch to a fresh child first runs the handoff turn on the running child. The
+    // prompt is held in switch_to and sent to the new child when the handoff ends (finish_handoff).
+    fn start_switch_handoff(&mut self, model: &str, text: &str) -> bool {
+        let pick = self.pick_for(model);
+        let due = switch_needs_handoff(
+            &self.pending_snapshot,
+            self.recent.len(),
+            self.proc.is_some(),
+            pick,
+            self.handoff.is_some(),
+        );
+        if !due {
+            return false;
+        }
+        self.switch_to = Some((model.to_string(), text.to_string()));
+        self.busy = true;
+        self.emit(UiEvent::Busy(true));
+        if self.start_handoff(format!("route {model}")) {
+            return true;
+        }
+        self.switch_to = None;
+        self.busy = false;
+        self.emit(UiEvent::Busy(false));
+        false
+    }
+
+    // Go switchChild after the snapshot: the old child is parked under its own model, the new child for the
+    // target starts with the snapshot in front of the held prompt.
+    fn complete_switch(&mut self, model: String, text: String, snapshot: String) {
+        self.park_active();
+        self.model = model.clone();
+        self.opts.model = model;
+        self.restart_child();
+        self.pending_snapshot = snapshot;
+        self.cur_task = text.clone();
+        if !self.send_turn(&text) {
+            self.busy = false;
+            self.emit(UiEvent::Busy(false));
         }
     }
 
@@ -1082,6 +1141,7 @@ impl State {
                 model: self.model.clone(),
                 last_api,
                 last_ctx: ctx,
+                busy: !self.agents.is_empty(),
             },
         );
     }
@@ -2636,6 +2696,7 @@ impl State {
         }
         if !valid && note.is_empty() && self.recent.is_empty() {
             // Go: nothing to carry, so the rotation is held and the session keeps running.
+            self.switch_to = None;
             self.last_rot_fail = Some(Instant::now());
             self.emit(UiEvent::Error(
                 "context rotation held: handoff failed".to_string(),
@@ -2652,6 +2713,10 @@ impl State {
             )
         };
         let snapshot = with_reco(&self.last_reco, &self.build_snapshot(&body));
+        if let Some((model, text)) = self.switch_to.take() {
+            self.complete_switch(model, text, snapshot);
+            return;
+        }
         self.rotate_child(snapshot, h.reason, valid, h.attempts);
         self.next_turn();
     }
@@ -3105,10 +3170,76 @@ fn observe_ttl(line: &str, seen: &str) -> Option<String> {
     Some(observed_ttl(u, seen))
 }
 
+// Go switchChild: the handoff turn runs only for a switch that starts a fresh child, with no pending snapshot
+// (a kept import snapshot wins), turns to hand off, a running session, and no handoff already in flight.
+fn switch_needs_handoff(
+    pending: &str,
+    recent: usize,
+    running: bool,
+    pick: ChildAction,
+    handoff_active: bool,
+) -> bool {
+    pending.is_empty() && recent > 0 && running && !handoff_active && pick == ChildAction::StartNew
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::{TempDir, isolated};
+
+    // Go switchChild snapshot rule (resumeshift_test.go TestRotateKeepsPendingSnapshot: no handoff when a snapshot is pending).
+    #[test]
+    fn switch_handoff_only_for_fresh_child_without_pending_snapshot() {
+        assert!(switch_needs_handoff(
+            "",
+            2,
+            true,
+            ChildAction::StartNew,
+            false
+        ));
+        assert!(!switch_needs_handoff(
+            "IMPORT SNAPSHOT",
+            2,
+            true,
+            ChildAction::StartNew,
+            false
+        ));
+        assert!(!switch_needs_handoff(
+            "",
+            0,
+            true,
+            ChildAction::StartNew,
+            false
+        ));
+        assert!(!switch_needs_handoff(
+            "",
+            2,
+            false,
+            ChildAction::StartNew,
+            false
+        ));
+        assert!(!switch_needs_handoff(
+            "",
+            2,
+            true,
+            ChildAction::UseLive,
+            false
+        ));
+        assert!(!switch_needs_handoff(
+            "",
+            2,
+            true,
+            ChildAction::Resume,
+            false
+        ));
+        assert!(!switch_needs_handoff(
+            "",
+            2,
+            true,
+            ChildAction::StartNew,
+            true
+        ));
+    }
 
     #[test]
     fn observe_ttl_reads_assistant_usage_only() {
