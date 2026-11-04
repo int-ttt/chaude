@@ -16,7 +16,10 @@ pub mod sessview;
 pub mod settings;
 pub mod usage;
 
+use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::panic;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
@@ -43,6 +46,8 @@ use edit::Editor;
 use render::{BOLD_OFF, BOLD_ON, FG_OFF, GREY_ON, ORANGE_ON, RESET};
 
 const TICK: Duration = Duration::from_millis(80);
+// Shortest gap between two frames (about 60 fps). Output that arrives faster is coalesced into the next frame.
+const FRAME: Duration = Duration::from_millis(16);
 const PROMPT: &str = "> ";
 // Rows below the viewport when idle: input box top, input line, input box bottom, status row.
 // A running row sits above them while busy (`App::shows_bar`).
@@ -169,6 +174,15 @@ pub struct App {
     // Main text streamed in this turn (Go gotText). Cleared when a turn starts.
     got_text: bool,
     welcome: Welcome,
+    // Wrapped rows of each transcript line (see WrapCache). Filled by body(); the frame only reads it.
+    wraps: RefCell<WrapCache>,
+}
+
+// Wrapped rows per transcript line, each kept with a hash of what produced them (text, width, link style).
+// A frame rewraps only the lines whose hash changed, so a long history costs a hash per row, not a rewrap.
+#[derive(Default)]
+struct WrapCache {
+    rows: Vec<(u64, Vec<String>)>,
 }
 
 // What the welcome box shows (tui.go welcome()).
@@ -239,6 +253,7 @@ impl App {
             tool_rows: HashMap::new(),
             agent_outcome: HashMap::new(),
             got_text: false,
+            wraps: RefCell::new(WrapCache::default()),
         }
     }
 
@@ -1229,20 +1244,31 @@ impl App {
         }
         // Text width is one less than the full width, so the welcome box gets the full width back.
         let mut rows = self.welcome_rows(width + 1);
+        let mut cache = self.wraps.borrow_mut();
+        cache.rows.truncate(self.transcript.len());
         for (i, l) in lines.into_iter().enumerate() {
             let w = if self.wide.contains(&i) {
                 width + 1
             } else {
                 width
             };
+            // Transcript rows come from the cache: rewrapped only when their text, width or style changed.
+            if i < self.transcript.len() {
+                let linked = self.linked.contains(&i);
+                let key = wrap_key(l, w, linked);
+                if cache.rows.len() <= i {
+                    cache.rows.push((key, wrap_row(l, w, linked)));
+                } else if cache.rows[i].0 != key {
+                    cache.rows[i] = (key, wrap_row(l, w, linked));
+                }
+                for row in &cache.rows[i].1 {
+                    rows.push(row.clone());
+                }
+                continue;
+            }
             // Go wrapLinked (tui.go:374, 376) styles links in assistant and user rows only; the live row is assistant text.
             let live = i == self.transcript.len() && !self.pending_main.is_empty();
-            let wrapped = if live || self.linked.contains(&i) {
-                render::wrap_linked(l, |s| render::wrap_cells(s, w))
-            } else {
-                render::wrap_cells(l, w)
-            };
-            rows.extend(wrapped.split('\n').map(str::to_string));
+            rows.extend(wrap_row(l, w, live || self.linked.contains(&i)));
         }
         rows
     }
@@ -1566,6 +1592,23 @@ impl App {
         out.push(edge("╰", "╯"));
         out
     }
+}
+
+// Cache key of one transcript row: its text, the width it wraps at and whether its links are styled.
+fn wrap_key(line: &str, width: usize, linked: bool) -> u64 {
+    let mut h = DefaultHasher::new();
+    (line, width, linked).hash(&mut h);
+    h.finish()
+}
+
+// One logical row wrapped to `w` cells, split into screen rows. Linked rows get link styles (wrapLinked).
+fn wrap_row(line: &str, w: usize, linked: bool) -> Vec<String> {
+    let wrapped = if linked {
+        render::wrap_linked(line, |s| render::wrap_cells(s, w))
+    } else {
+        render::wrap_cells(line, w)
+    };
+    wrapped.split('\n').map(str::to_string).collect()
 }
 
 // Go stage lines (repl.go stage calls): "· <slot> 처리중" on start, "· <slot> 완료" on success,
@@ -2047,11 +2090,21 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         let _ = wake_tx.send(Wake::Closed);
     });
     draw(&mut out, &app, &mut prev)?;
+    // dirty: state changed since the last frame. A dirty loop waits only until the next frame is due.
+    let mut dirty = false;
+    let mut last_draw = Instant::now();
     'main: loop {
-        // Idle: sleep until input or output arrives. Animating: also wake every TICK for the spinner and clock.
-        let Some(batch) = wait_batch(&wakes, app.animating().then_some(TICK)) else {
+        // Dirty: wait until the next frame is due (a key or output in between still wakes it). Idle: sleep
+        // until input or output arrives. Animating: also wake every TICK for the spinner and clock.
+        let timeout = if dirty {
+            Some((last_draw + FRAME).saturating_duration_since(Instant::now()))
+        } else {
+            app.animating().then_some(TICK)
+        };
+        let Some(batch) = wait_batch(&wakes, timeout) else {
             break;
         };
+        dirty = true;
         // Every queued wake is applied before one tick and one draw, so a burst of output costs one frame.
         for wake in batch {
             match wake {
@@ -2114,7 +2167,8 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                 Wake::Term(_) | Wake::Closed => {}
             }
         }
-        app.tick(Instant::now());
+        let now = Instant::now();
+        app.tick(now);
         if app.mouse != captured {
             if app.mouse {
                 execute!(out, EnableMouseCapture)?;
@@ -2123,7 +2177,12 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
             }
             captured = app.mouse;
         }
-        draw(&mut out, &app, &mut prev)?;
+        // Keys and output above are applied before this check, so a frame never shows stale state.
+        if now.saturating_duration_since(last_draw) >= FRAME {
+            draw(&mut out, &app, &mut prev)?;
+            last_draw = now;
+            dirty = false;
+        }
     }
     engine.shutdown();
     Ok(())
@@ -3299,5 +3358,42 @@ mod tests {
         });
         app.tick(app.clock + IDLE_NOTICE);
         assert!(!app.transcript.join("\n").contains("still waiting"));
+    }
+
+    // Frame bench: 2000-row history, then 200 streamed text events (one frame each) like 200 events/s.
+    // Run: cargo test -p chaude-cli --release bench_frame -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_frame_large_history_streaming() {
+        let mut app = App::new(120, 40);
+        for i in 0..2000 {
+            app.transcript.push(format!(
+                "**row {i}** see crates/cli/src/tui/mod.rs:{i} and https://example.com/a/{i} then more words to wrap"
+            ));
+        }
+        app.linked.extend(0..2000);
+        let mut prev = Vec::new();
+        let mut buf: Vec<u8> = Vec::new();
+        draw(&mut buf, &app, &mut prev).unwrap();
+        let mut ms: Vec<f64> = Vec::new();
+        for i in 0..200 {
+            app.apply(text(&format!(
+                "streamed line {i} with words to wrap across the width of the pane\n"
+            )));
+            buf.clear();
+            let t = Instant::now();
+            draw(&mut buf, &app, &mut prev).unwrap();
+            ms.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let avg = ms.iter().sum::<f64>() / ms.len() as f64;
+        println!(
+            "BENCH frame ms: avg {avg:.3} p50 {:.3} p95 {:.3} max {:.3} (n={}, history={} rows)",
+            ms[ms.len() / 2],
+            ms[ms.len() * 95 / 100],
+            ms[ms.len() - 1],
+            ms.len(),
+            app.transcript.len()
+        );
     }
 }
