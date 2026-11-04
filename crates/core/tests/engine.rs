@@ -662,6 +662,37 @@ fn running_agent_is_stored_interrupted_on_shutdown() {
 }
 
 #[test]
+fn stored_running_agent_is_restored_at_startup_and_cleared_by_next_line() {
+    let _g = lock();
+    let f = fake("agent-restore", &["text_turn.jsonl"]);
+    // owner_pid 4000000 is no live process, so startup marks the stored running agent interrupted.
+    fs::write(
+        f.dir.join("agents.json"),
+        r#"[{"id":"toolu_pre1","status":"running","task":"scan repo","background":true,"owner_pid":4000000,"agent_id":"ag1","started":"1970-01-01T00:00:00.000Z","updated":"1970-01-01T00:00:00.000Z"}]"#,
+    )
+    .unwrap();
+    let (h, rx) = Engine::start(config(&f));
+    let rows = loop {
+        if let UiEvent::AgentsRestored { rows } = rx.recv_timeout(WAIT).expect("engine went silent")
+        {
+            break rows;
+        }
+    };
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].id, "toolu_pre1");
+    assert_eq!(rows[0].task, "scan repo");
+    assert!(rows[0].background && rows[0].done, "{rows:?}");
+    h.submit("next");
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::AgentsRestored { rows } if rows.is_empty() => break,
+            _ => {}
+        }
+    }
+    h.shutdown();
+}
+
+#[test]
 fn silent_turn_emits_still_running_notice_and_never_interrupts() {
     let _g = lock();
     // No output for 2.5 s with no open tool_use: the 1 s timer fires, notices, and leaves the turn alone.

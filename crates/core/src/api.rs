@@ -157,6 +157,11 @@ pub enum UiEvent {
         id: String,
         lines: Vec<String>,
     },
+    // Agents an earlier harness left unfinished, shown below the running rows (Go restored rows, tui.go:1468).
+    // Rows have done = true. Sent empty once the next user line arrives (Go dismissRestored, repl.go:1081).
+    AgentsRestored {
+        rows: Vec<AgentRow>,
+    },
     // Prompt texts waiting behind the running turn, oldest first (Go m.queue; Queued(n) stays the count).
     QueueTexts(Vec<String>),
     // The running turn ended after an interrupt (before its TurnEnd).
@@ -572,6 +577,8 @@ struct State {
     // Delegated agents by tool_use id. A background agent (launch result said "async") keeps running past the
     // turn, so an abandoned turn does not end it, and it is listed in the handoff snapshot.
     agent_info: HashMap<String, AgentInfo>,
+    // Restored agents still shown (UiEvent::AgentsRestored); the next user line clears them.
+    restored_rows: Vec<AgentRow>,
     // Go agentStore: this session's delegated agents are written here on every change (None = off).
     agent_store: Option<AgentStore>,
     // agentId from an async launch result -> tool_use id, so a SendMessage resume finds the agent.
@@ -728,6 +735,25 @@ pub struct AgentRow {
     pub started_at: u64,
 }
 
+// A stored agent as a panel row. Restored agents are finished (done) and were interrupted.
+fn restored_row(s: &SavedAgent) -> AgentRow {
+    AgentRow {
+        id: s.id.clone(),
+        task: s.task.clone(),
+        prompt: s.prompt.clone(),
+        name: s.name.clone(),
+        model: s.model.clone(),
+        background: s.background,
+        done: true,
+        agent_id: s.agent_id.clone(),
+        result_path: s.out_path.clone(),
+        started_at: s
+            .started
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs()),
+    }
+}
+
 // What the handoff snapshot needs about a delegated agent (Go agentRec: Name, ResultPath, Background, Started,
 // Done, ResultDone). The entry stays after the agent ends, marked done, so the snapshot can list it.
 struct AgentInfo {
@@ -820,6 +846,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         opus_agents: HashSet::new(),
         rotate_deferred: rotate_defer::Deferral::default(),
         agent_info: HashMap::new(),
+        restored_rows: Vec::new(),
         agent_store,
         agent_ids: HashMap::new(),
         agent_labels: HashMap::new(),
@@ -894,6 +921,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         }
     }
     st.persist_live();
+    st.restore_agents_at_start();
     st.start_child();
     loop {
         let input = match st.wait_budget() {
@@ -1020,6 +1048,11 @@ impl State {
     }
 
     fn submit(&mut self, text: String) {
+        // Go handle (repl.go:1081): the next user line hides the restored agents.
+        if !self.restored_rows.is_empty() {
+            self.restored_rows.clear();
+            self.emit(UiEvent::AgentsRestored { rows: Vec::new() });
+        }
         if self.proc.is_none() {
             self.emit(UiEvent::Error("claude is not running".to_string()));
             return;
@@ -2397,6 +2430,24 @@ impl State {
         self.emit(UiEvent::AgentRows {
             rows: rows.into_iter().map(|(_, r)| r).collect(),
         });
+    }
+
+    // Go restoreAgents (repl.go:1205, agentstore.go:221): recent interrupted agents of earlier runs are listed
+    // below the running rows until the next user line.
+    fn restore_agents_at_start(&mut self) {
+        let rows: Vec<AgentRow> = self
+            .agent_store
+            .as_ref()
+            .map(|s| s.load(""))
+            .unwrap_or_default()
+            .iter()
+            .map(restored_row)
+            .collect();
+        if rows.is_empty() {
+            return;
+        }
+        self.restored_rows = rows.clone();
+        self.emit(UiEvent::AgentsRestored { rows });
     }
 
     // Go onSubEvent (repl.go:426, 686): a delegated agent's text and tool lines go to its agent-view log.

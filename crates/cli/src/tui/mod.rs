@@ -123,6 +123,8 @@ pub struct App {
     resident_busy: BTreeSet<String>,
     // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
     agent_rows: Vec<AgentRow>,
+    // Agents an earlier harness left unfinished, listed after the running rows (UiEvent::AgentsRestored).
+    restored_rows: Vec<AgentRow>,
     // Agent-view log by agent tool id (UiEvent::AgentLog; Go agentRec.log, newest MAX_AGENT_LOG lines).
     agent_logs: HashMap<String, Vec<String>>,
     // First agent row shown in the panels (Go panOff), moved by the wheel over them.
@@ -239,6 +241,7 @@ impl App {
             agents: Vec::new(),
             bg_agents: Vec::new(),
             agent_rows: Vec::new(),
+            restored_rows: Vec::new(),
             agent_logs: HashMap::new(),
             pan_off: 0,
             last_tool: String::new(),
@@ -297,6 +300,7 @@ impl App {
                 | UiEvent::Busy(_)
                 | UiEvent::Queued(_)
                 | UiEvent::AgentRows { .. }
+                | UiEvent::AgentsRestored { .. }
                 | UiEvent::AgentLog { .. }
                 | UiEvent::QueueTexts(_)
                 | UiEvent::OpusBusy(_)
@@ -589,6 +593,7 @@ impl App {
             }
             // Go agentRows / m.queue: the panels and the queue are redrawn from these lists each frame.
             UiEvent::AgentRows { rows } => self.agent_rows = rows,
+            UiEvent::AgentsRestored { rows } => self.restored_rows = rows,
             UiEvent::AgentLog { id, lines } => {
                 agentview::push_log(self.agent_logs.entry(id).or_default(), lines)
             }
@@ -1440,10 +1445,12 @@ impl App {
         queue_h: usize,
         used: usize,
     ) -> (Vec<&AgentRow>, usize, usize) {
+        // Restored rows follow the running ones (Go panel: running, then sortedRestored).
         let list: Vec<&AgentRow> = self
             .agent_rows
             .iter()
             .filter(|r| r.background == bg && !r.done)
+            .chain(self.restored_rows.iter().filter(|r| r.background == bg))
             .collect();
         if list.is_empty() || w < 10 {
             return (Vec::new(), 0, 0);
@@ -1674,7 +1681,8 @@ impl App {
         if panel_rows == 0 || row < self.rows.saturating_sub(panel_rows + 1) {
             return false;
         }
-        let total = self.agent_rows.iter().filter(|r| !r.done).count() as isize;
+        let total = (self.agent_rows.iter().filter(|r| !r.done).count() + self.restored_rows.len())
+            as isize;
         let d: isize = if up { -1 } else { 1 };
         self.pan_off = (self.pan_off as isize + d).clamp(0, total) as usize;
         true
@@ -2047,13 +2055,13 @@ fn agent_row_line(r: &AgentRow, session_model: &str, width: usize) -> String {
     } else {
         &r.task
     };
-    let text = bar::agent_status_text(
-        bar::AgentState::Running,
-        &r.model,
-        session_model,
-        &r.name,
-        summary,
-    );
+    // Finished rows here are restored ones (AgentsRestored), which were interrupted.
+    let state = if r.done {
+        bar::AgentState::Interrupted
+    } else {
+        bar::AgentState::Running
+    };
+    let text = bar::agent_status_text(state, &r.model, session_model, &r.name, summary);
     let dot = "\x1b[38;5;220m●\x1b[39m";
     format!(
         "  {dot}{GREY_ON} {}{FG_OFF}",
@@ -2938,6 +2946,25 @@ mod tests {
         assert_eq!(rows[fg], "  ● 실행 중-haiku-4-scout(task a)");
         assert_eq!(rows.iter().filter(|r| r.contains("실행 중-")).count(), 1);
         assert!(!rows.iter().any(|r| r.contains("task d")));
+    }
+
+    #[test]
+    fn restored_agents_follow_running_rows_as_interrupted_until_cleared() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("a", false, false)],
+        });
+        app.apply(UiEvent::AgentsRestored {
+            rows: vec![agent_row("r", false, true)],
+        });
+        let rows = plain_frame(&app, 60, 20);
+        let run = rows.iter().position(|r| r.contains("task a")).unwrap();
+        let rest = rows.iter().position(|r| r.contains("task r")).unwrap();
+        assert_eq!(rest, run + 1, "{rows:?}");
+        assert!(rows[rest].contains("중단-"), "{rows:?}");
+        app.apply(UiEvent::AgentsRestored { rows: Vec::new() });
+        let rows = plain_frame(&app, 60, 20);
+        assert!(!rows.iter().any(|r| r.contains("task r")), "{rows:?}");
     }
 
     #[test]
