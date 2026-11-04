@@ -21,7 +21,7 @@ FAKE_DIR="$OUT/fakebin"
 WORK="$OUT/work"
 COLS=100
 ROWS=30
-ALL_SCENARIOS=(startup-idle type-text multiline submit-stream tool-use slash-menu scroll-up esc-interrupt resize-80x24 exit usage settings resume view)
+ALL_SCENARIOS=(startup-idle type-text multiline submit-stream tool-use slash-menu scroll-up esc-interrupt resize-80x24 exit usage settings resume view rewind)
 
 mkdir -p "$OUT" "$FAKE_DIR" "$WORK" "$OUT/build"
 : >"$STATUS"
@@ -114,6 +114,11 @@ drive() { # drive <scenario> <session>
     view)
       # /view with no owned Claude Code session shows the same note on both sides.
       pause 2; text "$s" "/view"; key "$s" Enter; pause 2 ;;
+    rewind)
+      # two prompts, then double Esc on an empty editor opens the rewind picker; Enter cuts to the selected turn.
+      pause 2; text "$s" "first"; key "$s" Enter; pause 2
+      text "$s" "second"; key "$s" Enter; pause 3
+      key "$s" Escape; pause 0.2; key "$s" Escape; pause 1; key "$s" Enter; pause 2 ;;
   esac
 }
 
