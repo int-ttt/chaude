@@ -2587,3 +2587,67 @@ fn subagent_stream_lines_reach_agent_log() {
     );
     h.shutdown();
 }
+
+// Go idleFinish (repl.go:517-575): a child-initiated reply after a background launch is shown as a main-thread
+// message and ends the agent it belongs to.
+#[test]
+fn idle_reply_is_shown_as_main_message_after_agent_ends() {
+    let _g = lock();
+    let f = fake("bg_idle_show", &["bg_idle_stream_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let mut evs = until_idle(&rx);
+    let ended = |evs: &[UiEvent]| {
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_idle1"))
+    };
+    while !ended(&evs) {
+        evs.push(rx.recv_timeout(WAIT).expect("engine went silent"));
+    }
+    let shown = |evs: &[UiEvent]| {
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::MessageDone { role: Role::Main }))
+    };
+    while !shown(&evs) {
+        evs.push(rx.recv_timeout(WAIT).expect("engine went silent"));
+    }
+    assert!(evs.iter().any(|e| matches!(
+        e,
+        UiEvent::TextDelta { role: Role::Main, text } if text == "Scan finished"
+    )));
+    h.shutdown();
+}
+
+// Go idleFinish (repl.go:518-575): the idle reply is also logged as a background turn (metrics stage=turn,
+// source=background). Rust logs metrics only for prompted turns, so this stays ignored until that is ported.
+#[test]
+#[ignore = "Go idleFinish logs idle turns to metrics with source=background (repl.go:518-575); Rust does not"]
+fn idle_reply_is_logged_to_metrics_as_background() {
+    let _g = lock();
+    let f = fake("bg_idle_metrics", &["bg_idle_stream_turn.jsonl"]);
+    let metrics = f.dir.join("metrics");
+    let cfg = Config {
+        metrics_dir: Some(metrics.clone()),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let mut evs = until_idle(&rx);
+    while !evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_idle1"))
+    {
+        evs.push(rx.recv_timeout(WAIT).expect("engine went silent"));
+    }
+    h.shutdown();
+    let text: String = fs::read_dir(&metrics)
+        .unwrap()
+        .map(|e| fs::read_to_string(e.unwrap().path()).unwrap())
+        .collect();
+    assert!(
+        text.lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .any(|r| r["source"] == "background"),
+        "{text}"
+    );
+}
