@@ -15,14 +15,16 @@ use chaude_core::{metrics_report, orch, settings};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-const USAGE: &str = "usage: chaude [command] [args]
-  (no command)           interactive session (inline TUI; plain line mode when stdin is not a TTY)
-  mcp-resident <tcp:addr>  stdio bridge to the resident coder MCP socket (used by the main child's mcp.json)
-  gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]   OS-specific .claude/settings.json
-  metrics [--dir D] [--csv]  summary of the per-turn metrics (or CSV rows); --dir defaults to <record>/metrics
-  --from-claude ID|latest|PATH  start from a Claude Code session (with --import-dry-run: print the report only)
-  --version, -v          print version
-  -h, --help             print this help";
+// Go cmd/chaude/main.go usage, verbatim. The helper-script list is scripts.Names (crates/scripts NAMES).
+const USAGE: &str = "usage: chaude <command> [args]
+  repl [flags]           terminal REPL over claude -p stream-json with session rotation (default with no command)
+  metrics [--dir D] [--csv]   summarize per-turn metrics (record/metrics)
+  --from-claude ID|latest|PATH [--import-dry-run]   start a repl from a plain Claude Code session
+  --version              print version
+  gen-settings <os>      print/write OS-specific .claude/settings.json (mac|linux|windows) [--out FILE]
+  clean [dir] [--yes]    remove the claude-lean harness from a project (dry-run; --yes backs up then removes)
+  update                 check GitHub for a newer release and replace this binary (same as /update in the REPL)
+  charcount | claude-history | compress-archive | export-history | extract-transcript | search-history | usage-report   helper scripts (run with -h for flags)";
 
 // Go repl.go:1316 + applyOrchEnv: --orch <mode> (default m0) is normalized and exported as CHAUDE_ORCH for
 // child processes and hooks. Runs before any thread starts, so the environment write is sound.
@@ -270,6 +272,11 @@ mod tests {
         assert_eq!(from_claude_arg(&strs(&["--model", "x"])), Ok(None));
         assert!(from_claude_arg(&strs(&["--from-claude"])).is_err());
     }
+
+    #[test]
+    fn usage_lists_the_helper_scripts() {
+        assert!(USAGE.contains(chaude_scripts::NAMES));
+    }
 }
 
 fn main() {
@@ -285,8 +292,9 @@ fn main() {
             println!("{USAGE}");
             0
         }
-        None | Some("--orch" | "--model" | "--from-claude" | "--import-dry-run") => run_tui(&args),
-        Some(a) if a.starts_with("--model=") || a.starts_with("--from-claude=") => run_tui(&args),
+        // Go main.go default branch: any leading -flag runs the repl (flags are parsed by run_tui).
+        None => run_tui(&args),
+        Some(a) if a.starts_with('-') => run_tui(&args),
         Some("metrics") => metrics_main(&args[1..]),
         Some("clean") => chaude_clean::main(&args[1..]),
         Some(cmd) if chaude_scripts::has(cmd) => chaude_scripts::run(cmd, &args[1..]),
