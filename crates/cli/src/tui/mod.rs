@@ -9,6 +9,7 @@ pub mod edit;
 pub mod overlay;
 pub mod records;
 pub mod render;
+pub mod resume_pick;
 pub mod rewind;
 mod runewidth_table;
 pub mod sessview;
@@ -132,6 +133,8 @@ pub struct App {
     settings: Option<settings::Picker>,
     // Open /resume record picker (Go m.rpick) and /view session browser (Go m.sv). Both replace the body.
     recs: Option<records::RecPicker>,
+    // Open /resume session picker (Go m.pick): the Claude Code session groups of this project.
+    pick: Option<resume_pick::GroupPicker>,
     sess: Option<sessview::SessView>,
     // Open Ctrl+T agent view (Go m.av). Read-only; replaces the body.
     av: Option<agentview::AgentView>,
@@ -216,6 +219,7 @@ impl App {
             usage: usage::Usage::default(),
             settings: None,
             recs: None,
+            pick: None,
             sess: None,
             av: None,
             rw: rewind::Rewind::default(),
@@ -580,6 +584,17 @@ impl App {
             }
             return Action::Continue;
         }
+        if let Some(act) = self.pick.as_mut().map(|gp| gp.key(key)) {
+            match act {
+                resume_pick::Action::None => {}
+                resume_pick::Action::Close => self.pick = None,
+                resume_pick::Action::Pick(sid) => {
+                    self.pick = None;
+                    return self.resume_claude(sid);
+                }
+            }
+            return Action::Continue;
+        }
         if let Some(act) = self.recs.as_mut().map(|rp| rp.key(key)) {
             match act {
                 records::Action::None => {}
@@ -903,12 +918,7 @@ impl App {
                 self.import_view(&arg);
                 return Action::Continue;
             }
-            // /resume claude (Claude Code sessions) still goes to the engine; only record lookups open here.
-            Some(Dispatch::Resume { args })
-                if args.first().map(String::as_str) != Some("claude") =>
-            {
-                return self.resume(&args.join(" "));
-            }
+            Some(Dispatch::Resume { args }) => return self.resume(&args),
             Some(Dispatch::Note(s)) if !matches!(first, "/status" | "/version" | "/mode") => {
                 self.note(&s);
                 return Action::Continue;
@@ -973,25 +983,26 @@ impl App {
         }
     }
 
-    // Go /resume <arg> over the record folder: several hits open the picker, one hit or a number loads.
+    // Go /resume <args> (resumeTarget): "claude <q>", or any arg no record answers, is a Claude Code session query
+    // (group picker). Otherwise the record folder answers: several hits open the picker, one hit or a number loads.
     // A session id from the record folder's .sessions.jsonl resumes that session; anything else is a record lookup.
-    fn resume(&mut self, arg: &str) -> Action {
+    fn resume(&mut self, args: &[String]) -> Action {
+        let arg = args.join(" ");
         let exit =
             handoff::handoff_file(&chaude_core::record::dir_for(Path::new(&self.welcome.cwd)));
-        if let Some(sid) = claude_session_id(&exit, arg) {
-            let (model, rotate) = self.resume_rule.clone();
-            if !picked_resumes(&exit, &sid, &model, rotate) {
-                self.note("previous session: fresh start, handoff note carried over; not resumed");
-                return Action::Continue;
-            }
-            return Action::ResumeSession(sid);
+        if let Some(sid) = claude_session_id(&exit, &arg) {
+            return self.resume_claude(sid);
         }
         let root =
             chaude_core::record::dir_for(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
-        match records::pick(&root, arg) {
+        let (terms, record) = chaude_core::record_turn::resume_target_in(&root, args);
+        if !record {
+            return self.open_groups(&terms);
+        }
+        match records::pick(&root, &arg) {
             Err(e) => self.note(&e),
             Ok(Some(ps)) => self.recs = Some(records::RecPicker::new(ps)),
-            Ok(None) => match chaude_core::record_turn::resume(&root, arg, &records::list_date) {
+            Ok(None) => match chaude_core::record_turn::resume(&root, &arg, &records::list_date) {
                 Err(e) => self.note(&e),
                 Ok((lines, entries)) => {
                     for l in &lines {
@@ -1005,6 +1016,33 @@ impl App {
             },
         }
         Action::Continue
+    }
+
+    // Go groupList + pick: one matching group resumes its newest session, several open the picker, an error is the note.
+    fn open_groups(&mut self, terms: &[String]) -> Action {
+        match resume_pick::groups(&self.welcome.cwd, terms) {
+            Err(e) => {
+                self.note(&e);
+                Action::Continue
+            }
+            Ok(gs) if gs.len() == 1 => self.resume_claude(gs[0].latest().id.clone()),
+            Ok(gs) => {
+                self.pick = Some(resume_pick::GroupPicker::new(gs));
+                Action::Continue
+            }
+        }
+    }
+
+    // A Claude Code session picked or named by /resume: relaunches it unless the previous run's resume rule says fresh.
+    fn resume_claude(&mut self, sid: String) -> Action {
+        let exit =
+            handoff::handoff_file(&chaude_core::record::dir_for(Path::new(&self.welcome.cwd)));
+        let (model, rotate) = self.resume_rule.clone();
+        if !picked_resumes(&exit, &sid, &model, rotate) {
+            self.note("previous session: fresh start, handoff note carried over; not resumed");
+            return Action::Continue;
+        }
+        Action::ResumeSession(sid)
     }
 
     // Enter in the record picker: the whole folder is appended to the transcript (Go loadRecordPick).
@@ -1085,6 +1123,9 @@ impl App {
         }
         if let Some(rp) = &self.recs {
             return Some(rp.lines(width, h));
+        }
+        if let Some(gp) = &self.pick {
+            return Some(gp.lines(width, h));
         }
         self.sess.as_ref().map(|sv| match sv.turns {
             Some(_) => sv.prompt_lines(width, h),
@@ -1331,6 +1372,10 @@ impl App {
         }
         if let Some(rp) = self.recs.as_mut() {
             rp.wheel(up);
+            return true;
+        }
+        if let Some(gp) = self.pick.as_mut() {
+            gp.wheel(up);
             return true;
         }
         false

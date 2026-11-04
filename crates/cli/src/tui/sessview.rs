@@ -146,7 +146,7 @@ pub fn project_dir(home: &Path, cwd: &str) -> PathBuf {
     home.join(".claude").join("projects").join(proj)
 }
 
-fn home_dir() -> Option<PathBuf> {
+pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .filter(|h| !h.is_empty())
