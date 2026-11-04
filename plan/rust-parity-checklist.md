@@ -85,11 +85,11 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 | K5 | clipboard copy | selection.go:115 (clipboard.WriteAll + OSC 52) | done | crates/cli/src/tui/mod.rs native_copy, clipboard_tool, clipboard_payload | off macOS: wl-copy (WAYLAND_DISPLAY), xclip, xsel, clip.exe (UTF-16LE BOM); Windows native uses clip.exe not win32 API; not run on a non-macOS host |
 | K6 | status bar P/T/C per-role context | tui.go | done | crates/cli/src/tui/bar.rs role_tokens; mod.rs:397 UiEvent::RoleContext | P/T/C from core RoleContext; test bar shows P 1k/80k |
 | K7 | thinking row | tui.go | done | crates/cli/src/tui/mod.rs:1154 bar::thinking_row | |
-| K8 | done row | tui.go | missing | bar.rs / render.rs | no per-turn done row; mod.rs:395 says footer needs engine stats. TurnStats now emits a [측정] line, not this row (doubt: confirm Go intent) |
+| K8 | done row (agent completion line) | drain.go:40-55 doneLine (tui.go has no per-turn done row) | done | crates/cli/src/tui/bar.rs done_line; mod.rs UiEvent::AgentEnd | once per agent; AgentEnd carries no model, so always 상속 (doubt) |
 | K9 | rotated notice | tui.go | done | crates/cli/src/tui/mod.rs:428 UiEvent::Rotated, bar::rotated_notice | |
 | K10 | orphan notice | tui.go | done | crates/cli/src/tui/mod.rs:417 UiEvent::OrphanNotice, bar::orphan_notice | |
 | K11 | tool summary | tui.go | done | crates/cli/src/tui/mod.rs:297 render::tool_summary | |
-| K12 | assistant link wrap | render | missing | render.rs | blocked |
+| K12 | assistant link wrap | links.go:197 wrapLinked; tui.go:374 | done | crates/cli/src/tui/mod.rs body() wrap_linked; render.rs wrap_linked | raw md_bold text kept per row; links styled after wrap so a link across rows keeps style; applies to every transcript row (doubt: Go styles only assistant and user text) |
 
 ## Settings (internal/harness/chaude_settings.go:11-15)
 

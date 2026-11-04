@@ -1171,7 +1171,11 @@ impl App {
             } else {
                 width
             };
-            rows.extend(render::wrap_cells(l, w).split('\n').map(str::to_string));
+            rows.extend(
+                render::wrap_linked(l, |s| render::wrap_cells(s, w))
+                    .split('\n')
+                    .map(str::to_string),
+            );
         }
         rows
     }
@@ -1736,12 +1740,12 @@ fn feed(
     }
 }
 
-// Assistant text as Go shows it: **bold** pairs, then link styling (tui.go:374 mdBold + wrapLinked).
+// Assistant text as Go shows it: **bold** pairs here; links are styled after wrapping in body() (tui.go:374).
 const IMPORT_INSTALL_NOTE: &str =
     "import: the next prompt starts from this transcript (Go applyImport)";
 
 fn asst_text(line: &str) -> String {
-    render::linkify(&render::md_bold(line))
+    render::md_bold(line)
 }
 
 fn plain_text(line: &str) -> String {
@@ -2506,6 +2510,26 @@ mod tests {
     }
 
     // R03/R08 (tui.go:374): assistant text gets **bold** and link styling, and keeps its visible text.
+    #[test]
+    fn assistant_link_keeps_style_on_wrapped_rows() {
+        let mut app = app_with_lines(0);
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "see https://example.com/abcdefghijklmnop\n".to_string(),
+        });
+        let rows = app.body(20);
+        let tail = rows
+            .iter()
+            .find(|r| render::strip_sgr(r).trim() == "op")
+            .expect("tail row");
+        assert!(tail.contains(render::LINK_URL_ON));
+        assert!(
+            rows.iter().any(
+                |r| render::strip_sgr(r).contains("exampl") && r.contains(render::LINK_URL_ON)
+            )
+        );
+    }
+
     #[test]
     fn assistant_text_is_bold_and_linked_per_line() {
         let mut app = app_with_lines(0);

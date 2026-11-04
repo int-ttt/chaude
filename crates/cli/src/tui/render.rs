@@ -891,14 +891,8 @@ pub fn restyle(text: &str) -> String {
     lines.join("\n")
 }
 
-// linkify (links.go:188): styles the links of one line without wrapping.
-pub fn linkify(line: &str) -> String {
-    restyle(&mark_links(line))
-}
-
 // wrapLinked (links.go:197): wraps with `wrap`, then styles links on each wrapped run outside ``` fences.
 // Fenced code is wrapped but left unstyled.
-#[allow(dead_code)] // blocked: assistant text is linkified before wrapping; raw text not kept
 pub fn wrap_linked(text: &str, wrap: impl Fn(&str) -> String) -> String {
     let mut fence = false;
     let mut runs: Vec<(String, bool)> = Vec::new();
@@ -1229,7 +1223,7 @@ mod tests {
     #[test]
     fn linkify_keeps_visible_text_and_width() {
         let input = "\x1b[1mbold\x1b[0m open https://e.com/x and C:\\a\\b.txt:3 end";
-        let out = linkify(input);
+        let out = restyle(&mark_links(input));
         assert_ne!(out, input);
         assert_eq!(strip_sgr(&out), strip_sgr(input));
         assert_eq!(cell_width(&out), cell_width(input));
