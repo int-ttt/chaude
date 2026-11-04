@@ -5,6 +5,7 @@ pub mod budget;
 pub mod event;
 pub mod handoff;
 pub mod lean;
+pub mod mcp;
 pub mod metrics;
 pub mod mode;
 pub mod osenv;

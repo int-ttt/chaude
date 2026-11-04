@@ -83,7 +83,7 @@ n=0
 case "$*" in
   *TUIMARK*) role=tui ;;
   *CODERMARK*) role=coder ;;
-  *system-prompt*) role=prompter ;;
+  *" --system-prompt "*) role=prompter ;;
   *) role=main ;;
 esac
 while IFS= read -r line; do
@@ -1580,4 +1580,20 @@ fn exit_handoff_lists_resident_coder_and_owned_sessions() {
     );
     assert!(got.owned_sessions.iter().any(|s| s == "c1"), "{got:?}");
     assert!(got.prev_owned().contains("c1"));
+}
+
+#[test]
+fn mcp_coder_call_blocks_for_summary_and_rejects_empty_task() {
+    let _g = lock();
+    let f = fake("mcp_call", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, _rx) = Engine::start(cfg);
+    let caller = h.coder_caller();
+    let got = caller.call("rename the helper");
+    assert!(got.is_ok(), "{got:?}");
+    assert!(!got.unwrap().is_empty());
+    assert_eq!(caller.call("   "), Err("task is required".to_string()));
+    h.shutdown();
 }

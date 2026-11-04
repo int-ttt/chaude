@@ -35,6 +35,8 @@ pub struct Shape {
     pub no_slash: bool,
     // Go Rule body: --system-prompt when minimal, else --append-system-prompt. Empty = none.
     pub rule: String,
+    // Go residentMCPConfig: --mcp-config <file> for the main child when the resident coder tool is served.
+    pub mcp_config: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -101,6 +103,10 @@ pub fn build_args(model: &str, resume: Option<&str>, shape: &Shape) -> Vec<Strin
             .map(str::to_string),
         );
     } else {
+        if let Some(path) = &shape.mcp_config {
+            args.push("--mcp-config".to_string());
+            args.push(path.display().to_string());
+        }
         if !shape.tools.is_empty() {
             args.push("--tools".to_string());
             args.push(shape.tools.clone());
@@ -368,6 +374,31 @@ mod tests {
             "AGENT",
         ];
         assert_eq!(a[a.len() - tail.len()..], tail);
+    }
+
+    #[test]
+    fn mcp_config_flag_only_when_set() {
+        let main = Shape {
+            strict_mcp: true,
+            mcp_config: Some(PathBuf::from("/tmp/mcp.json")),
+            rule: "RULE".into(),
+            ..Shape::default()
+        };
+        let a = build_args("haiku", None, &main);
+        let at = a.iter().position(|x| x == "--mcp-config").expect("flag");
+        assert_eq!(a[at + 1], "/tmp/mcp.json");
+        let plain = build_args("haiku", None, &Shape::default());
+        assert!(!plain.iter().any(|x| x == "--mcp-config"));
+        let minimal = Shape {
+            minimal: true,
+            mcp_config: Some(PathBuf::from("/tmp/mcp.json")),
+            ..Shape::default()
+        };
+        assert!(
+            !build_args("haiku", None, &minimal)
+                .iter()
+                .any(|x| x == "--mcp-config")
+        );
     }
 
     #[test]

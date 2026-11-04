@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -15,13 +16,14 @@ use serde_json::{Value, json};
 use crate::budget::{self, Budget};
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
 use crate::handoff::{self, ExitHandoff};
+use crate::mcp;
 use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, Shape, SpawnOpts};
 use crate::resident::{
-    CODER_REPLY_FORMAT, CODER_TIMEOUT, PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter, PrompterOutcome,
-    StagePhase, TUI_TIMEOUT, agent_body, summarize_reply, tui_prompt,
+    CODER_REPLY_FORMAT, CODER_RULE, CODER_TIMEOUT, PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter,
+    PrompterOutcome, StagePhase, TUI_TIMEOUT, agent_body, summarize_reply, tui_prompt,
 };
 use crate::rotate::{
     HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
@@ -257,6 +259,8 @@ enum Cmd {
     Submit(String),
     // Go runResidentCoder: one task for an idle coder. The reply comes back as UiEvent::CoderReply.
     Coder(String),
+    // Go residentMCPConfig: the MCP tool call waits here for the coder's summary (Err = reason).
+    CoderCall(String, Sender<Result<String, String>>),
     Interrupt(InterruptSource),
     // Mode name as typed ("next" cycles); parsed by the actor so unknown names are reported as UiEvent::Error.
     SetMode(String),
@@ -296,6 +300,13 @@ impl EngineHandle {
     // Go runResidentCoder: sends a task to an idle coder (coder, then coder2...). Answers CoderReply or a Failed stage.
     pub fn coder(&self, task: &str) {
         let _ = self.tx.send(Input::Cmd(Cmd::Coder(task.to_string())));
+    }
+
+    // Handle for the MCP server threads: each call blocks until the coder answers (Go runResidentCoder).
+    pub fn coder_caller(&self) -> CoderCaller {
+        CoderCaller {
+            tx: self.tx.clone(),
+        }
     }
 
     pub fn interrupt(&self, source: InterruptSource) {
@@ -434,6 +445,8 @@ struct State {
     // Coder residents (Go coder, coder2..): slot 0 is "coder", slot i is "coder{i+1}". Grown on demand.
     coders: Vec<Coder>,
     coder_epoch: u64,
+    // Go residentMCPConfig path, created on first use when residents are on.
+    mcp_cfg: Option<PathBuf>,
 }
 
 // One coder resident. A running deadline means a task is in flight (Go busyRec).
@@ -445,6 +458,8 @@ struct Coder {
     deadline: Option<Instant>,
     // When the last task ended; drives the idle expiry of extra coders.
     idle_since: Option<Instant>,
+    // Answer for an MCP call in flight; taken by finish_coder.
+    waiter: Option<Sender<Result<String, String>>>,
 }
 
 // A handoff turn in progress: the rotation reason and how many handoff prompts were sent (Go makeSnapshotN).
@@ -507,6 +522,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         sid: String::new(),
         owned: Vec::new(),
         resident_sids: BTreeMap::new(),
+        mcp_cfg: None,
         self_tx,
         opts,
         epoch: 0,
@@ -565,7 +581,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
                 ProcMsg::Eof => st.on_tui_eof(),
             },
             Input::Tui(_, _) => {}
-            Input::Cmd(Cmd::Coder(task)) => st.start_coder(task),
+            Input::Cmd(Cmd::Coder(task)) => st.start_coder(task, None),
+            Input::Cmd(Cmd::CoderCall(task, waiter)) => st.start_coder(task, Some(waiter)),
             Input::Coder(i, epoch, msg) if st.coder_matches(i, epoch) => match msg {
                 ProcMsg::Line(line) => st.on_coder_line(i, &line),
                 ProcMsg::Eof => st.on_coder_eof(i),
@@ -782,10 +799,12 @@ impl State {
     }
 
     // Go runResidentCoder: the first idle coder takes the task (spawned if not running). Busy coders are skipped.
-    fn start_coder(&mut self, task: String) {
+    // waiter (MCP calls only) gets the reply or the failure reason.
+    fn start_coder(&mut self, task: String, waiter: Option<Sender<Result<String, String>>>) {
         let task = task.trim().to_string();
         if task.is_empty() {
             self.emit(UiEvent::Error("task is required".to_string()));
+            answer(waiter, Err("task is required".to_string()));
             return;
         }
         let extra = self.cfg.extra_coders.min(MAX_EXTRA_CODERS);
@@ -795,6 +814,7 @@ impl State {
                 "coder",
                 StagePhase::Failed("all resident coders are busy".into()),
             );
+            answer(waiter, Err("all resident coders are busy".to_string()));
             return;
         };
         let role = coder_role(i);
@@ -808,11 +828,13 @@ impl State {
                 &role,
                 StagePhase::Failed(format!("coder spawn failed: {e}")),
             );
+            answer(waiter, Err(format!("coder spawn failed: {e}")));
             return;
         }
         self.stage(&role, StagePhase::Working);
         self.coders[i].deadline = Some(Instant::now() + CODER_TIMEOUT);
         self.coders[i].idle_since = None;
+        self.coders[i].waiter = waiter;
         let text = format!("{task}{CODER_REPLY_FORMAT}");
         let wrote = match self.coders[i].proc.as_mut() {
             Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
@@ -839,6 +861,7 @@ impl State {
                 strict_mcp: true,
                 no_slash: true,
                 rule,
+                mcp_config: None,
             },
             ..self.opts.clone()
         };
@@ -959,7 +982,9 @@ impl State {
     fn finish_coder(&mut self, i: usize, out: Result<String, String>) {
         self.coders[i].deadline = None;
         self.coders[i].idle_since = Some(Instant::now());
+        let waiter = self.coders[i].waiter.take();
         let role = coder_role(i);
+        answer(waiter, out.clone());
         match out {
             Ok(text) => {
                 self.stage(&role, StagePhase::Done);
@@ -1908,11 +1933,32 @@ impl State {
     }
 
     // Spawns the child for the current generation; its lines are tagged so a replaced child is ignored.
+    // Go residentMCPConfig: started once, only with residents on. None leaves the main child without the coder tool.
+    fn mcp_config(&mut self) -> Option<PathBuf> {
+        if !self.cfg.residents {
+            return None;
+        }
+        if self.mcp_cfg.is_none() {
+            let caller = CoderCaller {
+                tx: self.self_tx.clone(),
+            };
+            self.mcp_cfg = mcp::start(Arc::new(move |task: &str| caller.call(task))).ok();
+        }
+        self.mcp_cfg.clone()
+    }
+
     fn start_child(&mut self) {
+        let mut opts = self.opts.clone();
+        if let Some(path) = self.mcp_config() {
+            opts.shape = Shape {
+                strict_mcp: true,
+                mcp_config: Some(path),
+                rule: CODER_RULE.to_string(),
+                ..Shape::default()
+            };
+        }
         let epoch = self.epoch;
-        match proc::spawn(&self.opts, self.self_tx.clone(), move |m| {
-            Input::Proc(epoch, m)
-        }) {
+        match proc::spawn(&opts, self.self_tx.clone(), move |m| Input::Proc(epoch, m)) {
             Ok(p) => self.proc = Some(p),
             Err(e) => self.emit(UiEvent::Error(format!("claude spawn failed: {e}"))),
         }
@@ -1927,6 +1973,33 @@ impl State {
             cost_usd,
             context_pct: pct,
         });
+    }
+}
+
+// Sends one MCP task into the engine and waits for its answer. Cloneable across server threads.
+pub struct CoderCaller {
+    tx: Sender<Input>,
+}
+
+impl CoderCaller {
+    pub fn call(&self, task: &str) -> Result<String, String> {
+        let (tx, rx) = mpsc::channel();
+        if self
+            .tx
+            .send(Input::Cmd(Cmd::CoderCall(task.to_string(), tx)))
+            .is_err()
+        {
+            return Err("engine stopped".to_string());
+        }
+        rx.recv()
+            .unwrap_or_else(|_| Err("engine stopped".to_string()))
+    }
+}
+
+// Delivers an MCP answer when one is waiting. TUI and handoff tasks have no waiter.
+fn answer(waiter: Option<Sender<Result<String, String>>>, out: Result<String, String>) {
+    if let Some(tx) = waiter {
+        let _ = tx.send(out);
     }
 }
 
