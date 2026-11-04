@@ -86,7 +86,7 @@ Counts (filled at end): see the "Counts" section.
 - [x] I23 History save is tmp file + rename (saveInputHistory history.go:57) · test: none · core: none → done: edit.rs:321-340 write_history tmp+rename
 - [x] I24 A new model loads previously recorded history (recordHistory tui.go:273; loadHistory tui.go:266) · test: TestRecordHistoryPersistsAndNewModelLoads (history_file_test.go:54) · core: none → done: edit.rs:215 load_history; test edit.rs:638
 - [x] I25 Esc+Esc on empty input opens rewind picker within 600ms (tui.go:696-711) · test: none · core: transcript turns (rewind unit = user turn) → done: mod.rs:760-783 double Esc 600ms
-- [ ] I26 Rewind picker: Open/Move/Cancel/Confirm (rewindState history.go:124-152) · test: none · core: transcript turns
+- [x] I26 Rewind picker: Open/Move/Cancel/Confirm (rewindState history.go:124-152) · test: none · core: transcript turns · audited: rewind.rs:36-98 matches history.go:124-152 (Open filter, wrap Move, Cancel, Confirm cut); wiring mod.rs:638-654, open mod.rs:774
 - [ ] I27 Rewind excludes slash commands from the unit list (history.go:124) · test: none · core: transcript turns
 - [ ] I28 Rewind with no turns shows note "nothing to rewind to" (tui.go:700-703) · test: none · core: none
 - [ ] I29 IME preedit: real terminal cursor placed in the input row via cursor up/col escape each frame (cursorWriter tui.go:232-260; imeColShift tui.go:177) · test: TestJediTermIMEColumnShift (resumeshift_test.go:28) · core: none
@@ -232,8 +232,8 @@ Counts (filled at end): see the "Counts" section.
 
 - [ ] A01 TUI is altscreen only (tea.WithAltScreen tui.go:1378); no inline mode in the Go TUI · test: none · core: none
 - [ ] A02 Plain path (HARNESS_PLAIN or non-TTY stdin) is line-oriented, not a TUI; output goes to stdout with r.p/dim (loop repl.go:1270+) · test: multiproc_s_test.go (not read) · core: plain loop
-- [ ] A03 Overlays (usage/agent/session) render full-screen, not inline (TestUsageOpenNotInline usageview_test.go:94) · test: TestUsageOpenNotInline (usageview_test.go:94) · core: none
-- [ ] A04 Esc from full-screen overlay returns to normal screen (TestViewEscBacksOutToNormalScreen sessview_test.go:35) · test: TestViewEscBacksOutToNormalScreen (sessview_test.go:35) · core: none
+- [x] A03 Overlays (usage/agent/session) render full-screen, not inline (TestUsageOpenNotInline usageview_test.go:94) · test: TestUsageOpenNotInline (usageview_test.go:94) · core: none · audited: overlays replace body rows only, chrome and input kept (mod.rs:1782-1790), same as tui.go:1349-1354
+- [x] A04 Esc from full-screen overlay returns to normal screen (TestViewEscBacksOutToNormalScreen sessview_test.go:35) · test: TestViewEscBacksOutToNormalScreen (sessview_test.go:35) · core: none · audited: usage.rs:108, sessview.rs:337, agentview mod.rs:658-665 all return to normal view
 
 ## Counts
 
