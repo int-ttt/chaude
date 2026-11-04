@@ -26,6 +26,8 @@ pub mod record;
 pub mod record_folder;
 pub mod record_turn;
 pub mod resident;
+#[cfg(test)]
+mod role_coexist;
 pub mod rotate;
 pub mod rotate_defer;
 pub mod settings;

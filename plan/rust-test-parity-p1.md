@@ -89,10 +89,10 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/chaude_settings_test.go::TestLegacyCoderSlotsKey | cli/src/tui/settings.rs::partial_file_keeps_defaults_and_reads_legacy_key | covered | |
 | harness/chaude_settings_test.go::TestSettingsFileIsPerProject | cli/src/tui/settings.rs::settings_file_is_per_project | covered | |
 | harness/chaude_settings_test.go::TestSettingsFileEmptyCwdUsesWorkingDir | - | missing | empty-cwd fallback not tested in Rust |
-| harness/childkey_test.go::TestChildKeyRoleCoexist | - | missing | Rust has no child key registry |
+| harness/childkey_test.go::TestChildKeyRoleCoexist | crates/core/src/role_coexist.rs::same_model_with_role_and_without_role_coexist_when_parked | covered | test-only; child_key + ChildSet park, role logic in child_set.rs |
 | harness/childkey_test.go::TestAdmitEvictsOldestParked | crates/core/src/child_set.rs::admit_evicts_oldest_parked | covered | |
 | harness/childkey_test.go::TestAdmitRefusesWhenNothingEvictable | crates/core/src/child_set.rs::admit_refuses_when_nothing_evictable | covered | |
-| harness/children_test.go::TestChildKey | crates/core/src/child_set.rs::child_key_matches_empty_dot_and_working_dir | covered | name-level match; role-coexist case is harness/childkey_test.go::TestChildKeyRoleCoexist (missing) |
+| harness/children_test.go::TestChildKey | crates/core/src/child_set.rs::child_key_matches_empty_dot_and_working_dir | covered | name-level match; role-coexist case is harness/childkey_test.go::TestChildKeyRoleCoexist (covered by role_coexist.rs) |
 | harness/children_test.go::TestChildSetParkTake | crates/core/src/child_set.rs::park_take_replaces_closes_once_and_expires | covered | |
 | harness/children_test.go::TestCloseAllParallel | crates/core/src/child_set.rs::close_all_closes_in_parallel | covered | |
 | harness/cleanenv_test.go::TestCleanEnvDropsAPIKey | crates/core/src/proc.rs::apply_env_drops_api_key_and_sets_only_valid_ttl | covered | name-level: checks the recorded env delta (key removed), not the inherited env |
