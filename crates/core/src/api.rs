@@ -216,6 +216,9 @@ pub struct Config {
     // Go --rotate-defer-timeout: how long a due rotation waits for background agents before it runs anyway.
     // Zero = rotate at once.
     pub rotate_defer_timeout: Duration,
+    // Go --idle-rotate: a handoff and fresh child once the child has no API response for this long, capped at the
+    // cache TTL (see idle_deadline). Zero = off.
+    pub idle_rotate: Duration,
     // Resident slots are running (Go len(resident) > 0): the engine emits UiEvent::Stage rows for the main turn
     // and each agent call. Off = no stage rows.
     pub residents: bool,
@@ -247,6 +250,7 @@ impl Default for Config {
             transcript: None,
             rotate_threshold: HAIKU_THRESHOLD,
             rotate_defer_timeout: Duration::from_secs(600),
+            idle_rotate: Duration::from_secs(3599),
             residents: true,
             extra_coders: 4,
             coder_idle_ttl: Duration::from_secs(270),
@@ -404,6 +408,8 @@ struct State {
     budget: Option<Budget>,
     // Last main assistant API response, for the warm-cache test of the next-call estimate.
     last_api: Option<Instant>,
+    // The last_api value an idle rotation already fired for: one idle rotation per API response.
+    idle_fired_for: Option<Instant>,
     // Set when a main usage event's in-flight estimate reached the cap; the turn is interrupted once.
     budget_hit: bool,
     // Per-turn metrics JSONL (Go metrics); disabled when cfg.metrics_dir is None.
@@ -517,6 +523,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         pending_perm: HashMap::new(),
         budget,
         last_api: None,
+        idle_fired_for: None,
         budget_hit: false,
         metrics,
         sid: String::new(),
@@ -1576,10 +1583,12 @@ impl State {
             return Some(left.max(Duration::from_millis(1)));
         }
         if !self.busy {
-            // Idle with a deferred rotation: wake when its defer timeout ends.
-            return self
-                .defer_left()
-                .map(|left| left.max(Duration::from_millis(1)));
+            // Idle with a deferred or idle rotation: wake at the nearer of the two.
+            let left = [self.defer_left(), self.idle_left()]
+                .into_iter()
+                .flatten()
+                .min();
+            return left.map(|left| left.max(Duration::from_millis(1)));
         }
         if let Some(t0) = self.interrupted_at {
             let left = self.cfg.interrupt_grace.saturating_sub(t0.elapsed());
@@ -1620,6 +1629,8 @@ impl State {
             // A deferred rotation waits out a prompter wait: it would send its handoff while the prompter runs.
             if !self.prompter.waiting() && self.defer_left().is_some_and(|d| d.is_zero()) {
                 self.run_deferred_rotation();
+            } else if self.idle_left().is_some_and(|d| d.is_zero()) {
+                self.run_idle_rotation();
             }
             return;
         }
@@ -1731,7 +1742,7 @@ impl State {
         if self.rotation_wanted() {
             if self.rotation_due() {
                 self.rotate_deferred = None;
-                if self.start_handoff() {
+                if self.start_handoff(self.ctx_reason()) {
                     return;
                 }
             } else {
@@ -1795,16 +1806,57 @@ impl State {
         self.rotate_deferred = None;
         self.busy = true;
         self.emit(UiEvent::Busy(true));
-        if !self.start_handoff() {
+        if !self.start_handoff(self.ctx_reason()) {
             self.busy = false;
             self.emit(UiEvent::Busy(false));
         }
     }
 
-    // Sends the hidden handoff prompt on the current child. Returns false when it could not be sent.
-    fn start_handoff(&mut self) -> bool {
+    // Go idleDeadline: the idle rotation waits this long, capped at 290 s for the 5m cache (1 h for the 1h
+    // cache, no cap when idle_rotate is shorter). Zero = off.
+    fn idle_deadline(&self) -> Duration {
+        let idle = self.cfg.idle_rotate;
+        if idle.is_zero() || self.cfg.cache_ttl == "1h" || idle < Duration::from_secs(290) {
+            return idle;
+        }
+        Duration::from_secs(290)
+    }
+
+    // Time left before the idle rotation fires. None when it cannot fire now: off, no child, no API response
+    // yet, a prompter wait, or already fired for this response (so the wait does not spin at zero).
+    fn idle_left(&self) -> Option<Duration> {
+        let deadline = self.idle_deadline();
+        let t0 = self.last_api?;
+        if deadline.is_zero()
+            || self.proc.is_none()
+            || self.prompter.waiting()
+            || self.idle_fired_for == Some(t0)
+        {
+            return None;
+        }
+        Some(deadline.saturating_sub(t0.elapsed()))
+    }
+
+    // Go idle rotation: the child has no API response for idle_deadline, so the handoff runs now.
+    fn run_idle_rotation(&mut self) {
+        self.idle_fired_for = self.last_api;
+        self.busy = true;
+        self.emit(UiEvent::Busy(true));
+        let reason = format!("idle {}s", self.idle_deadline().as_secs());
+        if !self.start_handoff(reason) {
+            self.busy = false;
+            self.emit(UiEvent::Busy(false));
+        }
+    }
+
+    // Reason shown for a context rotation: the context tokens against the threshold.
+    fn ctx_reason(&self) -> String {
         let thr = threshold_for(&self.model, self.cfg.rotate_threshold);
-        let reason = format!("ctx {} >= {}", self.ctx_tokens, thr);
+        format!("ctx {} >= {}", self.ctx_tokens, thr)
+    }
+
+    // Sends the hidden handoff prompt on the current child. Returns false when it could not be sent.
+    fn start_handoff(&mut self, reason: String) -> bool {
         self.handoff = Some(Handoff {
             reason,
             attempts: 1,
@@ -1918,6 +1970,7 @@ impl State {
         self.pending_snapshot = snapshot;
         self.sid.clear();
         self.ctx_tokens = 0;
+        self.last_api = None;
         self.opts.resume = None;
         self.start_child();
         let _ = self.metrics.log(json!({

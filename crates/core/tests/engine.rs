@@ -1120,6 +1120,30 @@ fn turn_is_logged_to_metrics_jsonl() {
 }
 
 #[test]
+fn idle_rotation_hands_off_after_quiet_child() {
+    let _g = lock();
+    let f = fake("idle", &["rotate_turn.jsonl", "handoff_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.idle_rotate = Duration::from_secs(1);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    until_idle(&rx);
+    // No further prompt: the child sits idle past the 1 s idle rotation and hands off on its own.
+    let t0 = Instant::now();
+    let reason = loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("engine went silent");
+        if let UiEvent::Rotated { reason } = ev {
+            break reason;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(10), "no idle rotation");
+    };
+    assert_eq!(reason, "idle 1s");
+    h.shutdown();
+}
+
+#[test]
 fn context_rotation_hands_off_and_fresh_child_gets_snapshot() {
     let _g = lock();
     let f = fake("rotate", &["rotate_turn.jsonl", "handoff_turn.jsonl"]);
