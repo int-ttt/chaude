@@ -2919,6 +2919,7 @@ fn observe_ttl(line: &str, seen: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{TempDir, isolated};
 
     #[test]
     fn observe_ttl_reads_assistant_usage_only() {
@@ -2983,15 +2984,17 @@ mod tests {
     fn max_workers_default_is_three() {
         assert_eq!(resolve_max_workers(None, "", 0), Ok(3));
         assert_eq!(resolve_max_workers(None, "  ", 4), Ok(3));
-        assert_eq!(Config::default().max_workers, 3);
+        let tmp = TempDir::new("max-workers-default");
+        assert_eq!(isolated(tmp.path()).max_workers, 3);
     }
 
     // Go start(): the main child's rule carries the forward rule unless the model is Opus.
     #[test]
     fn main_rule_forwards_for_non_opus_and_adds_category() {
+        let tmp = TempDir::new("main-rule-forward");
         let mut cfg = Config {
             model: "haiku".into(),
-            ..Config::default()
+            ..isolated(tmp.path())
         };
         assert_eq!(
             main_rule_with(&cfg, ""),
@@ -3010,9 +3013,10 @@ mod tests {
     // Go start(): delegation rule first, orch rule last; both can be switched off.
     #[test]
     fn main_rule_order_delegation_forward_category_orch() {
+        let tmp = TempDir::new("main-rule-order");
         let mut cfg = Config {
             model: "haiku".into(),
-            ..Config::default()
+            ..isolated(tmp.path())
         };
         assert_eq!(
             main_rule_with(&cfg, "b"),

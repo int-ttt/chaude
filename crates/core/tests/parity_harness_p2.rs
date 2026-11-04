@@ -47,6 +47,13 @@ struct Fake {
     bin: String,
 }
 
+// The test dir holds the fake script, the records and the clients/agents state files; removed on drop.
+impl Drop for Fake {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
 // Each user frame n sleeps 0.5 s, then prints turn{n}.jsonl. The coder role sleeps 0.2 s per task.
 fn fake(name: &str, turns: &[&str]) -> Fake {
     let dir = temp_dir(name);
@@ -146,6 +153,9 @@ fn config(f: &Fake) -> Config {
         claude_bin: f.bin.clone(),
         model: "opus".into(),
         residents: false,
+        // Clients and agents state stay in the test dir, never ~/.chaude.
+        agents_file: Some(f.dir.join("agents.json")),
+        clients_file: Some(f.dir.join("clients.json")),
         ..Config::default()
     }
 }

@@ -9,7 +9,13 @@ use chaude_core::api::Config;
 // The idle TTL and the default pool size are the public Config defaults the Go values map to.
 #[test]
 fn default_extra_pool_and_idle_ttl_match_go() {
-    let cfg = Config::default();
+    // No engine starts here, so the state paths under this dir are never created.
+    let dir = std::env::temp_dir().join(format!("chaude-p3-defaults-{}", std::process::id()));
+    let cfg = Config {
+        agents_file: Some(dir.join("agents.json")),
+        clients_file: Some(dir.join("clients.json")),
+        ..Config::default()
+    };
     assert!(cfg.residents);
     assert_eq!(cfg.extra_coders, 4);
     assert_eq!(cfg.coder_idle_ttl, Duration::from_secs(270));

@@ -56,6 +56,15 @@ pub(crate) mod testutil {
         }
     }
 
+    /// Config with the clients and agents files under `dir`, so a test never writes ~/.chaude.
+    pub fn isolated(dir: &Path) -> crate::api::Config {
+        crate::api::Config {
+            agents_file: Some(dir.join("agents.json")),
+            clients_file: Some(dir.join("clients.json")),
+            ..crate::api::Config::default()
+        }
+    }
+
     impl Drop for TempDir {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);

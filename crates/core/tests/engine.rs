@@ -45,6 +45,13 @@ struct Fake {
     bin: String,
 }
 
+// The test dir holds the fake script, the records and the clients/agents state files; removed on drop.
+impl Drop for Fake {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
 // Each user frame n sleeps 0.5 s, then prints turn{n}.jsonl. The sleep makes queueing deterministic.
 fn fake(name: &str, turns: &[&str]) -> Fake {
     let dir = temp_dir(name);
@@ -152,6 +159,9 @@ fn config(f: &Fake) -> Config {
         model: "opus".into(),
         // Baseline tests assert the non-resident event stream; stage tests opt in.
         residents: false,
+        // Clients and agents state stay in the test dir, never ~/.chaude.
+        agents_file: Some(f.dir.join("agents.json")),
+        clients_file: Some(f.dir.join("clients.json")),
         ..Config::default()
     }
 }
@@ -493,9 +503,10 @@ fn plan_mode_denies_bash_without_prompt_and_unknown_mode_is_reported() {
 #[test]
 fn spawn_failure_reports_error_and_rejects_work() {
     let _g = lock();
+    let f = fake("spawn-fail", &[]);
     let cfg = Config {
         claude_bin: "/nonexistent/chaude-e1/claude".into(),
-        ..Config::default()
+        ..config(&f)
     };
     let (h, rx) = Engine::start(cfg);
     let first = rx.recv_timeout(WAIT).expect("spawn error event");
