@@ -2,8 +2,6 @@
 resolver = "3"
 members = ["crates/*"]
 default-members = ["crates/core", "crates/cli"]
-# gui is a Tauri placeholder (phase 5): excluded from the workspace until it is built on its own.
-exclude = ["crates/gui"]
 
 [workspace.package]
 version = "0.10.2"

@@ -45,6 +45,10 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - blocked: /clear new-session notice; engine does not emit a new-session event.
      - blocked: thinking row, done row, rotated notice, orphan notice, tool summary, assistant link wrap; each needs core data (see targeted #[allow(dead_code)] reasons in bar.rs and render.rs).
 5. GUI (Tauri): session tabs, conversation view, input, usage display; .dmg / .msi.
+   - status (2026-11-04, crates/gui): placeholder only.
+     - done: crates/gui (chaude-gui) is a workspace member again (exclude removed); depends on chaude-core by path only, no UI framework.
+     - done: event_kind wraps core event::parse_line + type_name (unit tests: unknown type, invalid JSON).
+     - open: Tauri dependency and UI (session tabs, conversation view, input, usage display, .dmg / .msi).
 6. Parity tests vs Go (312 Go tests as reference), switch release to Rust, keep Go one version in deprecated/.
 - Priority (2026-11-03): Mac first; engine + TUI before phase 2 tools. See plan/rust-engine-tui.md.
 

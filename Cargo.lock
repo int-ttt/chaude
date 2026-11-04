@@ -69,6 +69,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "chaude-gui"
+version = "0.10.2"
+dependencies = [
+ "chaude-core",
+]
+
+[[package]]
 name = "chaude-scripts"
 version = "0.10.2"
 dependencies = [
