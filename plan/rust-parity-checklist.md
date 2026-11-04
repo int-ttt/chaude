@@ -19,7 +19,7 @@ Counts are rows, not individual flags. Repl flags are one row (F3) covering 26 f
 | C9 | `update` | main.go:51 | missing | crates/update (not wired) | |
 | C10 | `--version`, `-v`, `version` | main.go:53 | done | crates/cli/src/main.rs:195 | |
 | C11 | `-h`, `--help`, `help` text | main.go:20-29, 55 | differs | crates/cli/src/main.rs:16-22 | Rust lists different commands |
-| C12 | 7 helper scripts (`scripts.Has`) | main.go:61, deprecated/src/main/intt/internal/scripts/scripts.go:17-27, helpText common.go:364-395 | missing | crates/scripts (logic ported, 7 modules; not wired) | charcount, claude-history, compress-archive, export-history, extract-transcript, search-history, usage-report. Ported and tested (3 unit, 5 charcount, 7 smoke). Binary hookup pending: crates/cli/Cargo.toml dep and one main.rs match arm (`Some(cmd) if chaude_scripts::has(cmd)`). Stays missing until wired |
+| C12 | 7 helper scripts (`scripts.Has`) | main.go:61, deprecated/src/main/intt/internal/scripts/scripts.go:17-27, helpText common.go:364-395 | done | crates/cli/src/main.rs match arm chaude_scripts::has (7 modules) | charcount, claude-history, compress-archive, export-history, extract-transcript, search-history, usage-report. Ported and tested (3 unit, 5 charcount, 7 smoke). Wired: crates/cli/Cargo.toml dep chaude-scripts and main.rs arm `Some(cmd) if chaude_scripts::has(cmd)`. Smoke: `chaude charcount FILE` exit 0 |
 | C13 | leading `-flag` runs repl | main.go:58-59 | differs | crates/cli/src/main.rs:203-204 | Rust accepts only --orch and --model |
 | C14 | unknown command error, exit 2 | main.go:64-65 | done | crates/cli/src/main.rs:206-209 | message text differs |
 | C15 | `update.CleanupOld()` at startup | main.go:33 | missing | none | depends on C9 |
@@ -102,7 +102,7 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 ## Totals
 
 - Rows: 63 (C 15, F 3, E 5, S 25, K 12, T 3).
-- done: 41. differs: 7. missing: 15.
+- done: 42. differs: 7. missing: 14.
 - Missing, top: (1) `repl` subcommand and 26 repl flags (C2, F3); (2) `--from-claude` and `--import-dry-run` CLI (C5, C6); (3) `clean` (C8); (4) `update` CLI and startup cleanup (C9, C15); (5) 7 helper scripts (C12); (6) `CHAUDE_MAX_WORKERS` (E3); (7) status bar P/T/C (K6, blocked).
 
 ## Notes
