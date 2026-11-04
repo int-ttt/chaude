@@ -100,6 +100,8 @@ pub enum Action {
     },
     // Shift+Tab: the engine cycles the permission mode (Go setMode(Next())); it answers with ModeChanged.
     CycleMode,
+    // /mode <name>: the engine sets the permission mode and answers with ModeChanged.
+    SetMode(PermMode),
 }
 
 pub struct App {
@@ -948,13 +950,13 @@ impl App {
                 threshold: 0,
                 rotations: 0,
                 session_id: None,
-                mode: PermMode::Default,
+                mode: commands::parse_mode(&self.bar.mode).unwrap_or(PermMode::Default),
                 chaude_version: env!("CARGO_PKG_VERSION"),
                 busy: self.busy,
             };
             commands::dispatch(&text, &ctx)
         };
-        // /status, /version and /mode need engine state that is not in UiEvent yet, so they go to the engine.
+        // /status still goes to the engine (its state is not in UiEvent yet). /mode and /model are handled here.
         match dispatched {
             Some(Dispatch::Quit) => return Action::Quit,
             Some(Dispatch::ToggleMouse) => {
@@ -985,8 +987,15 @@ impl App {
                 return Action::Continue;
             }
             Some(Dispatch::Resume { args }) => return self.resume(&args),
-            Some(Dispatch::Note(s)) if !matches!(first, "/status" | "/mode") => {
+            Some(Dispatch::Note(s)) if first != "/status" => {
                 self.note(&s);
+                return Action::Continue;
+            }
+            // Go tui.go /mode: setMode; the engine answers ModeChanged, which prints "mode: <name>".
+            Some(Dispatch::SetMode(p)) => return Action::SetMode(p),
+            // Model switch needs core rotate-with-model (C07); until then it is not sent to the engine as text.
+            Some(Dispatch::Model { .. }) => {
+                self.note("model switch is not supported yet");
                 return Action::Continue;
             }
             _ => {}
@@ -2498,6 +2507,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                             }
                         }
                         Action::CycleMode => engine.set_mode("next"),
+                        Action::SetMode(p) => engine.set_mode(p.name()),
                         Action::ResumeSession(sid) => engine.resume_session(&sid),
                     }
                     if let Some(imp) = app.import_install.take() {
@@ -3704,6 +3714,25 @@ mod tests {
         assert_eq!(
             app.on_key(key(KeyCode::Char('d'), KeyModifiers::CONTROL)),
             Action::Quit
+        );
+    }
+
+    #[test]
+    fn slash_mode_and_model_are_not_sent_to_the_engine_as_text() {
+        let mut app = App::new(80, 24);
+        for c in "/mode plan".chars() {
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        assert_eq!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::SetMode(PermMode::Plan)
+        );
+        for c in "/model sonnet".chars() {
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        assert_eq!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::Continue
         );
     }
 
