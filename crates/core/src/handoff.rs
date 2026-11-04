@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -81,16 +80,42 @@ pub fn orphans(prev: &ExitHandoff, alive: impl Fn(u32) -> bool) -> Vec<(String, 
         .collect()
 }
 
-// Go pidAlive (unix). Uses `kill -0`, so no libc. A pid we may not signal reads as dead here.
+#[cfg(unix)]
+unsafe extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
+// errno ESRCH (no such process) is 3 on Linux and macOS.
+#[cfg(unix)]
+const ESRCH: i32 = 3;
+
+// Alive when kill succeeded, or failed with anything but ESRCH. EPERM means the pid exists under another user.
+#[cfg(unix)]
+fn alive_after_kill(ok: bool, errno: Option<i32>) -> bool {
+    ok || errno != Some(ESRCH)
+}
+
+// Go pidAlive. kill(pid, 0) sends no signal: only ESRCH reads as dead, EPERM reads as alive (not ours).
+// Windows always reports not-alive (there is no kill -0 there, so the check is skipped).
 pub fn pid_alive(pid: u32) -> bool {
-    pid != 0
-        && Command::new("kill")
-            .arg("-0")
-            .arg(pid.to_string())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success())
+    #[cfg(unix)]
+    {
+        // pid_t is i32. A larger pid would wrap negative, and kill(-n) signals a process group. pid 0 is the caller's group.
+        let Ok(pid) = i32::try_from(pid) else {
+            return false;
+        };
+        if pid == 0 {
+            return false;
+        }
+        // SAFETY: kill with signal 0 only checks the pid and touches no memory.
+        let ok = unsafe { kill(pid, 0) } == 0;
+        alive_after_kill(ok, io::Error::last_os_error().raw_os_error())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
 }
 
 // <project record folder>/.exit-handoff.json
@@ -457,5 +482,25 @@ mod tests {
             !text.contains("owner_pid") && !text.contains("child_pids"),
             "{text}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_errno_only_esrch_means_dead() {
+        assert!(alive_after_kill(true, None));
+        assert!(
+            alive_after_kill(false, Some(1)),
+            "EPERM: exists, owned by another user"
+        );
+        assert!(!alive_after_kill(false, Some(ESRCH)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pid_alive_on_real_pids() {
+        assert!(pid_alive(std::process::id()));
+        assert!(pid_alive(1), "pid 1 is alive even when not ours (EPERM)");
+        assert!(!pid_alive(0));
+        assert!(!pid_alive(u32::MAX));
     }
 }
