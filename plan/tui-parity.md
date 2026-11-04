@@ -200,7 +200,7 @@ Counts (filled at end): see the "Counts" section.
 - [ ] E15 Esc or Ctrl+C while busy calls interrupt: finish foreground panel and send intr to runTurn (interrupt tui.go:581; repl.go:637 `<-r.intr`, :711 Interrupt) · test: TestEscInterruptClearsForegroundPanel (panel_test.go:38) · core: Session.Interrupt
 - [ ] E16 After interrupt: "[interrupted]" then waits up to 20s for result (repl.go:~800-805) · test: none · core: Interrupt + result
 - [ ] E17 Stale Ctrl+C dropped at start of runTurn (repl.go:~690-695 select default) · test: none · core: none
-- [ ] E18 Ctrl+C with no turn running quits (tui.go:600-606) · test: none · core: none
+- [x] E18 Ctrl+C with no turn running quits (tui.go:600-606) · fixed: mod.rs:704 idle Ctrl+C quits even with text · test: ctrl_c_interrupts_when_busy_and_quits_when_idle_even_with_text (mod.rs:2970) · core: none
 - [ ] E19 OS SIGINT/SIGTERM forwarded to intr channel (repl.go:1384-1388) · test: none · core: none
 - [ ] E20 Interrupt marks running agents interrupted on exit (markInterrupted repl.go:1207; interruptRunning agentview.go:314) · test: none · core: agent registry
 - [ ] E21 Idle child-initiated turn: reply shown with idle timers and finish (idleFinish repl.go:~530-545) · test: none · core: idle turn events

@@ -702,13 +702,11 @@ impl App {
                 Action::Continue
             }
             KeyCode::Char('c') if ctrl => {
+                // Go tui.go: Ctrl+C interrupts when busy, otherwise quits even with input text.
                 if self.busy {
                     Action::Interrupt(InterruptSource::CtrlC)
-                } else if self.editor.is_empty() {
-                    Action::Quit
                 } else {
-                    self.editor.clear();
-                    Action::Continue
+                    Action::Quit
                 }
             }
             // Go tui.go: Ctrl+D quits at once, busy or not.
@@ -2969,12 +2967,10 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_c_interrupts_when_busy_clears_when_idle_and_quits_when_idle_and_empty() {
+    fn ctrl_c_interrupts_when_busy_and_quits_when_idle_even_with_text() {
         let mut app = App::new(80, 24);
         let ctrl_c = || key(KeyCode::Char('c'), KeyModifiers::CONTROL);
         app.on_key(key(KeyCode::Char('a'), KeyModifiers::NONE));
-        assert_eq!(app.on_key(ctrl_c()), Action::Continue);
-        assert!(app.editor.is_empty());
         assert_eq!(app.on_key(ctrl_c()), Action::Quit);
         app.apply(UiEvent::Busy(true));
         assert_eq!(
