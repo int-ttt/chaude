@@ -2588,7 +2588,9 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
 }
 
 // One prompt per stdin line, answered before the next line is read. Engine events are printed as plain text.
-fn plain(cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
+fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
+    // Go r.ui == nil: no UI answers permission asks, so idle asks are denied by the engine.
+    cfg.no_ui = true;
     let (engine, rx) = Engine::start(cfg);
     let mut app = App::new(80, 24);
     if let Some(imp) = startup {

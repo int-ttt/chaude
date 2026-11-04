@@ -284,6 +284,9 @@ pub struct Config {
     pub interrupt_grace: Duration,
     // Go --auto-allow (testing): every ask is allowed without a UI prompt. Mode verdicts still apply first.
     pub auto_allow: bool,
+    // Go r.ui == nil (plain line mode): stdin belongs to the prompt loop, so an ask with no turn running is denied
+    // with a notice instead of waiting for an answer that never comes.
+    pub no_ui: bool,
     // Go --task-budget-usd: USD cap per prompt (the ledger resets on each prompt). Zero = off.
     pub task_budget_usd: f64,
     // Go --metrics-dir: per-turn JSONL log directory. None = off (the CLI passes <record>/metrics).
@@ -386,6 +389,7 @@ impl Default for Config {
             inactivity_timeout: Duration::from_secs(300),
             interrupt_grace: Duration::from_secs(20),
             auto_allow: false,
+            no_ui: false,
             task_budget_usd: 0.0,
             metrics_dir: None,
             transcript: None,
@@ -2104,10 +2108,23 @@ impl State {
                     Verdict::Deny(msg) => {
                         self.respond_permission(&c.request_id, false, Value::Null, msg)
                     }
-                    // Go askPerm: with a UI the ask goes to the UI whether or not a turn runs. The engine
-                    // always has a UI channel, so Go's idle "no interactive prompt" deny is not reachable.
+                    // Go askPerm: with a UI the ask goes to the UI whether or not a turn runs. Without one
+                    // (plain mode) an idle ask is denied with the Go note.
                     Verdict::Ask if self.cfg.auto_allow => {
                         self.respond_permission(&c.request_id, true, input, "")
+                    }
+                    Verdict::Ask if self.cfg.no_ui && !self.busy => {
+                        let note = format!(
+                            "[permission denied while idle] {tool} {} (use /mode auto or acceptEdits)",
+                            crate::import_view::trunc(&input.to_string(), 120)
+                        );
+                        self.emit(UiEvent::Notice { text: note });
+                        self.respond_permission(
+                            &c.request_id,
+                            false,
+                            Value::Null,
+                            "denied: no interactive prompt available between turns",
+                        );
                     }
                     Verdict::Ask => {
                         let summary = tool_summary(&input);
