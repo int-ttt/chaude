@@ -257,8 +257,10 @@ mod tests {
 
     #[test]
     fn topic_carries_over_and_markers_are_stripped() {
-        let mut st = RecordState::default();
-        st.last_reply = "answer [cat: parser]\nmore".to_string();
+        let mut st = RecordState {
+            last_reply: "answer [cat: parser]\nmore".to_string(),
+            ..Default::default()
+        };
         let (topic, text) = st.topic_for("분석 a");
         assert_eq!(topic, "parser");
         assert_eq!(text, "answer\nmore");
