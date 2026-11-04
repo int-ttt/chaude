@@ -175,6 +175,30 @@ pub enum UiEvent {
     Usage {
         text: String,
     },
+    // Tokens in a resident role's context window from its last result usage (Go per-role ctx).
+    RoleContext {
+        role: String,
+        tokens: u64,
+    },
+    // This run's session ids (Go /view): the main child, every resident that has answered, and all owned ids.
+    SessionIds {
+        main: String,
+        residents: BTreeMap<String, String>,
+        owned: Vec<String>,
+    },
+    // The main child's session changed without a rotation (a user /clear): the old id is the one just replaced.
+    NewSession {
+        old_session: String,
+    },
+    // Emitted just before Rotated: the session id the rotation replaced (empty when none).
+    RotatedFrom {
+        old_session: String,
+    },
+    // Tool input JSON of a tool call, emitted right after its ToolStart (Go tool_summary / Agent model).
+    ToolInput {
+        id: String,
+        input: Value,
+    },
 }
 
 // Recent turns kept for the handoff snapshot (Go --tail-turns) and their size limits (Go --snapshot-chars).
@@ -728,6 +752,7 @@ impl State {
             return;
         };
         self.note_resident("prompter", r.session_id.clone());
+        self.role_context("prompter", r.usage.as_ref());
         if let Some(o) = self.prompter.reply(&r.result.unwrap_or_default()) {
             self.finish_prompter(o);
         }
@@ -910,6 +935,26 @@ impl State {
         if let Some(id) = session_id.filter(|id| !id.is_empty()) {
             self.note_own(&id);
             self.resident_sids.insert(role.to_string(), id);
+            self.emit_session_ids();
+        }
+    }
+
+    // Go /view: this run's session ids, sent whenever the main or a resident id changes.
+    fn emit_session_ids(&self) {
+        self.emit(UiEvent::SessionIds {
+            main: self.sid.clone(),
+            residents: self.resident_sids.clone(),
+            owned: self.owned.clone(),
+        });
+    }
+
+    // Tokens in the role's context window from its result usage (Go per-role ctx). Nothing without usage.
+    fn role_context(&self, role: &str, usage: Option<&Usage>) {
+        if let Some(u) = usage {
+            self.emit(UiEvent::RoleContext {
+                role: role.to_string(),
+                tokens: u.context_tokens(),
+            });
         }
     }
 
@@ -964,6 +1009,7 @@ impl State {
             return;
         };
         self.note_resident(&coder_role(i), r.session_id.clone());
+        self.role_context(&coder_role(i), r.usage.as_ref());
         let text = summarize_reply(&r.result.unwrap_or_default());
         if text.is_empty() {
             self.finish_coder(i, Err("coder empty reply".to_string()));
@@ -1010,6 +1056,7 @@ impl State {
             return;
         };
         self.note_resident("tui", r.session_id.clone());
+        self.role_context("tui", r.usage.as_ref());
         let text = r.result.unwrap_or_default().trim().to_string();
         if text.is_empty() {
             self.finish_tui(Err("tui empty reply".to_string()));
@@ -1228,7 +1275,14 @@ impl State {
             Event::System(s) => {
                 if let Some(id) = s.session_id {
                     self.note_own(&id);
-                    self.sid = id;
+                    let prev = std::mem::replace(&mut self.sid, id.clone());
+                    if prev != id {
+                        // A rotation clears sid first, so a non-empty previous id here means a /clear.
+                        if !prev.is_empty() {
+                            self.emit(UiEvent::NewSession { old_session: prev });
+                        }
+                        self.emit_session_ids();
+                    }
                 }
                 if let Some(m) = s.model {
                     self.model = m;
@@ -1426,6 +1480,10 @@ impl State {
             id: id.clone(),
             name: name.clone(),
             summary,
+        });
+        self.emit(UiEvent::ToolInput {
+            id: id.clone(),
+            input: input.clone(),
         });
         if name == "Agent" || name == "Task" {
             self.delegations += 1;
@@ -1981,6 +2039,7 @@ impl State {
             "attempts": attempts,
             "outcome": "closed",
         }));
+        self.emit(UiEvent::RotatedFrom { old_session: old });
         self.emit(UiEvent::Rotated { reason });
         self.emit_status(self.cost_usd);
     }

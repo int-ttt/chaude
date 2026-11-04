@@ -2,6 +2,7 @@
 // Engine tests against a fake `claude` shell script (Config::claude_bin override).
 // The script logs each stdin line to <dir>/stdin.log and, on the Nth user frame, replays <dir>/turnN.jsonl.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -206,6 +207,11 @@ fn text_turn_emits_deltas_then_done() {
         evs,
         vec![
             UiEvent::Busy(true),
+            UiEvent::SessionIds {
+                main: "s1".into(),
+                residents: BTreeMap::new(),
+                owned: vec!["s1".into()],
+            },
             status(0, 0.0),
             UiEvent::TextDelta {
                 role: Role::Main,
@@ -1268,6 +1274,84 @@ fn resident_stage_rows_bracket_main_turn_and_agent_calls() {
             stage("agent:scan", StagePhase::Done),
             stage("main", StagePhase::Done),
         ],
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
+fn session_ids_new_session_and_tool_input_are_emitted() {
+    let _g = lock();
+    let f = fake("clear", &["clear_turn.jsonl", "clear_after_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("first");
+    let first = until_idle(&rx);
+    assert!(
+        first.contains(&UiEvent::SessionIds {
+            main: "s1".into(),
+            residents: BTreeMap::new(),
+            owned: vec!["s1".into()],
+        }),
+        "{first:?}"
+    );
+    let input = first
+        .iter()
+        .position(|e| {
+            *e == UiEvent::ToolInput {
+                id: "toolu_bash1".into(),
+                input: serde_json::json!({"command": "ls -la"}),
+            }
+        })
+        .unwrap_or_else(|| panic!("{first:?}"));
+    let start = first
+        .iter()
+        .position(|e| matches!(e, UiEvent::ToolStart { id, .. } if id == "toolu_bash1"))
+        .unwrap();
+    assert_eq!(input, start + 1, "{first:?}");
+    // The same child now reports a new session id with no rotation: a user /clear.
+    h.submit("/clear");
+    let second = until_idle(&rx);
+    assert!(
+        second.contains(&UiEvent::NewSession {
+            old_session: "s1".into()
+        }),
+        "{second:?}"
+    );
+    assert!(
+        second.contains(&UiEvent::SessionIds {
+            main: "s2".into(),
+            residents: BTreeMap::new(),
+            owned: vec!["s1".into(), "s2".into()],
+        }),
+        "{second:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
+fn resident_result_reports_role_context_and_session() {
+    let _g = lock();
+    let f = fake("tui_ctx", &["text_turn.jsonl"]);
+    fs::copy(fixture("resident_usage.jsonl"), f.dir.join("tui.jsonl")).unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.contains(&UiEvent::RoleContext {
+            role: "tui".into(),
+            tokens: 103,
+        }),
+        "{evs:?}"
+    );
+    assert!(
+        evs.contains(&UiEvent::SessionIds {
+            main: "s1".into(),
+            residents: BTreeMap::from([("tui".to_string(), "tui-s1".to_string())]),
+            owned: vec!["s1".into(), "tui-s1".into()],
+        }),
         "{evs:?}"
     );
     h.shutdown();
