@@ -87,6 +87,7 @@ case "$*" in
   *" --system-prompt "*) role=prompter ;;
   *) role=main ;;
 esac
+[ "$role" = main ] && printf '%s\n' "$*" >> 'DIR/args.log'
 while IFS= read -r line; do
   if [ "$role" = coder ]; then
     case "$line" in
@@ -1702,6 +1703,53 @@ fn exit_handoff_records_main_session_on_shutdown() {
     assert_eq!(v["version"], 1, "{text}");
     assert_eq!(v["main_session"], "s1", "{text}");
     assert_eq!(v["cwd"], f.dir.display().to_string().as_str(), "{text}");
+}
+
+// A run that was killed leaves its live marker behind; the next start resumes its main session.
+#[test]
+fn killed_previous_run_starts_main_with_resume() {
+    let _g = lock();
+    let f = fake("resume_killed", &["text_turn.jsonl"]);
+    let path = f.dir.join(".exit-handoff.json");
+    let live = handoff::ExitHandoff {
+        main_session: "old1".into(),
+        ctx_tokens: BTreeMap::from([("main".to_string(), 250_000u64)]),
+        ..Default::default()
+    };
+    handoff::write_exit_handoff(&handoff::live_handoff_file(&path), &live).unwrap();
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.handoff_path = Some(path.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    until_idle(&rx);
+    h.shutdown();
+    let args = fs::read_to_string(f.dir.join("args.log")).expect("main child ran");
+    assert!(args.contains("--resume old1"), "{args}");
+    assert!(!handoff::live_handoff_file(&path).exists());
+}
+
+// A clean exit with the main context at or above the threshold keeps the fresh-session handoff path.
+#[test]
+fn clean_exit_above_threshold_starts_fresh() {
+    let _g = lock();
+    let f = fake("fresh_above", &["text_turn.jsonl"]);
+    let path = f.dir.join(".exit-handoff.json");
+    let prev = handoff::ExitHandoff {
+        main_session: "old2".into(),
+        ctx_tokens: BTreeMap::from([("main".to_string(), 250_000u64)]),
+        ..Default::default()
+    };
+    handoff::write_exit_handoff(&path, &prev).unwrap();
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.handoff_path = Some(path.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    until_idle(&rx);
+    h.shutdown();
+    let args = fs::read_to_string(f.dir.join("args.log")).expect("main child ran");
+    assert!(!args.contains("--resume"), "{args}");
 }
 
 #[test]

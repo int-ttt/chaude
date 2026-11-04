@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 
 // File name in the record project folder. The record listing ignores it (not .md).
 pub const EXIT_HANDOFF_FILE: &str = ".exit-handoff.json";
+// Written while a run is live and removed on clean exit. Still present at the next start = the run was killed.
+pub const LIVE_HANDOFF_FILE: &str = ".live-handoff.json";
+// ctx_tokens key of the main child; residents use their role name.
+pub const MAIN_ROLE: &str = "main";
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ExitHandoff {
@@ -25,9 +29,21 @@ pub struct ExitHandoff {
     pub resident_sessions: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owned_sessions: Vec<String>,
+    // role -> context tokens at the session's last result (MAIN_ROLE for the main child). Chaude only.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ctx_tokens: BTreeMap<String, u64>,
     // Unix seconds. Go writes an RFC 3339 "saved_at" string, which is not read here.
     #[serde(default)]
     pub saved_at_unix: u64,
+}
+
+// What a session load does with a previous session (see resume_mode).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Load {
+    // Start the session with `--resume <id>`.
+    Resume(String),
+    // Start a fresh session (the handoff path carries the context).
+    Fresh,
 }
 
 impl ExitHandoff {
@@ -44,6 +60,46 @@ impl ExitHandoff {
 // <project record folder>/.exit-handoff.json
 pub fn handoff_file(project_dir: &Path) -> PathBuf {
     project_dir.join(EXIT_HANDOFF_FILE)
+}
+
+// The live marker next to an exit handoff file (same folder, LIVE_HANDOFF_FILE).
+pub fn live_handoff_file(exit_path: &Path) -> PathBuf {
+    exit_path.with_file_name(LIVE_HANDOFF_FILE)
+}
+
+// The record of the previous run and whether it was killed. A live marker means the run never reached its
+// clean exit, so it is newer than the exit handoff and wins. None when neither file parses.
+pub fn previous_run(exit_path: &Path) -> Option<(ExitHandoff, bool)> {
+    if let Some(live) = read_exit_handoff(&live_handoff_file(exit_path)) {
+        return Some((live, true));
+    }
+    read_exit_handoff(exit_path).map(|h| (h, false))
+}
+
+// Decides how a session of `role` (MAIN_ROLE or a resident role) starts, from the previous run's record.
+// Resume when the run was killed (no clean exit handoff), or when the session's context is below the
+// rotation threshold. Fresh when there is no session id, or a clean exit above the threshold (the handoff
+// path carries it). threshold 0 = rotation off, so every session resumes. A missing ctx counts as 0.
+pub fn resume_mode(prev: &ExitHandoff, role: &str, killed: bool, threshold: u64) -> Load {
+    let sid = if role == MAIN_ROLE {
+        prev.main_session.as_str()
+    } else {
+        prev.resident_sessions.get(role).map_or("", String::as_str)
+    };
+    if sid.is_empty() {
+        return Load::Fresh;
+    }
+    let ctx = prev.ctx_tokens.get(role).copied().unwrap_or(0);
+    if killed || threshold == 0 || ctx < threshold {
+        Load::Resume(sid.to_string())
+    } else {
+        Load::Fresh
+    }
+}
+
+// Clean exit: the live marker is no longer needed. A missing file is fine.
+pub fn remove_live_handoff(exit_path: &Path) {
+    let _ = fs::remove_file(live_handoff_file(exit_path));
 }
 
 // Go writeExitHandoff: version 1 and saved_at now, written to a temp file then renamed.
@@ -148,5 +204,110 @@ mod tests {
         let ids = sample().prev_owned();
         let want: BTreeSet<String> = ["m0", "m1"].iter().map(|s| s.to_string()).collect();
         assert_eq!(ids, want);
+    }
+
+    fn with_ctx(main: u64, coder: u64) -> ExitHandoff {
+        let mut h = sample();
+        h.ctx_tokens.insert(MAIN_ROLE.to_string(), main);
+        h.ctx_tokens.insert("coder".to_string(), coder);
+        h
+    }
+
+    #[test]
+    fn killed_run_resumes_even_above_threshold() {
+        let h = with_ctx(150_000, 0);
+        assert_eq!(
+            resume_mode(&h, MAIN_ROLE, true, 80_000),
+            Load::Resume("m1".to_string())
+        );
+    }
+
+    #[test]
+    fn clean_exit_below_threshold_resumes() {
+        let h = with_ctx(79_999, 0);
+        assert_eq!(
+            resume_mode(&h, MAIN_ROLE, false, 80_000),
+            Load::Resume("m1".to_string())
+        );
+    }
+
+    #[test]
+    fn clean_exit_at_or_above_threshold_is_fresh() {
+        assert_eq!(
+            resume_mode(&with_ctx(80_000, 0), MAIN_ROLE, false, 80_000),
+            Load::Fresh
+        );
+        assert_eq!(
+            resume_mode(&with_ctx(120_000, 0), MAIN_ROLE, false, 80_000),
+            Load::Fresh
+        );
+    }
+
+    #[test]
+    fn resident_role_uses_its_own_session_and_ctx() {
+        let h = with_ctx(150_000, 10_000);
+        assert_eq!(
+            resume_mode(&h, "coder", false, 80_000),
+            Load::Resume("c1".to_string())
+        );
+        // tui has no recorded session id, so it starts fresh whatever its ctx.
+        assert_eq!(
+            resume_mode(&h, "tui", false, 80_000),
+            Load::Fresh,
+            "tui has no session id"
+        );
+    }
+
+    #[test]
+    fn no_session_id_is_fresh_even_when_killed() {
+        let h = ExitHandoff::default();
+        assert_eq!(resume_mode(&h, MAIN_ROLE, true, 80_000), Load::Fresh);
+    }
+
+    #[test]
+    fn zero_threshold_resumes_every_session() {
+        assert_eq!(
+            resume_mode(&with_ctx(500_000, 0), MAIN_ROLE, false, 0),
+            Load::Resume("m1".to_string())
+        );
+    }
+
+    #[test]
+    fn live_marker_wins_over_exit_handoff_and_is_removed_on_clean_exit() {
+        let dir = TempDir::new("handoff-live");
+        let exit = handoff_file(dir.path());
+        let old = ExitHandoff {
+            main_session: "old".to_string(),
+            ..Default::default()
+        };
+        write_exit_handoff(&exit, &old).unwrap();
+        assert_eq!(
+            previous_run(&exit).map(|(h, k)| (h.main_session, k)),
+            Some(("old".to_string(), false))
+        );
+
+        write_exit_handoff(&live_handoff_file(&exit), &sample()).unwrap();
+        let (h, killed) = previous_run(&exit).expect("live record");
+        assert!(killed);
+        assert_eq!(h.main_session, "m1");
+
+        remove_live_handoff(&exit);
+        assert!(!live_handoff_file(&exit).exists());
+        assert_eq!(
+            previous_run(&exit).map(|(h, k)| (h.main_session, k)),
+            Some(("old".to_string(), false))
+        );
+    }
+
+    #[test]
+    fn ctx_tokens_round_trip_and_empty_map_is_omitted() {
+        let dir = TempDir::new("handoff-ctx");
+        let path = handoff_file(dir.path());
+        write_exit_handoff(&path, &with_ctx(42, 7)).unwrap();
+        let got = read_exit_handoff(&path).unwrap();
+        assert_eq!(got.ctx_tokens.get(MAIN_ROLE), Some(&42));
+        assert_eq!(got.ctx_tokens.get("coder"), Some(&7));
+        write_exit_handoff(&path, &sample()).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("ctx_tokens"));
     }
 }

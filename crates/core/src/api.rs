@@ -444,6 +444,10 @@ struct State {
     owned: Vec<String>,
     // Last session id each resident role reported on a result line (Go resident_sessions). Live roles only.
     resident_sids: BTreeMap<String, String>,
+    // Session a resident role starts with (`--resume`), decided at start by handoff::resume_mode; taken on spawn.
+    resume_pending: BTreeMap<String, String>,
+    // Last context tokens each resident role reported (Go per-role ctx), kept for the live handoff.
+    role_ctx: BTreeMap<String, u64>,
     self_tx: Sender<Input>,
     opts: SpawnOpts,
     // Bumped on every fresh child so the old child's late lines and EOF are ignored.
@@ -506,10 +510,29 @@ struct AgentInfo {
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
+    // Session loads: a killed or below-threshold previous session resumes (handoff::resume_mode). An explicit
+    // cfg.resume wins for the main child.
+    let mut main_resume = cfg.resume.clone();
+    let mut resume_pending = BTreeMap::new();
+    if let Some((prev, killed)) = cfg.handoff_path.as_deref().and_then(handoff::previous_run) {
+        let main_thr = threshold_for(&cfg.model, cfg.rotate_threshold);
+        if let handoff::Load::Resume(sid) =
+            handoff::resume_mode(&prev, handoff::MAIN_ROLE, killed, main_thr)
+            && cfg.resume.is_none()
+        {
+            main_resume = Some(sid);
+        }
+        let res_thr = threshold_for("haiku", cfg.rotate_threshold);
+        for role in prev.resident_sessions.keys() {
+            if let handoff::Load::Resume(sid) = handoff::resume_mode(&prev, role, killed, res_thr) {
+                resume_pending.insert(role.clone(), sid);
+            }
+        }
+    }
     let opts = SpawnOpts {
         claude_bin: resolve_bin(&cfg.claude_bin),
         model: cfg.model.clone(),
-        resume: cfg.resume.clone(),
+        resume: main_resume,
         cwd: cfg.cwd.clone(),
         cache_ttl: cfg.cache_ttl.clone(),
         compact_window: cfg.compact_window,
@@ -553,6 +576,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         sid: String::new(),
         owned: Vec::new(),
         resident_sids: BTreeMap::new(),
+        resume_pending,
+        role_ctx: BTreeMap::new(),
         mcp_cfg: None,
         self_tx,
         opts,
@@ -574,6 +599,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         coders: Vec::new(),
         coder_epoch: 0,
     };
+    st.persist_live();
     st.start_child();
     loop {
         let input = match st.wait_budget() {
@@ -623,6 +649,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     }
     if let Some(path) = st.cfg.handoff_path.clone() {
         let _ = handoff::write_exit_handoff(&path, &st.exit_handoff());
+        handoff::remove_live_handoff(&path);
     }
     if let Some(mut p) = st.proc.take() {
         p.kill();
@@ -727,7 +754,7 @@ impl State {
         self.resident_sids.remove("prompter");
         let opts = SpawnOpts {
             model: "haiku".to_string(),
-            resume: None,
+            resume: self.resume_pending.remove("prompter"),
             max_budget_usd: 0.0,
             shape: Shape {
                 minimal: true,
@@ -813,7 +840,7 @@ impl State {
         let rule = agent_body(&cwd, "haiku-tui")?;
         let opts = SpawnOpts {
             model: "haiku".to_string(),
-            resume: None,
+            resume: self.resume_pending.remove("tui"),
             max_budget_usd: 0.0,
             shape: Shape {
                 minimal: true,
@@ -885,7 +912,7 @@ impl State {
         let rule = agent_body(&cwd, "haiku-coder")?;
         let opts = SpawnOpts {
             model: "haiku".to_string(),
-            resume: None,
+            resume: self.resume_pending.remove(&coder_role(i)),
             max_budget_usd: 0.0,
             shape: Shape {
                 minimal: false,
@@ -946,15 +973,30 @@ impl State {
             residents: self.resident_sids.clone(),
             owned: self.owned.clone(),
         });
+        self.persist_live();
+    }
+
+    // Rewrites the live marker with this run's ids and ctx, so a force kill leaves the latest state behind.
+    // Only with a handoff path (the TUI sets one).
+    fn persist_live(&self) {
+        if let Some(path) = &self.cfg.handoff_path {
+            let _ = handoff::write_exit_handoff(
+                &handoff::live_handoff_file(path),
+                &self.exit_handoff(),
+            );
+        }
     }
 
     // Tokens in the role's context window from its result usage (Go per-role ctx). Nothing without usage.
-    fn role_context(&self, role: &str, usage: Option<&Usage>) {
+    fn role_context(&mut self, role: &str, usage: Option<&Usage>) {
         if let Some(u) = usage {
+            let tokens = u.context_tokens();
+            self.role_ctx.insert(role.to_string(), tokens);
             self.emit(UiEvent::RoleContext {
                 role: role.to_string(),
-                tokens: u.context_tokens(),
+                tokens,
             });
+            self.persist_live();
         }
     }
 
@@ -975,6 +1017,15 @@ impl State {
             .filter(|(_, alive)| *alive)
             .filter_map(|(role, _)| self.resident_sids.get(&role).map(|id| (role, id.clone())))
             .collect();
+        let mut ctx_tokens: BTreeMap<String, u64> = self
+            .role_ctx
+            .iter()
+            .filter(|(role, _)| resident_sessions.contains_key(*role))
+            .map(|(role, tokens)| (role.clone(), *tokens))
+            .collect();
+        if !self.sid.is_empty() {
+            ctx_tokens.insert(handoff::MAIN_ROLE.to_string(), self.ctx_tokens);
+        }
         ExitHandoff {
             cwd: self
                 .opts
@@ -985,6 +1036,7 @@ impl State {
             main_session: self.sid.clone(),
             resident_sessions,
             owned_sessions: self.owned.clone(),
+            ctx_tokens,
             ..Default::default()
         }
     }
@@ -1318,6 +1370,7 @@ impl State {
                 }
                 if let Some(u) = &env.message.usage {
                     self.ctx_tokens = u.context_tokens();
+                    self.persist_live();
                     self.last_api = Some(Instant::now());
                     self.budget_mid_turn(u);
                     self.emit_status(self.cost_usd);
