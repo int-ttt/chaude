@@ -652,6 +652,8 @@ struct AgentInfo {
     done: bool,
     // The result file was written. Not set yet: Rust has no agentresult port (Go agentresult.go).
     result_done: bool,
+    // The Agent call's `model` input; empty when the agent inherits the session model.
+    model: String,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -667,8 +669,6 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
                 .map(|(role, pid)| {
                     let model = prev.child_models.get(&role).cloned().unwrap_or_default();
                     (role, pid, model)
-    // The Agent call's `model` input; empty when the agent inherits the session model.
-    model: String,
                 })
                 .collect();
         }
@@ -1823,6 +1823,11 @@ impl State {
                     started: Instant::now(),
                     done: false,
                     result_done: false,
+                    model: input
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
                 },
             );
             self.stage(&agent_slot(&description), StagePhase::Working);
@@ -1838,11 +1843,6 @@ impl State {
         self.open_tools.remove(&id);
         self.emit(UiEvent::ToolEnd {
             id: id.clone(),
-                    model: input
-                        .get("model")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
             ok: !is_error,
         });
         let text = result_text(content.as_ref());
@@ -1916,9 +1916,15 @@ impl State {
             if let Some(name) = name {
                 self.stage(&agent_slot(&name), StagePhase::Done);
             }
+            let model = self
+                .agent_info
+                .get(&id)
+                .map(|i| i.model.clone())
+                .unwrap_or_default();
             self.emit(UiEvent::AgentEnd {
                 id,
                 elapsed_ms: t0.elapsed().as_millis() as u64,
+                model,
             });
         }
         // The last background agent finished while the child is idle: the deferred rotation runs now.
@@ -1931,15 +1937,9 @@ impl State {
     fn on_task_notification(&mut self, text: &str) {
         if !text.contains("<task-notification>") {
             return;
-            let model = self
-                .agent_info
-                .get(&id)
-                .map(|i| i.model.clone())
-                .unwrap_or_default();
         }
         for part in text.split("<tool-use-id>").skip(1) {
             let id: String = part
-                model,
                 .chars()
                 .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
                 .collect();
@@ -2062,12 +2062,18 @@ impl State {
         for id in ids {
             self.opus_set(&id, false);
             if let Some(t0) = self.agents.remove(&id) {
+                let model = self
+                    .agent_info
+                    .get(&id)
+                    .map(|i| i.model.clone())
+                    .unwrap_or_default();
                 if let Some(i) = self.agent_info.get(&id) {
                     self.stage(&agent_slot(&i.name), StagePhase::Done);
                 }
                 self.emit(UiEvent::AgentEnd {
                     id,
                     elapsed_ms: t0.elapsed().as_millis() as u64,
+                    model,
                 });
             }
         }
@@ -2077,18 +2083,12 @@ impl State {
         self.stray_results += 1;
         self.end_turn(duration_ms);
     }
-                let model = self
-                    .agent_info
-                    .get(&id)
-                    .map(|i| i.model.clone())
-                    .unwrap_or_default();
 
     // Go repl.go turn record (stage "turn"). Keys the Rust engine does not produce yet (draining, rotations,
     // result_* usage) are left out until their groups land. Write errors are ignored, as in Go.
     // Go recordSave: the turn that just ended goes to its project folder under the record root (slash
     // commands and empty replies are skipped by RecordState). A failed write is reported as an Error.
     fn record_turn_save(&mut self, duration_ms: u64) {
-                    model,
         let cost_turn = (self.cost_usd - self.turn_cost_base).max(0.0);
         let mut fields = serde_json::Map::new();
         fields.insert("duration_ms".into(), json!(duration_ms));
@@ -2295,8 +2295,13 @@ impl State {
         format!("ctx {} >= {}", self.ctx_tokens, thr)
     }
 
-    // Sends the hidden handoff prompt on the current child. Returns false when it could not be sent.
+    // Sends the hidden handoff prompt on the current child. Returns false when it could not be sent, or when a
+    // pending snapshot was kept instead (the rotation then runs without a prompt; the caller goes on as after a failure).
     fn start_handoff(&mut self, reason: String) -> bool {
+        if !self.pending_snapshot.is_empty() {
+            self.rotate_keep_snapshot(reason);
+            return false;
+        }
         self.handoff = Some(Handoff {
             reason,
             attempts: 1,
@@ -2403,8 +2408,8 @@ impl State {
         clip(&parts.join("\n\n"), self.cfg.snapshot_chars)
     }
 
-    // Closes the current child and starts a fresh one (no --resume) that gets the snapshot with its next prompt.
-    fn rotate_child(&mut self, snapshot: String, reason: String, valid: bool, attempts: u32) {
+    // Closes the current child and starts a fresh one (no --resume). Returns the closed session id.
+    fn restart_child(&mut self) -> String {
         let old = self.sid.clone();
         if let Some(mut p) = self.proc.take() {
             p.kill();
@@ -2415,12 +2420,34 @@ impl State {
         self.interrupted_at = None;
         self.stray_results = 0;
         self.pending_perm.clear();
-        self.pending_snapshot = snapshot;
         self.sid.clear();
         self.ctx_tokens = 0;
         self.last_api = None;
         self.opts.resume = None;
         self.start_child();
+        old
+    }
+
+    // Go rotate with a pending snapshot (snapshot_kept): the child has not received it yet, so a handoff from
+    // it would be empty and would replace the snapshot. The child restarts and the snapshot stays for its next prompt.
+    fn rotate_keep_snapshot(&mut self, reason: String) {
+        let old = self.restart_child();
+        let _ = self.metrics.log(json!({
+            "stage": "rotate",
+            "reason": reason,
+            "old_session": old,
+            "snapshot_kept": true,
+            "outcome": "snapshot_kept",
+        }));
+        self.emit(UiEvent::RotatedFrom { old_session: old });
+        self.emit(UiEvent::Rotated { reason });
+        self.emit_status(self.cost_usd);
+    }
+
+    // Closes the current child and starts a fresh one that gets the snapshot with its next prompt.
+    fn rotate_child(&mut self, snapshot: String, reason: String, valid: bool, attempts: u32) {
+        let old = self.restart_child();
+        self.pending_snapshot = snapshot;
         let _ = self.metrics.log(json!({
             "stage": "rotate",
             "reason": reason,
@@ -2669,7 +2696,6 @@ mod tests {
         assert_eq!(resolve_max_workers(None, "  ", 4), Ok(3));
         assert_eq!(Config::default().max_workers, 3);
     }
-}
 
     #[test]
     fn idle_deadline_matches_go_cases() {
@@ -2691,3 +2717,4 @@ mod tests {
         assert_eq!(worker_floor(3, 4), 12);
         assert_eq!(worker_floor(20, 4), 20);
     }
+}
