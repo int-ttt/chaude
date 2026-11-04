@@ -108,7 +108,7 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/conductor_test.go::TestThresholdFor | core/src/rotate.rs::threshold_for_opus_and_configured | covered | |
 | harness/conductor_test.go::TestShouldRotateBoundary | core/src/rotate.rs::should_rotate_fires_at_threshold | covered | name-level: threshold boundary |
 | harness/delegation_test.go::TestDelegationRuleNamesHaikuCoder | core/src/orch.rs::rule_per_mode | covered | name-level: RULE_B names haiku-coder |
-| harness/delegation_test.go::TestForwardRuleFor | - | missing | Rust has no forward rule |
+| harness/delegation_test.go::TestForwardRuleFor | crates/core/src/forward.rs::forward_rule_for_skips_opus_models | covered | |
 | harness/dispatch_test.go::TestPickChild | crates/core/src/pick_child.rs::pick_child_matches_go_cases | covered | name-level match; owner case is pick_child_refuses_row_owned_by_other_live_pid (pid 1 instead of parent pid) |
 | harness/dispatch_test.go::TestMaxWorkersDefault | crates/core/tests/parity_harness_p1.rs::max_workers_default_is_three | ignored | parity: Go default 3; Rust default is max(3, 8 + extra_coders) |
 | harness/dispatch_test.go::TestMaxWorkersEnvOverride | crates/core/tests/parity_harness_p1.rs::max_workers_env_override_and_flag_precedence | covered | added in parity_harness_p1.rs |

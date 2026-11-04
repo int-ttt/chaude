@@ -7,6 +7,7 @@ pub mod cache_ttl;
 pub mod category;
 pub mod child_set;
 pub mod event;
+pub mod forward;
 pub mod handoff;
 pub mod import_claude;
 pub mod haiku_pool;
