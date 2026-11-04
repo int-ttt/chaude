@@ -19,6 +19,11 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
 1. Workspace + CI (cargo build/test on ubuntu/macos/windows) + cmd dispatch, osenv, flag parsing, settings/gen-settings (hooks embedded via include_str!).
 2. clean, update, 7 helper scripts (charcount, claude-history, compress-archive, export-history, extract-transcript, search-history, usage-report) with ported tests.
 3. Harness logic (~8k Go LOC) into core: stream-json, rotation, handoff, record, orch, resident MCP bridge (mcp-resident, tool resident_coder), import/--from-claude, metrics.
+   - status (2026-11-04, crates/core):
+     - done: handoff read side, resident and owned session ids (e73f375; handoff::read_exit_handoff, prev_owned).
+     - done: resident_coder MCP tool over loopback, core side (f90929d; mcp::start/serve/bridge, Engine coder_caller). Gap: `chaude mcp-resident` subcommand missing in crates/cli.
+     - done: main child idle rotation, Go idleDeadline (f6aca83; Config.idle_rotate).
+     - open: record, orch, rotation details beyond idle, import/--from-claude, metrics.
 4. Terminal UI without Charm: inline streaming output, input line with Korean IME + unicode width, spinner, status/usage bar, slash commands.
    - status (2026-11-04, crates/cli/src/tui):
      - done: inline streaming output (live feed + record load, asst rows via markdown path, tool_result_text).
