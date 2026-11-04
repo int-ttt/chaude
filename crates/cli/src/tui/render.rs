@@ -505,7 +505,6 @@ pub fn commas(n: i64) -> String {
 }
 
 // R19 importBlocks (tui.go:283): (kind, text) blocks; only the last 100 turns are shown, with a note first.
-#[allow(dead_code)] // blocked: /import runs in the engine; paired turns not in UiEvent
 pub fn import_blocks(turns: &[(String, String)]) -> Vec<(&'static str, String)> {
     let mut out = Vec::new();
     let mut turns = turns;

@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 
 use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::handoff;
+use chaude_core::import_claude;
 use chaude_core::resident::StagePhase;
 use crossterm::cursor::{MoveTo, Show};
 use crossterm::event::{
@@ -881,6 +882,10 @@ impl App {
                 self.open_view(&arg);
                 return Action::Continue;
             }
+            Some(Dispatch::Import { arg, .. }) => {
+                self.import_view(&arg);
+                return Action::Continue;
+            }
             // /resume claude (Claude Code sessions) still goes to the engine; only record lookups open here.
             Some(Dispatch::Resume { args })
                 if args.first().map(String::as_str) != Some("claude") =>
@@ -898,6 +903,21 @@ impl App {
 
     // Go /view: the sessions this run and the previous run spawned. The previous run comes from the exit handoff
     // (handoff::prev_owned, Go loadPrevOwned); this run's ids come from UiEvent::SessionIds.
+    // /import [id|latest]: shows the imported Claude Code transcript (Go importBlocks). Only the view is
+    // shown here; the engine snapshot install is blocked on core api.rs (no public install API yet).
+    fn import_view(&mut self, arg: &str) {
+        match import_claude::load_import_arg(arg, &self.welcome.cwd) {
+            Err(e) => self.note(&e),
+            Ok((_, imp)) => {
+                for (kind, text) in render::import_blocks(&imp.view) {
+                    self.record_block(kind, &text);
+                }
+                self.note(IMPORT_INSTALL_BLOCKED_NOTE);
+                self.follow_tail();
+            }
+        }
+    }
+
     fn open_view(&mut self, arg: &str) {
         if let Some(mode) = self.session_mode.clone() {
             self.note(&mode);
@@ -1632,6 +1652,8 @@ fn feed(
 }
 
 // Assistant text as Go shows it: **bold** pairs, then link styling (tui.go:374 mdBold + wrapLinked).
+const IMPORT_INSTALL_BLOCKED_NOTE: &str = "import: view only; the next prompt does not carry the snapshot yet (blocked: core api.rs install)";
+
 fn asst_text(line: &str) -> String {
     render::linkify(&render::md_bold(line))
 }
