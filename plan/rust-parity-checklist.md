@@ -39,7 +39,7 @@ Counts are rows, not individual flags. Repl flags are one row (F3) covering 26 f
 | E1 | `CHAUDE_ORCH` export | repl.go:1316 | done | crates/core/src/orch.rs:8 ENV_KEY | |
 | E2 | `CHAUDE_MCP_TOKEN` | mcp (Go) | done | crates/core/src/mcp.rs:71 | |
 | E3 | `CHAUDE_MAX_WORKERS` | repl.go:1305 (flag), repl.go:1345 and 1350 (env read), dispatch.go:16 resolveMaxWorkers | missing | none | only read on the repl path, so it lands with C2/F3 |
-| E4 | `CHAUDE_IME_SHIFT` (IME column shift override) | tui.go:173-178; also TERMINAL_EMULATOR=JetBrains-JediTerm at tui.go:183 | missing | none | verified; TUI-side, not repl |
+| E4 | `CHAUDE_IME_SHIFT` (IME column shift override) | tui.go:173-178; also TERMINAL_EMULATOR=JetBrains-JediTerm at tui.go:183 | done | crates/cli/src/tui/mod.rs ime_col_shift, App.ime_shift | read once at run_tui start; test ime_shift_follows_env_override_and_jediterm |
 | E5 | settings env overrides | Go settings | differs | crates/cli/src/tui/settings.rs | Rust set differs from Go |
 
 ## Slash commands (internal/harness/tui.go:192-217; Rust table crates/cli/src/tui/commands.rs:15-111)

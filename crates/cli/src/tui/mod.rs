@@ -85,6 +85,8 @@ pub enum Action {
 }
 
 pub struct App {
+    // Cursor column shift for IME preedit (Go imeShift, read once at start from the env).
+    ime_shift: i32,
     // /import or --from-claude: the loaded transcript, taken by the event loop and installed into the engine.
     import_install: Option<ClaudeImport>,
     editor: Editor,
@@ -205,6 +207,7 @@ impl App {
             open_tools: HashSet::new(),
             quiet_noted: false,
             mouse: true,
+            ime_shift: 0,
             sugg_sel: 0,
             usage: usage::Usage::default(),
             settings: None,
@@ -1625,7 +1628,20 @@ fn cursor(app: &App, w: usize, h: usize) -> (u16, u16) {
     let (top, shown) = input_window(rows.len(), cur_row);
     // The input rows sit above the box's bottom border and the status row.
     let y = h.saturating_sub(2 + shown) + (cur_row - top);
-    ((1 + pw + cur_col) as u16, y as u16)
+    let x = (1 + pw + cur_col) as i64 + app.ime_shift as i64;
+    (x.max(0) as u16, y as u16)
+}
+
+// imeColShift (tui.go:177): JediTerm draws uncommitted IME text one cell right, so the cursor parks one cell left.
+// CHAUDE_IME_SHIFT=<int> overrides; otherwise TERMINAL_EMULATOR=JetBrains-JediTerm gives -1.
+fn ime_col_shift(ime: Option<String>, emulator: Option<String>) -> i32 {
+    if let Some(n) = ime.and_then(|v| v.trim().parse::<i32>().ok()) {
+        return n;
+    }
+    if emulator.as_deref() == Some("JetBrains-JediTerm") {
+        return -1;
+    }
+    0
 }
 
 // Writes only the rows that differ from `prev` (the rows last drawn), then parks the cursor on the input line.
@@ -1854,6 +1870,10 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     let _guard = TermGuard::enter()?;
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
     let mut app = App::new(cols as usize, rows as usize);
+    app.ime_shift = ime_col_shift(
+        std::env::var("CHAUDE_IME_SHIFT").ok(),
+        std::env::var("TERMINAL_EMULATOR").ok(),
+    );
     if let Some(imp) = startup {
         app.show_import(&imp);
         engine.install_import(imp);
@@ -2232,6 +2252,22 @@ mod tests {
         assert!(out.ends_with("\x1b[?25h"), "{out:?}");
         // Cursor after "cd" on the second input row: 0-based (5, 7), so MoveTo is 1-based row 8, column 6.
         assert!(out.contains("\x1b[8;6H\x1b[?25h"), "{out:?}");
+    }
+
+    #[test]
+    fn ime_shift_follows_env_override_and_jediterm() {
+        assert_eq!(ime_col_shift(None, None), 0);
+        assert_eq!(ime_col_shift(None, Some("JetBrains-JediTerm".into())), -1);
+        assert_eq!(
+            ime_col_shift(Some(" 0 ".into()), Some("JetBrains-JediTerm".into())),
+            0
+        );
+        assert_eq!(ime_col_shift(Some("-2".into()), None), -2);
+        assert_eq!(
+            ime_col_shift(Some("".into()), Some("JetBrains-JediTerm".into())),
+            -1
+        );
+        assert_eq!(ime_col_shift(Some("x".into()), None), 0);
     }
 
     #[test]
