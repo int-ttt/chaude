@@ -70,7 +70,7 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 | S20 | /mode | done | engine | |
 | S21 | /mouse | done | Dispatch::ToggleMouse | |
 | S22 | /version | done | engine | |
-| S23 | /update | differs | crates/cli/src/tui/mod.rs (stub, TODO(update-check)) | no update check yet |
+| S23 | /update | done | crates/cli/src/tui/mod.rs Action::Update, Wake::Note; crates/update text() | Go update.Text (tui.go:1166): note "checking for updates...", then the result off the UI thread via Wake::Note. Runs the full update (Go Run installs), not only check_latest. Test update_notes_and_asks_the_loop_for_the_check |
 | S24 | /exit | done | Dispatch::Quit | |
 | S25 | /quit | done | Dispatch::Quit | |
 

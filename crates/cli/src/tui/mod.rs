@@ -72,6 +72,8 @@ pub enum Action {
     Quit,
     // /usage: the caller asks the engine for the one-shot run (UiEvent::Usage). Never a turn.
     Usage,
+    // /update: the caller runs the release check off the UI thread; the result returns as Wake::Note (tui.go:1166).
+    Update,
     // /resume <session id>: the caller asks the engine to relaunch that session (EngineHandle::resume_session).
     ResumeSession(String),
     // Answer to the open permission prompt (Go tui.go key(): y/Enter allow, n/Esc deny, Ctrl+C deny + interrupt).
@@ -879,10 +881,9 @@ impl App {
                 ));
                 return Action::Continue;
             }
-            // TODO(update-check): Go runs the release check off the UI thread (tui.go:1100). No update client in cli yet.
             Some(Dispatch::Update) => {
                 self.note(commands::UPDATE_START_NOTE);
-                return Action::Continue;
+                return Action::Update;
             }
             Some(Dispatch::OpenView { arg }) => {
                 self.open_view(&arg);
@@ -1823,6 +1824,8 @@ pub fn run(cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
 enum Wake {
     Term(Event),
     Engine(UiEvent),
+    // Result of an off-thread job (/update), shown as a note.
+    Note(String),
     Closed,
 }
 
@@ -1964,6 +1967,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
             let _ = tx.send(Wake::Closed);
         });
     }
+    let update_tx = wake_tx.clone();
     thread::spawn(move || {
         for ev in rx {
             if wake_tx.send(Wake::Engine(ev)).is_err() {
@@ -1982,6 +1986,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         for wake in batch {
             match wake {
                 Wake::Engine(ev) => app.apply(ev),
+                Wake::Note(text) => app.note(&text),
                 Wake::Term(Event::Key(key)) if key.kind == KeyEventKind::Press => {
                     match app.on_key(key) {
                         Action::Continue => {}
@@ -1989,6 +1994,14 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                         Action::Interrupt(src) => engine.interrupt(src),
                         Action::Quit => break 'main,
                         Action::Usage => engine.usage(),
+                        Action::Update => {
+                            let tx = update_tx.clone();
+                            thread::spawn(move || {
+                                let _ = tx.send(Wake::Note(chaude_update::text(env!(
+                                    "CARGO_PKG_VERSION"
+                                ))));
+                            });
+                        }
                         Action::Answer {
                             id,
                             allow,
@@ -2544,6 +2557,21 @@ mod tests {
                 .trim_start_matches("● ")
                 .trim_start(),
             "hi see https://a.io"
+        );
+    }
+
+    #[test]
+    fn update_notes_and_asks_the_loop_for_the_check() {
+        let mut app = App::new(80, 24);
+        type_str(&mut app, "/update");
+        assert_eq!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::Update
+        );
+        assert!(
+            app.transcript
+                .iter()
+                .any(|r| r == commands::UPDATE_START_NOTE)
         );
     }
 
