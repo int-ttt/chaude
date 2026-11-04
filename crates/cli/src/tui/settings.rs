@@ -10,7 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 
 use super::bar::clip;
-use super::render::{DIM_ON, FG_OFF, ORANGE_ON};
+use super::render::{FG_OFF, GREY_ON, ORANGE_ON};
 
 // Go chaude_settings.go constants.
 pub const MAX_EXTRA_CODERS: i64 = 8;
@@ -245,12 +245,12 @@ impl Picker {
             let row = if i == self.sel {
                 format!("{ORANGE_ON}{}{FG_OFF}", clip(&format!("> {r}"), width))
             } else {
-                format!("{DIM_ON}{}{FG_OFF}", clip(&format!("  {r}"), width))
+                format!("{GREY_ON}{}{FG_OFF}", clip(&format!("  {r}"), width))
             };
             l.push(row);
         }
         l.push(format!(
-            "{DIM_ON}{}{FG_OFF}",
+            "{GREY_ON}{}{FG_OFF}",
             clip("  변경은 다음 세션 시작 시 적용됩니다.", width)
         ));
         l.resize(h.max(l.len()), String::new());

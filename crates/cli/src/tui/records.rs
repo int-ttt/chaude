@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::bar::clip;
-use super::render::{DIM_ON, FG_OFF, ORANGE_ON, RESET};
+use super::render::{FG_OFF, GREY_ON, ORANGE_ON};
 use super::sessview::{stamp, wheel_sel};
 
 // Go rpick title (tui.go draw).
@@ -462,7 +462,7 @@ impl RecPicker {
             l.push(if i == self.sel {
                 format!("{ORANGE_ON}{}{FG_OFF}", clip(&format!("> {t}"), width))
             } else {
-                format!("{DIM_ON}{}{RESET}", clip(&format!("  {t}"), width))
+                format!("{GREY_ON}{}{FG_OFF}", clip(&format!("  {t}"), width))
             });
         }
         l.resize(hh, String::new());

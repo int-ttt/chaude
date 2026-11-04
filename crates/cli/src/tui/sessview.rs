@@ -11,7 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use unicode_width::UnicodeWidthStr;
 
 use super::bar::clip;
-use super::render::{DIM_ON, FG_OFF, ORANGE_ON, RESET, trunc_chars, wrap_cells};
+use super::render::{DIM_ON, FG_OFF, GREY_ON, ORANGE_ON, RESET, trunc_chars, wrap_cells};
 
 // Go sessActiveWindow: a session written this recently is marked active (●).
 pub const ACTIVE_WINDOW: Duration = Duration::from_secs(10 * 60);
@@ -369,7 +369,7 @@ impl SessView {
             out.push(if i == self.sel {
                 format!("{ORANGE_ON}{}{FG_OFF}", clip(&format!("> {t}"), width))
             } else {
-                format!("{DIM_ON}{}{RESET}", clip(&format!("  {t}"), width))
+                format!("{GREY_ON}{}{FG_OFF}", clip(&format!("  {t}"), width))
             });
         }
         out
