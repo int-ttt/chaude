@@ -39,6 +39,7 @@ use crate::rotate::{
     validate_handoff, with_reco,
 };
 use crate::rotate_defer::{self, Hold};
+use crate::turn_spend::TurnSpend;
 use crate::usage_poll::{USAGE_POLL_EVERY_SECS, log_usage};
 
 // Text tool results of background agents say this; the agent keeps running after the tool result.
@@ -555,6 +556,8 @@ struct State {
     stray_results: u32,
     // Session cost when the running turn started, and Agent/Task calls made in it (for TurnStats).
     turn_cost_base: f64,
+    // Go r.spend: subagent usage and spawn counts of the running turn, merged into its turn row.
+    spend: TurnSpend,
     delegations: u32,
     // Harness permission mode (Go permMode); decides can_use_tool before any prompt.
     mode: PermMode,
@@ -735,6 +738,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         interrupted_at: None,
         stray_results: 0,
         turn_cost_base: 0.0,
+        spend: TurnSpend::new(),
         delegations: 0,
         mode: PermMode::Default,
         pending_perm: HashMap::new(),
@@ -1492,6 +1496,7 @@ impl State {
                 self.last_activity = Instant::now();
                 self.turn_cost_base = self.cost_usd;
                 self.delegations = 0;
+                self.spend = TurnSpend::new();
                 // Go /clear: the next saved turn starts a new record file (RecordState.split).
                 if text.trim() == "/clear" {
                     self.record.split = true;
@@ -1605,6 +1610,9 @@ impl State {
         self.last_activity = Instant::now();
         if let Some(t) = observe_ttl(line, &self.ttl_seen) {
             self.ttl_seen = t;
+        }
+        if let Ok(raw) = serde_json::from_str::<Value>(line) {
+            self.spend.on_event(&raw);
         }
         match parse_line(line) {
             Ok(ev) => self.on_event(ev),
@@ -2182,7 +2190,7 @@ impl State {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         let cost_turn = (self.cost_usd - self.turn_cost_base).max(0.0);
-        let _ = self.metrics.log(json!({
+        let row = json!({
             "stage": "turn",
             "start_ms": end_ms.saturating_sub(duration_ms),
             "end_ms": end_ms,
@@ -2193,7 +2201,8 @@ impl State {
             "cost_turn_usd": cost_turn,
             "duration_ms": duration_ms,
             "delegations": self.delegations,
-        }));
+        });
+        let _ = self.metrics.log(with_spend(row, &self.spend));
     }
 
     // Finishes the running turn and starts the next queued one, if any.
@@ -2709,6 +2718,16 @@ fn main_rule_with(cfg: &Config, orch_mode: &str) -> String {
 // Go delegationRule: default delegation of bounded code changes to the haiku-coder agent.
 pub const DELEGATION_RULE: &str = "Default to delegating bounded code changes (implementation steps, small fixes, wiring, tests) to the haiku-coder agent with an exact spec; implement yourself only design-level or tightly coupled parts, then verify Haiku's diff. Log each delegation (agent, tokens, duration, outcome, retries).";
 
+// Go turn row: the subagent spend fields (sub_*, spawns) are merged into the row.
+fn with_spend(mut row: Value, spend: &TurnSpend) -> Value {
+    if let (Some(r), Some(f)) = (row.as_object_mut(), spend.fields().as_object()) {
+        for (k, v) in f {
+            r.insert(k.clone(), v.clone());
+        }
+    }
+    row
+}
+
 // Go TrimSpace(rule + " " + part): non-empty parts joined by one space.
 fn join_rules(parts: &[&str]) -> String {
     parts
@@ -2842,6 +2861,21 @@ mod tests {
     fn effective_ttl_prefers_observed() {
         assert_eq!(effective_ttl("", "5m"), "5m");
         assert_eq!(effective_ttl("1h", "5m"), "1h");
+    }
+
+    #[test]
+    fn with_spend_merges_subagent_fields_into_turn_row() {
+        let mut spend = TurnSpend::new();
+        spend.on_event(&json!({"type": "assistant", "parent_tool_use_id": "t1", "message": {"id": "m1", "usage": {"output_tokens": 7.0}}}));
+        let row = with_spend(json!({"stage": "turn", "delegations": 0}), &spend);
+        assert_eq!(row["stage"], "turn");
+        assert_eq!(row["delegations"], 0);
+        assert!(
+            row.as_object()
+                .unwrap()
+                .keys()
+                .any(|k| k.starts_with("sub_"))
+        );
     }
 
     #[test]
