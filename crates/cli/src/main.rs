@@ -46,10 +46,6 @@ fn main() {
             println!("{USAGE}");
             0
         }
-        Some(cmd) => {
-            eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");
-            2
-        }
         None | Some("--orch") => match apply_orch(&args) {
             Err(e) => {
                 eprintln!("chaude: {e}\n{USAGE}");
@@ -63,6 +59,10 @@ fn main() {
                 }
             },
         },
+        Some(cmd) => {
+            eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");
+            2
+        }
     };
     process::exit(code);
 }
