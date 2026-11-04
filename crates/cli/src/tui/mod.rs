@@ -32,6 +32,7 @@ use crossterm::event::{
 };
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::{execute, queue};
+use std::path::Path;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use bar::BarInput;
@@ -70,6 +71,8 @@ pub enum Action {
     Quit,
     // /usage: the caller asks the engine for the one-shot run (UiEvent::Usage). Never a turn.
     Usage,
+    // /resume <session id>: the caller asks the engine to relaunch that session (EngineHandle::resume_session).
+    ResumeSession(String),
     // Answer to the open permission prompt (Go tui.go key(): y/Enter allow, n/Esc deny, Ctrl+C deny + interrupt).
     Answer {
         id: String,
@@ -141,6 +144,8 @@ pub struct App {
     copy_note: Option<(String, Instant)>,
     // Which mode the previous session loads with (session_mode_note), shown at start and by /view.
     session_mode: Option<String>,
+    // Model and configured rotate threshold, the inputs of handoff::resume_mode for /resume (set in tui()).
+    resume_rule: (String, u64),
     welcome: Welcome,
 }
 
@@ -202,6 +207,7 @@ impl App {
             dragging: false,
             copy_note: None,
             session_mode: None,
+            resume_rule: (String::new(), 0),
         }
     }
 
@@ -340,6 +346,16 @@ impl App {
                 self.usage.set_text(&usage::failed(&msg), w, h);
             }
             UiEvent::Error(msg) => self.transcript.push(format!("! {msg}")),
+            // Core relaunched the idle main child with --resume; the view moves to the session list.
+            UiEvent::SessionResumed {
+                old_session,
+                session_id,
+            } => {
+                self.note(&format!(
+                    "session resumed: {session_id} (was {old_session})"
+                ));
+                self.open_sessions("");
+            }
             // Go tuiWriter note: the interrupted turn keeps its text, then the dim marker.
             UiEvent::Interrupted => {
                 // The engine drops the abandoned turn's prompts (core pending_perm), so none can be answered now.
@@ -770,8 +786,7 @@ impl App {
             Some(Dispatch::Resume { args })
                 if args.first().map(String::as_str) != Some("claude") =>
             {
-                self.resume(&args.join(" "));
-                return Action::Continue;
+                return self.resume(&args.join(" "));
             }
             Some(Dispatch::Note(s)) if !matches!(first, "/status" | "/version" | "/mode") => {
                 self.note(&s);
@@ -789,6 +804,11 @@ impl App {
         if let Some(mode) = self.session_mode.clone() {
             self.note(&mode);
         }
+        self.open_sessions(arg);
+    }
+
+    // The /view list itself, also reopened after SessionResumed so the switch is visible.
+    fn open_sessions(&mut self, arg: &str) {
         let owned: HashSet<String> = handoff::read_exit_handoff(&handoff::handoff_file(
             &records::record_dir(std::path::Path::new(&self.welcome.cwd)),
         ))
@@ -808,7 +828,17 @@ impl App {
     }
 
     // Go /resume <arg> over the record folder: several hits open the picker, one hit or a number loads.
-    fn resume(&mut self, arg: &str) {
+    // A session id from the record folder's .sessions.jsonl resumes that session; anything else is a record lookup.
+    fn resume(&mut self, arg: &str) -> Action {
+        let exit = handoff::handoff_file(&records::record_dir(Path::new(&self.welcome.cwd)));
+        if let Some(sid) = claude_session_id(&exit, arg) {
+            let (model, rotate) = self.resume_rule.clone();
+            if !picked_resumes(&exit, &sid, &model, rotate) {
+                self.note("previous session: fresh start, handoff note carried over; not resumed");
+                return Action::Continue;
+            }
+            return Action::ResumeSession(sid);
+        }
         let root = records::record_dir(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
         match records::pick(&root, arg) {
             Err(e) => self.note(&e),
@@ -826,6 +856,7 @@ impl App {
                 }
             },
         }
+        Action::Continue
     }
 
     // Enter in the record picker: the whole folder is appended to the transcript (Go loadRecordPick).
@@ -1582,6 +1613,35 @@ fn wait_batch(wakes: &Receiver<Wake>, timeout: Option<Duration>) -> Option<Vec<W
     Some(batch)
 }
 
+// The session id a /resume argument names: a hex/dash prefix (8+ chars) that matches exactly one logged id.
+fn claude_session_id(exit: &Path, arg: &str) -> Option<String> {
+    let hex = arg.len() >= 8 && arg.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+    if !hex {
+        return None;
+    }
+    let mut hits = handoff::read_sessions(exit)
+        .into_iter()
+        .filter(|r| r.session_id.starts_with(arg));
+    let first = hits.next()?;
+    hits.next().is_none().then_some(first.session_id)
+}
+
+// Whether a picked session relaunches now. The previous run's main session follows handoff::resume_mode
+// (fresh when core would not resume it); any other id is taken as named (core: the caller names the session).
+fn picked_resumes(exit: &Path, sid: &str, model: &str, rotate: u64) -> bool {
+    let Some((prev, killed)) = handoff::previous_run(exit) else {
+        return true;
+    };
+    if prev.main_session != sid {
+        return true;
+    }
+    let threshold = chaude_core::rotate::threshold_for(model, rotate);
+    matches!(
+        handoff::resume_mode(&prev, handoff::MAIN_ROLE, killed, threshold),
+        handoff::Load::Resume(_)
+    )
+}
+
 // Which mode the previous session loads with, as core decides it at start (handoff::resume_mode, same inputs).
 // None when there is no previous run, or when --resume was given explicitly (core takes that one as is).
 fn session_mode_note(
@@ -1624,6 +1684,7 @@ fn tui(mut cfg: Config) -> io::Result<()> {
     .model_id()
     .to_string();
     let threshold = cfg.context_window;
+    let resume_rule = (cfg.model.clone(), cfg.rotate_threshold);
     let session_mode = session_mode_note(
         cfg.handoff_path.as_deref(),
         &cfg.model,
@@ -1640,6 +1701,7 @@ fn tui(mut cfg: Config) -> io::Result<()> {
         app.note(mode);
     }
     app.session_mode = session_mode;
+    app.resume_rule = resume_rule;
     if let Ok(cwd) = std::env::current_dir() {
         app.editor.load_history(&cwd);
     }
@@ -1696,6 +1758,7 @@ fn tui(mut cfg: Config) -> io::Result<()> {
                             }
                         }
                         Action::CycleMode => engine.set_mode("next"),
+                        Action::ResumeSession(sid) => engine.resume_session(&sid),
                     }
                 }
                 Wake::Term(Event::Paste(text)) => app.editor.insert_str(&text),
@@ -2526,6 +2589,66 @@ mod tests {
         );
         assert!(String::from_utf8_lossy(&buf).contains('z'), "{buf:?}");
         sender.join().unwrap();
+    }
+
+    #[test]
+    fn resume_argument_names_one_logged_session_id() {
+        let dir = std::env::temp_dir().join(format!("chaude-tui-sid-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exit = dir.join("exit-handoff.json");
+        let _ = std::fs::remove_file(handoff::sessions_file(&exit));
+        handoff::append_session(
+            &exit,
+            handoff::MAIN_ROLE,
+            "3f2a9c10-0000-4000-8000-000000000001",
+        )
+        .unwrap();
+        handoff::append_session(&exit, "coder", "9b1e7d22-0000-4000-8000-000000000002").unwrap();
+        assert_eq!(
+            claude_session_id(&exit, "3f2a9c10"),
+            Some("3f2a9c10-0000-4000-8000-000000000001".to_string())
+        );
+        // Record names and short prefixes are not session ids.
+        assert_eq!(claude_session_id(&exit, "claude-harness"), None);
+        assert_eq!(claude_session_id(&exit, "3f2a"), None);
+        assert_eq!(claude_session_id(&exit, "0000"), None);
+    }
+
+    #[test]
+    fn picked_previous_main_session_follows_resume_mode() {
+        let dir = std::env::temp_dir().join(format!("chaude-tui-pick-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("exit-handoff.json");
+        let write = |tokens: u64| {
+            let h = handoff::ExitHandoff {
+                main_session: "sess-prev".into(),
+                ctx_tokens: [("main".to_string(), tokens)].into_iter().collect(),
+                ..Default::default()
+            };
+            std::fs::write(&path, serde_json::to_string(&h).unwrap()).unwrap();
+        };
+        // Above the threshold and not killed: core starts fresh, so the pick does not resume.
+        write(u64::MAX / 2);
+        assert!(!picked_resumes(&path, "sess-prev", "haiku", 80_000));
+        // Below the threshold: core resumes it.
+        write(10);
+        assert!(picked_resumes(&path, "sess-prev", "haiku", 80_000));
+        // Any other id is taken as named.
+        assert!(picked_resumes(&path, "sess-other", "haiku", 80_000));
+    }
+
+    #[test]
+    fn session_resumed_notes_the_switch_and_opens_the_session_list() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::SessionResumed {
+            old_session: "old-1".into(),
+            session_id: "new-2".into(),
+        });
+        assert!(
+            app.transcript
+                .iter()
+                .any(|l| l.contains("session resumed: new-2 (was old-1)"))
+        );
     }
 
     #[test]
