@@ -192,6 +192,7 @@ impl App {
                 (ASST_FIRST, "  "),
                 &mut self.main_open,
                 &mut self.transcript,
+                asst_text,
             ),
             UiEvent::TextDelta {
                 role: Role::Agent(_),
@@ -202,6 +203,7 @@ impl App {
                 (AGENT_PREFIX, AGENT_PREFIX),
                 &mut false,
                 &mut self.transcript,
+                plain_text,
             ),
             UiEvent::MessageDone { role: Role::Main } => self.end_main_block(),
             UiEvent::MessageDone {
@@ -211,6 +213,7 @@ impl App {
                 (AGENT_PREFIX, AGENT_PREFIX),
                 &mut false,
                 &mut self.transcript,
+                plain_text,
             ),
             UiEvent::ToolStart { name, summary, .. } => {
                 self.end_main_block();
@@ -226,6 +229,10 @@ impl App {
             // Go toolResultMsg: the first line cut to 160 runes, then "… (+N lines)" for the rest.
             UiEvent::ToolResult { text, .. } => {
                 let text = text.trim();
+                // Go hides an agent's caveman return from the transcript (tui.go:481).
+                if render::is_caveman_block(text) {
+                    return;
+                }
                 let lines: Vec<&str> = text.split('\n').collect();
                 let mut head = render::trunc_chars(lines[0], 160);
                 if lines.len() > 1 {
@@ -731,6 +738,7 @@ impl App {
             (ASST_FIRST, "  "),
             &mut self.main_open,
             &mut self.transcript,
+            asst_text,
         );
         if self.main_open {
             self.transcript.push(String::new());
@@ -1059,11 +1067,7 @@ impl App {
         };
         let mut out = vec![edge("╭", "╮")];
         if self.editor.is_empty() {
-            let ph = if self.busy {
-                "생각중 - 추가 입력은 한 번에 합쳐 처리"
-            } else {
-                "대기 - 프롬프트 입력"
-            };
+            let ph = render::input_placeholder(self.busy);
             // The cursor cell takes one column after the prompt, so the placeholder gets the rest.
             let ph = bar::clip(ph, inner.saturating_sub(PROMPT.len() + 1));
             out.push(side(&format!(
@@ -1231,26 +1235,48 @@ pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Resu
 
 // Appends text to `buf`, emitting each completed line to `out`. `lead` is (first line, later lines); `open`
 // records whether the block already has a line, so the first-line lead is written only once per block.
-fn feed(buf: &mut String, text: &str, lead: (&str, &str), open: &mut bool, out: &mut Vec<String>) {
+fn feed(
+    buf: &mut String,
+    text: &str,
+    lead: (&str, &str),
+    open: &mut bool,
+    out: &mut Vec<String>,
+    style: fn(&str) -> String,
+) {
     buf.push_str(text);
     while let Some(i) = buf.find('\n') {
         let line: String = buf.drain(..=i).collect();
         out.push(format!(
             "{}{}",
             if *open { lead.1 } else { lead.0 },
-            line.trim_end_matches('\n')
+            style(line.trim_end_matches('\n'))
         ));
         *open = true;
     }
 }
 
+// Assistant text as Go shows it: **bold** pairs, then link styling (tui.go:374 mdBold + wrapLinked).
+fn asst_text(line: &str) -> String {
+    render::linkify(&render::md_bold(line))
+}
+
+fn plain_text(line: &str) -> String {
+    line.to_string()
+}
+
 // Emits whatever is left in `buf` as a final line.
-fn flush(buf: &mut String, lead: (&str, &str), open: &mut bool, out: &mut Vec<String>) {
+fn flush(
+    buf: &mut String,
+    lead: (&str, &str),
+    open: &mut bool,
+    out: &mut Vec<String>,
+    style: fn(&str) -> String,
+) {
     if !buf.is_empty() {
         out.push(format!(
             "{}{}",
             if *open { lead.1 } else { lead.0 },
-            std::mem::take(buf)
+            style(&std::mem::take(buf))
         ));
         *open = true;
     }
@@ -1760,6 +1786,41 @@ mod tests {
         assert_eq!(
             rows,
             vec!["● hi", "", "● Agent(scan repo)", "  ⎿  done", ""]
+        );
+    }
+
+    // R04 (tui.go:481): an agent caveman return adds no transcript row; a plain tool result still does.
+    #[test]
+    fn caveman_tool_result_is_hidden_from_the_transcript() {
+        let mut app = app_with_lines(0);
+        let before = app.transcript.len();
+        app.apply(UiEvent::ToolResult {
+            id: "t1".to_string(),
+            text: "status: done\nreason: -\nclaim: a.go:1 | x".to_string(),
+        });
+        assert_eq!(app.transcript.len(), before);
+        app.apply(UiEvent::ToolResult {
+            id: "t2".to_string(),
+            text: "plain result".to_string(),
+        });
+        assert!(app.transcript.len() > before);
+    }
+
+    // R03/R08 (tui.go:374): assistant text gets **bold** and link styling, and keeps its visible text.
+    #[test]
+    fn assistant_text_is_bold_and_linked_per_line() {
+        let mut app = app_with_lines(0);
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "**hi** see https://a.io\n".to_string(),
+        });
+        let row = app.transcript.last().unwrap().clone();
+        assert!(row.contains(render::BOLD_ON));
+        assert_eq!(
+            render::strip_sgr(&row)
+                .trim_start_matches("● ")
+                .trim_start(),
+            "hi see https://a.io"
         );
     }
 
