@@ -34,6 +34,7 @@ use crate::resident::{
     CODER_REPLY_FORMAT, CODER_RULE, CODER_TIMEOUT, PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter,
     PrompterOutcome, StagePhase, TUI_TIMEOUT, agent_body, summarize_reply, tui_prompt,
 };
+use crate::resume_group;
 use crate::rotate::{
     HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
     validate_handoff, with_reco,
@@ -1500,6 +1501,7 @@ impl State {
                 // Go /clear: the next saved turn starts a new record file (RecordState.split).
                 if text.trim() == "/clear" {
                     self.record.split = true;
+                    self.clear_mark();
                 }
                 true
             }
@@ -2164,6 +2166,16 @@ impl State {
     // result_* usage) are left out until their groups land. Write errors are ignored, as in Go.
     // Go recordSave: the turn that just ended goes to its project folder under the record root (slash
     // commands and empty replies are skipped by RecordState). A failed write is reported as an Error.
+    // Go clearMark: a /clear splits /resume groups at this time, in the record dir of cwd.
+    fn clear_mark(&self) {
+        let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
+        let root = record::dir_for(&cwd);
+        let cwd_text = cwd.to_string_lossy();
+        if let Err(e) = resume_group::clear_mark_now(&root, &cwd_text) {
+            self.emit(UiEvent::Error(format!("clear mark failed: {e}")));
+        }
+    }
+
     fn record_turn_save(&mut self, duration_ms: u64) {
         let cost_turn = (self.cost_usd - self.turn_cost_base).max(0.0);
         let mut fields = serde_json::Map::new();
