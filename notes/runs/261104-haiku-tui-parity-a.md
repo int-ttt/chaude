@@ -61,3 +61,12 @@ core: not touched
 - blocked-core/other coder: B21, B22, B23 (queue; needs QueueTexts consumer at mod.rs:561, uncommitted L-group work, and core support).
 - code fixes: none in group B.
 - tests: plan-only commit; no code change. cargo not rerun for this batch.
+
+## Batch 4 (C18, C29, C31, C33)
+- C18 same: shift+tab -> Action::CycleMode (mod.rs:895), Go tui.go:752. Stale comment "Not wired yet" at commands.rs:163 left as is.
+- C29 same: Rust agentview.rs:229-250 key() vs Go agentview.go:135-158 avKey; keys match (esc/q/ctrl+c close, tab/right, shift+tab/left cycle, up/k, down/j, pgup, pgdown, home, end).
+- C31 same: MAX_AGENT_LOG 16 (agentview.rs) vs maxAgentLog 400 (agentview.go:13); read-only, no input.
+- C33 fixed: Rust routed usage/settings/pick/recs/sess/rw/av before perm, so an open overlay swallowed the permission answer. Go tui.go key() reads perm first. Moved perm block to the top of on_key (mod.rs:609).
+- Tests: `HOME=$(mktemp -d) cargo test -p chaude-cli` -> 224 passed, 0 failed, 1 ignored. clippy --all-targets -> 0 warnings. `cargo fmt -p chaude-cli -- --check` -> FAIL, one hunk outside this batch: mod.rs slash_menu_takes_room_from_the_queue (QueueTexts line, other coder's uncommitted test).
+- Disk: 9.4Gi free.
+- Still not audited: C10-C12, C17, C19-C25, C27, C28, C30, C32, B01, B07, B08, B09, B18, B19, B20, B24.

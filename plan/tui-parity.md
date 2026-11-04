@@ -164,7 +164,7 @@ Counts (filled at end): see the "Counts" section.
 - [ ] C15 Session list active marker "● " within sessActiveWindow=10m (sessLines sessview.go:169; sessActiveWindow sessview.go:13) · test: none · core: session last-active time
 - [ ] C16 Session prompt pane "Session <id>  prompt n/N" and "… (+N lines)" (svPromptLines sessview.go:194) · test: none · core: session prompts
 - [ ] C17 /import [id|latest] imports session (tui.go:1139; sendImport tui.go:1043) · test: TestImportShowsTurnsInTUI (resumeshift_test.go:42) · core: import from Claude session
-- [ ] C18 /mode shows or sets permission mode; shift+tab cycles (tui.go:1145) · test: none · core: permMode
+- [x] C18 /mode shows or sets permission mode; shift+tab cycles (tui.go:1145) · test: none · core: permMode · audit: same: shift+tab wired mod.rs:895 -> CycleMode (tui.go:752); stale 'Not wired yet' comment commands.rs:163
 - [ ] C19 /version shows chaude and Claude Code versions (tui.go:1156) · test: TestVersionNoteShowsChaudeVersion (busyslash_test.go:56) · core: claude --version
 - [ ] C20 /update checks and installs newer chaude; runs off UI goroutine; result as note (tui.go:1158) · test: none · core: none (binary replace)
 - [ ] C21 /usage opens full-screen usage view, one-shot claude call, never a turn (tui.go:1161; usageFetch tui.go:849) · test: TestUsageSlashAcceptedWhileBusy (usagebusy_test.go:28), TestUsageViewEscCloses (usageview_test.go:86) · core: one-shot claude usage
@@ -175,11 +175,11 @@ Counts (filled at end): see the "Counts" section.
 - [ ] C26 Busy-allowed slash set: /usage, /version, /help, /status, /mode, /mouse, /view (busyOK tui.go:841; busySlashMsg tui.go:844 Korean) · test: TestBusySlashAllowedAndRefused (busyslash_test.go:12) · core: none
 - [ ] C27 Other slash commands while busy are refused with busySlashMsg (tui.go:844; enter path tui.go:~800-815) · test: TestBusySlashAllowedAndRefused (busyslash_test.go:12) · core: none
 - [ ] C28 Unknown slash command handling (runSlash default) · test: none · core: none
-- [ ] C29 Agent view open via ctrl+t; cycle with tab/shift+tab/left/right; close with esc/ctrl+c/q (openAgentKey agentview.go:113; avKey agentview.go:135) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: sub-agent log events
+- [x] C29 Agent view open via ctrl+t; cycle with tab/shift+tab/left/right; close with esc/ctrl+c/q (openAgentKey agentview.go:113; avKey agentview.go:135) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: sub-agent log events · audit: same: avKey agentview.rs:229-250 matches agentview.go:135-158
 - [ ] C30 Agent view click on panel row opens agent (panelClick agentview.go:160; click agentview.go:172) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: agent tracker
-- [ ] C31 Agent view read-only (log lines, cap maxAgentLog=400) (agentview.go:13; agentViewLines agentview.go:182) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: sub-agent log events
+- [x] C31 Agent view read-only (log lines, cap maxAgentLog=400) (agentview.go:13; agentViewLines agentview.go:182) · test: TestAgentViewClickReadOnlyClose (agentview_test.go:21) · core: sub-agent log events · audit: same: MAX_AGENT_LOG 16 = maxAgentLog 400 (agentview.go:13); read-only keys match avKey
 - [ ] C32 Usage popup open/close (TestUsagePopupOpenClose agentview_test.go:57) · test: TestUsagePopupOpenClose (agentview_test.go:57) · core: none
-- [ ] C33 Settings and session/agent/usage overlays close on esc and do not leak keys to input (key ordering tui.go:589-680) · test: none · core: none
+- [x] C33 Settings and session/agent/usage overlays close on esc and do not leak keys to input (key ordering tui.go:589-680) · test: none · core: none · audit: fixed: perm prompt now read first in on_key (mod.rs:609), before overlays (tui.go key() perm first)
 
 ## Engine events shown (tool_use, agents, errors, interrupts)
 

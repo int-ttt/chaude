@@ -605,6 +605,28 @@ impl App {
 
     // Maps one key press to an action.
     pub fn on_key(&mut self, key: KeyEvent) -> Action {
+        // Go tui.go key(): while a permission prompt is open, only y/Enter, n/Esc and Ctrl+C are read.
+        // It runs before every overlay, so an open overlay cannot swallow the answer.
+        if let Some(id) = self.perm.clone() {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            let (allow, interrupt) = match key.code {
+                KeyCode::Char('y' | 'Y') | KeyCode::Enter => (true, false),
+                KeyCode::Char('n' | 'N') | KeyCode::Esc => (false, false),
+                KeyCode::Char('c') if ctrl => (false, true),
+                _ => return Action::Continue,
+            };
+            self.perm = None;
+            if !interrupt {
+                let word = if allow { "allowed" } else { "denied" };
+                self.transcript.push(format!("{GREY_ON}{word}{FG_OFF}"));
+                self.transcript.push(String::new());
+            }
+            return Action::Answer {
+                id,
+                allow,
+                interrupt,
+            };
+        }
         if self.usage.is_open() {
             let (w, h) = self.usage_geom();
             if self.usage.key(key, w, h) {
@@ -684,27 +706,6 @@ impl App {
                 self.follow_tail();
             }
             return Action::Continue;
-        }
-        // Go tui.go key(): while a permission prompt is open, only y/Enter, n/Esc and Ctrl+C are read.
-        if let Some(id) = self.perm.clone() {
-            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-            let (allow, interrupt) = match key.code {
-                KeyCode::Char('y' | 'Y') | KeyCode::Enter => (true, false),
-                KeyCode::Char('n' | 'N') | KeyCode::Esc => (false, false),
-                KeyCode::Char('c') if ctrl => (false, true),
-                _ => return Action::Continue,
-            };
-            self.perm = None;
-            if !interrupt {
-                let word = if allow { "allowed" } else { "denied" };
-                self.transcript.push(format!("{GREY_ON}{word}{FG_OFF}"));
-                self.transcript.push(String::new());
-            }
-            return Action::Answer {
-                id,
-                allow,
-                interrupt,
-            };
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
