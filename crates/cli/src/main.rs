@@ -2,6 +2,7 @@
 //! The other commands are not ported yet.
 
 mod mcp_resident;
+mod repl_args;
 mod tui;
 
 use std::env;
@@ -28,12 +29,7 @@ const USAGE: &str = "usage: chaude <command> [args]
 
 // Go repl.go:1316 + applyOrchEnv: --orch <mode> (default m0) is normalized and exported as CHAUDE_ORCH for
 // child processes and hooks. Runs before any thread starts, so the environment write is sound.
-fn apply_orch(args: &[String]) -> Result<&'static str, String> {
-    let raw = args
-        .iter()
-        .position(|a| a == "--orch")
-        .and_then(|i| args.get(i + 1))
-        .map_or("", String::as_str);
+fn apply_orch(raw: &str) -> Result<&'static str, String> {
     let mode = orch::parse(raw)?;
     // SAFETY: called from main before any other thread is spawned.
     unsafe { env::set_var(orch::ENV_KEY, mode) };
@@ -53,40 +49,6 @@ fn resolve_model(mode: &str, flag: Option<String>, settings_model: &str) -> Stri
         default
     }
     .to_string()
-}
-
-// --model <v> or --model=<v>. A missing value is an error (Go flag package behavior).
-fn parse_model(args: &[String]) -> Result<Option<String>, String> {
-    for (i, a) in args.iter().enumerate() {
-        if let Some(v) = a.strip_prefix("--model=") {
-            return Ok(Some(v.to_string()));
-        }
-        if a == "--model" {
-            return args
-                .get(i + 1)
-                .cloned()
-                .map(Some)
-                .ok_or_else(|| "--model needs a value".to_string());
-        }
-    }
-    Ok(None)
-}
-
-// --from-claude <v> or --from-claude=<v>: a session id, "latest", or a transcript path (Go -from-claude).
-fn from_claude_arg(args: &[String]) -> Result<Option<String>, String> {
-    for (i, a) in args.iter().enumerate() {
-        if let Some(v) = a.strip_prefix("--from-claude=") {
-            return Ok(Some(v.to_string()));
-        }
-        if a == "--from-claude" {
-            return args
-                .get(i + 1)
-                .cloned()
-                .map(Some)
-                .ok_or_else(|| "--from-claude needs a value".to_string());
-        }
-    }
-    Ok(None)
 }
 
 // Go importFromClaude dry run: prints the report and returns 0 when the recent handoff note survives the
@@ -116,44 +78,53 @@ fn import_dry_run(path: &Path, imp: &ClaudeImport) -> i32 {
 
 // The interactive session: --orch and --model are applied, then the TUI runs. Returns the exit code.
 fn run_tui(args: &[String]) -> i32 {
-    let mode = match apply_orch(args) {
+    let parsed = match repl_args::parse(args) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("chaude: {e}\n{USAGE}");
+            return 2;
+        }
+    };
+    if parsed.help() {
+        println!("{USAGE}");
+        return 0;
+    }
+    let mode = match apply_orch(parsed.orch()) {
         Ok(mode) => mode,
         Err(e) => {
             eprintln!("chaude: {e}\n{USAGE}");
             return 2;
         }
     };
-    let flag = match parse_model(args) {
-        Ok(flag) => flag,
-        Err(e) => {
-            eprintln!("chaude: {e}\n{USAGE}");
-            return 2;
-        }
-    };
+    // Go repl.go: CHAUDE_MAX_WORKERS is read only when --max-workers is absent (resolved in apply).
+    let env_workers = env::var("CHAUDE_MAX_WORKERS").unwrap_or_default();
     let mut cfg = Config::default();
+    if let Err(e) = parsed.apply(&mut cfg, &env_workers) {
+        eprintln!("chaude: {e}\n{USAGE}");
+        return 2;
+    }
     cfg.model = resolve_model(
         mode,
-        flag,
+        parsed.model(),
         settings::chaude_settings::main_model(cfg.cwd.as_deref()),
     );
-    let cwd = env::current_dir()
+    let cwd = cfg
+        .cwd
+        .clone()
+        .or_else(|| env::current_dir().ok())
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| ".".into());
-    let startup = match from_claude_arg(args) {
-        Ok(None) => None,
-        Ok(Some(arg)) => match import_claude::load_import_arg(&arg, &cwd) {
+        .unwrap_or_else(|| ".".into());
+    let startup = match parsed.claude_source() {
+        None => None,
+        Some(arg) => match import_claude::load_import_arg(&arg, &cwd) {
             Ok(loaded) => Some(loaded),
             Err(e) => {
                 eprintln!("chaude: import failed: {e}");
                 return 1;
             }
         },
-        Err(e) => {
-            eprintln!("chaude: {e}\n{USAGE}");
-            return 2;
-        }
     };
-    if args.iter().any(|a| a == "--import-dry-run") {
+    if parsed.import_dry_run() {
         return match &startup {
             Some((path, imp)) => import_dry_run(path, imp),
             None => {
@@ -211,10 +182,6 @@ fn metrics_main(args: &[String]) -> i32 {
 mod tests {
     use super::*;
 
-    fn strs(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
-    }
-
     #[test]
     fn model_flag_given_wins_over_orch_and_settings() {
         assert_eq!(
@@ -246,34 +213,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_model_forms() {
-        assert_eq!(parse_model(&strs(&["--orch", "b"])), Ok(None));
-        assert_eq!(
-            parse_model(&strs(&["--model", "sonnet"])),
-            Ok(Some("sonnet".into()))
-        );
-        assert_eq!(
-            parse_model(&strs(&["--model=fable"])),
-            Ok(Some("fable".into()))
-        );
-        assert!(parse_model(&strs(&["--model"])).is_err());
-    }
-
-    #[test]
-    fn from_claude_forms() {
-        assert_eq!(
-            from_claude_arg(&strs(&["--from-claude", "latest"])),
-            Ok(Some("latest".into()))
-        );
-        assert_eq!(
-            from_claude_arg(&strs(&["--from-claude=abc,def"])),
-            Ok(Some("abc,def".into()))
-        );
-        assert_eq!(from_claude_arg(&strs(&["--model", "x"])), Ok(None));
-        assert!(from_claude_arg(&strs(&["--from-claude"])).is_err());
-    }
-
-    #[test]
     fn usage_lists_the_helper_scripts() {
         assert!(USAGE.contains(chaude_scripts::NAMES));
     }
@@ -286,6 +225,8 @@ fn main() {
     let code = match args.first().map(String::as_str) {
         Some("gen-settings") => settings::gen_settings_main(&args[1..]),
         Some("mcp-resident") => mcp_resident::main(&args[1..]),
+        // Go main.go: `repl` runs the session with the flags after it.
+        Some("repl") => run_tui(&args[1..]),
         Some("--version" | "-v" | "version") => {
             println!("chaude {VERSION}");
             0
