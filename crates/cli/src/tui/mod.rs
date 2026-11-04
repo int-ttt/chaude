@@ -22,6 +22,7 @@ use std::sync::mpsc::TryRecvError;
 use std::time::{Duration, Instant};
 
 use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
+use chaude_core::resident::StagePhase;
 use crossterm::cursor::{MoveTo, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -114,6 +115,13 @@ pub struct App {
     // Open /resume record picker (Go m.rpick) and /view session browser (Go m.sv). Both replace the body.
     recs: Option<records::RecPicker>,
     sess: Option<sessview::SessView>,
+    // Open Ctrl+T agent view (Go m.av). Read-only; replaces the body.
+    av: Option<agentview::AgentView>,
+    // Go m.rw: Esc Esc rewind picker. prompts = (transcript row, text) of each echoed prompt, in order.
+    rw: rewind::Rewind,
+    prompts: Vec<(usize, String)>,
+    // Time of the last Esc on an empty input (Go m.lastEsc); a second Esc within 600 ms opens the picker.
+    last_esc: Option<Instant>,
     // Id of the permission request waiting for y/n (UiEvent::PermissionRequest). While set, keys answer it.
     perm: Option<String>,
     // Drag selection in body coordinates (wrapped body row as `line`, cell column as `col`); the Go textSel model.
@@ -169,6 +177,10 @@ impl App {
             settings: None,
             recs: None,
             sess: None,
+            av: None,
+            rw: rewind::Rewind::default(),
+            prompts: Vec::new(),
+            last_esc: None,
             perm: None,
             sel: render::TextSel::default(),
             dragging: false,
@@ -301,6 +313,11 @@ impl App {
                 self.usage.set_text(&text, w, h);
             }
             // While the window waits for /usage, its failure goes into the window (Go usageFetch).
+            // Go repl.go stage(): one grey note per stage change, same as the Go stageMsg block.
+            UiEvent::Stage { slot, phase } => {
+                self.end_main_block();
+                self.note(&stage_text(&slot, &phase));
+            }
             UiEvent::Error(msg) if self.usage.pending() => {
                 let (w, h) = self.usage_geom();
                 self.usage.set_text(&usage::failed(&msg), w, h);
@@ -420,6 +437,30 @@ impl App {
             }
             return Action::Continue;
         }
+        // Go tui.go rewind branch: while the picker is open it reads every key.
+        if self.rw.is_open() {
+            let refs: Vec<(&str, &str)> = self.prompts.iter().map(|(_, t)| ("user", t.as_str())).collect();
+            if let Some(cut) = self.rw.key(key, &refs) {
+                self.transcript.truncate(self.prompts[cut.cut].0);
+                self.prompts.truncate(cut.cut);
+                self.editor.clear();
+                self.editor.insert_str(&cut.text);
+                self.note(rewind::REWOUND);
+            }
+            return Action::Continue;
+        }
+        // Go avKey: read-only agent view. Only close, switch and scroll keys act; the rest is dropped.
+        if self.av.is_some() {
+            let recs = self.agent_recs();
+            let vp_h = self.rows.saturating_sub(CHROME);
+            if let Some(av) = self.av.as_mut()
+                && av.key(key, &recs, vp_h) == agentview::Action::Close
+            {
+                self.av = None;
+                self.follow_tail();
+            }
+            return Action::Continue;
+        }
         // Go tui.go key(): while a permission prompt is open, only y/Enter, n/Esc and Ctrl+C are read.
         if let Some(id) = self.perm.clone() {
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -446,6 +487,15 @@ impl App {
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         let page = self.rows.saturating_sub(CHROME).max(1) as isize;
         match key.code {
+            // Go ctrl+t: the agent view opens on the first agent of the sorted list.
+            KeyCode::Char('t') if ctrl => {
+                let recs = self.agent_recs();
+                match agentview::AgentView::open_first(&recs) {
+                    Some(av) => self.av = Some(av),
+                    None => self.note(agentview::NO_AGENTS),
+                }
+                Action::Continue
+            }
             KeyCode::Char('c') if ctrl => {
                 if self.busy {
                     Action::Interrupt(InterruptSource::CtrlC)
@@ -502,7 +552,25 @@ impl App {
             KeyCode::Enter => self.submit(),
             // Go tui.go: a single Esc interrupts while busy.
             KeyCode::Esc if self.busy => Action::Interrupt(InterruptSource::EscKey),
-            KeyCode::Esc => Action::Continue,
+            KeyCode::Esc => {
+                // Go tui.go esc: on an empty input a second Esc within 600 ms opens the rewind picker.
+                let now = Instant::now();
+                let double = self.editor.is_empty()
+                    && self.last_esc.is_some_and(|t| now.duration_since(t) < Duration::from_millis(600));
+                self.last_esc = Some(now);
+                if double {
+                    self.last_esc = None;
+                    let opened = {
+                        let refs: Vec<(&str, &str)> =
+                            self.prompts.iter().map(|(_, t)| ("user", t.as_str())).collect();
+                        self.rw.open(&refs)
+                    };
+                    if !opened {
+                        self.note(rewind::NOTHING);
+                    }
+                }
+                Action::Continue
+            }
             KeyCode::Backspace => {
                 self.editor.backspace();
                 self.sugg_sel = 0;
@@ -598,15 +666,19 @@ impl App {
         }
         self.turn_prompt = render::trunc_chars(text.lines().next().unwrap_or("").trim(), 60);
         self.end_main_block();
-        // Go tui.go render(): the user block is grey, "> " on its first row, and is followed by a blank row.
-        for (i, line) in text.split('\n').enumerate() {
-            let lead = if i == 0 { PROMPT } else { "  " };
-            self.transcript
-                .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
-        }
-        self.transcript.push(String::new());
-        self.follow_tail();
         let first = text.split_whitespace().next().unwrap_or("");
+        // Go tui.go /view is a local note and echoes nothing into the transcript.
+        if first != "/view" {
+            self.prompts.push((self.transcript.len(), text.clone()));
+            // Go tui.go render(): the user block is grey, "> " on its first row, and is followed by a blank row.
+            for (i, line) in text.split('\n').enumerate() {
+                let lead = if i == 0 { PROMPT } else { "  " };
+                self.transcript
+                    .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
+            }
+            self.transcript.push(String::new());
+            self.follow_tail();
+        }
         let dispatched = {
             let ctx = Ctx {
                 model: &self.bar.model,
@@ -726,7 +798,33 @@ impl App {
     }
 
     // Body rows of the open /settings, /resume or /view picker (same geometry as /usage). None when none is open.
+    // Running agents as the agent view sees them (Go tracker). The name is the description, never the id.
+    fn agent_recs(&self) -> Vec<agentview::AgentRec> {
+        let mut recs: Vec<agentview::AgentRec> = self
+            .agents
+            .iter()
+            .map(|(id, desc, _)| agentview::AgentRec {
+                id: id.clone(),
+                task: desc.clone(),
+                name: desc.clone(),
+                started: true,
+                ..Default::default()
+            })
+            .collect();
+        agentview::sort_all(&mut recs);
+        recs
+    }
+
     fn overlay_lines(&self, width: usize, h: usize) -> Option<Vec<String>> {
+        if self.rw.is_open() {
+            let refs: Vec<(&str, &str)> = self.prompts.iter().map(|(_, t)| ("user", t.as_str())).collect();
+            return Some(self.rw.lines(&refs, width, h));
+        }
+        if let Some(av) = &self.av {
+            let recs = self.agent_recs();
+            let rec = recs.iter().find(|r| r.id == av.id).cloned().unwrap_or_default();
+            return Some(av.clone().lines(&rec, &self.bar.model, width, h));
+        }
         if let Some(p) = &self.settings {
             return Some(p.lines(width, h));
         }
@@ -921,6 +1019,19 @@ impl App {
     }
 
     // Moves the viewport by `delta` rows. Landing on the last page follows the tail again.
+    // Go wheelSel on the open /resume picker or /view list. Returns false when neither is open.
+    fn overlay_wheel(&mut self, up: bool) -> bool {
+        if let Some(sv) = self.sess.as_mut() {
+            sv.wheel(up);
+            return true;
+        }
+        if let Some(rp) = self.recs.as_mut() {
+            rp.wheel(up);
+            return true;
+        }
+        false
+    }
+
     fn scroll(&mut self, delta: isize) {
         if self.usage.is_open() {
             let (w, h) = self.usage_geom();
@@ -1108,6 +1219,21 @@ impl App {
         }
         out.push(edge("╰", "╯"));
         out
+    }
+}
+
+// Go stage lines (repl.go stage calls): "· <slot> 처리중" on start, "· <slot> 완료" on success,
+// "· <slot> 실패: <err>" on failure. Agent slots use Go's "호출" on start and "agent <desc>" as the name.
+fn stage_text(slot: &str, phase: &StagePhase) -> String {
+    let (name, start) = match slot.strip_prefix("agent:") {
+        Some(desc) => (format!("agent {desc}"), "호출"),
+        None if slot == "tui" => (slot.to_string(), "번역중"),
+        None => (slot.to_string(), "처리중"),
+    };
+    match phase {
+        StagePhase::Working => format!("· {name} {start}"),
+        StagePhase::Done => format!("· {name} 완료"),
+        StagePhase::Failed(err) => format!("· {name} 실패: {err}"),
     }
 }
 
@@ -1347,19 +1473,13 @@ pub fn run(cfg: Config) -> io::Result<()> {
     }
 }
 
-// chaude_settings.go mainModelIDs: the settings alias shown as its model id. Other values pass through.
-fn main_model_id(alias: &str) -> String {
-    match alias {
-        "opus" => "claude-opus-5-5",
-        "sonnet" => "claude-sonnet-5-5",
-        "fable" => "claude-fable-5-1",
-        other => other,
-    }
-    .to_string()
-}
-
 fn tui(cfg: Config) -> io::Result<()> {
-    let model = main_model_id(&cfg.model);
+    let model = settings::Settings {
+        main_model: cfg.model.clone(),
+        ..settings::Settings::default()
+    }
+    .model_id()
+    .to_string();
     let threshold = cfg.context_window;
     let (engine, rx) = Engine::start(cfg);
     let _guard = TermGuard::enter()?;
@@ -1405,6 +1525,8 @@ fn tui(cfg: Config) -> io::Result<()> {
                 },
                 Event::Paste(text) => app.editor.insert_str(&text),
                 Event::Mouse(m) if app.mouse => match m.kind {
+                    MouseEventKind::ScrollUp if app.overlay_wheel(true) => {}
+                    MouseEventKind::ScrollDown if app.overlay_wheel(false) => {}
                     MouseEventKind::ScrollUp => app.scroll(-WHEEL_LINES),
                     MouseEventKind::ScrollDown => app.scroll(WHEEL_LINES),
                     MouseEventKind::Down(MouseButton::Left) => app.select_press(m.column, m.row),
