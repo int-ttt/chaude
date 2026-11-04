@@ -27,7 +27,9 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - done: record file format (record.rs: render/parse_entries, append_turn with lock, next_number, topic_of, slugify, dir_for; Stamp passed in, no local-time dep).
      - done: mcp temp dir guard (mcp::McpConfig/start_owned removes chaude-mcp-* dir on drop; api.rs still calls mcp::start, hook needed).
      - done: record_folder.rs (project folders, legacy root migration, list/filter/load, /resume lines; date fn passed in) and record_turn.rs (RecordState topic/save, measure_line, resume, pick).
-     - open: api.rs turn-end call into RecordState::save and /resume wiring (A-owned hook), orch, rotation details beyond idle, import/--from-claude, metrics.
+     - done: orch.rs (Go orch.go, orchws.go: parse/default_model/rule, mode f Router with parse_ws, WsState rotation at 20 turns/40k ctx/270s idle, handoff_text; api.rs routing hook needed).
+     - done: rotate_defer.rs (Go rotate_defer.go: due, Deferral hold/is_due/take with timeout, bg_handoff_lines, running_count; api.rs still has its own rotate_deferred, hook needed).
+     - open: api.rs turn-end call into RecordState::save and /resume wiring (A-owned hook), api.rs wiring of orch Router and rotate_defer, import/--from-claude, metrics.
 4. Terminal UI without Charm: inline streaming output, input line with Korean IME + unicode width, spinner, status/usage bar, slash commands.
    - status (2026-11-04, crates/cli/src/tui):
      - done: inline streaming output (live feed + record load, asst rows via markdown path, tool_result_text).

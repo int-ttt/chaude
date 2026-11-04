@@ -16,6 +16,7 @@ pub mod record_folder;
 pub mod record_turn;
 pub mod resident;
 pub mod rotate;
+pub mod rotate_defer;
 pub mod settings;
 
 #[cfg(test)]
