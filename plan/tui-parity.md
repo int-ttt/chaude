@@ -216,8 +216,8 @@ Counts (filled at end): see the "Counts" section.
 
 - [ ] X01 Start child process, print error to stderr and exit 1 on failure (runTUI repl.go:1364-1368; loop repl.go:1270-1273) · test: none · core: session start
 - [ ] X02 Interactive detection: stdin is a char device (repl.go:~1393) · test: none · core: none
-- [ ] X03 TUI only when interactive and HARNESS_PLAIN unset; else plain loop (repl.go:1386-1388) · test: multiproc_s_test.go (not read) · core: none
-- [ ] X04 Project settings ensured at start (settings.EnsureProjectSettings repl.go:~1374) · test: none · core: settings
+- [x] X03 TUI only when interactive and HARNESS_PLAIN unset; else plain loop (repl.go:1386-1388) · fixed: mod.rs:1984 HARNESS_PLAIN check in run · test: multiproc_s_test.go (not read) · core: none
+- [x] X04 Project settings ensured at start (settings.EnsureProjectSettings repl.go:~1374) · fixed: main.rs:138 ensure_project_settings before tui::run · test: none · core: settings
 - [ ] X05 Start: agent store, client wiring, worker pool, reconcileStart, metrics (repl.go:~1376-1395) · test: none · core: registry, metrics
 - [ ] X06 --from-claude import at startup (importFromClaude) shows transcript · test: TestImportShowsTurnsInTUI (resumeshift_test.go:42) · core: import
 - [ ] X07 Startup shows welcome banner (welcome tui.go:295) · test: none · core: none

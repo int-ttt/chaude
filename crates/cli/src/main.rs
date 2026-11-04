@@ -133,6 +133,11 @@ fn run_tui(args: &[String]) -> i32 {
             }
         };
     }
+    // Go repl.go: project settings are ensured at startup; a failure is reported and startup continues.
+    let home = env::var_os("HOME").map(PathBuf::from);
+    if let Err(e) = settings::project::ensure_project_settings(Path::new(&cwd), home.as_deref()) {
+        eprintln!("project settings: {e}");
+    }
     match tui::run(cfg, startup.map(|(_, imp)| imp)) {
         Ok(()) => 0,
         Err(e) => {

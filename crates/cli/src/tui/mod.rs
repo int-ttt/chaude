@@ -1980,7 +1980,9 @@ impl Drop for TermGuard {
 
 // Entry point for `chaude` with no arguments. Non-TTY stdin falls back to plain line mode.
 pub fn run(cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
-    if io::stdin().is_terminal() {
+    // Go repl.go: the TUI needs an interactive stdin and HARNESS_PLAIN unset (empty counts as unset).
+    let plain_forced = !std::env::var("HARNESS_PLAIN").unwrap_or_default().is_empty();
+    if io::stdin().is_terminal() && !plain_forced {
         tui(cfg, startup)
     } else {
         plain(cfg, startup)
