@@ -312,12 +312,13 @@ pub struct Config {
 }
 
 // Resolves the worker cap (Go resolveMaxWorkers): the flag when set, else the CHAUDE_MAX_WORKERS value when
-// non-empty, else DEFAULT_MAX_WORKERS. With neither set, the cap is at least RESIDENT_MAX_WORKERS plus the
-// extra coders, because extra coders are parked children too (Go repl.go floor). Values below 1 are errors.
+// non-empty, else DEFAULT_MAX_WORKERS (3). Values below 1 are errors. The resident floor (Go repl.go) is a
+// separate step: the caller applies `worker_floor` only when neither the flag nor the env is set.
+// `extra_coders` is kept for the existing CLI call shape; the floor is applied by `worker_floor`, not here.
 pub fn resolve_max_workers(
     flag: Option<usize>,
     env: &str,
-    extra_coders: usize,
+    _extra_coders: usize,
 ) -> Result<usize, String> {
     if let Some(n) = flag {
         if n < 1 {
@@ -334,7 +335,22 @@ pub fn resolve_max_workers(
             )),
         };
     }
-    Ok(DEFAULT_MAX_WORKERS.max(RESIDENT_MAX_WORKERS + extra_coders))
+    Ok(DEFAULT_MAX_WORKERS)
+}
+
+// Go idleDeadline: the idle rotation delay. With a 5m cache the wait is capped at 290s (before the cache
+// expires); 1h cache, off (0), or a delay already under 290s is used as given. Mirrors Go clients_test.go.
+fn idle_deadline(idle: Duration, cache_ttl: &str) -> Duration {
+    if idle.is_zero() || cache_ttl == "1h" || idle < Duration::from_secs(290) {
+        return idle;
+    }
+    Duration::from_secs(290)
+}
+
+// Go repl.go floor, applied only when neither --max-workers nor CHAUDE_MAX_WORKERS is set: parked resident
+// children plus extra coders need at least this many slots. Returns the larger of `current` and the floor.
+pub fn worker_floor(current: usize, extra_coders: usize) -> usize {
+    current.max(RESIDENT_MAX_WORKERS + extra_coders)
 }
 
 impl Default for Config {
@@ -2243,11 +2259,7 @@ impl State {
     // Go idleDeadline: the idle rotation waits this long, capped at 290 s for the 5m cache (1 h for the 1h
     // cache, no cap when idle_rotate is shorter). Zero = off.
     fn idle_deadline(&self) -> Duration {
-        let idle = self.cfg.idle_rotate;
-        if idle.is_zero() || self.cfg.cache_ttl == "1h" || idle < Duration::from_secs(290) {
-            return idle;
-        }
-        Duration::from_secs(290)
+        idle_deadline(self.cfg.idle_rotate, &self.cfg.cache_ttl)
     }
 
     // Time left before the idle rotation fires. None when it cannot fire now: off, no child, no API response
@@ -2652,9 +2664,30 @@ mod tests {
     }
 
     #[test]
-    fn max_workers_default_has_resident_floor() {
-        assert_eq!(resolve_max_workers(None, "", 0), Ok(8));
-        assert_eq!(resolve_max_workers(None, "  ", 4), Ok(12));
+    fn max_workers_default_is_three() {
+        assert_eq!(resolve_max_workers(None, "", 0), Ok(3));
+        assert_eq!(resolve_max_workers(None, "  ", 4), Ok(3));
         assert_eq!(Config::default().max_workers, 3);
     }
 }
+
+    #[test]
+    fn idle_deadline_matches_go_cases() {
+        let h = Duration::from_secs(3600);
+        assert_eq!(idle_deadline(h, "1h"), h);
+        assert_eq!(idle_deadline(h, "5m"), Duration::from_secs(290));
+        assert_eq!(idle_deadline(h, "auto"), Duration::from_secs(290));
+        assert_eq!(
+            idle_deadline(Duration::from_secs(100), "auto"),
+            Duration::from_secs(100)
+        );
+        assert_eq!(idle_deadline(Duration::ZERO, "1h"), Duration::ZERO);
+        assert_eq!(idle_deadline(Duration::ZERO, "5m"), Duration::ZERO);
+    }
+
+    #[test]
+    fn worker_floor_applies_resident_plus_extra_coders() {
+        assert_eq!(worker_floor(3, 0), 8);
+        assert_eq!(worker_floor(3, 4), 12);
+        assert_eq!(worker_floor(20, 4), 20);
+    }

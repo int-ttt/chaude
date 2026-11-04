@@ -18,7 +18,6 @@ fn max_workers_rejects_zero_from_flag_and_env() {
 }
 
 #[test]
-#[ignore = "parity: Go default is 3; Rust default is max(3, RESIDENT_MAX_WORKERS(8) + extra_coders), so unset env yields 8"]
 fn max_workers_default_is_three() {
     assert_eq!(resolve_max_workers(None, "", 0), Ok(3));
 }

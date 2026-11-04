@@ -414,4 +414,40 @@ mod tests {
         assert_eq!(a.len(), 36);
         assert_eq!(a.matches('-').count(), 4);
     }
+
+    // Parity with Go harness cleanenv_test.go: TestCleanEnvDropsAPIKey. Checks the recorded env delta, not the
+    // inherited environment, so it does not depend on the test runner's own env.
+    #[test]
+    fn apply_env_drops_api_key_and_sets_only_valid_ttl() {
+        let mut cmd = Command::new("true");
+        apply_env(&mut cmd, 0, "1h");
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert!(envs.contains(&("ANTHROPIC_API_KEY".to_string(), None)));
+        assert!(envs.contains(&(
+            "CLAUDE_CODE_PROMPT_CACHE_TTL".to_string(),
+            Some("1h".to_string())
+        )));
+        assert!(
+            !envs
+                .iter()
+                .any(|(k, _)| k == "CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+        );
+
+        let mut cmd = Command::new("true");
+        apply_env(&mut cmd, 50_000, "auto");
+        let envs: Vec<String> = cmd
+            .get_envs()
+            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .collect();
+        assert!(envs.iter().any(|k| k == "CLAUDE_CODE_AUTO_COMPACT_WINDOW"));
+        assert!(!envs.iter().any(|k| k == "CLAUDE_CODE_PROMPT_CACHE_TTL"));
+    }
 }
