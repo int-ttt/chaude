@@ -222,6 +222,11 @@ impl Editor {
         self.draft.clear();
     }
 
+    // Go inputHistory.Browsing: a recalled prompt is on screen.
+    pub fn browsing(&self) -> bool {
+        self.browse.is_some()
+    }
+
     pub fn history_prev(&mut self) {
         let next = match self.browse {
             None => {

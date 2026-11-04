@@ -38,54 +38,54 @@ Counts (filled at end): see the "Counts" section.
 
 ## Rendering (colors, wrapping, links, markdown, CJK width)
 
-- [ ] R01 Palette: orange `#D97757` for brand accent, grey `#888888` dim (tui.go:252-256) · test: none · core: none
-- [ ] R02 Dark background assumed; no OSC background query at startup (tui.go:1384) · test: none · core: none
-- [ ] R03 Markdown bold `**x**` rendered with bold SGR (mdBold tui.go:316) · test: TestMdBold (bold_test.go:5) · core: none
-- [ ] R04 Caveman status blocks detected by regex `^status:\s*(done|partial|fail|blocked)\b` and hidden/collapsed in tool results (cavemanStatusRe tui.go:97; isCavemanBlock tui.go:100) · test: TestIsCavemanBlock (tui_caveman_test.go:9), TestToolResultCavemanHidden (tui_caveman_test.go:28) · core: none
-- [ ] R05 Tool result text summarized with "… (+N lines)" beyond the first line (tui.go:485) · test: none · core: tool_result content
-- [ ] R06 Tool summary line from tool_use input (toolSummary tui.go:67; resultText tui.go:86) · test: none · core: tool_use events
-- [ ] R07 Permission prompt note "Allow <tool>(<arg>)?  [y] yes  [n] no" (tui.go:499) · test: none · core: control_request can_use_tool
-- [ ] R08 Links: URL, Windows path, dot path, relative path, absolute path detected and colored `linkColorOn = \x1b[38;2;95;175;255m` (links.go:13-40, linkSpans links.go:59, markLinks links.go:84) · test: TestLinkSpansDetects (links_test.go:18), TestLinkSpansProseNegatives (links_test.go:40), TestLinkSpansOverlapAndBoundary (links_test.go:54) · core: none
-- [ ] R09 Link text stays visible text-equal after linkify (TestLinkifyPreservesVisibleText links_test.go:65) · test: TestLinkifyPreservesVisibleText (links_test.go:65) · core: none
-- [ ] R10 Links are not styled inside fenced code blocks (wrapLinked links.go:197) · test: TestWrapLinkedSkipsFence (links_test.go:82) · core: none
-- [ ] R11 Link color survives soft wrap across rows using private SGR marks 9001/9002/9003 (restyle links.go:128) · test: TestWrapLinkedColorsWholeTokens (links_wrap_test.go:88) · core: none
-- [ ] R12 Wrap by display cell width, not rune count (wrap in input rows input.go:149; ansi.Truncate tui.go:1429) · test: TestInputWrapWide (input_test.go:30) · core: none
-- [ ] R13 Mixed-width (CJK + ASCII) width measure (TestInputWidthMixed input_test.go:9) · test: TestInputWidthMixed (input_test.go:9) · core: none
-- [ ] R14 Ellipsis truncation with "…" for long lines (ansiTrunc tui.go:1429; trunc in repl) · test: none · core: none
-- [ ] R15 Usage bar: 10 cells, width measured with runewidth (renderBar usagebar.go:18; barWidth usagebar.go:35) · test: TestRenderBar (usagebar_test.go:8) · core: none
-- [ ] R16 Context usage decoration against ctxBarMax=150000 tokens (decorateUsage usagebar.go:41) · test: TestDecorateUsage (usagebar_test.go:28) · core: usage/context numbers
-- [ ] R17 Usage percent text parsed by `(\d+(?:\.\d+)?)%` and bar inserted (pctRe usagebar.go:37) · test: TestDecorateUsage (usagebar_test.go:28) · core: claude /usage output
-- [ ] R18 Dim/bold/reset SGR used for notes and status (dimSt tui.go:256; repl.go dim/rst constants) · test: none · core: none
-- [ ] R19 Import transcript rebuilt as blocks on --from-claude (importBlocks tui.go:283; "(N earlier turns not shown)" at 100 cap tui.go:286) · test: TestImportShowsTurnsInTUI (resumeshift_test.go:42) · core: transcript import
-- [ ] R20 Selection highlight overlay in view by content coordinates (highlightView selection.go:92; highlightLine selection.go:81) · test: TestSelectionMultiLineAndReversedOrder (selection_test.go:37) · core: none
+- [x] R01 Palette: orange `#D97757` for brand accent, grey `#888888` dim (tui.go:252-256) · test: none · core: none → done: render.rs:10-12 ORANGE_ON 217,119,87 / GREY_ON 136
+- [x] R02 Dark background assumed; no OSC background query at startup (tui.go:1384) · test: none · core: none → done: no OSC 11 background query in crates/cli (grep)
+- [x] R03 Markdown bold `**x**` rendered with bold SGR (mdBold tui.go:316) · test: TestMdBold (bold_test.go:5) · core: none → done: render.rs:372 md_bold; mod.rs:1918; test render.rs:1325
+- [x] R04 Caveman status blocks detected by regex `^status:\s*(done|partial|fail|blocked)\b` and hidden/collapsed in tool results (cavemanStatusRe tui.go:97; isCavemanBlock tui.go:100) · test: TestIsCavemanBlock (tui_caveman_test.go:9), TestToolResultCavemanHidden (tui_caveman_test.go:28) · core: none → done: render.rs:425 is_caveman_block, render.rs:442 tool_result_text hides it; test render.rs:1338
+- [x] R05 Tool result text summarized with "… (+N lines)" beyond the first line (tui.go:485) · test: none · core: tool_result content → done: render.rs:442-455 tool_result_text "… (+N lines)"; mod.rs:358
+- [x] R06 Tool summary line from tool_use input (toolSummary tui.go:67; resultText tui.go:86) · test: none · core: tool_use events → done: render.rs:458 tool_summary; mod.rs ToolInput handler; test render.rs:1362
+- [x] R07 Permission prompt note "Allow <tool>(<arg>)?  [y] yes  [n] no" (tui.go:499) · test: none · core: control_request can_use_tool → done: render.rs:490 perm_note; mod.rs:530
+- [x] R08 Links: URL, Windows path, dot path, relative path, absolute path detected and colored `linkColorOn = \x1b[38;2;95;175;255m` (links.go:13-40, linkSpans links.go:59, markLinks links.go:84) · test: TestLinkSpansDetects (links_test.go:18), TestLinkSpansProseNegatives (links_test.go:40), TestLinkSpansOverlapAndBoundary (links_test.go:54) · core: none → done: render.rs:18-20 LINK_COLOR_ON; link_spans 802, mark_links 807
+- [x] R09 Link text stays visible text-equal after linkify (TestLinkifyPreservesVisibleText links_test.go:65) · test: TestLinkifyPreservesVisibleText (links_test.go:65) · core: none → done: test render.rs:1224 linkify_keeps_visible_text_and_width
+- [x] R10 Links are not styled inside fenced code blocks (wrapLinked links.go:197) · test: TestWrapLinkedSkipsFence (links_test.go:82) · core: none → done: wrap_linked render.rs:896; test render.rs:1235
+- [x] R11 Link color survives soft wrap across rows using private SGR marks 9001/9002/9003 (restyle links.go:128) · test: TestWrapLinkedColorsWholeTokens (links_wrap_test.go:88) · core: none → done: restyle render.rs:846; wrap_linked render.rs:896; test render.rs:1247
+- [x] R12 Wrap by display cell width, not rune count (wrap in input rows input.go:149; ansi.Truncate tui.go:1429) · test: TestInputWrapWide (input_test.go:30) · core: none → done: wrap_cells render.rs:340 used mod.rs:1612 (cell width)
+- [x] R13 Mixed-width (CJK + ASCII) width measure (TestInputWidthMixed input_test.go:9) · test: TestInputWidthMixed (input_test.go:9) · core: none → done: render.rs:139-277 cell width; test render.rs:1401 mixed_width_measure
+- [ ] R14 Ellipsis truncation with "…" for long lines (open: trunc_ellipsis render.rs:317 has no production caller; only tests) (ansiTrunc tui.go:1429; trunc in repl) · test: none · core: none
+- [x] R15 Usage bar: 10 cells, width measured with runewidth (renderBar usagebar.go:18; barWidth usagebar.go:35) · test: TestRenderBar (usagebar_test.go:8) · core: none → done: render.rs:530 render_bar 10 cells; bar_width render.rs:543 is a dead_code helper only
+- [x] R16 Context usage decoration against ctxBarMax=150000 tokens (decorateUsage usagebar.go:41) · test: TestDecorateUsage (usagebar_test.go:28) · core: usage/context numbers → done: render.rs:566 decorate_usage; mod.rs:468
+- [x] R17 Usage percent text parsed by `(\d+(?:\.\d+)?)%` and bar inserted (pctRe usagebar.go:37) · test: TestDecorateUsage (usagebar_test.go:28) · core: claude /usage output → done: render.rs:548 pct_value; used by decorate_usage
+- [x] R18 Dim/bold/reset SGR used for notes and status (dimSt tui.go:256; repl.go dim/rst constants) · test: none · core: none → done: render.rs:13-17 DIM_ON/RESET/BOLD; used in agentview.rs, rewind.rs
+- [x] R19 Import transcript rebuilt as blocks on --from-claude (importBlocks tui.go:283; "(N earlier turns not shown)" at 100 cap tui.go:286) · test: TestImportShowsTurnsInTUI (resumeshift_test.go:42) · core: transcript import → done: render.rs:508 import_blocks, cap 100 at render.rs:514; mod.rs:971
+- [x] R20 Selection highlight overlay in view by content coordinates (highlightView selection.go:92; highlightLine selection.go:81) · test: TestSelectionMultiLineAndReversedOrder (selection_test.go:37) · core: none → done: TextSel render.rs:959; highlight_line render.rs:1017; mod.rs:1330-1373
 
 ## Input editor (keys, multiline, paste, history, IME)
 
-- [ ] I01 Printable runes inserted at cursor (KeyRunes tui.go:943; Insert input.go:40) · test: TestInputNewline (input_test.go:52) · core: none
-- [ ] I02 Control chars filtered out of insert; tab converted to space (Insert input.go:40-62) · test: none · core: none
-- [ ] I03 Space key inserts (tui.go:947) · test: none · core: none
-- [ ] I04 Backspace / Ctrl+H (tui.go:949; Backspace input.go:64) · test: TestTUIAltBackspaceAndCtrlU (input_test.go:109) · core: none
-- [ ] I05 Delete / Ctrl+D inside editor (tui.go:955; Delete input.go:71) · test: none · core: none
-- [ ] I06 Left/Right move one rune (tui.go:957-959; Left/Right input.go:117-127) · test: none · core: none
-- [ ] I07 Home / Ctrl+A and End / Ctrl+E per logical line (tui.go:961-963; Home/End input.go:129-139) · test: none · core: none
-- [ ] I08 Ctrl+W deletes previous word, punctuation-aware (tui.go:965; DeleteWord input.go:81) · test: TestInputDeleteWordPunct (input_test.go:91) · core: none
-- [ ] I09 Ctrl+K kills to end of line (tui.go:967; KillToEnd input.go:141) · test: none · core: none
-- [ ] I10 Ctrl+U kills to start of line; terminal cmd+delete sends ^U (tui.go:969; KillToStart input.go:101) · test: TestInputKillToStart (input_test.go:72), TestTUIAltBackspaceAndCtrlU (input_test.go:109) · core: none
-- [ ] I11 Alt+Enter and Ctrl+J insert newline (tui.go:747) · test: none · core: none
-- [ ] I12 Trailing backslash then Enter inserts newline instead of submit (tui.go:776-783) · test: none · core: none
-- [ ] I13 Enter submits trimmed non-empty line; empty line ignored (tui.go:776-800) · test: none · core: none
-- [ ] I14 Up/Down move across soft-wrapped rows before history (tui.go:718-742; MoveRow input.go:185) · test: TestUpMovesCompleterWhenNotAtTop (history_file_test.go:109) · core: none
-- [ ] I15 Up/Down history recall when at top/bottom row (tui.go:718-742; inputHistory Prev/Next history.go:89-111) · test: TestUpDownHistoryWithSlashCompleter (history_file_test.go:77) · core: none
-- [ ] I16 Slash completer owns Up/Down while open and not browsing a recalled prompt (tui.go:718-742) · test: TestUpDownHistoryWithSlashCompleter (history_file_test.go:77) · core: none
-- [ ] I17 Tab completes the selected slash suggestion and appends a space (tui.go:712-717) · test: none · core: none
-- [ ] I18 Shift+Tab cycles permission mode (tui.go:744; setMode tui.go:1182) · test: none · core: permission modes (default/acceptEdits/plan/auto)
-- [ ] I19 Multiline paste: bracketed paste delivers runes; newlines inserted, not submitted (KeyRunes path tui.go:943 + Insert) · test: none (verify) · core: none
-- [ ] I20 History: max 500 entries, consecutive duplicates dropped (maxHistory history.go:18; Add history.go:78) · test: TestHistoryDedupeConsecutive (history_file_test.go:127) · core: none
-- [ ] I21 History persisted to `<cwd>/.chaude/history.jsonl` (historyFileFor history.go:22) · test: TestHistoryFileFor (history_file_test.go:48), TestHistoryFileRoundTrip (history_file_test.go:12) · core: none
-- [ ] I22 History load rules (skip bad lines, cap) (loadInputHistory history.go:35) · test: TestHistoryFileLoadRules (history_file_test.go:26) · core: none
-- [ ] I23 History save is tmp file + rename (saveInputHistory history.go:57) · test: none · core: none
-- [ ] I24 A new model loads previously recorded history (recordHistory tui.go:273; loadHistory tui.go:266) · test: TestRecordHistoryPersistsAndNewModelLoads (history_file_test.go:54) · core: none
-- [ ] I25 Esc+Esc on empty input opens rewind picker within 600ms (tui.go:696-711) · test: none · core: transcript turns (rewind unit = user turn)
+- [x] I01 Printable runes inserted at cursor (KeyRunes tui.go:943; Insert input.go:40) · test: TestInputNewline (input_test.go:52) · core: none → done: mod.rs:748 insert_char; edit.rs:44
+- [x] I02 Control chars filtered out of insert; tab converted to space (Insert input.go:40-62) · test: none · core: none → done: edit.rs:263 filter_char; test edit.rs:455
+- [x] I03 Space key inserts (tui.go:947) · test: none · core: none → done: mod.rs:748; test edit.rs:467
+- [x] I04 Backspace / Ctrl+H (tui.go:949; Backspace input.go:64) · test: TestTUIAltBackspaceAndCtrlU (input_test.go:109) · core: none → done: mod.rs:784; test edit.rs:440
+- [x] I05 Delete / Ctrl+D inside editor (tui.go:955; Delete input.go:71) · test: none · core: none → done: mod.rs:789 Delete; Ctrl+D quits in Go (tui.go:682) and Rust (mod.rs:715), so no editor delete on Ctrl+D in either
+- [x] I06 Left/Right move one rune (tui.go:957-959; Left/Right input.go:117-127) · test: none · core: none → done: mod.rs:793-800; edit.rs:129-133
+- [x] I07 Home / Ctrl+A and End / Ctrl+E per logical line (tui.go:961-963; Home/End input.go:129-139) · test: none · core: none → done: mod.rs:801-816; edit.rs:140-150; test edit.rs:475
+- [x] I08 Ctrl+W deletes previous word, punctuation-aware (tui.go:965; DeleteWord input.go:81) · test: TestInputDeleteWordPunct (input_test.go:91) · core: none → done: mod.rs:728; edit.rs:90; test edit.rs:528
+- [x] I09 Ctrl+K kills to end of line (tui.go:967; KillToEnd input.go:141) · test: none · core: none → done: mod.rs:736; edit.rs:124; test edit.rs:515
+- [x] I10 Ctrl+U kills to start of line; terminal cmd+delete sends ^U (tui.go:969; KillToStart input.go:101) · test: TestInputKillToStart (input_test.go:72), TestTUIAltBackspaceAndCtrlU (input_test.go:109) · core: none → done: mod.rs:732; edit.rs:110; test edit.rs:499
+- [x] I11 Alt+Enter and Ctrl+J insert newline (tui.go:747) · test: none · core: none → done: mod.rs:716 (ctrl+j), mod.rs:753 (alt+enter)
+- [x] I12 Trailing backslash then Enter inserts newline instead of submit (tui.go:776-783) · test: none · core: none → done: edit.rs:67 backslash_newline; mod.rs:870; test edit.rs:579
+- [x] I13 Enter submits trimmed non-empty line; empty line ignored (tui.go:776-800) · test: none · core: none → done: mod.rs:871-875 submit; empty ignored
+- [x] I14 Up/Down move across soft-wrapped rows before history (tui.go:718-742; MoveRow input.go:185) · test: TestUpMovesCompleterWhenNotAtTop (history_file_test.go:109) · core: none → done: mod.rs:851-861 move_row first; edit.rs:151
+- [x] I15 Up/Down history recall when at top/bottom row (tui.go:718-742; inputHistory Prev/Next history.go:89-111) · test: TestUpDownHistoryWithSlashCompleter (history_file_test.go:77) · core: none → done: mod.rs:851-861; edit.rs:225,241
+- [x] I16 Slash completer owns Up/Down while open and not browsing a recalled prompt (tui.go:718-742) · test: TestUpDownHistoryWithSlashCompleter (history_file_test.go:77) · core: none → done: mod.rs:831-841 (fixed: browsing guard, top falls to history, wrap); edit.rs browsing()
+- [x] I17 Tab completes the selected slash suggestion and appends a space (tui.go:712-717) · test: none · core: none → done: mod.rs:842-849; commands.rs:313 complete appends space
+- [x] I18 Shift+Tab cycles permission mode (tui.go:744; setMode tui.go:1182) · test: none · core: permission modes (default/acceptEdits/plan/auto) → done: mod.rs:863 BackTab -> CycleMode; mode set in core (not verified here)
+- [x] I19 Multiline paste: bracketed paste delivers runes; newlines inserted, not submitted (KeyRunes path tui.go:943 + Insert) · test: none (verify) · core: none → done: mod.rs paste path inserts via insert_str; edit.rs:52; test edit.rs:490
+- [x] I20 History: max 500 entries, consecutive duplicates dropped (maxHistory history.go:18; Add history.go:78) · test: TestHistoryDedupeConsecutive (history_file_test.go:127) · core: none → done: edit.rs:14 MAX_HISTORY=500; edit.rs:296 push_history; test edit.rs:611
+- [x] I21 History persisted to `<cwd>/.chaude/history.jsonl` (historyFileFor history.go:22) · test: TestHistoryFileFor (history_file_test.go:48), TestHistoryFileRoundTrip (history_file_test.go:12) · core: none → done: edit.rs:286 history_file_for; test edit.rs:660
+- [x] I22 History load rules (skip bad lines, cap) (loadInputHistory history.go:35) · test: TestHistoryFileLoadRules (history_file_test.go:26) · core: none → done: edit.rs:307 read_history; test edit.rs:684
+- [x] I23 History save is tmp file + rename (saveInputHistory history.go:57) · test: none · core: none → done: edit.rs:321-340 write_history tmp+rename
+- [x] I24 A new model loads previously recorded history (recordHistory tui.go:273; loadHistory tui.go:266) · test: TestRecordHistoryPersistsAndNewModelLoads (history_file_test.go:54) · core: none → done: edit.rs:215 load_history; test edit.rs:638
+- [x] I25 Esc+Esc on empty input opens rewind picker within 600ms (tui.go:696-711) · test: none · core: transcript turns (rewind unit = user turn) → done: mod.rs:760-783 double Esc 600ms
 - [ ] I26 Rewind picker: Open/Move/Cancel/Confirm (rewindState history.go:124-152) · test: none · core: transcript turns
 - [ ] I27 Rewind excludes slash commands from the unit list (history.go:124) · test: none · core: transcript turns
 - [ ] I28 Rewind with no turns shows note "nothing to rewind to" (tui.go:700-703) · test: none · core: none

@@ -830,13 +830,16 @@ impl App {
                 self.scroll(1);
                 Action::Continue
             }
-            KeyCode::Up if !self.suggest().is_empty() => {
-                self.sugg_sel = self.sugg_sel.saturating_sub(1);
+            // Go tui.go: the completer owns Up/Down only while open and not browsing a recalled prompt; Up at its top goes to history.
+            KeyCode::Up
+                if self.sugg_sel > 0 && !self.editor.browsing() && !self.suggest().is_empty() =>
+            {
+                self.sugg_sel -= 1;
                 Action::Continue
             }
-            KeyCode::Down if !self.suggest().is_empty() => {
-                let last = self.suggest().len() - 1;
-                self.sugg_sel = (self.sugg_sel + 1).min(last);
+            KeyCode::Down if !self.editor.browsing() && !self.suggest().is_empty() => {
+                let n = self.suggest().len();
+                self.sugg_sel = (self.sugg_sel + 1) % n;
                 Action::Continue
             }
             KeyCode::Tab if !self.suggest().is_empty() => {
