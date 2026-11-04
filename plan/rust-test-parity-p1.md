@@ -95,7 +95,7 @@ missing = no Rust test yet (reason in note); n-a = outside Rust scope; ignored =
 | harness/children_test.go::TestChildKey | crates/core/src/child_set.rs::child_key_matches_empty_dot_and_working_dir | covered | name-level match; role-coexist case is harness/childkey_test.go::TestChildKeyRoleCoexist (missing) |
 | harness/children_test.go::TestChildSetParkTake | crates/core/src/child_set.rs::park_take_replaces_closes_once_and_expires | covered | |
 | harness/children_test.go::TestCloseAllParallel | crates/core/src/child_set.rs::close_all_closes_in_parallel | covered | |
-| harness/cleanenv_test.go::TestCleanEnvDropsAPIKey | - | missing | apply_env is private in core/src/proc.rs; no public test seam |
+| harness/cleanenv_test.go::TestCleanEnvDropsAPIKey | crates/core/src/proc.rs::apply_env_drops_api_key_and_sets_only_valid_ttl | covered | name-level: checks the recorded env delta (key removed), not the inherited env |
 | harness/clients_test.go::TestClientRegistryRoundTrip | crates/core/src/clients.rs::round_trip_upsert_get_mark_ended | covered | |
 | harness/clients_test.go::TestClientRegistryBrokenJSON | crates/core/src/clients.rs::broken_json_reads_as_empty | covered | |
 | harness/clients_test.go::TestClientRegistryAtomicWrite | crates/core/src/clients.rs::atomic_write_leaves_no_tmp_file | covered | |

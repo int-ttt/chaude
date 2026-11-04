@@ -441,13 +441,26 @@ mod tests {
                 .any(|(k, _)| k == "CLAUDE_CODE_AUTO_COMPACT_WINDOW")
         );
 
+        // Go TestCleanEnv: the window entry carries the exact value; "auto" adds no TTL entry.
         let mut cmd = Command::new("true");
-        apply_env(&mut cmd, 50_000, "auto");
-        let envs: Vec<String> = cmd
+        apply_env(&mut cmd, 300_000, "auto");
+        let envs: Vec<(String, Option<String>)> = cmd
             .get_envs()
-            .map(|(k, _)| k.to_string_lossy().into_owned())
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
             .collect();
-        assert!(envs.iter().any(|k| k == "CLAUDE_CODE_AUTO_COMPACT_WINDOW"));
-        assert!(!envs.iter().any(|k| k == "CLAUDE_CODE_PROMPT_CACHE_TTL"));
+        assert!(envs.contains(&(
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW".to_string(),
+            Some("300000".to_string())
+        )));
+        assert!(
+            !envs
+                .iter()
+                .any(|(k, _)| k == "CLAUDE_CODE_PROMPT_CACHE_TTL")
+        );
     }
 }

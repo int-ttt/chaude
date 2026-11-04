@@ -166,10 +166,10 @@ Note on balance: group 3 has 16 update/install tests that are blocked on the upd
 |---|---|---|---|
 | TestParseSamples | none | missing | not found by name grep |
 | TestCtxTokens | crates/core/src/event.rs::usage_context_tokens_sums_input_and_cache | covered | |
-| TestObservedTTL | none | missing | observed-TTL helper not found in Rust |
+| TestObservedTTL | crates/core/src/cache_ttl.rs::observed_ttl_reads_written_tier_else_prev | covered | helper only; api.rs does not call observed_ttl yet (Go livechild.go touchMain) |
 | TestSnapshot | crates/core/src/import_claude.rs::snapshot_keeps_tail_turns_and_files | covered | name-level |
-| TestCleanEnv | none | missing | proc.rs env_remove (ANTHROPIC_API_KEY) has no test and proc is not pub |
-| TestWithCacheTTL | none | missing | proc.rs PROMPT_CACHE_TTL setting has no test and proc is not pub |
+| TestCleanEnv | crates/core/src/proc.rs::apply_env_drops_api_key_and_sets_only_valid_ttl | covered | name-level: env delta (ANTHROPIC_API_KEY removed, exact window value), not inherited env |
+| TestWithCacheTTL | crates/core/src/cache_ttl.rs::with_cache_ttl_pins_single_entry_last | covered | name-level: pure helper; proc apply_env sets the TTL entry, not with_cache_ttl |
 | TestFmtK | none | missing | bar.rs fmt_k (line 90) has no test |
 | TestCtxBar | none | missing | not found by name grep |
 
