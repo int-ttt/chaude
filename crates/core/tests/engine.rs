@@ -1958,3 +1958,58 @@ fn resume_session_is_refused_while_busy() {
     );
     h.shutdown();
 }
+
+#[test]
+fn opus_agent_emits_opus_busy_bracket_around_its_run() {
+    let _g = lock();
+    let f = fake("opus_agent", &["opus_agent_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("scan");
+    let evs = until_idle(&rx);
+    let on = evs.iter().position(|e| *e == UiEvent::OpusBusy(true));
+    let end = evs
+        .iter()
+        .position(|e| matches!(e, UiEvent::AgentEnd { .. }));
+    let off = evs.iter().position(|e| *e == UiEvent::OpusBusy(false));
+    assert!(on.is_some() && off.is_some(), "{evs:?}");
+    // The opus run ends with its tool result, which comes before AgentEnd.
+    assert!(on < off && on < end, "{evs:?}");
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, UiEvent::OpusBusy(_)))
+            .count(),
+        2,
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
+fn coder_task_emits_resident_busy_bracket_before_reply() {
+    let _g = lock();
+    let f = fake("coder_busy", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.coder("rename the helper");
+    let evs = until_coder_reply(&rx);
+    let on = evs.iter().position(|e| {
+        *e == UiEvent::ResidentBusy {
+            role: "coder".into(),
+            busy: true,
+        }
+    });
+    let off = evs.iter().position(|e| {
+        *e == UiEvent::ResidentBusy {
+            role: "coder".into(),
+            busy: false,
+        }
+    });
+    let reply = evs
+        .iter()
+        .position(|e| matches!(e, UiEvent::CoderReply { .. }));
+    assert!(on.is_some() && off.is_some() && reply.is_some(), "{evs:?}");
+    assert!(on < off && off < reply, "{evs:?}");
+    h.shutdown();
+}

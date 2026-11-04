@@ -103,6 +103,13 @@ pub enum UiEvent {
         context_pct: u32,
     },
     Busy(bool),
+    // True while a running Agent is on the opus model (Go opusRunning: name prefix "opus-" or model "opus").
+    OpusBusy(bool),
+    // A resident role (coder, prompter, tui) has a command in flight (Go residentBusy).
+    ResidentBusy {
+        role: String,
+        busy: bool,
+    },
     Queued(usize),
     TurnEnd {
         duration_ms: u64,
@@ -427,6 +434,8 @@ struct State {
     tools: HashSet<String>,
     // Agent tool_use id -> start time, for AgentEnd elapsed_ms.
     agents: HashMap<String, Instant>,
+    // Running Agent tool ids on the opus model; OpusBusy follows whether this set is empty.
+    opus_agents: HashSet<String>,
     // A rotation that was due while background agents ran: when it was first deferred (Go rotate_defer).
     rotate_deferred: Option<Instant>,
     // Delegated agents by tool_use id. A background agent (launch result said "async") keeps running past the
@@ -584,6 +593,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         cost_usd: 0.0,
         tools: HashSet::new(),
         agents: HashMap::new(),
+        opus_agents: HashSet::new(),
         rotate_deferred: None,
         agent_info: HashMap::new(),
         agent_ids: HashMap::new(),
@@ -747,6 +757,27 @@ impl State {
         }
     }
 
+    // Adds or removes an opus Agent and emits OpusBusy only when the running state changes.
+    fn opus_set(&mut self, id: &str, on: bool) {
+        let before = !self.opus_agents.is_empty();
+        if on {
+            self.opus_agents.insert(id.to_string());
+        } else {
+            self.opus_agents.remove(id);
+        }
+        let after = !self.opus_agents.is_empty();
+        if before != after {
+            self.emit(UiEvent::OpusBusy(after));
+        }
+    }
+
+    fn resident_busy(&mut self, role: &str, busy: bool) {
+        self.emit(UiEvent::ResidentBusy {
+            role: role.to_string(),
+            busy,
+        });
+    }
+
     // Sends text to the prompter. A spawn, start or write failure falls back to the raw prompt (Go).
     fn start_prompter(&mut self, text: String) {
         if self.prompter_proc.is_none()
@@ -769,6 +800,7 @@ impl State {
         };
         self.stage("prompter", phase);
         self.prompter_deadline = Some(Instant::now() + PROMPTER_TIMEOUT);
+        self.resident_busy("prompter", true);
         let wrote = match self.prompter_proc.as_mut() {
             Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
             None => Err("prompter not running".to_string()),
@@ -837,7 +869,9 @@ impl State {
 
     // Ends the prompter wait: its stage row, then the outcome goes to the main child as a turn.
     fn finish_prompter(&mut self, o: PrompterOutcome) {
-        self.prompter_deadline = None;
+        if self.prompter_deadline.take().is_some() {
+            self.resident_busy("prompter", false);
+        }
         if let Some(phase) = o.stage {
             self.stage("prompter", phase);
         }
@@ -855,6 +889,7 @@ impl State {
         }
         self.stage("tui", StagePhase::Working);
         self.tui_deadline = Some(Instant::now() + TUI_TIMEOUT);
+        self.resident_busy("tui", true);
         let wrote = match self.tui_proc.as_mut() {
             Some(p) => p.write_user(&tui_prompt(&reply)).map_err(|e| e.to_string()),
             None => Err("tui not running".to_string()),
@@ -924,6 +959,7 @@ impl State {
         }
         self.stage(&role, StagePhase::Working);
         self.coders[i].deadline = Some(Instant::now() + CODER_TIMEOUT);
+        self.resident_busy(&role, true);
         self.coders[i].idle_since = None;
         self.coders[i].waiter = waiter;
         let text = format!("{task}{CODER_REPLY_FORMAT}");
@@ -1147,7 +1183,9 @@ impl State {
 
     // Ends a coder task: its stage row, then the reply (or the failure reason) goes to the UI.
     fn finish_coder(&mut self, i: usize, out: Result<String, String>) {
-        self.coders[i].deadline = None;
+        if self.coders[i].deadline.take().is_some() {
+            self.resident_busy(&coder_role(i), false);
+        }
         self.coders[i].idle_since = Some(Instant::now());
         let waiter = self.coders[i].waiter.take();
         let role = coder_role(i);
@@ -1197,7 +1235,9 @@ impl State {
 
     // Ends the tui wait: the answer (or its failure row), then the turn is over.
     fn finish_tui(&mut self, out: Result<String, String>) {
-        self.tui_deadline = None;
+        if self.tui_deadline.take().is_some() {
+            self.resident_busy("tui", false);
+        }
         match out {
             Ok(text) => {
                 self.stage("tui", StagePhase::Done);
@@ -1613,6 +1653,14 @@ impl State {
                 })
                 .map(|s| clip(s, 80))
                 .unwrap_or_default();
+            if input.get("model").and_then(Value::as_str) == Some("opus")
+                || input
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|n| n.starts_with("opus-"))
+            {
+                self.opus_set(&id, true);
+            }
             self.agents.insert(id.clone(), Instant::now());
             self.agent_labels.insert(id.clone(), description.clone());
             self.agent_info.insert(
@@ -1700,6 +1748,7 @@ impl State {
 
     fn finish_agent(&mut self, id: String) {
         let info = self.agent_info.remove(&id);
+        self.opus_set(&id, false);
         if let Some(t0) = self.agents.remove(&id) {
             if let Some(i) = info {
                 self.stage(&agent_slot(&i.name), StagePhase::Done);
@@ -1847,6 +1896,7 @@ impl State {
             .cloned()
             .collect();
         for id in ids {
+            self.opus_set(&id, false);
             if let Some(t0) = self.agents.remove(&id) {
                 if let Some(i) = self.agent_info.get(&id) {
                     self.stage(&agent_slot(&i.name), StagePhase::Done);
