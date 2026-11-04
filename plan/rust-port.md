@@ -33,6 +33,8 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - done: metrics core (cf3d7f1; metrics::usage_fields, metrics_report.rs: summary text and 14-column CSV from the per-day JSONL files).
      - done: api.rs turn-end RecordState::save (api.rs:1996), crates/cli call sites for /import --from-claude, --import-dry-run and `chaude metrics` (--dir, --csv).
      - open: api.rs wiring of orch Router (orch.rs is not called from api.rs or cli, verified 2026-11-04 at c8233d6).
+     - wired in api.rs (2026-11-04, a9c1d6d and earlier): usage poll after each turn (5 min throttle), turn spend merged into the turn metrics row, delegation rule in the main child system prompt, /clear clear mark, client registry (clients.json: live row on child start, clear ends it, startup reconcile emits OrphanNotice), AgentStore startup interrupt sweep.
+     - open (not wired in api.rs, not done): haiku_pool WorkerPool note_edit (Go repl.go:743), pick_child with ChildSet (Go dispatch.go:91, needs multi-child routing), orch Router route/record, AgentTracker persistence per agent (agent_store.rs AgentTracker not used by api.rs).
 4. Terminal UI without Charm: inline streaming output, input line with Korean IME + unicode width, spinner, status/usage bar, slash commands.
    - status (2026-11-04, crates/cli/src/tui):
      - done: inline streaming output (live feed + record load, asst rows via markdown path, tool_result_text).
@@ -42,7 +44,7 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - done: idle "still waiting" notice (Go quiet, 30 min, no open tool call).
      - done: /view lists the previous run's owned sessions (handoff::read_exit_handoff, prev_owned).
      - done (f73b6fb): status bar P/T/C per-role context (UiEvent::RoleContext), /view this run's session ids (UiEvent::SessionIds), /clear new-session notice (UiEvent::NewSession), thinking row, rotated notice, orphan notice, tool summary.
-     - missing: done row (K8; no per-turn done row wired, doubt on Go intent); assistant link wrap (K12; render::wrap_linked still dead code).
+     - done: done row (K8, bar::done_line, UiEvent::AgentEnd) and assistant link wrap (K12, render::wrap_linked in body()). Checklist rows K8 and K12 are done (verified 2026-11-04).
 5. GUI (Tauri): session tabs, conversation view, input, usage display; .dmg / .msi.
    - status (2026-11-04, crates/gui): placeholder only.
      - done: crates/gui (chaude-gui) is a workspace member again (exclude removed); depends on chaude-core by path only, no UI framework.

@@ -104,6 +104,7 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 - Rows: 63 (C 15, F 3, E 5, S 25, K 12, T 3).
 - done: 63. differs: 0. missing: 0. (Was done 55, differs 1 S23, missing 7; C2, F3, E3 closed 2026-11-04; C9, C15, K8, K12, S23 closed earlier.)
 - Verified 2026-11-04 against code at c8233d6: C3, C4, C5, C6, C8, C11, C12, C13 done (main.rs match arms); K6-K11, S02, S08 wired (f73b6fb). Orch Router (orch.rs) is not called from api.rs (rust-port.md phase 3).
+- Verified 2026-11-04 after a9c1d6d: core wiring in api.rs covers usage poll, turn spend, delegation rule, /clear mark, client registry (clients.json) with startup reconcile, AgentStore startup sweep. Not wired, so not done: orch Router, WorkerPool note_edit, pick_child/ChildSet, AgentTracker persistence. No row above is counted done on the strength of these.
 
 ## Notes
 
