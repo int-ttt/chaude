@@ -21,6 +21,8 @@ use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, Shape, SpawnOpts};
+use crate::record::{self, Stamp};
+use crate::record_turn::{self, RecordState};
 use crate::resident::{
     CODER_REPLY_FORMAT, CODER_RULE, CODER_TIMEOUT, PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter,
     PrompterOutcome, StagePhase, TUI_TIMEOUT, agent_body, summarize_reply, tui_prompt,
@@ -515,6 +517,8 @@ struct State {
     coder_epoch: u64,
     // Go residentMCPConfig, created on first use when residents are on. Its guard removes the temp dir on drop.
     mcp_cfg: Option<mcp::McpConfig>,
+    // Go recordSave state: the reply and measurement of the turn that just ended, the topic, the /clear split.
+    record: RecordState,
 }
 
 // One coder resident. A running deadline means a task is in flight (Go busyRec).
@@ -625,6 +629,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         resume_pending,
         role_ctx: BTreeMap::new(),
         mcp_cfg: None,
+        record: RecordState::default(),
         self_tx,
         opts,
         epoch: 0,
@@ -1946,6 +1951,28 @@ impl State {
 
     // Go repl.go turn record (stage "turn"). Keys the Rust engine does not produce yet (draining, rotations,
     // result_* usage) are left out until their groups land. Write errors are ignored, as in Go.
+    // Go recordSave: the turn that just ended goes to its project folder under the record root (slash
+    // commands and empty replies are skipped by RecordState). A failed write is reported as an Error.
+    fn record_turn_save(&mut self, duration_ms: u64) {
+        let cost_turn = (self.cost_usd - self.turn_cost_base).max(0.0);
+        let mut fields = serde_json::Map::new();
+        fields.insert("duration_ms".into(), json!(duration_ms));
+        fields.insert("cost_turn_usd".into(), json!(cost_turn));
+        fields.insert("cost_usd".into(), json!(self.cost_usd));
+        fields.insert("ctx".into(), json!(self.ctx_tokens));
+        fields.insert("delegations".into(), json!(self.delegations));
+        self.record.last_measure = record_turn::measure_line(&fields);
+        self.record.last_reply = self.turn_reply.clone();
+        let Some(stamp) = local_stamp() else {
+            return;
+        };
+        let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
+        let root = record::dir_for(&cwd);
+        if let Err(e) = self.record.save(&root, &cwd, &self.turn_prompt, &stamp) {
+            self.emit(UiEvent::Error(format!("record save failed: {e}")));
+        }
+    }
+
     fn log_turn(&self, duration_ms: u64) {
         let end_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1991,6 +2018,7 @@ impl State {
         self.open_tools.clear();
         self.stage("main", StagePhase::Done);
         self.emit(UiEvent::TurnEnd { duration_ms });
+        self.record_turn_save(duration_ms);
         self.remember_turn();
         if self.cfg.residents && !self.turn_reply.trim().is_empty() {
             // The turn stays busy until the tui answers or fails; after_turn runs then.
@@ -2412,6 +2440,23 @@ fn clip(s: &str, max: usize) -> String {
 
 fn elapsed_ms(since: Option<Instant>) -> u64 {
     since.map(|t| t.elapsed().as_millis() as u64).unwrap_or(0)
+}
+
+// Local wall-clock time for the record file name (Go recordSave). The date tool gives local time without a
+// time-zone crate; None when it cannot run, and the turn is then not saved.
+fn local_stamp() -> Option<Stamp> {
+    let out = std::process::Command::new("date")
+        .arg("+%Y %m %d %H %M %S")
+        .output()
+        .ok()?;
+    let nums: Vec<u32> = String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let [y, mo, d, h, mi, s] = nums[..] else {
+        return None;
+    };
+    Some(Stamp::new(y as i32, mo, d, h, mi, s))
 }
 
 fn now_secs() -> u64 {

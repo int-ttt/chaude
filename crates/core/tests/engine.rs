@@ -47,6 +47,9 @@ struct Fake {
 // Each user frame n sleeps 0.5 s, then prints turn{n}.jsonl. The sleep makes queueing deterministic.
 fn fake(name: &str, turns: &[&str]) -> Fake {
     let dir = temp_dir(name);
+    // Record turns land under this test dir, never the repo record/ folder. Tests hold lock(), so no race.
+    // SAFETY: set before any engine thread of this test starts; other engine tests are serialized by lock().
+    unsafe { std::env::set_var("HARNESS_RECORD_DIR", dir.join("record")) };
     for (i, f) in turns.iter().enumerate() {
         fs::copy(fixture(f), dir.join(format!("turn{}.jsonl", i + 1))).unwrap();
     }
@@ -1852,6 +1855,41 @@ fn mcp_config_dir_is_removed_on_shutdown() {
     assert_eq!(mcp_dirs().len(), before.len() + 1, "{:?}", mcp_dirs());
     h.shutdown();
     assert_eq!(mcp_dirs(), before);
+}
+
+// A finished turn is saved to the record folder with its prompt and measurement line (Go recordSave).
+#[test]
+fn finished_turn_is_saved_to_record_folder() {
+    let _g = lock();
+    let f = fake("record_turn", &["record_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("say hi");
+    until_idle(&rx);
+    h.shutdown();
+    let mut text = String::new();
+    for p in files_under(&f.dir.join("record")) {
+        text.push_str(&fs::read_to_string(p).unwrap());
+    }
+    assert!(text.contains("say hi"), "{text}");
+    assert!(text.contains("[측정]"), "{text}");
+}
+
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(rd) = fs::read_dir(dir) else {
+        return out;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(files_under(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
 }
 
 // chaude-mcp-<pid>-* dirs in the temp dir, this process only.
