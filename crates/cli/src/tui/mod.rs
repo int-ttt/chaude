@@ -139,6 +139,8 @@ pub struct App {
     dragging: bool,
     // "복사됨 (N자)" or the copy error, shown on the status row for 2s (Go copyNote); the Instant is when it was set.
     copy_note: Option<(String, Instant)>,
+    // Which mode the previous session loads with (session_mode_note), shown at start and by /view.
+    session_mode: Option<String>,
     welcome: Welcome,
 }
 
@@ -199,6 +201,7 @@ impl App {
             sel: render::TextSel::default(),
             dragging: false,
             copy_note: None,
+            session_mode: None,
         }
     }
 
@@ -783,6 +786,9 @@ impl App {
     // (handoff::prev_owned, Go loadPrevOwned). TODO(view-owned): this run's ids (main, rotated, resident child)
     // are not in any UiEvent yet, so only the previous run's ids are listed.
     fn open_view(&mut self, arg: &str) {
+        if let Some(mode) = self.session_mode.clone() {
+            self.note(&mode);
+        }
         let owned: HashSet<String> = handoff::read_exit_handoff(&handoff::handoff_file(
             &records::record_dir(std::path::Path::new(&self.welcome.cwd)),
         ))
@@ -1576,6 +1582,36 @@ fn wait_batch(wakes: &Receiver<Wake>, timeout: Option<Duration>) -> Option<Vec<W
     Some(batch)
 }
 
+// Which mode the previous session loads with, as core decides it at start (handoff::resume_mode, same inputs).
+// None when there is no previous run, or when --resume was given explicitly (core takes that one as is).
+fn session_mode_note(
+    handoff_path: Option<&std::path::Path>,
+    model: &str,
+    rotate: u64,
+    explicit: bool,
+) -> Option<String> {
+    if explicit {
+        return None;
+    }
+    let (prev, killed) = handoff::previous_run(handoff_path?)?;
+    let threshold = chaude_core::rotate::threshold_for(model, rotate);
+    Some(
+        match handoff::resume_mode(&prev, handoff::MAIN_ROLE, killed, threshold) {
+            handoff::Load::Resume(sid) if killed => {
+                format!("previous session: resume claude --resume {sid} (last run was killed)")
+            }
+            handoff::Load::Resume(sid) => {
+                format!(
+                    "previous session: resume claude --resume {sid} (context below rotation threshold)"
+                )
+            }
+            handoff::Load::Fresh => {
+                "previous session: fresh start, handoff note carried over".to_string()
+            }
+        },
+    )
+}
+
 fn tui(mut cfg: Config) -> io::Result<()> {
     // Go writes the exit handoff into the record folder on quit; /view reads it back (prev_owned).
     if let (None, Ok(cwd)) = (&cfg.handoff_path, std::env::current_dir()) {
@@ -1588,12 +1624,22 @@ fn tui(mut cfg: Config) -> io::Result<()> {
     .model_id()
     .to_string();
     let threshold = cfg.context_window;
+    let session_mode = session_mode_note(
+        cfg.handoff_path.as_deref(),
+        &cfg.model,
+        cfg.rotate_threshold,
+        cfg.resume.is_some(),
+    );
     let (engine, rx) = Engine::start(cfg);
     let _guard = TermGuard::enter()?;
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
     let mut app = App::new(cols as usize, rows as usize);
     app.welcome.model = model;
     app.welcome.threshold = threshold;
+    if let Some(mode) = &session_mode {
+        app.note(mode);
+    }
+    app.session_mode = session_mode;
     if let Ok(cwd) = std::env::current_dir() {
         app.editor.load_history(&cwd);
     }
@@ -2445,6 +2491,76 @@ mod tests {
         app.busy = false;
         app.copy_done(3, Ok(()));
         assert!(app.animating());
+    }
+
+    #[test]
+    fn a_key_press_reaches_the_screen_without_waiting_for_the_tick() {
+        let (tx, wakes) = mpsc::channel();
+        let sender = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(20));
+            tx.send(Wake::Term(Event::Key(key(
+                KeyCode::Char('z'),
+                KeyModifiers::NONE,
+            ))))
+            .unwrap();
+            thread::sleep(Duration::from_millis(200));
+        });
+        let mut app = App::new(40, 6);
+        let mut prev = Vec::new();
+        draw(&mut Vec::new(), &app, &mut prev).unwrap();
+        let mut buf = Vec::new();
+        let start = Instant::now();
+        // Same steps as one loop iteration with no timer (idle): wait, apply the keys, tick, draw once.
+        let batch = wait_batch(&wakes, Some(Duration::from_secs(10))).unwrap();
+        for wake in batch {
+            if let Wake::Term(Event::Key(k)) = wake {
+                app.on_key(k);
+            }
+        }
+        app.tick(Instant::now());
+        draw(&mut buf, &app, &mut prev).unwrap();
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        assert!(String::from_utf8_lossy(&buf).contains('z'), "{buf:?}");
+        sender.join().unwrap();
+    }
+
+    #[test]
+    fn session_mode_note_follows_core_resume_rule() {
+        let dir = std::env::temp_dir().join(format!("chaude-tui-mode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("exit-handoff.json");
+        let with_ctx = |tokens: u64| handoff::ExitHandoff {
+            main_session: "sess-1".into(),
+            ctx_tokens: [("main".to_string(), tokens)].into_iter().collect(),
+            ..Default::default()
+        };
+        // Clean exit below the threshold: resume.
+        handoff::write_exit_handoff(&path, &with_ctx(1_000)).unwrap();
+        let note = session_mode_note(Some(&path), "haiku", 80_000, false).unwrap();
+        assert!(
+            note.contains("claude --resume sess-1") && note.contains("below rotation"),
+            "{note}"
+        );
+        // Clean exit above the threshold: fresh start with the handoff note.
+        handoff::write_exit_handoff(&path, &with_ctx(90_000)).unwrap();
+        let note = session_mode_note(Some(&path), "haiku", 80_000, false).unwrap();
+        assert!(note.starts_with("previous session: fresh start"), "{note}");
+        // Killed run (live marker left behind): resume, whatever the context size.
+        std::fs::remove_file(&path).unwrap();
+        handoff::write_exit_handoff(&handoff::live_handoff_file(&path), &with_ctx(90_000)).unwrap();
+        let note = session_mode_note(Some(&path), "haiku", 80_000, false).unwrap();
+        assert!(
+            note.contains("claude --resume sess-1") && note.contains("killed"),
+            "{note}"
+        );
+        // An explicit --resume and no previous run both give no note.
+        assert!(session_mode_note(Some(&path), "haiku", 80_000, true).is_none());
+        assert!(session_mode_note(None, "haiku", 80_000, false).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
