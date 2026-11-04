@@ -1403,8 +1403,45 @@ impl App {
         (fg, bg)
     }
 
-    // Go rowsA (tui.go:1448-1520): one line per running agent of one kind. When they do not fit, the rows start at
-    // `pan_off` (shared by both panels, Go panOff) and the last row is the "… a-b/n" indicator.
+    // Go rowsA (tui.go:1448-1520): the agent rows of one kind that fit the panel, as (shown records, offset of the
+    // first shown record, length of the whole list). The length is 0 when the panel is not drawn. When the list does
+    // not fit, the rows start at `pan_off` (shared by both panels, Go panOff) and one indicator row follows.
+    fn agent_window(
+        &self,
+        bg: bool,
+        w: usize,
+        h: usize,
+        queue_h: usize,
+        used: usize,
+    ) -> (Vec<&AgentRow>, usize, usize) {
+        let list: Vec<&AgentRow> = self
+            .agent_rows
+            .iter()
+            .filter(|r| r.background == bg && !r.done)
+            .collect();
+        if list.is_empty() || w < 10 {
+            return (Vec::new(), 0, 0);
+        }
+        let room = h.saturating_sub(
+            self.input_height(w) + 3 + queue_h + self.popup_h() + MIN_VIEW_ROWS + used,
+        );
+        let limit = MAX_PANEL_ROWS.min(room);
+        if limit == 0 {
+            return (Vec::new(), 0, 0);
+        }
+        // limit-1 agent rows and one indicator row when the list does not fit (Go rowsA).
+        let total = list.len();
+        let (off, shown) = if total > limit {
+            let n = limit - 1;
+            (self.pan_off.min(total - n), n)
+        } else {
+            (0, total)
+        };
+        let window = list.into_iter().skip(off).take(shown).collect();
+        (window, off, total)
+    }
+
+    // One line per agent row of one kind (agent_window), then the "… a-b/n" indicator when the list does not fit.
     fn agent_lines(
         &self,
         bg: bool,
@@ -1413,42 +1450,63 @@ impl App {
         queue_h: usize,
         used: usize,
     ) -> Vec<String> {
-        let list: Vec<&AgentRow> = self
-            .agent_rows
-            .iter()
-            .filter(|r| r.background == bg && !r.done)
-            .collect();
-        if list.is_empty() || w < 10 {
-            return Vec::new();
-        }
-        let room = h.saturating_sub(
-            self.input_height(w) + 3 + queue_h + self.popup_h() + MIN_VIEW_ROWS + used,
-        );
-        let limit = MAX_PANEL_ROWS.min(room);
-        if limit == 0 {
+        let (shown, off, total) = self.agent_window(bg, w, h, queue_h, used);
+        if total == 0 {
             return Vec::new();
         }
         let width = text_width(w);
-        // limit-1 agent rows and one indicator row when the list does not fit (Go rowsA).
-        let (off, shown) = if list.len() > limit {
-            let n = limit - 1;
-            (self.pan_off.min(list.len() - n), n)
-        } else {
-            (0, list.len())
-        };
-        let mut out: Vec<String> = list
+        let mut out: Vec<String> = shown
             .iter()
-            .skip(off)
-            .take(shown)
             .map(|r| agent_row_line(r, &self.bar.model, width))
             .collect();
-        if list.len() > limit {
+        if total > shown.len() {
             out.push(format!(
                 "{GREY_ON}{}{FG_OFF}",
-                bar::scroll_range_text(off, shown, list.len())
+                bar::scroll_range_text(off, shown.len(), total)
             ));
         }
         out
+    }
+
+    // Go panelClick (agentview.go:160): the agent on the panel row at screen `row`. Rows are foreground then
+    // background, as panel_lines draws them; the scroll indicator row and other rows give None.
+    fn panel_agent_at(&self, row: usize) -> Option<String> {
+        let (fg, bg) = self.panel_lines(self.cols, self.rows);
+        let panel_rows = fg.len() + bg.len();
+        let start = self.rows.saturating_sub(panel_rows + 1);
+        let i = row.checked_sub(start).filter(|i| *i < panel_rows)?;
+        let queue_h = self.queue_lines(self.cols, self.rows).len();
+        let mut slots: Vec<Option<&str>> = Vec::new();
+        for is_bg in [false, true] {
+            let used = if is_bg { fg.len() } else { 0 };
+            let (shown, _, total) = self.agent_window(is_bg, self.cols, self.rows, queue_h, used);
+            slots.extend(shown.iter().map(|r| Some(r.id.as_str())));
+            if total > shown.len() {
+                slots.push(None);
+            }
+        }
+        slots.get(i).copied().flatten().map(str::to_string)
+    }
+
+    // Go click (agentview.go:172): a left press on an agent panel row opens that agent's view. The open usage,
+    // permission, picker, rewind and session overlays keep the press (Go click guard). False when nothing opened.
+    fn panel_click(&mut self, row: u16) -> bool {
+        if self.usage.is_open()
+            || self.perm.is_some()
+            || self.pick.is_some()
+            || self.recs.is_some()
+            || self.rw.is_open()
+            || self.sess.is_some()
+        {
+            return false;
+        }
+        match self.panel_agent_at(row as usize) {
+            Some(id) => {
+                self.av = Some(agentview::AgentView::open(&id));
+                true
+            }
+            None => false,
+        }
     }
 
     // Go popH: the slash menu rows (at most maxPop = 8) that take room from the queue and the panels.
@@ -2467,7 +2525,11 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                     MouseEventKind::ScrollDown if app.overlay_wheel(false, m.row as usize) => {}
                     MouseEventKind::ScrollUp => app.scroll(-WHEEL_LINES),
                     MouseEventKind::ScrollDown => app.scroll(WHEEL_LINES),
-                    MouseEventKind::Down(MouseButton::Left) => app.select_press(m.column, m.row),
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if !app.panel_click(m.row) {
+                            app.select_press(m.column, m.row);
+                        }
+                    }
                     MouseEventKind::Drag(MouseButton::Left) => app.select_drag(m.column, m.row),
                     MouseEventKind::Up(MouseButton::Left) => {
                         if let Some(text) = app.select_release(m.column, m.row) {
@@ -2875,6 +2937,24 @@ mod tests {
         assert_eq!(rows.iter().filter(|r| r.contains("실행 중-")).count(), 3);
         let more = rows.iter().position(|r| r.contains("1-3/5")).unwrap();
         assert_eq!(rows[more], "  … 1-3/5 (마우스 휠로 스크롤)");
+    }
+
+    #[test]
+    fn click_on_a_panel_row_opens_that_agent() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("a", false, false), agent_row("b", false, false)],
+        });
+        let (fg, bg) = app.panel_lines(60, 20);
+        assert_eq!(fg.len() + bg.len(), 2);
+        let first = 20 - 1 - 2;
+        // A transcript row and the status row do not open an agent.
+        assert!(!app.panel_click(0));
+        assert!(!app.panel_click(19));
+        assert!(app.av.is_none());
+        // The second panel row opens agent "b" (Go panelClick maps the row to its record).
+        assert!(app.panel_click(first as u16 + 1));
+        assert_eq!(app.av.as_ref().map(|v| v.id.as_str()), Some("b"));
     }
 
     #[test]
