@@ -5,10 +5,12 @@ mod mcp_resident;
 mod tui;
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 use chaude_core::api::Config;
+use chaude_core::import_claude::{self, ClaudeImport};
+use chaude_core::rotate;
 use chaude_core::{metrics_report, orch, settings};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -18,6 +20,7 @@ const USAGE: &str = "usage: chaude [command] [args]
   mcp-resident <tcp:addr>  stdio bridge to the resident coder MCP socket (used by the main child's mcp.json)
   gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]   OS-specific .claude/settings.json
   metrics [--dir D] [--csv]  summary of the per-turn metrics (or CSV rows); --dir defaults to <record>/metrics
+  --from-claude ID|latest|PATH  start from a Claude Code session (with --import-dry-run: print the report only)
   --version, -v          print version
   -h, --help             print this help";
 
@@ -67,6 +70,48 @@ fn parse_model(args: &[String]) -> Result<Option<String>, String> {
     Ok(None)
 }
 
+// --from-claude <v> or --from-claude=<v>: a session id, "latest", or a transcript path (Go -from-claude).
+fn from_claude_arg(args: &[String]) -> Result<Option<String>, String> {
+    for (i, a) in args.iter().enumerate() {
+        if let Some(v) = a.strip_prefix("--from-claude=") {
+            return Ok(Some(v.to_string()));
+        }
+        if a == "--from-claude" {
+            return args
+                .get(i + 1)
+                .cloned()
+                .map(Some)
+                .ok_or_else(|| "--from-claude needs a value".to_string());
+        }
+    }
+    Ok(None)
+}
+
+// Go importFromClaude dry run: prints the report and returns 0 when the recent handoff note survives the
+// snapshot the next prompt would start from, 1 otherwise.
+fn import_dry_run(path: &Path, imp: &ClaudeImport) -> i32 {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    let note = import_claude::import_note(stem);
+    let snap = rotate::with_reco(
+        &imp.reco,
+        &import_claude::import_snapshot(
+            imp,
+            &note,
+            import_claude::DEFAULT_TAIL_TURNS,
+            import_claude::DEFAULT_SNAPSHOT_CHARS,
+        ),
+    );
+    let preserved = rotate::reco_preserved(&imp.reco, &snap);
+    print!(
+        "{}",
+        import_claude::dry_run_report(imp, path, &snap, preserved)
+    );
+    if preserved { 0 } else { 1 }
+}
+
 // The interactive session: --orch and --model are applied, then the TUI runs. Returns the exit code.
 fn run_tui(args: &[String]) -> i32 {
     let mode = match apply_orch(args) {
@@ -89,7 +134,33 @@ fn run_tui(args: &[String]) -> i32 {
         flag,
         settings::chaude_settings::main_model(cfg.cwd.as_deref()),
     );
-    match tui::run(cfg) {
+    let cwd = env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| ".".into());
+    let startup = match from_claude_arg(args) {
+        Ok(None) => None,
+        Ok(Some(arg)) => match import_claude::load_import_arg(&arg, &cwd) {
+            Ok(loaded) => Some(loaded),
+            Err(e) => {
+                eprintln!("chaude: import failed: {e}");
+                return 1;
+            }
+        },
+        Err(e) => {
+            eprintln!("chaude: {e}\n{USAGE}");
+            return 2;
+        }
+    };
+    if args.iter().any(|a| a == "--import-dry-run") {
+        return match &startup {
+            Some((path, imp)) => import_dry_run(path, imp),
+            None => {
+                eprintln!("chaude: --import-dry-run needs --from-claude\n{USAGE}");
+                2
+            }
+        };
+    }
+    match tui::run(cfg, startup.map(|(_, imp)| imp)) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("chaude: {e}");
@@ -185,6 +256,20 @@ mod tests {
         );
         assert!(parse_model(&strs(&["--model"])).is_err());
     }
+
+    #[test]
+    fn from_claude_forms() {
+        assert_eq!(
+            from_claude_arg(&strs(&["--from-claude", "latest"])),
+            Ok(Some("latest".into()))
+        );
+        assert_eq!(
+            from_claude_arg(&strs(&["--from-claude=abc,def"])),
+            Ok(Some("abc,def".into()))
+        );
+        assert_eq!(from_claude_arg(&strs(&["--model", "x"])), Ok(None));
+        assert!(from_claude_arg(&strs(&["--from-claude"])).is_err());
+    }
 }
 
 fn main() {
@@ -200,8 +285,8 @@ fn main() {
             println!("{USAGE}");
             0
         }
-        None | Some("--orch" | "--model") => run_tui(&args),
-        Some(a) if a.starts_with("--model=") => run_tui(&args),
+        None | Some("--orch" | "--model" | "--from-claude" | "--import-dry-run") => run_tui(&args),
+        Some(a) if a.starts_with("--model=") || a.starts_with("--from-claude=") => run_tui(&args),
         Some("metrics") => metrics_main(&args[1..]),
         Some(cmd) => {
             eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");

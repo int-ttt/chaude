@@ -12,8 +12,8 @@ Counts are rows, not individual flags. Repl flags are one row (F3) covering 26 f
 | C2 | `repl [flags]` subcommand | main.go:39 | missing | crates/cli/src/main.rs:206 | falls to "not ported" |
 | C3 | `metrics [--dir D] [--csv]` | main.go:41 | done | crates/cli/src/main.rs:102 metrics_main | |
 | C4 | `mcp-resident` | main.go:43 | done | crates/cli/src/mcp_resident.rs | |
-| C5 | `--from-claude ID\|latest\|PATH` | main.go:45, repl.go | missing | crates/core/src/import_claude.rs | core done, no CLI call site |
-| C6 | `--import-dry-run` | main.go:45 | missing | crates/core/src/import_claude.rs | core takes dry_run, no CLI |
+| C5 | `--from-claude ID\|latest\|PATH` | main.go:45, repl.go | done | crates/cli/src/main.rs from_claude_arg, run_tui | load_import_arg; startup import installed into the next prompt (install_import) |
+| C6 | `--import-dry-run` | main.go:45 | done | crates/cli/src/main.rs import_dry_run | prints dry_run_report; exit 0 when reco preserved, else 1 |
 | C7 | `gen-settings [os] [--out] [--src] [--python]` | main.go:47, settings.go:269-300 | done | crates/core/src/settings/mod.rs:187 | |
 | C8 | `clean [dir] [--yes]` | main.go:49, clean.go | missing | crates/clean (not wired) | |
 | C9 | `update` | main.go:51 | missing | crates/update (not wired) | |
@@ -102,7 +102,7 @@ Both tables have 25 entries (the earlier estimate of 24 was off by one).
 ## Totals
 
 - Rows: 63 (C 15, F 3, E 5, S 25, K 12, T 3).
-- done: 39. differs: 7. missing: 17.
+- done: 41. differs: 7. missing: 15.
 - Missing, top: (1) `repl` subcommand and 26 repl flags (C2, F3); (2) `--from-claude` and `--import-dry-run` CLI (C5, C6); (3) `clean` (C8); (4) `update` CLI and startup cleanup (C9, C15); (5) 7 helper scripts (C12); (6) `CHAUDE_MAX_WORKERS` (E3); (7) status bar P/T/C (K6, blocked).
 
 ## Notes

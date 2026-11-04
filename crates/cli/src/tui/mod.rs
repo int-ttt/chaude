@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::handoff;
-use chaude_core::import_claude;
+use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::resident::StagePhase;
 use crossterm::cursor::{MoveTo, Show};
 use crossterm::event::{
@@ -85,6 +85,8 @@ pub enum Action {
 }
 
 pub struct App {
+    // /import or --from-claude: the loaded transcript, taken by the event loop and installed into the engine.
+    import_install: Option<ClaudeImport>,
     editor: Editor,
     // Terminal size as last seen by the event loop. Key handling needs it to page and clamp the viewport.
     cols: usize,
@@ -211,6 +213,7 @@ impl App {
             av: None,
             rw: rewind::Rewind::default(),
             prompts: Vec::new(),
+            import_install: None,
             last_esc: None,
             wide: HashSet::new(),
             perm: None,
@@ -903,22 +906,28 @@ impl App {
 
     // Go /view: the sessions this run and the previous run spawned. The previous run comes from the exit handoff
     // (handoff::prev_owned, Go loadPrevOwned); this run's ids come from UiEvent::SessionIds.
-    // /import [id|latest]: replaces the transcript with the imported Claude Code view (Go importedMsg ->
-    // importBlocks). Only the view is shown here; the engine snapshot install is blocked on core api.rs.
+    // /import [id|latest]: the imported Claude Code view replaces the transcript (Go importedMsg), and the
+    // transcript is queued for the engine (Go applyImport) so the next prompt starts from it.
     fn import_view(&mut self, arg: &str) {
         match import_claude::load_import_arg(arg, &self.welcome.cwd) {
             Err(e) => self.note(&e),
             Ok((_, imp)) => {
-                self.transcript.clear();
-                self.wide.clear();
-                self.prompts.clear();
-                for (kind, text) in render::import_blocks(&imp.view) {
-                    self.record_block(kind, &text);
-                }
-                self.note(IMPORT_INSTALL_BLOCKED_NOTE);
-                self.follow_tail();
+                self.show_import(&imp);
+                self.import_install = Some(imp);
             }
         }
+    }
+
+    // Go importedMsg: replaces the transcript with the imported view (importBlocks), then the install note.
+    fn show_import(&mut self, imp: &ClaudeImport) {
+        self.transcript.clear();
+        self.wide.clear();
+        self.prompts.clear();
+        for (kind, text) in render::import_blocks(&imp.view) {
+            self.record_block(kind, &text);
+        }
+        self.note(IMPORT_INSTALL_NOTE);
+        self.follow_tail();
     }
 
     fn open_view(&mut self, arg: &str) {
@@ -1657,7 +1666,8 @@ fn feed(
 }
 
 // Assistant text as Go shows it: **bold** pairs, then link styling (tui.go:374 mdBold + wrapLinked).
-const IMPORT_INSTALL_BLOCKED_NOTE: &str = "import: view only; the next prompt does not carry the snapshot yet (blocked: core api.rs install)";
+const IMPORT_INSTALL_NOTE: &str =
+    "import: the next prompt starts from this transcript (Go applyImport)";
 
 fn asst_text(line: &str) -> String {
     render::linkify(&render::md_bold(line))
@@ -1726,11 +1736,11 @@ impl Drop for TermGuard {
 }
 
 // Entry point for `chaude` with no arguments. Non-TTY stdin falls back to plain line mode.
-pub fn run(cfg: Config) -> io::Result<()> {
+pub fn run(cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     if io::stdin().is_terminal() {
-        tui(cfg)
+        tui(cfg, startup)
     } else {
-        plain(cfg)
+        plain(cfg, startup)
     }
 }
 
@@ -1821,7 +1831,7 @@ fn session_mode_note(
     )
 }
 
-fn tui(mut cfg: Config) -> io::Result<()> {
+fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     // Go writes the exit handoff into the record folder on quit; /view reads it back (prev_owned).
     if let (None, Ok(cwd)) = (&cfg.handoff_path, std::env::current_dir()) {
         cfg.handoff_path = Some(handoff::handoff_file(&chaude_core::record::dir_for(&cwd)));
@@ -1844,6 +1854,10 @@ fn tui(mut cfg: Config) -> io::Result<()> {
     let _guard = TermGuard::enter()?;
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
     let mut app = App::new(cols as usize, rows as usize);
+    if let Some(imp) = startup {
+        app.show_import(&imp);
+        engine.install_import(imp);
+    }
     app.welcome.model = model;
     app.welcome.threshold = threshold;
     if let Some(mode) = &session_mode {
@@ -1909,6 +1923,9 @@ fn tui(mut cfg: Config) -> io::Result<()> {
                         Action::CycleMode => engine.set_mode("next"),
                         Action::ResumeSession(sid) => engine.resume_session(&sid),
                     }
+                    if let Some(imp) = app.import_install.take() {
+                        engine.install_import(imp);
+                    }
                 }
                 Wake::Term(Event::Paste(text)) => app.editor.insert_str(&text),
                 Wake::Term(Event::Mouse(m)) if app.mouse => match m.kind {
@@ -1951,9 +1968,16 @@ fn tui(mut cfg: Config) -> io::Result<()> {
 }
 
 // One prompt per stdin line, answered before the next line is read. Engine events are printed as plain text.
-fn plain(cfg: Config) -> io::Result<()> {
+fn plain(cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     let (engine, rx) = Engine::start(cfg);
     let mut app = App::new(80, 24);
+    if let Some(imp) = startup {
+        app.show_import(&imp);
+        for l in &app.transcript {
+            println!("{l}");
+        }
+        engine.install_import(imp);
+    }
     for line in io::stdin().lock().lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -2864,6 +2888,7 @@ mod tests {
         app.transcript.push("old line before import".to_string());
         app.import_view(path.to_str().unwrap());
         let _ = std::fs::remove_file(&path);
+        assert!(app.import_install.is_some());
         assert!(
             !app.transcript
                 .iter()
@@ -2877,7 +2902,7 @@ mod tests {
             app.transcript
         );
         assert!(
-            app.transcript.iter().any(|l| l.contains("view only")),
+            app.transcript.iter().any(|l| l.contains("next prompt")),
             "{:?}",
             app.transcript
         );
