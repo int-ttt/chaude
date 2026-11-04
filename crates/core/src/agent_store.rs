@@ -170,13 +170,12 @@ impl AgentStore {
     /// Loads the file at `path` if it exists and parses. Records without an id are skipped.
     pub fn new(path: &Path) -> Self {
         let mut m = HashMap::new();
-        if !path.as_os_str().is_empty() {
-            if let Ok(b) = fs::read(path) {
-                if let Ok(list) = serde_json::from_slice::<Vec<SavedAgent>>(&b) {
-                    for a in list.into_iter().filter(|a| !a.id.is_empty()) {
-                        m.insert(a.id.clone(), a);
-                    }
-                }
+        if !path.as_os_str().is_empty()
+            && let Ok(b) = fs::read(path)
+            && let Ok(list) = serde_json::from_slice::<Vec<SavedAgent>>(&b)
+        {
+            for a in list.into_iter().filter(|a| !a.id.is_empty()) {
+                m.insert(a.id.clone(), a);
             }
         }
         AgentStore {
@@ -293,10 +292,10 @@ impl AgentStore {
         if text == g.last {
             return;
         }
-        if let Some(dir) = self.path.parent().filter(|d| !d.as_os_str().is_empty()) {
-            if fs::create_dir_all(dir).is_err() {
-                return;
-            }
+        if let Some(dir) = self.path.parent().filter(|d| !d.as_os_str().is_empty())
+            && fs::create_dir_all(dir).is_err()
+        {
+            return;
         }
         let mut tmp = self.path.clone().into_os_string();
         tmp.push(".tmp");

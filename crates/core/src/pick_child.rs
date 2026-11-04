@@ -55,10 +55,10 @@ pub fn pick_child(
     now: SystemTime,
     deadline: Duration,
 ) -> ChildAction {
-    if let Some((last_api, last_ctx)) = live {
-        if is_warm(last_api, last_ctx, limit, now, deadline) {
-            return ChildAction::UseLive;
-        }
+    if let Some((last_api, last_ctx)) = live
+        && is_warm(last_api, last_ctx, limit, now, deadline)
+    {
+        return ChildAction::UseLive;
     }
     let Some(row) = row else {
         return ChildAction::StartNew;
