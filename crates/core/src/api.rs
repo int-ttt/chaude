@@ -1208,6 +1208,18 @@ impl State {
         );
     }
 
+    // Go endAllParked("clear"): every parked child is ended and its registry row marked, so a /clear cannot bring
+    // them back (their pre-clear session ids included).
+    fn end_all_parked(&mut self) {
+        let cwd = self.client_cwd();
+        for (_, mut p) in self.children.take_all() {
+            p.sess.close();
+            if let Some(reg) = &self.clients {
+                reg.mark_ended(&cwd, &p.model, "clear", now_stamp());
+            }
+        }
+    }
+
     // Go switchChild with actUseLive: the parked child becomes the active one again under its own epoch.
     fn restore_child(&mut self, p: Parked<ParkedProc>) {
         let ParkedProc { proc, epoch, sid } = p.sess;
@@ -1226,6 +1238,8 @@ impl State {
         self.pending_perm.clear();
         self.opts.resume = None;
         self.upsert_live(pid, sid);
+        // The restored child's id is now the main id (/status and /view read it from SessionIds).
+        self.emit_session_ids();
         self.emit_status(self.cost_usd);
     }
 
@@ -3022,6 +3036,7 @@ impl State {
     fn finish_clear(&mut self, snapshot: String) {
         self.clear_mark();
         self.clear_client_row();
+        self.end_all_parked();
         self.record.split = true;
         self.restart_child();
         self.recent.clear();

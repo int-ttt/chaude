@@ -185,6 +185,8 @@ pub struct App {
     this_run: BTreeSet<String>,
     // Session id the next rotation replaces (UiEvent::RotatedFrom), read by the Rotated notice.
     rot_from: String,
+    // Current main session id (UiEvent::SessionIds main; empty after a rotation until the new one). /status shows it.
+    session_id: String,
     // Tool rows by tool id: transcript index and tool name. ToolInput rewrites the row in place.
     tool_rows: HashMap<String, (usize, String)>,
     // Agent outcome by tool id until its AgentEnd: failed (ToolEnd ok=false) and the result's first line.
@@ -239,6 +241,7 @@ impl App {
             last_tool: String::new(),
             queue_texts: Vec::new(),
             rot: 0,
+            session_id: String::new(),
             clock: Instant::now(),
             spin: ' ',
             transcript: Vec::new(),
@@ -459,6 +462,7 @@ impl App {
                 residents,
                 owned,
             } => {
+                self.session_id = main.clone();
                 self.this_run = std::iter::once(main)
                     .chain(residents.into_values())
                     .chain(owned)
@@ -467,7 +471,10 @@ impl App {
             }
             // Go repl.go:1412: /clear starts a new session.
             UiEvent::NewSession { .. } => self.note(bar::NEW_SESSION_NOTICE),
-            UiEvent::RotatedFrom { old_session } => self.rot_from = old_session,
+            UiEvent::RotatedFrom { old_session } => {
+                self.session_id.clear();
+                self.rot_from = old_session;
+            }
             // Go repl.go:1436: a claude child left by a dead harness. Core sends the model alias when the handoff
             // file had one; otherwise it is the main model for main and the role name for a resident.
             UiEvent::OrphanNotice { role, pid, model } => {
@@ -922,6 +929,24 @@ impl App {
         }
         self.turn_prompt = render::trunc_chars(text.lines().next().unwrap_or("").trim(), 60);
         self.end_main_block();
+        let dispatched = {
+            let ctx = Ctx {
+                model: &self.bar.model,
+                last_ctx: self.bar.tokens,
+                threshold: self.welcome.threshold,
+                rotations: u64::from(self.rot),
+                session_id: Some(self.session_id.as_str()),
+                mode: commands::parse_mode(&self.bar.mode).unwrap_or(PermMode::Default),
+                chaude_version: env!("CARGO_PKG_VERSION"),
+                busy: self.busy,
+            };
+            commands::dispatch(&text, &ctx)
+        };
+        // Go tui.go /clear: the transcript is emptied first (m.blocks = nil), then the user block is shown.
+        // A busy /clear is refused by dispatch, so it never reaches here.
+        if matches!(dispatched, Some(Dispatch::Clear)) {
+            self.clear_transcript();
+        }
         let first = text.split_whitespace().next().unwrap_or("");
         // Go tui.go /view is a local note and echoes nothing into the transcript.
         if first != "/view" {
@@ -937,20 +962,6 @@ impl App {
             self.transcript.push(String::new());
             self.follow_tail();
         }
-        let dispatched = {
-            let ctx = Ctx {
-                model: &self.bar.model,
-                last_ctx: self.bar.tokens,
-                threshold: self.welcome.threshold,
-                rotations: u64::from(self.rot),
-                // The TUI does not track the session id yet (UiEvent has no current-session field).
-                session_id: None,
-                mode: commands::parse_mode(&self.bar.mode).unwrap_or(PermMode::Default),
-                chaude_version: env!("CARGO_PKG_VERSION"),
-                busy: self.busy,
-            };
-            commands::dispatch(&text, &ctx)
-        };
         // Go tui.go /status: answered locally from the TUI state, never sent to the child. /mode and /model are handled here too.
         match dispatched {
             Some(Dispatch::Quit) => return Action::Quit,
@@ -1012,12 +1023,17 @@ impl App {
         }
     }
 
-    // Go importedMsg: replaces the transcript with the imported view (importBlocks), then the install note.
-    fn show_import(&mut self, imp: &ClaudeImport) {
+    // Empties the transcript and the row indexes that point into it (Go m.blocks = nil).
+    fn clear_transcript(&mut self) {
         self.transcript.clear();
         self.wide.clear();
         self.linked.clear();
         self.prompts.clear();
+    }
+
+    // Go importedMsg: replaces the transcript with the imported view (importBlocks), then the install note.
+    fn show_import(&mut self, imp: &ClaudeImport) {
+        self.clear_transcript();
         for (kind, text) in render::import_blocks(&imp.view) {
             self.record_block(kind, &text);
         }
@@ -3374,6 +3390,36 @@ mod tests {
         let text = app.transcript.join("\n");
         assert!(text.contains("rotations 0"), "{text}");
         assert!(text.contains("session -"), "{text}");
+    }
+
+    #[test]
+    fn status_shows_the_main_session_id_once_known() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::SessionIds {
+            main: "abcdef0123456789".to_string(),
+            residents: std::collections::BTreeMap::new(),
+            owned: vec![],
+        });
+        for c in "/status".chars() {
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        let text = app.transcript.join("\n");
+        assert!(text.contains("session abcdef01"), "{text}");
+        assert!(!text.contains("session -"), "{text}");
+    }
+
+    #[test]
+    fn clear_empties_the_transcript_before_the_clear_echo() {
+        let mut app = App::new(80, 24);
+        app.transcript.push("old turn text".to_string());
+        for c in "/clear".chars() {
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        let text = app.transcript.join("\n");
+        assert!(!text.contains("old turn text"), "{text}");
+        assert!(text.contains("/clear"), "{text}");
     }
 
     #[test]

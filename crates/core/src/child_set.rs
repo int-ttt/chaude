@@ -101,6 +101,11 @@ impl<S: Close> ChildSet<S> {
         self.map().remove(key)
     }
 
+    /// Removes and returns every stored child, busy ones included (Go endAllParked). The caller ends them.
+    pub fn take_all(&self) -> Vec<(String, Parked<S>)> {
+        self.map().drain().collect()
+    }
+
     /// Last-API time and context size of the child under `key`, without removing it.
     pub fn warm_info(&self, key: &str) -> Option<(SystemTime, u64)> {
         self.map().get(key).map(|c| (c.last_api, c.last_ctx))
@@ -235,6 +240,22 @@ mod tests {
             vec!["idle".to_string()],
             "busy child must stay parked"
         );
+    }
+
+    // Go endAllParked: every parked child is taken, busy ones included.
+    #[test]
+    fn take_all_returns_busy_and_idle_children() {
+        let n = Arc::new(AtomicUsize::new(0));
+        let s = ChildSet::new();
+        let now = SystemTime::now();
+        s.park("idle", fake(&n, Duration::ZERO, "", now));
+        let mut busy = fake(&n, Duration::ZERO, "", now);
+        busy.busy = true;
+        s.park("busy", busy);
+        let mut keys: Vec<String> = s.take_all().into_iter().map(|(k, _)| k).collect();
+        keys.sort();
+        assert_eq!(keys, vec!["busy".to_string(), "idle".to_string()]);
+        assert!(s.is_empty(), "take_all empties the set");
     }
 
     // Go TestChildSetParkTake
