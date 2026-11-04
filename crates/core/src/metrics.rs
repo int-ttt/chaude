@@ -73,7 +73,7 @@ fn unix_secs() -> i64 {
 }
 
 // Unix seconds (UTC) as "YYYY-MM-DDTHH:MM:SSZ", the form Go time.RFC3339 gives for UTC.
-fn rfc3339(secs: i64) -> String {
+pub(crate) fn rfc3339(secs: i64) -> String {
     let (y, m, d) = civil_from_days(secs.div_euclid(86_400));
     let rem = secs.rem_euclid(86_400);
     format!(

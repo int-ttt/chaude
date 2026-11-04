@@ -1,5 +1,6 @@
 //! chaude core: OS helpers, argument parsing and the settings generator, shared by the CLI and the GUI.
 
+pub mod agent_store;
 pub mod api;
 pub mod budget;
 pub mod cache_ttl;
