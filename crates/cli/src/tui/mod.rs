@@ -119,6 +119,9 @@ pub struct App {
     agents: Vec<(String, String, Instant)>,
     // Ids of the agents launched in the background (UiEvent::AgentBackground); they have no AgentEnd until done.
     bg_agents: Vec<String>,
+    // Go opusRunning / residentBusy: an opus Agent is running, and the resident roles with a command in flight.
+    opus_busy: bool,
+    resident_busy: BTreeSet<String>,
     // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
     agent_rows: Vec<AgentRow>,
     // First agent row shown in the panels (Go panOff), moved by the wheel over them.
@@ -250,6 +253,8 @@ impl App {
             unseen: false,
             quiet_since: None,
             open_tools: HashSet::new(),
+            opus_busy: false,
+            resident_busy: BTreeSet::new(),
             quiet_noted: false,
             mouse: true,
             ime_shift: 0,
@@ -291,6 +296,8 @@ impl App {
                 | UiEvent::Queued(_)
                 | UiEvent::AgentRows { .. }
                 | UiEvent::QueueTexts(_)
+                | UiEvent::OpusBusy(_)
+                | UiEvent::ResidentBusy { .. }
         );
         if matches!(
             ev,
@@ -571,6 +578,15 @@ impl App {
             // Go agentRows / m.queue: the panels and the queue are redrawn from these lists each frame.
             UiEvent::AgentRows { rows } => self.agent_rows = rows,
             UiEvent::QueueTexts(texts) => self.queue_texts = texts,
+            // Go opusRunning / residentBusy: state only, read by the thinking row.
+            UiEvent::OpusBusy(on) => self.opus_busy = on,
+            UiEvent::ResidentBusy { role, busy } => {
+                if busy {
+                    self.resident_busy.insert(role);
+                } else {
+                    self.resident_busy.remove(&role);
+                }
+            }
             // Variants added after the TUI wiring (non_exhaustive in core) render nothing yet.
             _ => {}
         }
@@ -1294,16 +1310,16 @@ impl App {
         if !self.pending_agent.is_empty() {
             lines.push(&agent);
         }
-        // Go tui.go View() thinking row (tui.go:383-391), in the transcript flow. The opus and resident busy
-        // states have no UiEvent yet, so they are passed as false.
+        // Go tui.go View() thinking row (tui.go:383-391), in the transcript flow. Go runningN/residentBusy:
+        // an opus Agent or a resident role with a command in flight keeps the row up after text started.
         let fg = self
             .agents
             .iter()
             .any(|(id, _, _)| !self.bg_agents.contains(id));
         match bar::thinking_row(
             fg,
-            false,
-            false,
+            self.opus_busy,
+            !self.resident_busy.is_empty(),
             self.got_text,
             self.perm.is_some(),
             self.busy,
@@ -3531,6 +3547,38 @@ mod tests {
         // The busy state no longer adds a chrome row, so only the top bar (unseen or agents) can.
         assert!(!app.shows_bar());
     }
+    // Go tui.go:383-391: after text started, an opus Agent or a busy resident keeps the thinking row up.
+    #[test]
+    fn opus_or_resident_busy_keeps_the_thinking_row_after_text() {
+        let thinking = |app: &App| {
+            app.body(100)
+                .iter()
+                .any(|r| r.contains("생각중-claude-opus-5-5-메인"))
+        };
+        let mut app = App::new(100, 30);
+        type_str(&mut app, "long task");
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        app.apply(UiEvent::Busy(true));
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "partial".into(),
+        });
+        assert!(!thinking(&app), "text started and nothing running: hidden");
+        app.apply(UiEvent::OpusBusy(true));
+        assert!(thinking(&app), "opus running keeps the row");
+        app.apply(UiEvent::OpusBusy(false));
+        app.apply(UiEvent::ResidentBusy {
+            role: "coder".into(),
+            busy: true,
+        });
+        assert!(thinking(&app), "resident busy keeps the row");
+        app.apply(UiEvent::ResidentBusy {
+            role: "coder".into(),
+            busy: false,
+        });
+        assert!(!thinking(&app), "resident idle again: hidden");
+    }
+
 
     #[test]
     fn a_single_escape_interrupts_only_while_busy() {
