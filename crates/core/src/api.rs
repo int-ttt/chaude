@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 use crate::budget::{self, Budget};
+use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
 use crate::clients::idle_deadline;
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
@@ -597,6 +598,8 @@ struct State {
     mark: MarkerFilter,
     // Current task category from the last normal turn (Go r.cat).
     cat: String,
+    // Cache TTL seen in an assistant usage.cache_creation (Go ttlSeen); "" until one is seen.
+    ttl_seen: String,
     // Snapshot for the next prompt sent to a fresh child; empty when none is pending.
     pending_snapshot: String,
     // Set while a hidden handoff turn runs; its text is not shown.
@@ -753,6 +756,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         turn_reply: String::new(),
         mark: MarkerFilter::default(),
         cat: String::new(),
+        ttl_seen: String::new(),
         pending_snapshot: String::new(),
         handoff: None,
         prompter: Prompter::new(),
@@ -1462,7 +1466,7 @@ impl State {
     // Go estNext: planned cost of the next call. Warm while the last API response is inside the cache TTL
     // (Go idleDeadline, capped at 290 s for the 5m cache and 1 h for the 1h cache; no idle-rotate setting here).
     fn estimate_next(&self) -> f64 {
-        let ttl = self.cfg.cache_ttl.as_str();
+        let ttl = effective_ttl(&self.ttl_seen, &self.cfg.cache_ttl);
         let window = if ttl == "1h" {
             Duration::from_secs(3600)
         } else {
@@ -1557,6 +1561,9 @@ impl State {
 
     fn on_line(&mut self, line: &str) {
         self.last_activity = Instant::now();
+        if let Some(t) = observe_ttl(line, &self.ttl_seen) {
+            self.ttl_seen = t;
+        }
         match parse_line(line) {
             Ok(ev) => self.on_event(ev),
             Err(_) => self.log_unparsed(line),
@@ -2295,7 +2302,10 @@ impl State {
     // Go idleDeadline: the idle rotation waits this long, capped at 290 s for the 5m cache (1 h for the 1h
     // cache, no cap when idle_rotate is shorter). Zero = off.
     fn idle_deadline(&self) -> Duration {
-        idle_deadline(self.cfg.idle_rotate, &self.cfg.cache_ttl)
+        idle_deadline(
+            self.cfg.idle_rotate,
+            effective_ttl(&self.ttl_seen, &self.cfg.cache_ttl),
+        )
     }
 
     // Time left before the idle rotation fires. None when it cannot fire now: off, no child, no API response
@@ -2730,9 +2740,47 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+// Go effTTL: the observed TTL when known, else the --cache-ttl flag.
+fn effective_ttl<'a>(seen: &'a str, cfg: &'a str) -> &'a str {
+    if seen.is_empty() { cfg } else { seen }
+}
+
+// Go livechild.go: an assistant event with non-empty usage updates ttlSeen. None when the line does not apply.
+fn observe_ttl(line: &str, seen: &str) -> Option<String> {
+    if !line.contains("usage") {
+        return None;
+    }
+    let v: Value = serde_json::from_str(line).ok()?;
+    if v["type"] != "assistant" {
+        return None;
+    }
+    let u = &v["message"]["usage"];
+    if !u.as_object().is_some_and(|m| !m.is_empty()) {
+        return None;
+    }
+    Some(observed_ttl(u, seen))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn observe_ttl_reads_assistant_usage_only() {
+        let up = r#"{"type":"assistant","message":{"usage":{"cache_creation":{"ephemeral_1h_input_tokens":5}}}}"#;
+        assert_eq!(observe_ttl(up, "5m").as_deref(), Some("1h"));
+        let user = r#"{"type":"user","message":{"usage":{"cache_creation":{"ephemeral_1h_input_tokens":5}}}}"#;
+        assert_eq!(observe_ttl(user, "5m"), None);
+        let no_tier = r#"{"type":"assistant","message":{"usage":{"input_tokens":2}}}"#;
+        assert_eq!(observe_ttl(no_tier, "auto").as_deref(), Some("auto"));
+        assert_eq!(observe_ttl("not json cache_creation", "5m"), None);
+    }
+
+    #[test]
+    fn effective_ttl_prefers_observed() {
+        assert_eq!(effective_ttl("", "5m"), "5m");
+        assert_eq!(effective_ttl("1h", "5m"), "1h");
+    }
 
     #[test]
     fn max_workers_flag_wins_and_rejects_zero() {
