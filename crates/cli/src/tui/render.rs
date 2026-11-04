@@ -1,8 +1,6 @@
 //! Pure rendering helpers ported from the Go TUI (tui.go, links.go, usagebar.go, input.go, repl.go).
 //! Nothing here touches the terminal. Each item cites the Go source it mirrors. The event loop does not
-//! call these yet, so dead-code warnings are allowed for this module until they are wired in.
-// Unused until mod.rs/overlays call: highlight_view, input_cursor_cells, input_view_row, link_spans (I33/R20/R10, TODO(core-cursor) for I30) and the wrap_linked path (R10/R11).
-#![allow(dead_code)]
+//! call these yet, so the items not wired are marked with a targeted #[allow(dead_code)] and a reason.
 
 use std::sync::OnceLock;
 
@@ -315,6 +313,7 @@ pub fn cell_width(s: &str) -> usize {
 }
 
 // R14 ansi.Truncate(s, w, "…") (tui.go:1429): unchanged when it fits, else cut to w-1 cells plus "…".
+#[allow(dead_code)] // unwired: header clip (Go ansiTrunc) not called yet
 pub fn trunc_ellipsis(s: &str, w: usize) -> String {
     if cell_width(s) <= w {
         return s.to_string();
@@ -456,6 +455,7 @@ pub fn tool_result_text(s: &str) -> Option<String> {
 // R06 toolSummary (tui.go:67): the first priority key whose string value is non-empty, newlines turned
 // into spaces, cut to 100 chars. Otherwise the compact JSON of the input (Go jsonStr), cut to 100 chars.
 // Empty for no input.
+#[allow(dead_code)] // blocked: needs tool input JSON in UiEvent::ToolStart
 pub fn tool_summary(input: &serde_json::Value) -> String {
     const KEYS: [&str; 8] = [
         "command",
@@ -506,6 +506,7 @@ pub fn commas(n: i64) -> String {
 }
 
 // R19 importBlocks (tui.go:283): (kind, text) blocks; only the last 100 turns are shown, with a note first.
+#[allow(dead_code)] // blocked: /import runs in the engine; paired turns not in UiEvent
 pub fn import_blocks(turns: &[(String, String)]) -> Vec<(&'static str, String)> {
     let mut out = Vec::new();
     let mut turns = turns;
@@ -540,6 +541,7 @@ pub fn render_bar(pct: f64) -> String {
 }
 
 // R15 barWidth (usagebar.go:35): display width of a rendered bar.
+#[allow(dead_code)] // unwired: usage bar width (usagebar.go barWidth) not drawn on this path
 pub fn bar_width(pct: f64) -> usize {
     cell_width(&render_bar(pct))
 }
@@ -798,6 +800,7 @@ fn link_spans_bytes(b: &[u8]) -> Vec<LinkSpan> {
 }
 
 // linkSpans (links.go:59) on plain text.
+#[allow(dead_code)] // blocked: assistant text is linkified before wrapping; raw text not kept
 pub fn link_spans(s: &str) -> Vec<LinkSpan> {
     link_spans_bytes(s.as_bytes())
 }
@@ -897,6 +900,7 @@ pub fn linkify(line: &str) -> String {
 
 // wrapLinked (links.go:197): wraps with `wrap`, then styles links on each wrapped run outside ``` fences.
 // Fenced code is wrapped but left unstyled.
+#[allow(dead_code)] // blocked: assistant text is linkified before wrapping; raw text not kept
 pub fn wrap_linked(text: &str, wrap: impl Fn(&str) -> String) -> String {
     let mut fence = false;
     let mut runs: Vec<(String, bool)> = Vec::new();
@@ -1031,6 +1035,7 @@ pub fn highlight_line(line: &str, from: usize, to: usize) -> String {
 
 // highlightView (selection.go:92): screen row r shows content line y_offset + r, so the highlight is
 // recomputed from content coordinates on every frame.
+#[allow(dead_code)] // unwired: mod.rs highlights rows itself; this view-level helper is not called
 pub fn highlight_view(frame: &str, lines: &[String], y_offset: usize, s: &TextSel) -> String {
     if s.empty() {
         return frame.to_string();
@@ -1061,6 +1066,7 @@ pub fn input_placeholder(busy: bool) -> &'static str {
 }
 
 // I30 cells (input.go:24): cell column of byte index `pos` within one visual row.
+#[allow(dead_code)] // blocked: I30 needs core cursor (TODO(core-cursor))
 pub fn input_cursor_cells(row: &str, pos: usize) -> usize {
     cell_width(&row[..pos])
 }

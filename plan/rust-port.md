@@ -20,6 +20,17 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
 2. clean, update, 7 helper scripts (charcount, claude-history, compress-archive, export-history, extract-transcript, search-history, usage-report) with ported tests.
 3. Harness logic (~8k Go LOC) into core: stream-json, rotation, handoff, record, orch, resident MCP bridge (mcp-resident, tool resident_coder), import/--from-claude, metrics.
 4. Terminal UI without Charm: inline streaming output, input line with Korean IME + unicode width, spinner, status/usage bar, slash commands.
+   - status (2026-11-04, crates/cli/src/tui):
+     - done: inline streaming output (live feed + record load, asst rows via markdown path, tool_result_text).
+     - done: input line Korean IME + unicode width (render::input_view_row, cursor cell).
+     - done: spinner (bar::spinner_frame).
+     - done: slash commands in the TUI (/usage /settings /view /mouse /update, record /resume). /status /version /mode and /clear go to the engine.
+     - done: idle "still waiting" notice (Go quiet, 30 min, no open tool call).
+     - done: /view lists the previous run's owned sessions (handoff::read_exit_handoff, prev_owned).
+     - blocked: status bar P/T/C per-role context (hardcoded 0/80k); UiEvent has no per-role context.
+     - blocked: /view this run's session ids (main, rotated, resident); no UiEvent carries them.
+     - blocked: /clear new-session notice; engine does not emit a new-session event.
+     - blocked: thinking row, done row, rotated notice, orphan notice, tool summary, assistant link wrap; each needs core data (see targeted #[allow(dead_code)] reasons in bar.rs and render.rs).
 5. GUI (Tauri): session tabs, conversation view, input, usage display; .dmg / .msi.
 6. Parity tests vs Go (312 Go tests as reference), switch release to Rust, keep Go one version in deprecated/.
 - Priority (2026-11-03): Mac first; engine + TUI before phase 2 tools. See plan/rust-engine-tui.md.

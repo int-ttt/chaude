@@ -1,9 +1,6 @@
 // Formatting for the two status rows above the input line. Pure functions only, so they are unit-tested
 // without a terminal. Every row is clipped to the given display width so it never wraps.
-// The Go parity helpers below (status suffix, spinner, agent rows, notices) take their data as arguments;
-// the callers that feed them from UiEvent are not wired yet, hence the module-level allow.
-// Unused until mod.rs wires them: agent_state/agent_status_text/has_model_prefix (B04-B06, needs per-agent model data), thinking_row (B07, needs per-role core state), done_line (B10), rotated_notice (B15, needs old session id in UiEvent::Rotated), quiet_notice (B17, idle timer), scroll_range_text (S17, agent list window). Each is a TODO to wire.
-#![allow(dead_code)]
+// Helpers that need core data or hooks not wired yet carry a targeted #[allow(dead_code)] with the reason.
 
 use std::time::Duration;
 
@@ -103,6 +100,7 @@ pub fn fmt_secs(secs: u64) -> String {
     }
 }
 
+#[allow(dead_code)] // blocked: bar P/T/C token counts need the core handoff read API
 pub fn fmt_tokens(n: u64) -> String {
     if n < 1_000 {
         n.to_string()
@@ -213,12 +211,14 @@ pub fn agent_state(failed: bool, interrupted: bool, done: bool, started: bool) -
 // Which thinking row to draw under the transcript (tui.go:383-391). A running foreground agent alone is not
 // enough: the row shows only when Opus or a resident session is busy, or no text has streamed yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // blocked: thinking row needs per-role state from core
 pub enum ThinkingRow {
     None,
     Status,
     StatusWithEsc,
 }
 
+#[allow(dead_code)] // blocked: thinking row needs per-role state from core
 pub fn thinking_row(
     fg_running: bool,
     opus_running: bool,
@@ -272,6 +272,7 @@ pub fn agent_status_text(
 
 // doneLine (drain.go:39-55): the one-line completion notice of a finished agent. Whitespace is collapsed and
 // the result is capped at 120 characters (trunc counts runes in Go).
+#[allow(dead_code)] // blocked: done row needs model and result text from core
 pub fn done_line(failed: bool, model: &str, name: &str, what: &str) -> String {
     let kind = if failed {
         "[agent 실패]"
@@ -289,19 +290,8 @@ pub fn done_line(failed: bool, model: &str, name: &str, what: &str) -> String {
         .collect()
 }
 
-// Stage notices shown as dim lines (repl.go:649, 722, 752, 804).
-pub const STAGE_MAIN_START: &str = "· main 처리중";
-pub const STAGE_MAIN_DONE: &str = "· main 완료";
-
-pub fn stage_agent_call(agent_type: &str) -> String {
-    format!("· agent {agent_type} 호출")
-}
-
-pub fn stage_agent_done(agent_type: &str) -> String {
-    format!("· agent {agent_type} 완료")
-}
-
 // Notice for a claude process left over from a dead harness (repl.go:1435).
+#[allow(dead_code)] // blocked: engine orphan detection is not in core events
 pub fn orphan_notice(pid: u32, model: &str, cwd: &str) -> String {
     format!(
         "[orphan] claude pid {pid} ({model}, {cwd}) still running after its harness died; left running"
@@ -314,6 +304,7 @@ pub fn budget_notice(spent: f64, cap: f64) -> String {
 }
 
 // Context rotation line (repl.go:1019). The old session id is cut to 8 characters, or shown as "None".
+#[allow(dead_code)] // blocked: UiEvent::Rotated has no old session id
 pub fn rotated_notice(rotations: u32, reason: &str, old_session: &str) -> String {
     let old = if old_session.is_empty() {
         "None".to_string()
@@ -324,6 +315,7 @@ pub fn rotated_notice(rotations: u32, reason: &str, old_session: &str) -> String
 }
 
 // Shown after /clear starts a new session (repl.go:1412).
+#[allow(dead_code)] // blocked: /clear is handled by the engine; no new-session event yet
 pub const NEW_SESSION_NOTICE: &str = "── new session ──";
 
 // Quiet-wait notice (repl.go:788). The duration is written the way Go's time.Duration prints it.
@@ -336,6 +328,7 @@ pub fn quiet_notice(idle: Duration) -> String {
 
 // Agent list scroll indicator (tui.go:1490). `off` is the 0-based first shown row, `shown` the rows in the
 // window, `total` all agents. Shows 1-based bounds, e.g. "  … 3-5/12 (마우스 휠로 스크롤)".
+#[allow(dead_code)] // unwired: agent list scroll indicator not drawn yet (tui.go:1490)
 pub fn scroll_range_text(off: usize, shown: usize, total: usize) -> String {
     format!(
         "  … {}-{}/{} (마우스 휠로 스크롤)",
@@ -542,10 +535,6 @@ mod tests {
 
     #[test]
     fn stage_and_fixed_notices_have_go_text() {
-        assert_eq!(STAGE_MAIN_START, "· main 처리중");
-        assert_eq!(STAGE_MAIN_DONE, "· main 완료");
-        assert_eq!(stage_agent_call("Explore"), "· agent Explore 호출");
-        assert_eq!(stage_agent_done("Explore"), "· agent Explore 완료");
         assert_eq!(NEW_SESSION_NOTICE, "── new session ──");
     }
 

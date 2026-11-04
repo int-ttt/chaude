@@ -22,6 +22,7 @@ use std::sync::mpsc::TryRecvError;
 use std::time::{Duration, Instant};
 
 use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
+use chaude_core::handoff;
 use chaude_core::resident::StagePhase;
 use crossterm::cursor::{MoveTo, Show};
 use crossterm::event::{
@@ -49,6 +50,8 @@ const REV_ON: &str = "\x1b[7m";
 const WHEEL_LINES: isize = 3;
 // Go copyNote lifetime (selection.go copyNoteMsg, 2s).
 const COPY_NOTE_TTL: Duration = Duration::from_secs(2);
+// Go defaultIdleNotice (repl.go:620): quiet time with no open tool call before the "still waiting" notice.
+const IDLE_NOTICE: Duration = Duration::from_secs(30 * 60);
 // Shown on the running row when output arrived while the view was held above the tail (scroll-bottom.md).
 const NEW_MSG: &str = "↓ 새 메시지";
 // Prefix for agent text lines.
@@ -104,6 +107,10 @@ pub struct App {
     top: usize,
     follow: bool,
     unseen: bool,
+    // Last content event (Go seen counter) and open tool call ids. The idle notice needs both (Go openTools).
+    quiet_since: Option<Instant>,
+    open_tools: HashSet<String>,
+    quiet_noted: bool,
     // Mouse wheel scrolling (/mouse). When off, the terminal keeps the mouse for text selection.
     mouse: bool,
     // Selected row of the slash menu (overlay::slash_popup). Reset when the input changes.
@@ -173,6 +180,9 @@ impl App {
             top: 0,
             follow: true,
             unseen: false,
+            quiet_since: None,
+            open_tools: HashSet::new(),
+            quiet_noted: false,
             mouse: true,
             sugg_sel: 0,
             usage: usage::Usage::default(),
@@ -230,7 +240,8 @@ impl App {
                 &mut self.transcript,
                 plain_text,
             ),
-            UiEvent::ToolStart { name, summary, .. } => {
+            UiEvent::ToolStart { id, name, summary } => {
+                self.open_tools.insert(id);
                 self.end_main_block();
                 let head = if summary.is_empty() {
                     name
@@ -240,19 +251,15 @@ impl App {
                 self.transcript.push(format!("{TOOL_ON}● {head}{FG_OFF}"));
             }
             // Go shows the tool_result text, not a done/failed word; that row comes from ToolResult.
-            UiEvent::ToolEnd { .. } => {}
+            UiEvent::ToolEnd { id, .. } => {
+                self.open_tools.remove(&id);
+            }
             // Go toolResultMsg: the first line cut to 160 runes, then "… (+N lines)" for the rest.
             UiEvent::ToolResult { text, .. } => {
-                let text = text.trim();
-                // Go hides an agent's caveman return from the transcript (tui.go:481).
-                if render::is_caveman_block(text) {
+                // Go hides an agent's caveman return from the transcript (tui.go:481); None means hidden.
+                let Some(head) = render::tool_result_text(&text) else {
                     return;
-                }
-                let lines: Vec<&str> = text.split('\n').collect();
-                let mut head = render::trunc_chars(lines[0], 160);
-                if lines.len() > 1 {
-                    head.push_str(&format!(" … (+{} lines)", lines.len() - 1));
-                }
+                };
                 self.transcript
                     .push(format!("{GREY_ON}  ⎿  {head}{FG_OFF}"));
                 self.transcript.push(String::new());
@@ -298,6 +305,9 @@ impl App {
             UiEvent::Busy(b) => {
                 self.busy = b;
                 self.turn_start = if b { Some(Instant::now()) } else { None };
+                // A new turn starts its quiet count now, not at the last event of the previous turn.
+                self.quiet_since = Some(self.clock);
+                self.quiet_noted = false;
             }
             UiEvent::Queued(n) => self.bar.queued = n,
             // Go shows no per-turn "done" row; its footer comes from engine stats that UiEvent does not carry yet.
@@ -382,11 +392,25 @@ impl App {
         if content && !self.follow {
             self.unseen = true;
         }
+        if content {
+            self.quiet_since = Some(self.clock);
+            self.quiet_noted = false;
+        }
     }
 
     // Records the time for elapsed counters and the spinner (Go spinner: one frame per 125 ms).
     pub fn tick(&mut self, now: Instant) {
         self.clock = now;
+        // Go quiet(): one notice after a quiet stretch with no open tool call (Agent/Task calls are waited for).
+        let quiet_for = self.quiet_since.map(|since| now.duration_since(since));
+        if self.busy
+            && self.open_tools.is_empty()
+            && !self.quiet_noted
+            && quiet_for.is_some_and(|d| d >= IDLE_NOTICE)
+        {
+            self.quiet_noted = true;
+            self.note(&bar::quiet_notice(IDLE_NOTICE));
+        }
         self.spin = match self.turn_start {
             Some(t) if self.busy => bar::spinner_frame(now.duration_since(t)),
             _ => ' ',
@@ -740,11 +764,17 @@ impl App {
         Action::Submit(text)
     }
 
-    // Go /view: the sessions this process spawned. TODO(view-owned): Go ownSessionList needs the spawned
-    // session ids (main, rotated, resident child), which no UiEvent carries yet, so the owned set is empty.
+    // Go /view: the sessions this run and the previous run spawned. The previous run comes from the exit handoff
+    // (handoff::prev_owned, Go loadPrevOwned). TODO(view-owned): this run's ids (main, rotated, resident child)
+    // are not in any UiEvent yet, so only the previous run's ids are listed.
     fn open_view(&mut self, arg: &str) {
+        let owned: HashSet<String> = handoff::read_exit_handoff(&handoff::handoff_file(
+            &records::record_dir(std::path::Path::new(&self.welcome.cwd)),
+        ))
+        .map(|h| h.prev_owned().into_iter().collect())
+        .unwrap_or_default();
         let result = sessview::session_list(&self.welcome.cwd)
-            .and_then(|all| sessview::own_sessions(all, &HashSet::new()))
+            .and_then(|all| sessview::own_sessions(all, &owned))
             .and_then(|list| sessview::SessView::open(list, arg));
         match result {
             Ok(sv) => self.sess = Some(sv),
@@ -790,14 +820,19 @@ impl App {
         }
     }
 
-    // One record block in the transcript. User blocks use the prompt echo; other kinds are plain text rows.
-    // TODO(record-kinds): Go renders assistant blocks through the markdown path; plain rows for now.
+    // One record block in the transcript. User blocks use the prompt echo; asst blocks use the markdown
+    // path as live output does (asst_text); other kinds are plain note rows.
     fn record_block(&mut self, kind: &str, text: &str) {
         if kind == "user" {
             for (i, line) in text.split('\n').enumerate() {
                 let lead = if i == 0 { PROMPT } else { "  " };
                 self.transcript
                     .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
+            }
+        } else if kind == "asst" {
+            for (i, line) in text.split('\n').enumerate() {
+                let lead = if i == 0 { ASST_FIRST } else { "  " };
+                self.transcript.push(format!("{lead}{}", asst_text(line)));
             }
         } else {
             self.note(text);
@@ -1483,7 +1518,11 @@ pub fn run(cfg: Config) -> io::Result<()> {
     }
 }
 
-fn tui(cfg: Config) -> io::Result<()> {
+fn tui(mut cfg: Config) -> io::Result<()> {
+    // Go writes the exit handoff into the record folder on quit; /view reads it back (prev_owned).
+    if let (None, Ok(cwd)) = (&cfg.handoff_path, std::env::current_dir()) {
+        cfg.handoff_path = Some(handoff::handoff_file(&records::record_dir(&cwd)));
+    }
     let model = settings::Settings {
         main_model: cfg.model.clone(),
         ..settings::Settings::default()
@@ -2282,5 +2321,27 @@ mod tests {
         let mut again: Vec<u8> = Vec::new();
         draw(&mut again, &app, &mut prev).unwrap();
         assert!(!String::from_utf8_lossy(&again).contains("M 0/200k"));
+    }
+
+    // Go quiet(): a busy turn with no content for 30 min shows one notice; an open tool call suppresses it.
+    #[test]
+    fn idle_notice_once_and_not_while_tool_open() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::Busy(true));
+        let later = app.clock + IDLE_NOTICE;
+        app.tick(later);
+        app.tick(later);
+        let rows = app.transcript.join("\n");
+        assert_eq!(rows.matches("[no output for 30m0s").count(), 1);
+
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::Busy(true));
+        app.apply(UiEvent::ToolStart {
+            id: "t1".into(),
+            name: "Agent".into(),
+            summary: String::new(),
+        });
+        app.tick(app.clock + IDLE_NOTICE);
+        assert!(!app.transcript.join("\n").contains("still waiting"));
     }
 }
