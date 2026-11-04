@@ -1505,13 +1505,13 @@ fn resumed_background_agent_is_active_again_until_task_notification() {
 }
 
 #[test]
-fn resume_after_agent_ended_still_emits_resumed_with_fallback_label() {
+fn resume_after_agent_ended_keeps_start_label() {
     let _g = lock();
     let f = fake("resume_late", &["resume_after_end_turn.jsonl"]);
     let (h, rx) = Engine::start(config(&f));
     h.submit("go");
     let evs = until_idle(&rx);
-    // The task-notification ended the agent and dropped its name, so the resume has no description.
+    // The task-notification ended the agent and dropped its live info; the resume reuses the start label.
     assert!(
         evs.contains(&UiEvent::AgentEnd {
             id: "toolu_bg2".into(),
@@ -1528,7 +1528,7 @@ fn resume_after_agent_ended_still_emits_resumed_with_fallback_label() {
     assert!(
         evs.contains(&UiEvent::AgentResumed {
             id: "toolu_bg2".into(),
-            description: "agent b92c452c".into(),
+            description: "scan".into(),
             started_at: evs
                 .iter()
                 .find_map(|e| match e {

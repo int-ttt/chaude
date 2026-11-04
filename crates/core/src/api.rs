@@ -428,6 +428,8 @@ struct State {
     agent_info: HashMap<String, AgentInfo>,
     // agentId from an async launch result -> tool_use id, so a SendMessage resume finds the agent.
     agent_ids: HashMap<String, String>,
+    // Start label by tool_use id. Kept after the agent ends, so a later SendMessage resume still shows it.
+    agent_labels: HashMap<String, String>,
     // tool_use ids still waiting for their tool_result; the inactivity timer is paused while non-empty.
     open_tools: HashSet<String>,
     // Last claude line or turn start; the inactivity timer measures from here.
@@ -575,6 +577,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         rotate_deferred: None,
         agent_info: HashMap::new(),
         agent_ids: HashMap::new(),
+        agent_labels: HashMap::new(),
         open_tools: HashSet::new(),
         last_activity: Instant::now(),
         interrupted_at: None,
@@ -1578,6 +1581,7 @@ impl State {
                 .map(|s| clip(s, 80))
                 .unwrap_or_default();
             self.agents.insert(id.clone(), Instant::now());
+            self.agent_labels.insert(id.clone(), description.clone());
             self.agent_info.insert(
                 id.clone(),
                 AgentInfo {
@@ -1612,7 +1616,7 @@ impl State {
             .ok()
             .filter(|v| v["success"] != false)
             .and_then(|v| v["resumedAgentId"].as_str().map(str::to_string));
-        // agent_info is dropped when the agent ends, so a resume after that falls back to the agent id as label.
+        // agent_info is dropped when the agent ends, so a resume after that uses the start label, then the agent id.
         let known = resume.and_then(|aid| {
             let tool = self.agent_ids.get(&aid).cloned()?;
             Some((tool, aid))
@@ -1622,6 +1626,7 @@ impl State {
                 .agent_info
                 .get(&tool)
                 .map(|i| i.name.clone())
+                .or_else(|| self.agent_labels.get(&tool).cloned())
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| format!("agent {}", aid.chars().take(8).collect::<String>()));
             self.agents.insert(tool.clone(), Instant::now());
