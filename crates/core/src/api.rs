@@ -18,6 +18,10 @@ use crate::metrics::Metrics;
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
 use crate::proc::{self, ClaudeProc, ProcMsg, SpawnOpts};
+use crate::rotate::{
+    HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
+    validate_handoff, with_reco,
+};
 
 // Text tool results of background agents say this; the agent keeps running after the tool result.
 const ASYNC_AGENT_MARK: &str = "Async agent launched";
@@ -146,6 +150,11 @@ pub enum UiEvent {
     },
 }
 
+// Recent turns kept for the handoff snapshot (Go --tail-turns) and their size limits (Go --snapshot-chars).
+const TAIL_TURNS: usize = 4;
+const TURN_CHARS: usize = 1_500;
+const SNAPSHOT_CHARS: usize = 24_000;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     // Name or path of the claude binary; resolved on PATH like osenv::resolve_bin. Tests point this at a fake.
@@ -171,6 +180,9 @@ pub struct Config {
     pub metrics_dir: Option<PathBuf>,
     // Go --transcript: JSONL trace of unparsable child lines ({"kind":"unparsed"}). None = off (the CLI passes StateDir/transcript.jsonl).
     pub transcript: Option<PathBuf>,
+    // Go context rotation: a turn that ends at or above this many context tokens starts a handoff and a fresh
+    // child (Opus uses its own threshold, see rotate::threshold_for). Zero = rotation off.
+    pub rotate_threshold: u64,
 }
 
 impl Default for Config {
@@ -190,6 +202,7 @@ impl Default for Config {
             task_budget_usd: 0.0,
             metrics_dir: None,
             transcript: None,
+            rotate_threshold: HAIKU_THRESHOLD,
         }
     }
 }
@@ -206,7 +219,8 @@ enum Cmd {
 
 enum Input {
     Cmd(Cmd),
-    Proc(ProcMsg),
+    // Child message tagged with the child's generation; messages from a replaced child are dropped.
+    Proc(u64, ProcMsg),
 }
 
 pub struct EngineHandle {
@@ -319,6 +333,29 @@ struct State {
     metrics: Metrics,
     // Session id from the child's system event (Go sess.SessionID); "" until the child reports one.
     sid: String,
+    self_tx: Sender<Input>,
+    opts: SpawnOpts,
+    // Bumped on every fresh child so the old child's late lines and EOF are ignored.
+    epoch: u64,
+    // Files written by Write/Edit/NotebookEdit in this session (Go r.files), for the handoff snapshot.
+    files: Vec<String>,
+    // Last recommendation line of a normal turn (Go lastReco), carried verbatim into the snapshot.
+    last_reco: String,
+    // Last normal turns as (prompt, reply), newest last (Go tr.turns).
+    recent: VecDeque<(String, String)>,
+    // Prompt and assistant text of the running turn.
+    turn_prompt: String,
+    turn_reply: String,
+    // Snapshot for the next prompt sent to a fresh child; empty when none is pending.
+    pending_snapshot: String,
+    // Set while a hidden handoff turn runs; its text is not shown.
+    handoff: Option<Handoff>,
+}
+
+// A handoff turn in progress: the rotation reason and how many handoff prompts were sent (Go makeSnapshotN).
+struct Handoff {
+    reason: String,
+    attempts: u32,
 }
 
 fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
@@ -362,11 +399,18 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         budget_hit: false,
         metrics,
         sid: String::new(),
+        self_tx,
+        opts,
+        epoch: 0,
+        files: Vec::new(),
+        last_reco: String::new(),
+        recent: VecDeque::new(),
+        turn_prompt: String::new(),
+        turn_reply: String::new(),
+        pending_snapshot: String::new(),
+        handoff: None,
     };
-    match proc::spawn(&opts, self_tx, Input::Proc) {
-        Ok(p) => st.proc = Some(p),
-        Err(e) => st.emit(UiEvent::Error(format!("claude spawn failed: {e}"))),
-    }
+    st.start_child();
     loop {
         let input = match st.wait_budget() {
             Some(d) => match rx.recv_timeout(d) {
@@ -389,8 +433,11 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
             Input::Cmd(Cmd::SetMode(name)) => st.set_mode(&name),
             Input::Cmd(Cmd::Permission { id, allow }) => st.answer_permission(&id, allow),
             Input::Cmd(Cmd::Usage) => st.usage(),
-            Input::Proc(ProcMsg::Line(line)) => st.on_line(&line),
-            Input::Proc(ProcMsg::Eof) => st.on_eof(),
+            Input::Proc(epoch, msg) if epoch == st.epoch => match msg {
+                ProcMsg::Line(line) => st.on_line(&line),
+                ProcMsg::Eof => st.on_eof(),
+            },
+            Input::Proc(_, _) => {}
         }
     }
     if let Some(mut p) = st.proc.take() {
@@ -447,8 +494,20 @@ impl State {
         let Some(p) = self.proc.as_mut() else {
             return false;
         };
-        match p.write_user(text) {
+        // Go runTurn: the pending snapshot of a rotated session goes in front of the first prompt sent to it.
+        let frame = if self.pending_snapshot.is_empty() {
+            text.to_string()
+        } else {
+            format!(
+                "{}\n\n## Current user message\n{}",
+                self.pending_snapshot, text
+            )
+        };
+        match p.write_user(&frame) {
             Ok(()) => {
+                self.pending_snapshot.clear();
+                self.turn_prompt = text.to_string();
+                self.turn_reply.clear();
                 self.turn_started = Some(Instant::now());
                 self.last_activity = Instant::now();
                 self.turn_cost_base = self.cost_usd;
@@ -541,6 +600,7 @@ impl State {
         self.open_tools.clear();
         self.interrupted_at = None;
         self.stray_results = 0;
+        self.handoff = None;
         self.emit(UiEvent::Error("claude exited".to_string()));
         if let Some(mut p) = self.proc.take() {
             p.kill();
@@ -598,9 +658,16 @@ impl State {
                     StreamInner::ContentBlockDelta {
                         delta: Delta::TextDelta { text },
                     } => {
-                        self.emit(UiEvent::TextDelta { role, text });
+                        if matches!(role, Role::Main) {
+                            self.turn_reply.push_str(&text);
+                        }
+                        if self.handoff.is_none() {
+                            self.emit(UiEvent::TextDelta { role, text });
+                        }
                     }
-                    StreamInner::MessageStop => self.emit(UiEvent::MessageDone { role }),
+                    StreamInner::MessageStop if self.handoff.is_none() => {
+                        self.emit(UiEvent::MessageDone { role })
+                    }
                     _ => {}
                 }
             }
@@ -756,6 +823,14 @@ impl State {
         if !self.tools.insert(id.clone()) {
             return;
         }
+        // Go runTurn: files written by Write/Edit/NotebookEdit are listed in the handoff snapshot.
+        if let Some(fp) = input.get("file_path").and_then(Value::as_str)
+            && matches!(name.as_str(), "Write" | "Edit" | "NotebookEdit")
+            && !fp.is_empty()
+            && !self.files.iter().any(|f| f == fp)
+        {
+            self.files.push(fp.to_string());
+        }
         self.open_tools.insert(id.clone());
         let summary = tool_summary(&input);
         self.emit(UiEvent::ToolStart {
@@ -897,6 +972,10 @@ impl State {
 
     // Finishes the running turn and starts the next queued one, if any.
     fn end_turn(&mut self, duration_ms: u64) {
+        if self.handoff.is_some() {
+            self.finish_handoff();
+            return;
+        }
         if self.interrupted_at.is_some() {
             self.emit(UiEvent::Interrupted);
         }
@@ -915,7 +994,15 @@ impl State {
         self.interrupted_at = None;
         self.open_tools.clear();
         self.emit(UiEvent::TurnEnd { duration_ms });
-        // Go doneMsg / mergePrompts: everything queued meanwhile goes out as ONE turn, joined by a blank line.
+        self.remember_turn();
+        if self.rotation_due() && self.start_handoff() {
+            return;
+        }
+        self.next_turn();
+    }
+
+    // Go doneMsg / mergePrompts: everything queued meanwhile goes out as ONE turn, joined by a blank line.
+    fn next_turn(&mut self) {
         if self.queue.is_empty() {
             self.busy = false;
             self.emit(UiEvent::Busy(false));
@@ -926,6 +1013,148 @@ impl State {
         if !self.send_turn(&next) {
             self.busy = false;
             self.emit(UiEvent::Busy(false));
+        }
+    }
+
+    fn remember_turn(&mut self) {
+        let rc = extract_reco(&self.turn_reply);
+        if !rc.is_empty() {
+            self.last_reco = rc;
+        }
+        self.recent
+            .push_back((self.turn_prompt.clone(), self.turn_reply.clone()));
+        while self.recent.len() > TAIL_TURNS {
+            self.recent.pop_front();
+        }
+    }
+
+    // Go shouldRotate at turn end. Rotation waits while background agents run (rotate_defer, not yet ported).
+    fn rotation_due(&self) -> bool {
+        let thr = threshold_for(&self.model, self.cfg.rotate_threshold);
+        self.cfg.rotate_threshold > 0
+            && self.proc.is_some()
+            && self.agents.is_empty()
+            && should_rotate(self.ctx_tokens, thr)
+    }
+
+    // Sends the hidden handoff prompt on the current child. Returns false when it could not be sent.
+    fn start_handoff(&mut self) -> bool {
+        let thr = threshold_for(&self.model, self.cfg.rotate_threshold);
+        let reason = format!("ctx {} >= {}", self.ctx_tokens, thr);
+        self.handoff = Some(Handoff {
+            reason,
+            attempts: 1,
+        });
+        if self.send_turn(HANDOFF_PROMPT) {
+            return true;
+        }
+        self.handoff = None;
+        false
+    }
+
+    // Ends the hidden handoff turn (Go makeSnapshotN): retries once when invalid, then rotates or holds.
+    fn finish_handoff(&mut self) {
+        self.turn_started = None;
+        self.interrupted_at = None;
+        self.open_tools.clear();
+        let Some(h) = self.handoff.take() else {
+            return;
+        };
+        let note = self.turn_reply.trim().to_string();
+        let problems = validate_handoff(&note, &self.files);
+        let valid = problems.is_empty();
+        if !valid && h.attempts < 2 {
+            self.handoff = Some(Handoff {
+                reason: h.reason.clone(),
+                attempts: h.attempts + 1,
+            });
+            if self.send_turn(HANDOFF_PROMPT) {
+                return;
+            }
+            self.handoff = None;
+        }
+        if !valid && note.is_empty() && self.recent.is_empty() {
+            // Go: nothing to carry, so the rotation is held and the session keeps running.
+            self.emit(UiEvent::Error(
+                "context rotation held: handoff failed".to_string(),
+            ));
+            self.next_turn();
+            return;
+        }
+        let body = if valid {
+            note
+        } else {
+            format!(
+                "(handoff note failed validation: {}; recent turns follow)",
+                problems.join("; ")
+            )
+        };
+        let snapshot = with_reco(&self.last_reco, &self.build_snapshot(&body));
+        self.rotate_child(snapshot, h.reason, valid, h.attempts);
+        self.next_turn();
+    }
+
+    // Go buildSnapshot: preamble, handoff note, changed files, and the last turns, capped at SNAPSHOT_CHARS.
+    fn build_snapshot(&self, note: &str) -> String {
+        let note = if note.is_empty() { "(empty)" } else { note };
+        let mut parts = vec![
+            PREAMBLE.to_string(),
+            format!("## Handoff note (written by previous session)\n{note}"),
+        ];
+        if !self.files.is_empty() {
+            let list: Vec<String> = self.files.iter().map(|f| format!("- {f}")).collect();
+            parts.push(format!("## Files changed\n{}", list.join("\n")));
+        }
+        if !self.recent.is_empty() {
+            let mut turns = vec!["## Last turns (verbatim, truncated)".to_string()];
+            for (user, assistant) in &self.recent {
+                turns.push(format!(
+                    "User: {}\nAssistant: {}",
+                    clip(user, TURN_CHARS),
+                    clip(assistant, TURN_CHARS)
+                ));
+            }
+            parts.push(turns.join("\n\n"));
+        }
+        clip(&parts.join("\n\n"), SNAPSHOT_CHARS)
+    }
+
+    // Closes the current child and starts a fresh one (no --resume) that gets the snapshot with its next prompt.
+    fn rotate_child(&mut self, snapshot: String, reason: String, valid: bool, attempts: u32) {
+        let old = self.sid.clone();
+        if let Some(mut p) = self.proc.take() {
+            p.kill();
+        }
+        self.epoch += 1;
+        self.open_tools.clear();
+        self.interrupted_at = None;
+        self.stray_results = 0;
+        self.pending_perm.clear();
+        self.pending_snapshot = snapshot;
+        self.sid.clear();
+        self.ctx_tokens = 0;
+        self.opts.resume = None;
+        self.start_child();
+        let _ = self.metrics.log(json!({
+            "stage": "rotate",
+            "reason": reason,
+            "old_session": old,
+            "handoff_valid": valid,
+            "attempts": attempts,
+            "outcome": "closed",
+        }));
+        self.emit(UiEvent::Rotated { reason });
+        self.emit_status(self.cost_usd);
+    }
+
+    // Spawns the child for the current generation; its lines are tagged so a replaced child is ignored.
+    fn start_child(&mut self) {
+        let epoch = self.epoch;
+        match proc::spawn(&self.opts, self.self_tx.clone(), move |m| {
+            Input::Proc(epoch, m)
+        }) {
+            Ok(p) => self.proc = Some(p),
+            Err(e) => self.emit(UiEvent::Error(format!("claude spawn failed: {e}"))),
         }
     }
 

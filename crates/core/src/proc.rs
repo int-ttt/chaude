@@ -122,7 +122,7 @@ pub struct ClaudeProc {
 pub fn spawn<T: Send + 'static>(
     opts: &SpawnOpts,
     tx: Sender<T>,
-    wrap: fn(ProcMsg) -> T,
+    wrap: impl Fn(ProcMsg) -> T + Send + 'static,
 ) -> io::Result<ClaudeProc> {
     let mut cmd = Command::new(&opts.claude_bin);
     cmd.args(build_args(&opts.model, opts.resume.as_deref()))

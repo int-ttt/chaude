@@ -1046,3 +1046,34 @@ fn turn_is_logged_to_metrics_jsonl() {
     assert!(rec["duration_ms"].is_u64(), "{text}");
     assert!(rec["cost_turn_usd"].is_f64(), "{text}");
 }
+
+#[test]
+fn context_rotation_hands_off_and_fresh_child_gets_snapshot() {
+    let _g = lock();
+    let f = fake("rotate", &["rotate_turn.jsonl", "handoff_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::Rotated { reason } if reason == "ctx 100 >= 50"))
+    );
+    // The handoff turn is hidden: its note never reaches the UI as text.
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::TextDelta { text, .. } if text.contains("Goal")))
+    );
+    h.submit("again");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "## Current user message");
+    assert!(log.contains("Write a handoff note"));
+    let frame = log
+        .lines()
+        .find(|l| l.contains("## Current user message"))
+        .expect("snapshot frame");
+    assert!(frame.contains("Goal: finish the context rotation test"));
+    assert!(frame.contains("again"));
+    h.shutdown();
+}
