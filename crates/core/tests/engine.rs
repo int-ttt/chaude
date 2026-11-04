@@ -12,6 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
+use chaude_core::handoff;
 use chaude_core::resident::StagePhase;
 
 // Scripts are written and exec'd per test; serializing tests avoids ETXTBSY races.
@@ -69,7 +70,7 @@ fn fake(name: &str, turns: &[&str]) -> Fake {
     // The coder reply: status and changed lines, which summarize_reply keeps. Its agent body carries CODERMARK.
     fs::write(
         dir.join("coder.jsonl"),
-        "{\"type\":\"result\",\"result\":\"status: done\\nchanged: a.rs: edit\"}\n",
+        "{\"type\":\"result\",\"result\":\"status: done\\nchanged: a.rs: edit\",\"session_id\":\"c1\"}\n",
     )
     .unwrap();
     fs::write(
@@ -1555,4 +1556,28 @@ fn exit_handoff_records_main_session_on_shutdown() {
     assert_eq!(v["version"], 1, "{text}");
     assert_eq!(v["main_session"], "s1", "{text}");
     assert_eq!(v["cwd"], f.dir.display().to_string().as_str(), "{text}");
+}
+
+#[test]
+fn exit_handoff_lists_resident_coder_and_owned_sessions() {
+    let _g = lock();
+    let f = fake("handoff_res", &["text_turn.jsonl"]);
+    let path = f.dir.join(".exit-handoff.json");
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    cfg.handoff_path = Some(path.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.coder("rename the helper");
+    until_coder_reply(&rx);
+    // The coder stays alive (idle) until shutdown, so its session is live in the handoff.
+    h.shutdown();
+    let got = handoff::read_exit_handoff(&path).expect("handoff readable");
+    assert_eq!(got.version, 1);
+    assert_eq!(
+        got.resident_sessions.get("coder").map(String::as_str),
+        Some("c1")
+    );
+    assert!(got.owned_sessions.iter().any(|s| s == "c1"), "{got:?}");
+    assert!(got.prev_owned().contains("c1"));
 }

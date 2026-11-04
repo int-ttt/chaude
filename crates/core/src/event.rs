@@ -133,6 +133,7 @@ pub struct ResultEvent {
     pub subtype: Option<String>,
     pub is_error: Option<bool>,
     pub result: Option<String>,
+    pub session_id: Option<String>,
     pub duration_ms: Option<u64>,
     pub total_cost_usd: Option<f64>,
     pub usage: Option<Usage>,

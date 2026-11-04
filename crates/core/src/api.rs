@@ -2,7 +2,7 @@
 // Commands and child stdout lines share one mpsc channel, so a single loop owns all state.
 // Owned types only: no lifetimes. Subagent tool events are not surfaced in E1 (pipeline is E2).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 
 use crate::budget::{self, Budget};
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
+use crate::handoff::{self, ExitHandoff};
 use crate::metrics::{Metrics, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::osenv::resolve_bin;
@@ -398,6 +399,10 @@ struct State {
     metrics: Metrics,
     // Session id from the child's system event (Go sess.SessionID); "" until the child reports one.
     sid: String,
+    // Every main and resident session id this run started (Go r.owned), kept for the handoff.
+    owned: Vec<String>,
+    // Last session id each resident role reported on a result line (Go resident_sessions). Live roles only.
+    resident_sids: BTreeMap<String, String>,
     self_tx: Sender<Input>,
     opts: SpawnOpts,
     // Bumped on every fresh child so the old child's late lines and EOF are ignored.
@@ -500,6 +505,8 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         budget_hit: false,
         metrics,
         sid: String::new(),
+        owned: Vec::new(),
+        resident_sids: BTreeMap::new(),
         self_tx,
         opts,
         epoch: 0,
@@ -567,7 +574,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         }
     }
     if let Some(path) = st.cfg.handoff_path.clone() {
-        write_handoff(&path, st.opts.cwd.as_deref(), &st.sid);
+        let _ = handoff::write_exit_handoff(&path, &st.exit_handoff());
     }
     if let Some(mut p) = st.proc.take() {
         p.kill();
@@ -669,6 +676,7 @@ impl State {
 
     // Go residentSlots prompter: haiku with the minimal shape and the prompter rule. Kept alive across prompts.
     fn spawn_prompter(&mut self) -> Result<(), String> {
+        self.resident_sids.remove("prompter");
         let opts = SpawnOpts {
             model: "haiku".to_string(),
             resume: None,
@@ -695,6 +703,7 @@ impl State {
         let Ok(Event::Result(r)) = parse_line(line) else {
             return;
         };
+        self.note_resident("prompter", r.session_id.clone());
         if let Some(o) = self.prompter.reply(&r.result.unwrap_or_default()) {
             self.finish_prompter(o);
         }
@@ -750,6 +759,7 @@ impl State {
 
     // Go residentSlots tui: haiku with the minimal shape and the haiku-tui agent body. Kept alive across turns.
     fn spawn_tui(&mut self) -> Result<(), String> {
+        self.resident_sids.remove("tui");
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
         let rule = agent_body(&cwd, "haiku-tui")?;
         let opts = SpawnOpts {
@@ -816,6 +826,7 @@ impl State {
 
     // Go residentSlots coder: haiku with the haiku-coder agent body, the coder tools, strict MCP and no slash commands.
     fn spawn_coder(&mut self, i: usize) -> Result<(), String> {
+        self.resident_sids.remove(&coder_role(i));
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
         let rule = agent_body(&cwd, "haiku-coder")?;
         let opts = SpawnOpts {
@@ -857,6 +868,52 @@ impl State {
         self.coders[i].idle_since = None;
     }
 
+    // Records a session id this run started (Go noteOwn), once.
+    fn note_own(&mut self, id: &str) {
+        if !self.owned.iter().any(|o| o == id) {
+            self.owned.push(id.to_string());
+        }
+    }
+
+    // Keeps the session id a resident result line carries, for its role; owned too.
+    fn note_resident(&mut self, role: &str, session_id: Option<String>) {
+        if let Some(id) = session_id.filter(|id| !id.is_empty()) {
+            self.note_own(&id);
+            self.resident_sids.insert(role.to_string(), id);
+        }
+    }
+
+    // This run's session ids for the handoff (Go handoffSnapshot). A resident counts only while its child runs.
+    fn exit_handoff(&self) -> ExitHandoff {
+        let mut roles = vec![
+            ("prompter".to_string(), self.prompter_proc.is_some()),
+            ("tui".to_string(), self.tui_proc.is_some()),
+        ];
+        roles.extend(
+            self.coders
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (coder_role(i), c.proc.is_some())),
+        );
+        let resident_sessions: BTreeMap<String, String> = roles
+            .into_iter()
+            .filter(|(_, alive)| *alive)
+            .filter_map(|(role, _)| self.resident_sids.get(&role).map(|id| (role, id.clone())))
+            .collect();
+        ExitHandoff {
+            cwd: self
+                .opts
+                .cwd
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            main_session: self.sid.clone(),
+            resident_sessions,
+            owned_sessions: self.owned.clone(),
+            ..Default::default()
+        }
+    }
+
     // Time left before an idle extra coder expires (Go extraCoderTTL). None for the base coder, a busy
     // slot, or an empty slot.
     fn coder_idle_left(&self, i: usize) -> Option<Duration> {
@@ -876,6 +933,7 @@ impl State {
         let Ok(Event::Result(r)) = parse_line(line) else {
             return;
         };
+        self.note_resident(&coder_role(i), r.session_id.clone());
         let text = summarize_reply(&r.result.unwrap_or_default());
         if text.is_empty() {
             self.finish_coder(i, Err("coder empty reply".to_string()));
@@ -919,6 +977,7 @@ impl State {
         let Ok(Event::Result(r)) = parse_line(line) else {
             return;
         };
+        self.note_resident("tui", r.session_id.clone());
         let text = r.result.unwrap_or_default().trim().to_string();
         if text.is_empty() {
             self.finish_tui(Err("tui empty reply".to_string()));
@@ -1136,6 +1195,7 @@ impl State {
         match ev {
             Event::System(s) => {
                 if let Some(id) = s.session_id {
+                    self.note_own(&id);
                     self.sid = id;
                 }
                 if let Some(m) = s.model {
@@ -1867,37 +1927,6 @@ impl State {
             cost_usd,
             context_pct: pct,
         });
-    }
-}
-
-// Go writeExitHandoff: this run's session ids, so the next start in the same cwd can find them. Written via a
-// temp file and rename. Errors are ignored so a failed write never blocks exit. saved_at_unix stands in for
-// Go's RFC 3339 saved_at. main_session is omitted when empty (Go omitempty).
-fn write_handoff(path: &std::path::Path, cwd: Option<&std::path::Path>, main_session: &str) {
-    let saved = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let mut body = json!({
-        "version": 1,
-        "cwd": cwd.map(|p| p.display().to_string()).unwrap_or_default(),
-        "main_session": main_session,
-        "saved_at_unix": saved,
-    });
-    if main_session.is_empty()
-        && let Some(m) = body.as_object_mut()
-    {
-        m.remove("main_session");
-    }
-    let Ok(text) = serde_json::to_string_pretty(&body) else {
-        return;
-    };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, format!("{text}\n")).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
     }
 }
 

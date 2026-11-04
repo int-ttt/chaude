@@ -3,6 +3,7 @@
 pub mod api;
 pub mod budget;
 pub mod event;
+pub mod handoff;
 pub mod lean;
 pub mod metrics;
 pub mod mode;

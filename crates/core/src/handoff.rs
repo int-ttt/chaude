@@ -1,0 +1,152 @@
+//! Exit handoff (Go exit_handoff.go): the session ids of one chaude run, read by the next start in the same cwd
+//! so /view and /resume can find them again.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde::{Deserialize, Serialize};
+
+// File name in the record project folder. The record listing ignores it (not .md).
+pub const EXIT_HANDOFF_FILE: &str = ".exit-handoff.json";
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExitHandoff {
+    #[serde(default)]
+    pub version: u32,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub main_session: String,
+    // role -> session id (Go resident_sessions)
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub resident_sessions: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owned_sessions: Vec<String>,
+    // Unix seconds. Go writes an RFC 3339 "saved_at" string, which is not read here.
+    #[serde(default)]
+    pub saved_at_unix: u64,
+}
+
+impl ExitHandoff {
+    // Go loadPrevOwned: the owned sessions of the previous run plus its main session. /view lists these.
+    pub fn prev_owned(&self) -> BTreeSet<String> {
+        let mut ids: BTreeSet<String> = self.owned_sessions.iter().cloned().collect();
+        if !self.main_session.is_empty() {
+            ids.insert(self.main_session.clone());
+        }
+        ids
+    }
+}
+
+// <project record folder>/.exit-handoff.json
+pub fn handoff_file(project_dir: &Path) -> PathBuf {
+    project_dir.join(EXIT_HANDOFF_FILE)
+}
+
+// Go writeExitHandoff: version 1 and saved_at now, written to a temp file then renamed.
+pub fn write_exit_handoff(path: &Path, h: &ExitHandoff) -> io::Result<()> {
+    let mut out = h.clone();
+    out.version = 1;
+    out.saved_at_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let text = serde_json::to_string_pretty(&out).map_err(io::Error::other)?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, format!("{text}\n"))?;
+    fs::rename(&tmp, path)
+}
+
+// Go readExitHandoff: None when the file is missing or does not parse.
+pub fn read_exit_handoff(path: &Path) -> Option<ExitHandoff> {
+    let text = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::TempDir;
+
+    fn sample() -> ExitHandoff {
+        let mut h = ExitHandoff {
+            cwd: "/work/app".to_string(),
+            main_session: "m1".to_string(),
+            owned_sessions: vec!["m0".to_string(), "m1".to_string()],
+            ..Default::default()
+        };
+        h.resident_sessions
+            .insert("coder".to_string(), "c1".to_string());
+        h
+    }
+
+    #[test]
+    fn write_then_read_keeps_ids_and_sets_version() {
+        let dir = TempDir::new("handoff-rt");
+        let path = handoff_file(dir.path());
+        write_exit_handoff(&path, &sample()).expect("write");
+        let got = read_exit_handoff(&path).expect("read");
+        assert_eq!(got.version, 1);
+        assert_eq!(got.main_session, "m1");
+        assert_eq!(
+            got.resident_sessions.get("coder").map(String::as_str),
+            Some("c1")
+        );
+        assert_eq!(got.owned_sessions, vec!["m0", "m1"]);
+        assert!(got.saved_at_unix > 0);
+        assert!(!path.with_extension("json.tmp").exists());
+    }
+
+    #[test]
+    fn missing_or_bad_file_reads_as_none() {
+        let dir = TempDir::new("handoff-bad");
+        assert!(read_exit_handoff(&handoff_file(dir.path())).is_none());
+        let path = handoff_file(dir.path());
+        fs::write(&path, "{not json").unwrap();
+        assert!(read_exit_handoff(&path).is_none());
+    }
+
+    #[test]
+    fn reads_go_written_file_with_string_saved_at() {
+        let dir = TempDir::new("handoff-go");
+        let path = handoff_file(dir.path());
+        let go = r#"{"version":1,"cwd":"/w","main_session":"g1",
+            "resident_sessions":{"tui":"t1"},"owned_sessions":["g0","g1"],
+            "saved_at":"2026-11-04T10:00:00+09:00"}"#;
+        fs::write(&path, go).unwrap();
+        let got = read_exit_handoff(&path).expect("go file parses");
+        assert_eq!(got.main_session, "g1");
+        assert_eq!(
+            got.resident_sessions.get("tui").map(String::as_str),
+            Some("t1")
+        );
+        assert_eq!(got.saved_at_unix, 0);
+    }
+
+    #[test]
+    fn empty_main_session_is_omitted() {
+        let dir = TempDir::new("handoff-omit");
+        let path = handoff_file(dir.path());
+        let h = ExitHandoff {
+            cwd: "/w".to_string(),
+            ..Default::default()
+        };
+        write_exit_handoff(&path, &h).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("main_session"), "{text}");
+        assert!(!text.contains("resident_sessions"), "{text}");
+    }
+
+    #[test]
+    fn prev_owned_is_owned_plus_main_without_duplicates() {
+        let ids = sample().prev_owned();
+        let want: BTreeSet<String> = ["m0", "m1"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(ids, want);
+    }
+}
