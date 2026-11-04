@@ -1876,6 +1876,35 @@ fn finished_turn_is_saved_to_record_folder() {
     assert!(text.contains("[측정]"), "{text}");
 }
 
+// A /clear splits the record: the turn after it goes to a new file (Go recordSave split).
+#[test]
+fn clear_splits_the_next_saved_turn() {
+    let _g = lock();
+    let f = fake(
+        "record_split",
+        &[
+            "record_turn.jsonl",
+            "record_turn.jsonl",
+            "record_turn.jsonl",
+        ],
+    );
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("say hi");
+    until_idle(&rx);
+    h.submit("/clear");
+    until_idle(&rx);
+    h.submit("say hi");
+    until_idle(&rx);
+    h.shutdown();
+    let files = files_under(&f.dir.join("record"))
+        .into_iter()
+        .filter(|p| fs::read_to_string(p).unwrap_or_default().contains("say hi"))
+        .count();
+    assert_eq!(files, 2, "the turn after /clear starts a new record file");
+}
+
 fn files_under(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let Ok(rd) = fs::read_dir(dir) else {

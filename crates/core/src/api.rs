@@ -1329,6 +1329,10 @@ impl State {
                 self.last_activity = Instant::now();
                 self.turn_cost_base = self.cost_usd;
                 self.delegations = 0;
+                // Go /clear: the next saved turn starts a new record file (RecordState.split).
+                if text.trim() == "/clear" {
+                    self.record.split = true;
+                }
                 true
             }
             Err(e) => {
