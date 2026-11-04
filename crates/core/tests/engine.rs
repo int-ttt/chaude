@@ -1244,6 +1244,8 @@ fn handoff_snapshot_lists_running_background_agent_with_result_path() {
         .find(|l| l.contains("## Current user message"))
         .expect("snapshot frame");
     assert!(frame.contains("## Background agents (results in notes/runs/)"));
+    // Go joins each header and its body as separate parts with a blank line (the frame is JSON, so \n is escaped).
+    assert!(frame.contains(r"## Background agents (results in notes/runs/)\n\n- scan (toolu_bg1)"));
     assert!(frame.contains("- scan (toolu_bg1): running, result file: notes/runs/"));
     assert!(frame.contains("-agent-toolu_bg1.md"));
     h.shutdown();

@@ -2208,9 +2208,11 @@ impl State {
     // Go buildSnapshot: preamble, handoff note, changed files, and the last turns, capped at SNAPSHOT_CHARS.
     fn build_snapshot(&self, note: &str) -> String {
         let note = if note.is_empty() { "(empty)" } else { note };
+        // Each header and its body are separate parts, joined with a blank line (Go buildSnapshot).
         let mut parts = vec![
             PREAMBLE.to_string(),
-            format!("## Handoff note (written by previous session)\n{note}"),
+            "## Handoff note (written by previous session)".to_string(),
+            note.to_string(),
         ];
         // Go bgHandoffLines: background agents still running, oldest first, with their result file.
         let mut bg: Vec<(Instant, String)> = self
@@ -2228,14 +2230,13 @@ impl State {
         bg.sort();
         if !bg.is_empty() {
             let lines: Vec<String> = bg.into_iter().map(|(_, l)| l).collect();
-            parts.push(format!(
-                "## Background agents (results in notes/runs/)\n{}",
-                lines.join("\n")
-            ));
+            parts.push("## Background agents (results in notes/runs/)".to_string());
+            parts.push(lines.join("\n"));
         }
         if !self.files.is_empty() {
             let list: Vec<String> = self.files.iter().map(|f| format!("- {f}")).collect();
-            parts.push(format!("## Files changed\n{}", list.join("\n")));
+            parts.push("## Files changed".to_string());
+            parts.push(list.join("\n"));
         }
         if !self.recent.is_empty() {
             let mut turns = vec!["## Last turns (verbatim, truncated)".to_string()];
