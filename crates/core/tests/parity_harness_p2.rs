@@ -278,13 +278,14 @@ impl Write for SharedBuf {
     }
 }
 
-// Go TestMCPRoundTripFakeSession over the socket: the bridge carries the token line, then MCP lines.
+// Go TestMCPRoundTripFakeSession over the socket: the bridge reaches the server, then MCP lines flow.
 #[test]
 fn mcp_bridge_round_trip_over_loopback() {
     let token = mcp::new_token();
     let run: Arc<CoderFn> =
         Arc::new(|task: &str| Ok(format!("status: done\nchanged: b.rs: {task}")));
-    let addr = mcp::serve(run, &token).expect("serve");
+    let sock = temp_dir("mcp").join("mcp.sock");
+    let addr = mcp::serve(run, &token, &sock).expect("serve");
     let input = concat!(
         r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"resident_coder","arguments":{"task":"x"}}}"#,
         "\n",
@@ -296,7 +297,6 @@ fn mcp_bridge_round_trip_over_loopback() {
 }
 
 // Go TestResidentMCPConfigWritten: the config is written once, with the bridge command and the token in env.
-// Diff: Go serves a unix socket (args "...mcp.sock"); Rust serves tcp and passes "tcp:<addr>" as the arg.
 #[test]
 fn mcp_config_is_written_with_bridge_command_and_token_env() {
     let run: Arc<CoderFn> = Arc::new(|_: &str| Ok(String::new()));
@@ -311,7 +311,6 @@ fn mcp_config_is_written_with_bridge_command_and_token_env() {
 }
 
 #[test]
-#[ignore = "parity: Rust serves tcp:<addr>, Go uses a unix socket (args ...mcp.sock)"]
 fn mcp_config_args_point_at_unix_socket() {
     let run: Arc<CoderFn> = Arc::new(|_: &str| Ok(String::new()));
     let cfg = mcp::start_owned(run).expect("start_owned");

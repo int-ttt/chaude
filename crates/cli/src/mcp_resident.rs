@@ -1,6 +1,6 @@
-//! `chaude mcp-resident <tcp:addr>`: the stdio side of the resident coder MCP tool (Go MCPResidentBridge).
-//! The main child runs this as its MCP server; it copies lines between its stdio and the loopback socket
-//! that core's mcp::serve listens on. Only the tcp: form is supported (core binds TCP only).
+//! `chaude mcp-resident <socket>`: the stdio side of the resident coder MCP tool (Go MCPResidentBridge).
+//! The main child runs this as its MCP server; it copies lines between its stdio and the socket that
+//! core's mcp::serve listens on: a unix socket path on unix, or tcp:<addr> (Windows).
 
 use std::io;
 
@@ -12,10 +12,6 @@ pub fn main(args: &[String]) -> i32 {
         eprintln!("usage: chaude mcp-resident <socket>");
         return 2;
     };
-    if !addr.starts_with("tcp:") {
-        eprintln!("mcp-resident: only tcp:<addr> is supported, got {addr}");
-        return 2;
-    }
     match mcp::bridge(addr, io::stdin(), io::stdout()) {
         Ok(()) => 0,
         Err(e) => {
@@ -51,11 +47,12 @@ mod tests {
     fn usage_errors_exit_2() {
         assert_eq!(main(&[]), 2);
         assert_eq!(main(&["a".to_string(), "b".to_string()]), 2);
-        assert_eq!(
-            main(&["/tmp/sock".to_string()]),
-            2,
-            "unix paths are not supported"
-        );
+    }
+
+    #[test]
+    fn missing_unix_socket_exits_1() {
+        let sock = std::env::temp_dir().join(format!("chaude-no-such-{}.sock", std::process::id()));
+        assert_eq!(main(&[sock.display().to_string()]), 1);
     }
 
     #[test]

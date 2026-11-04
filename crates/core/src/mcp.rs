@@ -1,12 +1,17 @@
 //! Resident MCP server (Go resident_mcp.go, resident_coder.go mcpReply). The main child calls the
-//! `resident_coder` tool through `chaude mcp-resident <addr>`, which copies MCP lines to this loopback socket.
+//! `resident_coder` tool through `chaude mcp-resident <addr>`, which copies MCP lines to this server.
+//! Unix serves a unix socket in a 0700 temp dir (Go listenMCP); Windows serves loopback TCP with a token.
 
 use std::collections::hash_map::RandomState;
 use std::fs;
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::mem::ManuallyDrop;
-use std::net::{Shutdown, TcpListener, TcpStream};
+#[cfg(not(unix))]
+use std::net::TcpListener;
+use std::net::{Shutdown, TcpStream};
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
@@ -94,33 +99,79 @@ pub fn config_json(exe: &str, addr: &str, token: &str) -> String {
     .to_string()
 }
 
-// Listens on 127.0.0.1 and answers each bridge connection on its own thread. Returns "tcp:<addr>".
-// Each connection must open with the token line, or it is dropped without a reply.
+// A bridge connection: a unix socket on unix, TCP (and tcp: addresses) everywhere.
+trait Conn: Read + Write + Send + Sized + 'static {
+    fn dup(&self) -> io::Result<Self>;
+    fn close_write(&self) -> io::Result<()>;
+}
+
+impl Conn for TcpStream {
+    fn dup(&self) -> io::Result<Self> {
+        self.try_clone()
+    }
+    fn close_write(&self) -> io::Result<()> {
+        self.shutdown(Shutdown::Write)
+    }
+}
+
+#[cfg(unix)]
+impl Conn for UnixStream {
+    fn dup(&self) -> io::Result<Self> {
+        self.try_clone()
+    }
+    fn close_write(&self) -> io::Result<()> {
+        self.shutdown(Shutdown::Write)
+    }
+}
+
+// Serves the unix socket at sock (Go listenMCP). The socket sits in a 0700 dir and is chmod 0600, so
+// only this user reaches it; no token line is read. Returns the bare socket path for the bridge arg.
 // The listener lives until the process exits (Go serveMCP).
-pub fn serve(run: Arc<CoderFn>, token: &str) -> io::Result<String> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
-    let addr = format!("tcp:{}", listener.local_addr()?);
-    let token = token.to_string();
-    thread::spawn(move || {
-        for conn in listener.incoming() {
-            let Ok(conn) = conn else { break };
-            let run = Arc::clone(&run);
-            let token = token.clone();
-            thread::spawn(move || serve_conn(conn, &*run, &token));
-        }
-    });
+#[cfg(unix)]
+pub fn serve(run: Arc<CoderFn>, _token: &str, sock: &Path) -> io::Result<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let listener = UnixListener::bind(sock)?;
+    fs::set_permissions(sock, fs::Permissions::from_mode(0o600))?;
+    let addr = sock.display().to_string();
+    thread::spawn(move || accept_loop(listener.incoming(), run, None));
     Ok(addr)
 }
 
-fn serve_conn(conn: TcpStream, run: &CoderFn, token: &str) {
-    let Ok(reader_side) = conn.try_clone() else {
+// Windows has no unix socket here: listens on 127.0.0.1 and returns "tcp:<addr>". Each connection must
+// open with the token line, or it is dropped without a reply. The sock argument is unused.
+#[cfg(not(unix))]
+pub fn serve(run: Arc<CoderFn>, token: &str, _sock: &Path) -> io::Result<String> {
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let addr = format!("tcp:{}", listener.local_addr()?);
+    let token = token.to_string();
+    thread::spawn(move || accept_loop(listener.incoming(), run, Some(token)));
+    Ok(addr)
+}
+
+fn accept_loop<S: Conn>(
+    incoming: impl Iterator<Item = io::Result<S>>,
+    run: Arc<CoderFn>,
+    token: Option<String>,
+) {
+    for conn in incoming {
+        let Ok(conn) = conn else { break };
+        let run = Arc::clone(&run);
+        let token = token.clone();
+        thread::spawn(move || serve_conn(conn, &*run, token.as_deref()));
+    }
+}
+
+fn serve_conn<S: Conn>(conn: S, run: &CoderFn, token: Option<&str>) {
+    let Ok(reader_side) = conn.dup() else {
         return;
     };
     let mut writer = conn;
     let mut lines = BufReader::new(reader_side).lines();
-    match lines.next() {
-        Some(Ok(first)) if first == token => {}
-        _ => return,
+    if let Some(token) = token {
+        match lines.next() {
+            Some(Ok(first)) if first == token => {}
+            _ => return,
+        }
     }
     for line in lines {
         let Ok(line) = line else { break };
@@ -156,22 +207,24 @@ impl Drop for McpConfig {
     }
 }
 
-// Starts the server and writes mcp.json into a fresh temp directory. The guard removes that dir on drop.
+// Starts the server and writes mcp.json (and on unix mcp.sock) into a fresh temp directory. The guard
+// removes that dir on drop, which also removes the socket file.
 pub fn start_owned(run: Arc<CoderFn>) -> io::Result<McpConfig> {
     let token = new_token();
-    let addr = serve(run, &token)?;
     let exe = std::env::current_exe()?;
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     let dir = std::env::temp_dir().join(format!("chaude-mcp-{}-{nanos}", std::process::id()));
-    fs::create_dir_all(&dir)?;
+    make_private_dir(&dir)?;
     let path = dir.join("mcp.json");
+    // Created before serve, so a failed serve still removes the dir.
     let cfg = McpConfig {
-        dir,
+        dir: dir.clone(),
         path: path.clone(),
     };
+    let addr = serve(run, &token, &dir.join("mcp.sock"))?;
     fs::write(
         &path,
         config_json(&exe.display().to_string(), &addr, &token),
@@ -184,14 +237,25 @@ pub fn start_owned(run: Arc<CoderFn>) -> io::Result<McpConfig> {
     Ok(cfg)
 }
 
+#[cfg(unix)]
+fn make_private_dir(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new().mode(0o700).create(dir)
+}
+
+#[cfg(not(unix))]
+fn make_private_dir(dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(dir)
+}
+
 // Same as start_owned, but the dir is never removed (the old behaviour; api.rs still uses it).
 pub fn start(run: Arc<CoderFn>) -> io::Result<PathBuf> {
     start_owned(run).map(McpConfig::into_path)
 }
 
-// Go MCPResidentBridge: copies MCP lines between the main child's stdio and the socket at addr.
-// The token comes from TOKEN_ENV. Input EOF closes the write side; the bridge returns when the server
-// closes its side.
+// Go MCPResidentBridge: copies MCP lines between the main child's stdio and the socket at addr
+// (a unix socket path, or tcp:<addr>). The token comes from TOKEN_ENV and is sent only on tcp:.
+// Input EOF closes the write side; the bridge returns when the server closes its side.
 pub fn bridge(addr: &str, input: impl Read, output: impl Write + Send + 'static) -> io::Result<()> {
     let token = std::env::var(TOKEN_ENV).ok();
     bridge_with_token(addr, token.as_deref(), input, output)
@@ -201,22 +265,37 @@ pub fn bridge(addr: &str, input: impl Read, output: impl Write + Send + 'static)
 pub fn bridge_with_token(
     addr: &str,
     token: Option<&str>,
+    input: impl Read,
+    output: impl Write + Send + 'static,
+) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        if !addr.starts_with("tcp:") {
+            // The socket file is 0600 in a 0700 dir, so no token line is sent.
+            return relay(UnixStream::connect(addr)?, None, input, output);
+        }
+    }
+    let addr = addr.strip_prefix("tcp:").unwrap_or(addr);
+    relay(TcpStream::connect(addr)?, token, input, output)
+}
+
+fn relay<S: Conn>(
+    mut conn: S,
+    token: Option<&str>,
     mut input: impl Read,
     mut output: impl Write + Send + 'static,
 ) -> io::Result<()> {
-    let addr = addr.strip_prefix("tcp:").unwrap_or(addr);
-    let mut conn = TcpStream::connect(addr)?;
     if let Some(token) = token {
         writeln!(conn, "{token}")?;
     }
-    let mut back = conn.try_clone()?;
+    let mut back = conn.dup()?;
     let pump = thread::spawn(move || {
         let _ = io::copy(&mut back, &mut output);
         let _ = output.flush();
     });
-    let mut fwd = conn.try_clone()?;
+    let mut fwd = conn.dup()?;
     io::copy(&mut input, &mut fwd)?;
-    let _ = conn.shutdown(Shutdown::Write);
+    let _ = conn.close_write();
     let _ = pump.join();
     Ok(())
 }
@@ -326,21 +405,45 @@ mod tests {
     const CALL: &[u8] = br#"{"id":5,"method":"tools/call","params":{"name":"resident_coder","arguments":{"task":"x"}}}
 "#;
 
+    // A socket path unique to this test process; the test removes it.
+    fn sock_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("chaude-mcp-t-{}-{name}.sock", std::process::id()))
+    }
+
     #[test]
     fn loopback_round_trip_through_bridge() {
         let token = new_token();
-        let addr = serve(Arc::new(ok_run), &token).expect("serve");
+        let sock = sock_path("roundtrip");
+        let addr = serve(Arc::new(ok_run), &token, &sock).expect("serve");
         let out = Arc::new(Mutex::new(Vec::<u8>::new()));
         bridge_with_token(&addr, Some(&token), CALL, Shared(Arc::clone(&out))).expect("bridge");
+        let _ = fs::remove_file(&sock);
         let text = String::from_utf8(out.lock().unwrap().clone()).unwrap();
         let got: Value = serde_json::from_str(text.trim()).expect("one reply line");
         assert_eq!(got["id"], 5);
         assert_eq!(got["result"]["content"][0]["text"], "status: done (x)");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn unix_socket_is_private_and_needs_no_token() {
+        use std::os::unix::fs::PermissionsExt;
+        let sock = sock_path("private");
+        let addr = serve(Arc::new(ok_run), "unused", &sock).expect("serve");
+        assert_eq!(addr, sock.display().to_string());
+        let mode = fs::metadata(&sock).expect("socket").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let out = Arc::new(Mutex::new(Vec::<u8>::new()));
+        bridge_with_token(&addr, None, CALL, Shared(Arc::clone(&out))).expect("bridge");
+        let _ = fs::remove_file(&sock);
+        let text = String::from_utf8(out.lock().unwrap().clone()).unwrap();
+        assert!(text.contains("status: done (x)"), "{text}");
+    }
+
+    #[cfg(not(unix))]
     #[test]
     fn wrong_or_missing_token_gets_no_reply() {
-        let addr = serve(Arc::new(ok_run), &new_token()).expect("serve");
+        let addr = serve(Arc::new(ok_run), &new_token(), Path::new("")).expect("serve");
         for token in [Some("not-the-token"), None] {
             let out = Arc::new(Mutex::new(Vec::<u8>::new()));
             // The server drops the connection, so the write side may fail; only the empty output matters.
