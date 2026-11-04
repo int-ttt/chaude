@@ -35,7 +35,9 @@ use crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
-use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, ScrollDown, ScrollUp,
+};
 use crossterm::{execute, queue};
 use std::path::Path;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -1760,7 +1762,13 @@ fn text_width(w: usize) -> usize {
 }
 
 // The whole screen as `h` rows of at most `w` columns. Pure: the same App and size give the same rows.
+#[cfg(test)]
 pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
+    layout(app, w, h).0
+}
+
+// The rows of `frame`, and how many of the top rows are the body (the part that scrolls with new output).
+fn layout(app: &App, w: usize, h: usize) -> (Vec<String>, usize) {
     let width = text_width(w);
     let chrome = app.chrome(w);
     let chrome_h = chrome.len();
@@ -1790,7 +1798,7 @@ pub fn frame(app: &App, w: usize, h: usize) -> Vec<String> {
     rows.extend(menu);
     // Too short for the whole chrome: keep the bottom rows, input line included.
     rows.extend(chrome.into_iter().skip(chrome_h - h.min(chrome_h)));
-    rows
+    (rows, body_h)
 }
 
 // Terminal cell that holds the cursor: inside the input box (after its left border), on the input row.
@@ -1817,11 +1825,56 @@ fn ime_col_shift(ime: Option<String>, emulator: Option<String>) -> i32 {
     0
 }
 
-// Writes only the rows that differ from `prev` (the rows last drawn), then parks the cursor on the input line.
+// How far the body's rows moved since the last draw, so the terminal can scroll them instead of repainting:
+// k > 0 means the content moved up k rows (new lines at the tail), k < 0 means it moved down. 0 when no clean shift.
+fn body_shift(prev: &[String], rows: &[String], body_h: usize) -> isize {
+    const MAX: usize = 8;
+    if body_h < 2 || prev.len() != rows.len() || prev[..body_h] == rows[..body_h] {
+        return 0;
+    }
+    for k in 1..=MAX.min(body_h - 1) {
+        if prev[k..body_h] == rows[..body_h - k] {
+            return k as isize;
+        }
+        if prev[..body_h - k] == rows[k..body_h] {
+            return -(k as isize);
+        }
+    }
+    0
+}
+
+// Writes only what changed since `prev` (the rows last drawn), then parks the cursor on the input line.
+// A body that only shifted (new output at the tail, or a scroll) is moved with the terminal's scroll region,
+// so only the rows that really changed are written. Nothing is cleared on a normal update.
 pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Result<()> {
-    let rows = frame(app, app.cols, app.rows);
+    let (rows, body_h) = layout(app, app.cols, app.rows);
+    let shift = body_shift(prev, &rows, body_h);
+    let mut moved;
+    let old: &[String] = if shift == 0 {
+        prev
+    } else {
+        // Mirror the terminal after the scroll: rows that scrolled in are blank until repainted.
+        write!(out, "\x1b[1;{body_h}r")?;
+        if shift > 0 {
+            queue!(out, ScrollUp(shift as u16))?;
+        } else {
+            queue!(out, ScrollDown((-shift) as u16))?;
+        }
+        write!(out, "\x1b[r")?;
+        moved = prev.clone();
+        if shift > 0 {
+            let k = shift as usize;
+            moved[..body_h].rotate_left(k);
+            moved[body_h - k..body_h].iter_mut().for_each(String::clear);
+        } else {
+            let k = (-shift) as usize;
+            moved[..body_h].rotate_right(k);
+            moved[..k].iter_mut().for_each(String::clear);
+        }
+        &moved
+    };
     for (i, row) in rows.iter().enumerate() {
-        if prev.get(i) != Some(row) {
+        if old.get(i) != Some(row) {
             queue!(out, MoveTo(0, i as u16), Clear(ClearType::CurrentLine))?;
             write!(out, "{row}")?;
         }
@@ -3360,6 +3413,156 @@ mod tests {
         assert!(!app.transcript.join("\n").contains("still waiting"));
     }
 
+    // Minimal terminal model for the escapes draw() emits: cursor moves, line clear, scroll region, SU/SD.
+    struct Screen {
+        w: usize,
+        cells: Vec<Vec<char>>,
+        row: usize,
+        col: usize,
+        top: usize,
+        bot: usize,
+    }
+
+    impl Screen {
+        fn new(w: usize, h: usize) -> Self {
+            Screen {
+                w,
+                cells: vec![vec![' '; w]; h],
+                row: 0,
+                col: 0,
+                top: 0,
+                bot: h - 1,
+            }
+        }
+
+        fn feed(&mut self, s: &str) {
+            let mut it = s.chars();
+            while let Some(c) = it.next() {
+                if c != '\x1b' {
+                    if self.col < self.w {
+                        self.cells[self.row][self.col] = c;
+                    }
+                    self.col += 1;
+                    continue;
+                }
+                assert_eq!(it.next(), Some('['), "only CSI is modelled");
+                let mut params = String::new();
+                let fin = loop {
+                    let c = it.next().expect("escape cut short");
+                    if c.is_ascii_digit() || c == ';' || c == '?' {
+                        params.push(c);
+                    } else {
+                        break c;
+                    }
+                };
+                let nums: Vec<usize> = params.split(';').filter_map(|p| p.parse().ok()).collect();
+                match fin {
+                    'm' | 'h' | 'l' => {}
+                    'H' => {
+                        self.row = nums.first().copied().unwrap_or(1) - 1;
+                        self.col = nums.get(1).copied().unwrap_or(1) - 1;
+                    }
+                    'K' if params == "2" => self.cells[self.row] = vec![' '; self.w],
+                    'S' | 'T' => self.scroll(nums.first().copied().unwrap_or(1), fin == 'S'),
+                    'r' if params.is_empty() => {
+                        self.top = 0;
+                        self.bot = self.cells.len() - 1;
+                        (self.row, self.col) = (0, 0);
+                    }
+                    'r' => {
+                        self.top = nums[0] - 1;
+                        self.bot = nums[1] - 1;
+                        (self.row, self.col) = (0, 0);
+                    }
+                    other => panic!("unmodelled escape {other:?} params {params:?}"),
+                }
+            }
+        }
+
+        fn scroll(&mut self, n: usize, up: bool) {
+            let blank = vec![' '; self.w];
+            for _ in 0..n {
+                if up {
+                    for r in self.top..self.bot {
+                        self.cells[r] = self.cells[r + 1].clone();
+                    }
+                    self.cells[self.bot] = blank.clone();
+                } else {
+                    for r in (self.top + 1..=self.bot).rev() {
+                        self.cells[r] = self.cells[r - 1].clone();
+                    }
+                    self.cells[self.top] = blank.clone();
+                }
+            }
+        }
+
+        fn lines(&self) -> Vec<String> {
+            self.cells
+                .iter()
+                .map(|r| r.iter().collect::<String>().trim_end().to_string())
+                .collect()
+        }
+    }
+
+    fn strip_sgr(s: &str) -> String {
+        let mut out = String::new();
+        let mut it = s.chars();
+        while let Some(c) = it.next() {
+            if c == '\x1b' {
+                for c in it.by_ref() {
+                    if c.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    // Draws one update and checks the modelled screen equals the frame. Returns the bytes written.
+    fn draw_and_check(app: &App, prev: &mut Vec<String>, screen: &mut Screen) -> String {
+        let mut buf: Vec<u8> = Vec::new();
+        draw(&mut buf, app, prev).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        screen.feed(&out);
+        let want: Vec<String> = frame(app, app.cols, app.rows)
+            .iter()
+            .map(|r| strip_sgr(r).trim_end().to_string())
+            .collect();
+        assert_eq!(screen.lines(), want, "bytes written: {out:?}");
+        out
+    }
+
+    // Scrolled body moves use the terminal's scroll region; the screen must still match the frame after each update.
+    #[test]
+    fn draw_scroll_region_leaves_the_screen_equal_to_the_frame() {
+        let mut app = App::new(40, 12);
+        let mut prev = Vec::new();
+        let mut screen = Screen::new(40, 12);
+        draw_and_check(&app, &mut prev, &mut screen);
+        let mut scrolled = false;
+        for i in 0..30 {
+            app.apply(text(&format!("line {i}\n")));
+            scrolled |= draw_and_check(&app, &mut prev, &mut screen).contains("\x1b[1S");
+        }
+        assert!(
+            scrolled,
+            "a streamed line should move the body with a scroll, not a repaint"
+        );
+        for delta in [-3, -2, 5, 100, -40] {
+            app.scroll(delta);
+            draw_and_check(&app, &mut prev, &mut screen);
+        }
+        app.apply(text("tail\n"));
+        draw_and_check(&app, &mut prev, &mut screen);
+        for i in 0..20 {
+            app.apply(text(&format!("burst {i}\n")));
+        }
+        draw_and_check(&app, &mut prev, &mut screen);
+    }
+
     // Frame bench: 2000-row history, then 200 streamed text events (one frame each) like 200 events/s.
     // Run: cargo test -p chaude-cli --release bench_frame -- --ignored --nocapture
     #[test]
@@ -3376,6 +3579,9 @@ mod tests {
         let mut buf: Vec<u8> = Vec::new();
         draw(&mut buf, &app, &mut prev).unwrap();
         let mut ms: Vec<f64> = Vec::new();
+        let mut bytes: Vec<usize> = Vec::new();
+        let mut cells: Vec<usize> = Vec::new();
+        let mut rows_changed: Vec<usize> = Vec::new();
         for i in 0..200 {
             app.apply(text(&format!(
                 "streamed line {i} with words to wrap across the width of the pane\n"
@@ -3384,6 +3590,11 @@ mod tests {
             let t = Instant::now();
             draw(&mut buf, &app, &mut prev).unwrap();
             ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            bytes.push(buf.len());
+            // Rows actually repainted: each repaint starts with a line clear (ESC[2K).
+            let repainted = String::from_utf8_lossy(&buf).matches("\x1b[2K").count();
+            rows_changed.push(repainted);
+            cells.push(repainted * app.cols);
         }
         ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let avg = ms.iter().sum::<f64>() / ms.len() as f64;
@@ -3394,6 +3605,16 @@ mod tests {
             ms[ms.len() - 1],
             ms.len(),
             app.transcript.len()
+        );
+        let n = bytes.len();
+        println!(
+            "BENCH per update: bytes avg {} max {}; rows repainted avg {} max {}; cells repainted avg {} max {} (n={n})",
+            bytes.iter().sum::<usize>() / n,
+            bytes.iter().max().unwrap(),
+            rows_changed.iter().sum::<usize>() / n,
+            rows_changed.iter().max().unwrap(),
+            cells.iter().sum::<usize>() / n,
+            cells.iter().max().unwrap()
         );
     }
 }
