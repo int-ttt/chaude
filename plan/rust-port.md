@@ -24,7 +24,8 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - done: resident_coder MCP tool over loopback, core side (f90929d; mcp::start/serve/bridge, Engine coder_caller). Gap: `chaude mcp-resident` subcommand missing in crates/cli.
      - done: main child idle rotation, Go idleDeadline (f6aca83; Config.idle_rotate).
      - done: resident MCP loopback requires a per-run token line (d50d91f; mcp::new_token 256-bit from /dev/urandom, token in mcp.json env CHAUDE_MCP_TOKEN, not argv).
-     - open: record, orch, rotation details beyond idle, import/--from-claude, metrics.
+     - done: record file format (record.rs: render/parse_entries, append_turn with lock, next_number, topic_of, slugify, dir_for; Stamp passed in, no local-time dep).
+     - open: record_turn/record_folder (turn assembly, project folders), orch, rotation details beyond idle, import/--from-claude, metrics.
 4. Terminal UI without Charm: inline streaming output, input line with Korean IME + unicode width, spinner, status/usage bar, slash commands.
    - status (2026-11-04, crates/cli/src/tui):
      - done: inline streaming output (live feed + record load, asst rows via markdown path, tool_result_text).
