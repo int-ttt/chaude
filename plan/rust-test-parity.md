@@ -12,8 +12,8 @@ Dedupe key: Go test name (320 unique names, no collisions across packages). Prec
 
 | status | count |
 |---|---|
-| covered | 233 |
-| partial | 14 |
+| covered | 235 |
+| partial | 12 |
 | ignored | 48 |
 | missing | 0 |
 | n-a | 25 |
@@ -31,7 +31,7 @@ Ignored by reason (sum 48):
 
 ## Remaining
 
-- partial (14): Rust test covers the part of the Go body that is ported; the rest has an ignored stub in
+- partial (12): Rust test covers the part of the Go body that is ported; the rest has an ignored stub in
   crates/core/tests/parity_final3_ignored.rs (or the stub named in the note). Stubs panic when run with --ignored.
 - ignored (48): stubs exist; each needs its seam wired (core Repl seam, TUI, or cli test seam) before #[ignore] can be removed.
 - design (2): TestResidentSlotsFixedFour, TestResidentCoderBusyRefuses. Go fixes four resident roles and refuses a busy single coder;
@@ -254,14 +254,14 @@ Ignored by reason (sum 48):
 | TestStageLinesOrder | internal/harness/resident_agent_test.go | crates/core/tests/engine.rs::resident_stage_rows_bracket_main_turn_and_agent_calls | partial | stage row bracket covered; full order stub: crates/core/tests/parity_final3_ignored.rs::go_stage_lines_full_order |
 | TestSessionArgsMinimal | internal/harness/resident_agent_test.go | crates/core/src/proc.rs::args_match_go_session_defaults | covered | body read: Rust args checked against Go session defaults |
 | TestSessionArgsCoder | internal/harness/resident_agent_test.go | crates/core/src/proc.rs::resident_shape_args_match_go_session_args | covered | body read: coder session args |
-| TestMainStrictMCP | internal/harness/resident_agent_test.go | crates/core/src/proc.rs::mcp_config_flag_only_when_set, crates/core/tests/parity_final3.rs::main_strict_mcp_args | partial | strict-MCP args covered (final3); spawn-once stub: crates/core/tests/parity_final3_ignored.rs::go_main_strict_mcp_spawn_once |
+| TestMainStrictMCP | internal/harness/resident_agent_test.go | crates/core/src/proc.rs::mcp_config_flag_only_when_set, crates/core/tests/parity_final3.rs::main_strict_mcp_args, crates/core/tests/parity_final3_resident.rs::main_spawned_once_with_strict_mcp | covered | strict-MCP args (final3) plus one main spawn across a turn (engine, final3 resident) |
 | TestResidentRunningListShowsOnlyBusySessions | internal/harness/resident_busy_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): running list shows only busy residents  [p12: resident_running_list_shows_only_busy_sessions] |
 | TestResidentCoderReply | internal/harness/resident_coder_test.go | crates/core/tests/engine.rs::coder_task_emits_working_done_rows_and_reply | covered | body read: coder reply rows |
 | TestResidentCoderSlotReuse | internal/harness/resident_coder_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): coder slot reuse  [p12: resident_coder_slot_reuse] |
 | TestResidentCoderBusyRefuses | internal/harness/resident_coder_test.go | none | ignored | ignored (Rust differs by design): Go refuses a busy single coder; Rust pool errors "all resident coders are busy" (crates/core/src/api.rs:1046). Planned #[ignore = "parity: single-coder busy refusal vs pool error"]  [p12: resident_coder_busy_refuses] |
 | TestCoderPermissionOnlyWhenBusy | internal/harness/resident_coder_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): coder permission prompt only when busy  [p12: coder_permission_only_when_busy] |
 | TestMCPRoundTripFakeSession | internal/harness/resident_coder_test.go | crates/core/tests/parity_final3.rs::mcp_round_trip_fake_session | covered | fake session MCP round trip (final3) |
-| TestResidentMCPConfigWritten | internal/harness/resident_coder_test.go | crates/core/tests/parity_final3.rs::resident_mcp_config_written | partial | config written with 0600 mode (final3); created-once stub: crates/core/tests/parity_final3_ignored.rs::go_resident_mcp_config_created_once  [p12: mcp_config_args] |
+| TestResidentMCPConfigWritten | internal/harness/resident_coder_test.go | crates/core/tests/parity_final3.rs::resident_mcp_config_written, crates/core/tests/parity_final3_resident.rs::mcp_config_path_reused_after_respawn | covered | config written with 0600 mode (final3) plus same mcp.json path after respawn (engine, final3 resident)  [p12: mcp_config_args] |
 | TestExtraCoderPoolFromSetting | internal/harness/resident_extra_test.go | crates/cli/src/tui/settings.rs::extra_coders_wins_over_legacy_key; crates/core/tests/parity_harness_p3.rs::default_extra_pool_and_idle_ttl_match_go | covered | default pool 4 asserted in p3 (new); the setting parse is name-level |
 | TestExtraCoderExpiresAt270s | internal/harness/resident_extra_test.go | crates/core/tests/engine.rs::idle_extra_coder_expires_and_base_coder_stays; crates/core/tests/parity_harness_p3.rs::default_extra_pool_and_idle_ttl_match_go | covered | engine test uses 300 ms TTL; p3 asserts the default 270 s |
 | TestViaPrompterFailureNotice | internal/harness/resident_pipeline_test.go | crates/core/tests/engine.rs::prompter_failure_falls_back_to_raw_prompt | covered | name-level |
