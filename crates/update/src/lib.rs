@@ -1,10 +1,20 @@
 //! Self-update helpers (Go: update command).
 
 pub mod archive;
+pub mod cleanup;
 pub mod fsutil;
 pub mod http;
+pub mod update;
+
+#[cfg(test)]
+mod tests;
 
 use std::fmt;
+
+pub use cleanup::cleanup_old;
+pub use update::{
+    Fetch, Options, Version, check_latest, check_latest_with, default_fetch, run, run_cli, text,
+};
 
 /// Update failure. `Offline` means GitHub could not be reached; `Failed` is any other error.
 #[derive(Debug)]
