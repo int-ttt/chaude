@@ -4,6 +4,8 @@ pub mod api;
 pub mod budget;
 pub mod event;
 pub mod handoff;
+pub mod import_claude;
+pub mod import_view;
 pub mod lean;
 pub mod mcp;
 pub mod metrics;
