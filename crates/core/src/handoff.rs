@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,16 @@ pub struct ExitHandoff {
     // Unix seconds. Go writes an RFC 3339 "saved_at" string, which is not read here.
     #[serde(default)]
     pub saved_at_unix: u64,
+    // Harness pid that wrote the file (Go owner_pid). Only the live marker needs it; 0 when unknown.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub owner_pid: u32,
+    // role -> claude child pid while the child runs (Go child_pid). Only the live marker needs it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub child_pids: BTreeMap<String, u32>,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 // What a session load does with a previous session (see resume_mode).
@@ -55,6 +66,31 @@ impl ExitHandoff {
         }
         ids
     }
+}
+
+// Go reconcileStart: children a dead harness left running. Empty while the owner is alive. Otherwise each
+// (role, pid) whose child is alive, in role order. `alive` is pid_alive in production.
+pub fn orphans(prev: &ExitHandoff, alive: impl Fn(u32) -> bool) -> Vec<(String, u32)> {
+    if prev.owner_pid != 0 && alive(prev.owner_pid) {
+        return Vec::new();
+    }
+    prev.child_pids
+        .iter()
+        .filter(|(_, pid)| **pid != 0 && alive(**pid))
+        .map(|(role, pid)| (role.clone(), *pid))
+        .collect()
+}
+
+// Go pidAlive (unix). Uses `kill -0`, so no libc. A pid we may not signal reads as dead here.
+pub fn pid_alive(pid: u32) -> bool {
+    pid != 0
+        && Command::new("kill")
+            .arg("-0")
+            .arg(pid.to_string())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
 }
 
 // <project record folder>/.exit-handoff.json
@@ -381,5 +417,45 @@ mod tests {
         assert_eq!(got.ctx_tokens.get("coder"), Some(&7));
         write_exit_handoff(&path, &sample()).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("ctx_tokens"));
+    }
+
+    #[test]
+    fn orphans_lists_alive_children_only_when_owner_is_dead() {
+        let mut h = sample();
+        h.owner_pid = 100;
+        h.child_pids = BTreeMap::from([
+            ("main".to_string(), 201),
+            ("coder".to_string(), 202),
+            ("tui".to_string(), 0),
+        ]);
+        // Owner dead: the alive children are orphans; a zero pid is never one.
+        let alive = |pid: u32| pid == 201 || pid == 202;
+        assert_eq!(
+            orphans(&h, alive),
+            vec![("coder".to_string(), 202), ("main".to_string(), 201)]
+        );
+        // Owner alive (another run in the same folder): nothing to report.
+        assert!(orphans(&h, |pid| pid == 100 || pid == 201).is_empty());
+        // Children all gone: nothing to report.
+        assert!(orphans(&h, |_| false).is_empty());
+    }
+
+    #[test]
+    fn owner_and_child_pids_round_trip_and_stay_out_of_clean_files() {
+        let dir = TempDir::new("handoff-pids");
+        let path = handoff_file(dir.path());
+        let mut h = sample();
+        h.owner_pid = 7;
+        h.child_pids = BTreeMap::from([("main".to_string(), 9)]);
+        write_exit_handoff(&path, &h).unwrap();
+        let got = read_exit_handoff(&path).expect("readable");
+        assert_eq!(got.owner_pid, 7);
+        assert_eq!(got.child_pids.get("main"), Some(&9));
+        write_exit_handoff(&path, &sample()).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(
+            !text.contains("owner_pid") && !text.contains("child_pids"),
+            "{text}"
+        );
     }
 }

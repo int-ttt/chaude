@@ -204,6 +204,12 @@ pub enum UiEvent {
         id: String,
         input: Value,
     },
+    // A claude child a dead harness left running; sent at start and never killed (Go "[orphan]" notice).
+    // role is the handoff role (MAIN_ROLE or a resident role).
+    OrphanNotice {
+        role: String,
+        pid: u32,
+    },
 }
 
 // Recent turns kept for the handoff snapshot (Go --tail-turns) and their size limits (Go --snapshot-chars).
@@ -531,7 +537,11 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     // cfg.resume wins for the main child.
     let mut main_resume = cfg.resume.clone();
     let mut resume_pending = BTreeMap::new();
+    let mut orphans = Vec::new();
     if let Some((prev, killed)) = cfg.handoff_path.as_deref().and_then(handoff::previous_run) {
+        if killed {
+            orphans = handoff::orphans(&prev, handoff::pid_alive);
+        }
         let main_thr = threshold_for(&cfg.model, cfg.rotate_threshold);
         if let handoff::Load::Resume(sid) =
             handoff::resume_mode(&prev, handoff::MAIN_ROLE, killed, main_thr)
@@ -617,6 +627,9 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
         coders: Vec::new(),
         coder_epoch: 0,
     };
+    for (role, pid) in orphans {
+        st.emit(UiEvent::OrphanNotice { role, pid });
+    }
     st.persist_live();
     st.start_child();
     loop {
@@ -1055,6 +1068,24 @@ impl State {
         if !self.sid.is_empty() {
             ctx_tokens.insert(handoff::MAIN_ROLE.to_string(), self.ctx_tokens);
         }
+        // Live children by role (Go child_pid), so a dead harness's leftovers can be found at the next start.
+        let child_pids: BTreeMap<String, u32> = self
+            .proc
+            .iter()
+            .map(|p| (handoff::MAIN_ROLE.to_string(), p.pid()))
+            .chain(
+                self.prompter_proc
+                    .iter()
+                    .map(|p| ("prompter".to_string(), p.pid())),
+            )
+            .chain(self.tui_proc.iter().map(|p| ("tui".to_string(), p.pid())))
+            .chain(
+                self.coders
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, c)| c.proc.as_ref().map(|p| (coder_role(i), p.pid()))),
+            )
+            .collect();
         ExitHandoff {
             cwd: self
                 .opts
@@ -1066,6 +1097,8 @@ impl State {
             resident_sessions,
             owned_sessions: self.owned.clone(),
             ctx_tokens,
+            owner_pid: std::process::id(),
+            child_pids,
             ..Default::default()
         }
     }

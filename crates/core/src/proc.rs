@@ -258,6 +258,11 @@ impl ClaudeProc {
         Ok(id)
     }
 
+    // OS pid of the claude child (handoff child_pids).
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     // Kills the child and reaps it. Errors are ignored: the child may already have exited.
     pub fn kill(&mut self) {
         let _ = self.child.kill();

@@ -1705,6 +1705,46 @@ fn exit_handoff_records_main_session_on_shutdown() {
     assert_eq!(v["cwd"], f.dir.display().to_string().as_str(), "{text}");
 }
 
+// A dead harness whose claude child still runs is reported at the next start (Go reconcileStart "[orphan]").
+// The owner pid is a reaped child, so it is dead; the test process stands in for a live orphan.
+#[test]
+fn orphan_notice_for_alive_child_of_dead_owner() {
+    let _g = lock();
+    let f = fake("orphan_notice", &["text_turn.jsonl"]);
+    let path = f.dir.join(".exit-handoff.json");
+    let mut dead = process::Command::new("true").spawn().expect("spawn true");
+    dead.wait().expect("reap true");
+    let live = handoff::ExitHandoff {
+        main_session: "old1".into(),
+        owner_pid: dead.id(),
+        child_pids: BTreeMap::from([
+            ("main".to_string(), process::id()),
+            ("coder".to_string(), dead.id()),
+        ]),
+        ..Default::default()
+    };
+    handoff::write_exit_handoff(&handoff::live_handoff_file(&path), &live).unwrap();
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.handoff_path = Some(path.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let evs = until_idle(&rx);
+    h.shutdown();
+    let orphans: Vec<&UiEvent> = evs
+        .iter()
+        .filter(|e| matches!(e, UiEvent::OrphanNotice { .. }))
+        .collect();
+    assert_eq!(
+        orphans,
+        vec![&UiEvent::OrphanNotice {
+            role: "main".into(),
+            pid: process::id(),
+        }],
+        "{evs:?}"
+    );
+}
+
 // A run that was killed leaves its live marker behind; the next start resumes its main session.
 #[test]
 fn killed_previous_run_starts_main_with_resume() {
