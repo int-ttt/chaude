@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 use crate::budget::{self, Budget};
+use crate::clients::idle_deadline;
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
 use crate::handoff::{self, ExitHandoff};
 use crate::import_claude::{ClaudeImport, import_note};
@@ -336,15 +337,6 @@ pub fn resolve_max_workers(
         };
     }
     Ok(DEFAULT_MAX_WORKERS)
-}
-
-// Go idleDeadline: the idle rotation delay. With a 5m cache the wait is capped at 290s (before the cache
-// expires); 1h cache, off (0), or a delay already under 290s is used as given. Mirrors Go clients_test.go.
-fn idle_deadline(idle: Duration, cache_ttl: &str) -> Duration {
-    if idle.is_zero() || cache_ttl == "1h" || idle < Duration::from_secs(290) {
-        return idle;
-    }
-    Duration::from_secs(290)
 }
 
 // Go repl.go floor, applied only when neither --max-workers nor CHAUDE_MAX_WORKERS is set: parked resident
