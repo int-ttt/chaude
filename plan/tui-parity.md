@@ -119,15 +119,19 @@ Counts (filled at end): see the "Counts" section.
 
 ## Status bar, spinner, notices
 
-- [ ] B01 Status line: state, model, "rot N", "agents N running (bg N)" (statusLine tui.go:1193-1210) · test: none · core: rotation count, agent tracker
+- [x] B01 Status line: state, model, "rot N", "agents N running (bg N)" (statusLine tui.go:1193-1210) · test: none · core: rotation count, agent tracker
+  · audited (same): bar.rs:210-219 status_suffix (Go statusLine tui.go:1201-1228: rot, mode, agents N running (bg N)); test bar.rs:567. Row's old line range 1193-1210 was stale.
 - [x] B02 Main status text while busy with elapsed "· Mm SSs" (mainStatusText tui.go:888-898) · test: none · core: turn start time  · fixed: ToolStart sets last_tool (40 runes, mod.rs), Busy(true) clears it, busy_row passes it to bar::elapsed_suffix (Go tui.go:900-906). test: busy_row_shows_the_last_tool_and_a_new_turn_clears_it; slash menu room (popH): slash_menu_takes_room_from_the_queue
 - [x] B03 Spinner while busy (sp Tick Init tui.go:280) · test: none · core: none  · audited (same): bar.rs:192 spinner_frame; tick at mod.rs:593
 - [x] B04 Status text prefixed by agent name; format (TestAgentStatusTextPrefixedName panel_test.go:314; TestAgentStatusFormat panel_test.go:340; agentStatusText tui.go:1527) · test: TestAgentStatusFormat (panel_test.go:340) · core: agent events  · audited (same): bar.rs:269-292 agent_status_text + tests
 - [x] B05 Agent state dot: state mapping (agentState tui.go:1505; agentDot tui.go:1520) · test: TestStalledOutputFileKeepsAgentRunningUntilDoneSignal (panel_test.go:169) · core: agent done signal  · audited (same): bar.rs:225 agent_state; dot wiring in agent rows
 - [x] B06 Model prefix hidden when already in name (hasModelPrefix tui.go:1546) · test: none · core: none  · audited (same): bar.rs:269-292 has_model_prefix + tests
-- [ ] B07 Thinking indicator only for foreground session (TestThinkingOnlyForForeground panel_test.go:120; TestSessionPanelAndThinking panel_test.go:17) · test: TestThinkingOnlyForForeground (panel_test.go:120) · core: thinking deltas
-- [ ] B08 Idle tick refreshes panel when background agent finishes (TestIdleTickRefreshesWhenBackgroundFinishes panel_test.go:55) · test: TestIdleTickRefreshesWhenBackgroundFinishes (panel_test.go:55) · core: agent done
+- [x] B07 Thinking indicator only for foreground session (TestThinkingOnlyForForeground panel_test.go:120; TestSessionPanelAndThinking panel_test.go:17) · test: TestThinkingOnlyForForeground (panel_test.go:120) · core: thinking deltas
+  · fixed (19846b9): fg part same (bar.rs:249-267 thinking_row, mod.rs body); opus/resident were passed false, now OpusBusy/ResidentBusy stored in apply (Go tui.go:383-391) · test: mod.rs opus_or_resident_busy_keeps_the_thinking_row_after_text (new)
+- [x] B08 Idle tick refreshes panel when background agent finishes (TestIdleTickRefreshesWhenBackgroundFinishes panel_test.go:55) · test: TestIdleTickRefreshesWhenBackgroundFinishes (panel_test.go:55) · core: agent done
+  · audited (same, by code read, no test): Go spinner tick refresh tui.go:454 is event-driven; Rust redraws each event-loop pass (mod.rs:2544); AgentEnd variant api.rs:105 (emit site not re-verified)
 - [ ] B09 Background finish notification finishes oldest background row (TestUserEventNotificationFinishesBackground panel_test.go:384) · test: TestUserEventNotificationFinishesBackground (panel_test.go:384) · core: task-notification user events
+  · audited (diff): named-id finish is same (api.rs:2355-2368 on_task_notification, Go drain.go:182-207). Missing Go fallback finishOldestBackground (drain.go:251; repl.go:526 idle child turn with no notification; livechild.go:97). Not in core; remaining
 - [x] B10 Done line for a finished agent (doneLine agentview/tui note; markDoneLocked drain.go/agentview.go:59) · test: none · core: agent done  · audited (same): bar.rs:305 done line; mod.rs:1229-1232
 - [x] B11 Stage notices "· main 처리중", "· agent <type> 호출", "· agent <type> 완료", "· main 완료" (repl.go:~790-800; stage resident.go:255) · test: none · core: resident child events  · audited (same): mod.rs:485-488 Stage -> note; stage_text mod.rs:1753-1764 (· main 처리중/· agent X 호출/완료)
 - [x] B12 Non-stage notices via addNotice / noteMsg (resident.go:277; drain.go:96) · test: none · core: drain/agent notices  · audited (same): mod.rs:489-494 error note block (Go addNotice/noteMsg)
@@ -136,13 +140,20 @@ Counts (filled at end): see the "Counts" section.
 - [x] B15 Context-rotated notice "── context rotated #N (reason; …) ──" (repl.go:1019) · test: TestLiveRotationCarriesContext (acceptance_test.go:21) · core: rotate/handoff  · audited (same): bar.rs:331-337 rotated_notice; mod.rs:472
 - [x] B16 "── new session ──" on /clear (clear repl.go:1409-1412) · test: none · core: session start  · audited (same): bar.rs:340-341 NEW_SESSION_NOTICE; mod.rs:454
 - [x] B17 Quiet-wait notice "[no output for <d>; still waiting, Esc/Ctrl+C to interrupt]" once per quiet stretch with no open tool (repl.go:788; quiet closure repl.go:~775-790) · test: TestTurnQuietNoticeKeepsWaiting (turn_wait_test.go:63) · core: result/events stream  · audited (same): bar.rs:346 quiet_notice; mod.rs:590
-- [ ] B18 Long-running Agent/Task tool call is waited for with no cap (repl.go:~800 comment; TestTurnWaitsForOpenAgentToolResult turn_wait_test.go:38) · test: TestTurnWaitsForOpenAgentToolResult (turn_wait_test.go:38) · core: tool_use/tool_result pairing
-- [ ] B19 Stalled output file keeps agent running until done signal (panel_test.go:169) · test: TestStalledOutputFileKeepsAgentRunningUntilDoneSignal (panel_test.go:169) · core: output file / done signal
-- [ ] B20 Usage popup and budget flows: /usage allowed while busy (usagebusy_test.go:10-51) · test: TestUsageAllowedWhileBusy (usagebusy_test.go:10), TestUsageMsgWhileBusyOpensPopup (usagebusy_test.go:51) · core: one-shot claude call
-- [ ] B21 Queue: input submitted while busy is queued, not sent (TestQueueWhileBusyNotSent panel_test.go:218) · test: TestQueueWhileBusyNotSent (panel_test.go:218) · core: none
-- [ ] B22 Queue sent on done, in order, merged with "\n\n" (mergePrompts tui.go:876; TestQueueSentOnDoneInOrder panel_test.go:235) · test: TestQueueSentOnDoneInOrder (panel_test.go:235) · core: turn done
-- [ ] B23 Background-only agents do not queue input (TestBackgroundOnlyDoesNotQueue panel_test.go:280) · test: TestBackgroundOnlyDoesNotQueue (panel_test.go:280) · core: agent tracker
-- [ ] B24 Esc during foreground agent clears foreground panel (TestEscInterruptClearsForegroundPanel panel_test.go:38) · test: TestEscInterruptClearsForegroundPanel (panel_test.go:38) · core: interrupt
+- [x] B18 Long-running Agent/Task tool call is waited for with no cap (repl.go:~800 comment; TestTurnWaitsForOpenAgentToolResult turn_wait_test.go:38) · test: TestTurnWaitsForOpenAgentToolResult (turn_wait_test.go:38) · core: tool_use/tool_result pairing
+  · audited (same): core main_wait_budget returns None while open_tools is non-empty (api.rs:2411); on_quiet skips it (api.rs:2457); TUI quiet notice skipped (mod.rs:597)
+- [x] B19 Stalled output file keeps agent running until done signal (panel_test.go:169) · test: TestStalledOutputFileKeepsAgentRunningUntilDoneSignal (panel_test.go:169) · core: output file / done signal
+  · audited (same): Go startMod/startSize set-only (drain.go:36-37,120, no reader); done only by signal (drain.go:182-207). Rust has no output-file stat path
+- [x] B20 Usage popup and budget flows: /usage allowed while busy (usagebusy_test.go:10-51) · test: TestUsageAllowedWhileBusy (usagebusy_test.go:10), TestUsageMsgWhileBusyOpensPopup (usagebusy_test.go:51) · core: one-shot claude call
+  · audited (same): commands.rs:332 lets /usage through while busy (Go tui.go:797-804); test commands.rs usage_is_accepted_while_busy; mod.rs:967 returns Action::Usage while busy
+- [x] B21 Queue: input submitted while busy is queued, not sent (TestQueueWhileBusyNotSent panel_test.go:218) · test: TestQueueWhileBusyNotSent (panel_test.go:218) · core: none
+  · audited (same): api.rs:987-994 submit queues while busy or prompter waiting (Go tui.go:816); TUI always sends Action::Submit (mod.rs:2459). No direct test
+- [x] B22 Queue sent on done, in order, merged with "\n\n" (mergePrompts tui.go:876; TestQueueSentOnDoneInOrder panel_test.go:235) · test: TestQueueSentOnDoneInOrder (panel_test.go:235) · core: turn done
+  · audited (same): api.rs:2639-2651 next_turn joins with "\n\n" (Go tui.go:513-520 mergePrompts); test crates/core/tests/engine.rs:315 queued_prompts_go_out_as_one_merged_turn_on_done
+- [x] B23 Background-only agents do not queue input (TestBackgroundOnlyDoesNotQueue panel_test.go:280) · test: TestBackgroundOnlyDoesNotQueue (panel_test.go:280) · core: agent tracker
+  · audited (same): busy is turn-scoped (api.rs:1118 set; cleared at 1124, 1139, 2641, 2649); background agents never touch busy and submit (api.rs:983) reads busy only. Go m.busy tui.go:797 same
+- [x] B24 Esc during foreground agent clears foreground panel (TestEscInterruptClearsForegroundPanel panel_test.go:38) · test: TestEscInterruptClearsForegroundPanel (panel_test.go:38) · core: interrupt
+  · audited (same): Go interrupt() tui.go:589-595 calls finishForeground; Rust mod.rs:2476 and 2496 call finish_foreground; engine.interrupt at mod.rs:2477; test mod.rs interrupt_finishes_foreground_agents_only
 - [x] B25 Copy note and transient status line (copyNote field tui.go:~70; copySelected selection.go:150) · test: none · core: none  · audited (same): mod.rs:1504 복사됨 (N자); test mod.rs:3613 asserts 5자; Go selection.go:161-166
 
 ## Slash commands
