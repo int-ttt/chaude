@@ -903,12 +903,15 @@ impl App {
 
     // Go /view: the sessions this run and the previous run spawned. The previous run comes from the exit handoff
     // (handoff::prev_owned, Go loadPrevOwned); this run's ids come from UiEvent::SessionIds.
-    // /import [id|latest]: shows the imported Claude Code transcript (Go importBlocks). Only the view is
-    // shown here; the engine snapshot install is blocked on core api.rs (no public install API yet).
+    // /import [id|latest]: replaces the transcript with the imported Claude Code view (Go importedMsg ->
+    // importBlocks). Only the view is shown here; the engine snapshot install is blocked on core api.rs.
     fn import_view(&mut self, arg: &str) {
         match import_claude::load_import_arg(arg, &self.welcome.cwd) {
             Err(e) => self.note(&e),
             Ok((_, imp)) => {
+                self.transcript.clear();
+                self.wide.clear();
+                self.prompts.clear();
                 for (kind, text) in render::import_blocks(&imp.view) {
                     self.record_block(kind, &text);
                 }
@@ -2845,6 +2848,39 @@ mod tests {
         );
         assert!(String::from_utf8_lossy(&buf).contains('z'), "{buf:?}");
         sender.join().unwrap();
+    }
+
+    #[test]
+    fn import_replaces_the_transcript_view() {
+        let path = std::env::temp_dir().join(format!("chaude-import-{}.jsonl", std::process::id()));
+        let lines = concat!(
+            r#"{"type":"user","message":{"content":"hello import"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"hi there"}]}}"#,
+            "\n"
+        );
+        std::fs::write(&path, lines).unwrap();
+        let mut app = App::new(80, 24);
+        app.transcript.push("old line before import".to_string());
+        app.import_view(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            !app.transcript
+                .iter()
+                .any(|l| l.contains("old line before import")),
+            "{:?}",
+            app.transcript
+        );
+        assert!(
+            app.transcript.iter().any(|l| l.contains("hello import")),
+            "{:?}",
+            app.transcript
+        );
+        assert!(
+            app.transcript.iter().any(|l| l.contains("view only")),
+            "{:?}",
+            app.transcript
+        );
     }
 
     #[test]
