@@ -6,6 +6,7 @@ pub mod child_set;
 pub mod event;
 pub mod handoff;
 pub mod import_claude;
+pub mod haiku_pool;
 pub mod import_view;
 pub mod lean;
 pub mod mcp;
