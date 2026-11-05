@@ -20,7 +20,7 @@ use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, BufRead, Write};
 use std::panic;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
@@ -32,8 +32,8 @@ use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::resident::StagePhase;
 use crossterm::cursor::{MoveTo, Show};
 use crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::terminal::{
     self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, ScrollDown, ScrollUp,
@@ -2254,12 +2254,32 @@ fn flush(
 fn restore_terminal() {
     let _ = execute!(
         io::stdout(),
-        DisableMouseCapture,
+        MouseCellMotion(false),
         DisableBracketedPaste,
         LeaveAlternateScreen,
         Show
     );
     let _ = terminal::disable_raw_mode();
+}
+
+// Go tui.go:1394 WithMouseCellMotion: button and drag motion (?1002) with SGR coordinates (?1006) only.
+// crossterm's EnableMouseCapture also turns on any-motion (?1003), so the sequences are written here.
+struct MouseCellMotion(bool);
+
+impl crossterm::Command for MouseCellMotion {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        let k = if self.0 { 'h' } else { 'l' };
+        write!(f, "\x1b[?1002{k}\x1b[?1006{k}")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        if self.0 {
+            crossterm::Command::execute_winapi(&crossterm::event::EnableMouseCapture)
+        } else {
+            crossterm::Command::execute_winapi(&crossterm::event::DisableMouseCapture)
+        }
+    }
 }
 
 // Enters raw mode and the alternate screen. Dropping it (exit, error, or unwind) restores the terminal.
@@ -2273,7 +2293,7 @@ impl TermGuard {
             EnterAlternateScreen,
             Clear(ClearType::All),
             EnableBracketedPaste,
-            EnableMouseCapture
+            MouseCellMotion(true)
         )?;
         // The default hook prints while the alternate screen is still up, so restore before it runs.
         let hook = panic::take_hook();
@@ -2297,11 +2317,29 @@ pub fn run(cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     let plain_forced = !std::env::var("HARNESS_PLAIN")
         .unwrap_or_default()
         .is_empty();
-    if io::stdin().is_terminal() && !plain_forced {
+    if stdin_is_char_device() && !plain_forced {
         tui(cfg, startup)
     } else {
         plain(cfg, startup)
     }
+}
+
+// Go repl.go: interactive when stdin is a character device (st.Mode()&os.ModeCharDevice), so /dev/null counts.
+#[cfg(unix)]
+fn stdin_is_char_device() -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    use std::os::unix::io::FromRawFd;
+    // SAFETY: fd 0 belongs to the process; ManuallyDrop keeps this temporary File from closing it.
+    let stdin = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(0) });
+    stdin
+        .metadata()
+        .map(|m| m.file_type().is_char_device())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn stdin_is_char_device() -> bool {
+    std::io::IsTerminal::is_terminal(&io::stdin())
 }
 
 // Everything the TUI loop waits on: a terminal event, an engine event, or the end of either source.
@@ -2586,9 +2624,9 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         app.tick(now);
         if app.mouse != captured {
             if app.mouse {
-                execute!(out, EnableMouseCapture)?;
+                execute!(out, MouseCellMotion(true))?;
             } else {
-                execute!(out, DisableMouseCapture)?;
+                execute!(out, MouseCellMotion(false))?;
             }
             captured = app.mouse;
         }
