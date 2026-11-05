@@ -102,6 +102,25 @@ pub enum Action {
     SetMode(PermMode),
 }
 
+// A tool row in the transcript: its index, tool name and head text, the wall-clock start and the Instant it started
+// (elapsed), and the finish (wall-clock end, elapsed seconds) once ToolEnd arrives.
+struct ToolRow {
+    row: usize,
+    name: String,
+    head: String,
+    start: i64,
+    at: Instant,
+    end: Option<(i64, u64)>,
+}
+
+// A stage row in the transcript: its index, the stage body without the "· " lead, and its start.
+struct StageRow {
+    row: usize,
+    body: String,
+    start: i64,
+    at: Instant,
+}
+
 pub struct App {
     // Cursor column shift for IME preedit (Go imeShift, read once at start from the env).
     ime_shift: i32,
@@ -200,8 +219,10 @@ pub struct App {
     rot_from: String,
     // Current main session id (UiEvent::SessionIds main; empty after a rotation until the new one). /status shows it.
     session_id: String,
-    // Tool rows by tool id: transcript index and tool name. ToolInput rewrites the row in place.
-    tool_rows: HashMap<String, (usize, String)>,
+    // Tool rows by tool id. ToolInput and ToolEnd rewrite the row in place with its time.
+    tool_rows: HashMap<String, ToolRow>,
+    // Stage rows by slot: the Working row, rewritten with its end time when the slot finishes.
+    stage_rows: HashMap<String, StageRow>,
     // Agents whose tool_result was an error (ToolEnd ok=false), by tool id until their AgentEnd.
     agent_outcome: HashSet<String>,
     // Foreground agents already finished by an interrupt (Go finishForeground); core's later AgentEnd for them is dropped.
@@ -297,6 +318,7 @@ impl App {
             this_run: BTreeSet::new(),
             rot_from: String::new(),
             tool_rows: HashMap::new(),
+            stage_rows: HashMap::new(),
             agent_outcome: HashSet::new(),
             finished_fg: Vec::new(),
             got_text: false,
@@ -367,26 +389,43 @@ impl App {
                     format!("{name}({summary})")
                 };
                 self.last_tool = trunc_runes(&head, LAST_TOOL_RUNES);
-                self.tool_rows.insert(id, (self.transcript.len(), name));
-                self.transcript.push(format!("{TOOL_ON}● {head}{FG_OFF}"));
+                let row = ToolRow {
+                    row: self.transcript.len(),
+                    name,
+                    head: head.clone(),
+                    start: unix_now(),
+                    at: Instant::now(),
+                    end: None,
+                };
+                self.transcript.push(tool_line(&row));
+                self.tool_rows.insert(id, row);
             }
             // Go tool_summary: the input JSON gives the row its argument summary. Rewrites only a row still in place.
             UiEvent::ToolInput { id, input } => {
                 let summary = render::tool_summary(&input);
-                if let Some((row, name)) = self.tool_rows.get(&id).cloned()
-                    && let Some(line) = self.transcript.get_mut(row)
+                if let Some(r) = self.tool_rows.get_mut(&id)
+                    && let Some(line) = self.transcript.get_mut(r.row)
                 {
-                    let head = if summary.is_empty() {
-                        name
+                    r.head = if summary.is_empty() {
+                        r.name.clone()
                     } else {
-                        format!("{name}({summary})")
+                        format!("{}({summary})", r.name)
                     };
-                    self.last_tool = trunc_runes(&head, LAST_TOOL_RUNES);
-                    *line = format!("{TOOL_ON}● {head}{FG_OFF}");
+                    self.last_tool = trunc_runes(&r.head, LAST_TOOL_RUNES);
+                    *line = tool_line(r);
                 }
             }
             // Go shows the tool_result text, not a done/failed word; that row comes from ToolResult.
+            // The tool row also gets its end time and elapsed (" → HH:MM:SS (Ns)").
             UiEvent::ToolEnd { id, ok } => {
+                if let Some(r) = self.tool_rows.get_mut(&id)
+                    && r.end.is_none()
+                {
+                    r.end = Some((unix_now(), r.at.elapsed().as_secs()));
+                    if let Some(line) = self.transcript.get_mut(r.row) {
+                        *line = tool_line(r);
+                    }
+                }
                 self.open_tools.remove(&id);
                 if !ok && self.is_agent_tool(&id) {
                     self.agent_outcome.insert(id);
@@ -522,9 +561,38 @@ impl App {
             }
             // While the window waits for /usage, its failure goes into the window (Go usageFetch).
             // Go repl.go stage(): one grey note per stage change, then a blank row (Go note block adds "").
+            // The Working row carries its start time and, once the slot finishes, its end time and elapsed.
             UiEvent::Stage { slot, phase } => {
                 self.end_main_block();
-                self.note(&format!("{GREY_ON}{}{FG_OFF}", stage_text(&slot, &phase)));
+                let text = stage_text(&slot, &phase);
+                match phase {
+                    StagePhase::Working => {
+                        let body = text.strip_prefix("· ").unwrap_or(&text).to_string();
+                        let row = StageRow {
+                            row: self.transcript.len(),
+                            body,
+                            start: unix_now(),
+                            at: Instant::now(),
+                        };
+                        self.note(&format!(
+                            "{GREY_ON}{}{FG_OFF}",
+                            action_line("· ", row.start, &row.body, None)
+                        ));
+                        self.stage_rows.insert(slot.clone(), row);
+                    }
+                    StagePhase::Done | StagePhase::Failed(_) => {
+                        if let Some(r) = self.stage_rows.remove(&slot)
+                            && let Some(line) = self.transcript.get_mut(r.row)
+                        {
+                            let end = Some((unix_now(), r.at.elapsed().as_secs()));
+                            *line = format!(
+                                "{GREY_ON}{}{FG_OFF}",
+                                action_line("· ", r.start, &r.body, end)
+                            );
+                        }
+                        self.note(&format!("{GREY_ON}{text}{FG_OFF}"));
+                    }
+                }
                 self.transcript.push(String::new());
             }
             // Go resident.go notice(): a failed prompter or tui pass, one note line.
@@ -596,7 +664,17 @@ impl App {
             UiEvent::AgentLog { id, lines } => {
                 agentview::push_log(self.agent_logs.entry(id).or_default(), lines)
             }
-            UiEvent::QueueTexts(texts) => self.queue_texts = texts,
+            // The engine drains the queue into the next turn (core next_turn: one merged prompt, joined by a blank line).
+            // That is the moment a queued prompt is sent, so it is echoed here, once, and becomes the turn's label.
+            UiEvent::QueueTexts(texts) => {
+                let drained = std::mem::replace(&mut self.queue_texts, texts);
+                if !drained.is_empty() && self.queue_texts.is_empty() && self.busy {
+                    let merged = drained.join("\n\n");
+                    self.turn_prompt =
+                        render::trunc_chars(merged.lines().next().unwrap_or("").trim(), 60);
+                    self.echo_prompt(&merged);
+                }
+            }
             // Go opusRunning / residentBusy: state only, read by the thinking row.
             UiEvent::OpusBusy(on) => self.opus_busy = on,
             UiEvent::ResidentBusy {
@@ -762,8 +840,8 @@ impl App {
                 .collect();
             if let Some(cut) = self.rw.key(key, &refs) {
                 self.transcript.truncate(self.prompts[cut.cut].0);
-                self.tool_rows
-                    .retain(|_, (row, _)| *row < self.transcript.len());
+                self.tool_rows.retain(|_, r| r.row < self.transcript.len());
+                self.stage_rows.retain(|_, r| r.row < self.transcript.len());
                 self.wide.retain(|&i| i < self.transcript.len());
                 self.linked.retain(|&i| i < self.transcript.len());
                 self.prompts.truncate(cut.cut);
@@ -990,7 +1068,6 @@ impl App {
         if text.trim().is_empty() {
             return Action::Continue;
         }
-        self.turn_prompt = render::trunc_chars(text.lines().next().unwrap_or("").trim(), 60);
         self.end_main_block();
         let dispatched = {
             let ctx = Ctx {
@@ -1011,19 +1088,15 @@ impl App {
             self.clear_transcript();
         }
         let first = text.split_whitespace().next().unwrap_or("");
+        // A prompt sent while a turn runs only joins the queue (queue_lines shows it as "대기"). It is echoed once,
+        // when QueueTexts drains and the merged prompt goes out as the next turn. Commands never queue.
+        let queued = self.busy && dispatched.is_none();
+        if !queued {
+            self.turn_prompt = render::trunc_chars(text.lines().next().unwrap_or("").trim(), 60);
+        }
         // Go tui.go /view is a local note and echoes nothing into the transcript.
-        if first != "/view" {
-            self.prompts.push((self.transcript.len(), text.clone()));
-            // Go tui.go render(): the user block is grey, "> " on its first row, and is followed by a blank row.
-            let at = self.transcript.len();
-            for (i, line) in text.split('\n').enumerate() {
-                let lead = if i == 0 { PROMPT } else { "  " };
-                self.transcript
-                    .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
-            }
-            self.link_from(at);
-            self.transcript.push(String::new());
-            self.follow_tail();
+        if first != "/view" && !queued {
+            self.echo_prompt(&text);
         }
         // Go tui.go /status: answered locally from the TUI state, never sent to the child. /mode and /model are handled here too.
         match dispatched {
@@ -1352,6 +1425,21 @@ impl App {
         self.note(&format!("{GREY_ON}{notice}{FG_OFF}"));
     }
 
+    // Go tui.go render(): the user block is grey, "> " on its first row, and is followed by a blank row.
+    // Used when a prompt is sent: at once when idle, or when a queued prompt starts as the next turn.
+    fn echo_prompt(&mut self, text: &str) {
+        self.prompts.push((self.transcript.len(), text.to_string()));
+        let at = self.transcript.len();
+        for (i, line) in text.split('\n').enumerate() {
+            let lead = if i == 0 { PROMPT } else { "  " };
+            self.transcript
+                .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
+        }
+        self.link_from(at);
+        self.transcript.push(String::new());
+        self.follow_tail();
+    }
+
     // Marks the rows pushed since `at` as assistant or user rows, whose links body() styles.
     fn link_from(&mut self, at: usize) {
         self.linked.extend(at..self.transcript.len());
@@ -1366,7 +1454,7 @@ impl App {
 
     // Agent and Task tool calls, which launch a subagent. Checked by the name the ToolStart row was given.
     fn is_agent_tool(&self, id: &str) -> bool {
-        matches!(self.tool_rows.get(id), Some((_, name)) if name == "Agent" || name == "Task")
+        matches!(self.tool_rows.get(id), Some(r) if r.name == "Agent" || r.name == "Task")
     }
 
     // Go mainStatusText + the spinner (tui.go:385-390): `✶ 생각중-model-메인(prompt) · Mm SSs`, orange frame, grey text.
@@ -2030,6 +2118,28 @@ fn stage_text(slot: &str, phase: &StagePhase) -> String {
     }
 }
 
+// An action row with its time: `<lead>HH:MM:SS <body>`, and once finished ` → HH:MM:SS (elapsed)` at the end.
+// The lead ("● " or "· ") stays first, so the wrap hang and the "● Name(arg)" text are unchanged.
+fn action_line(lead: &str, start: i64, body: &str, end: Option<(i64, u64)>) -> String {
+    let mut s = format!("{lead}{} {body}", clock_hhmmss(start));
+    if let Some((at, secs)) = end {
+        s.push_str(&format!(
+            " → {} ({})",
+            clock_hhmmss(at),
+            bar::fmt_secs(secs)
+        ));
+    }
+    s
+}
+
+// A tool row as the transcript holds it: the green "● " tool block with its time.
+fn tool_line(r: &ToolRow) -> String {
+    format!(
+        "{TOOL_ON}{}{FG_OFF}",
+        action_line("● ", r.start, &r.head, r.end)
+    )
+}
+
 // Go inputBox.View window (input.go:211): at most MAX_INPUT_ROWS rows, scrolled so the cursor row stays visible.
 // Returns the first row and the number of rows shown.
 fn input_window(n: usize, cur: usize) -> (usize, usize) {
@@ -2230,8 +2340,13 @@ fn layout(app: &App, w: usize, h: usize) -> (Vec<String>, usize) {
     let menu = overlay::slash_popup(&app.suggest(), app.sugg_sel, w, menu_max);
     let body_h = h.saturating_sub(chrome_h + menu.len());
     let mut rows = Vec::with_capacity(h);
+    // An overlay fills exactly the body rows: the /view list is shorter than the body (or empty when narrow), and
+    // draw compares the rows by index with the previous frame (body_shift slices them to body_h).
     let overlay = if body_h > 0 && !app.usage.is_open() {
-        app.overlay_lines(width, body_h)
+        app.overlay_lines(width, body_h).map(|mut lines| {
+            lines.resize(body_h, String::new());
+            lines
+        })
     } else {
         None
     };
@@ -3006,9 +3121,9 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-// Local "HH:MM" (Go time.Format("15:04")).
+// Local (hour, minute, second) of a unix time.
 #[cfg(unix)]
-fn clock_hhmm(secs: i64) -> String {
+fn clock_hms(secs: i64) -> (i64, i64, i64) {
     let t = secs as libc::time_t;
     // SAFETY: localtime_r writes into the zeroed tm we own and reads only the local `t`.
     let tm = unsafe {
@@ -3016,20 +3131,49 @@ fn clock_hhmm(secs: i64) -> String {
         libc::localtime_r(&t, &mut tm);
         tm
     };
-    format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+    (tm.tm_hour as i64, tm.tm_min as i64, tm.tm_sec as i64)
 }
 
 // No libc off unix: UTC clock, so the rate text stays well-formed.
 #[cfg(not(unix))]
-fn clock_hhmm(secs: i64) -> String {
+fn clock_hms(secs: i64) -> (i64, i64, i64) {
     let day = secs.rem_euclid(86_400);
-    format!("{:02}:{:02}", day / 3600, day % 3600 / 60)
+    (day / 3600, day % 3600 / 60, day % 60)
+}
+
+// Local "HH:MM" (Go time.Format("15:04")).
+fn clock_hhmm(secs: i64) -> String {
+    let (h, m, _) = clock_hms(secs);
+    format!("{h:02}:{m:02}")
+}
+
+// Local "HH:MM:SS" for the action rows' start and end stamps.
+fn clock_hhmmss(secs: i64) -> String {
+    let (h, m, s) = clock_hms(secs);
+    format!("{h:02}:{m:02}:{s:02}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crossterm::event::KeyEventState;
+
+    // Drop the "HH:MM:SS " start stamp after an action row's lead ("● " / "· ") and any " → HH:MM:SS (..)" end.
+    fn untime(row: &str) -> String {
+        let mut plain = render::strip_sgr(row);
+        if let Some(i) = plain.find(" → ") {
+            plain.truncate(i);
+        }
+        for lead in ["● ", "· "] {
+            if let Some(rest) = plain.strip_prefix(lead) {
+                let b = rest.as_bytes();
+                if b.len() >= 9 && b[2] == b':' && b[5] == b':' && b[8] == b' ' {
+                    return format!("{lead}{}", &rest[9..]);
+                }
+            }
+        }
+        plain
+    }
 
     fn key(code: KeyCode, mods: KeyModifiers) -> KeyEvent {
         KeyEvent {
@@ -3295,6 +3439,62 @@ mod tests {
         assert_eq!(rows[top - 1], "  … +3 대기");
         assert_eq!(rows[top - 2], "  대기 q3");
         assert_eq!(queue_rows(&rows).len(), 5);
+    }
+
+    #[test]
+    fn action_line_prefixes_the_start_stamp_and_appends_the_end_stamp() {
+        let start = 1_700_000_000;
+        assert_eq!(
+            action_line("● ", start, "Bash(ls)", None),
+            format!("● {} Bash(ls)", clock_hhmmss(start))
+        );
+        assert_eq!(
+            action_line("· ", start, "prompter 처리중", Some((start + 89, 89))),
+            format!(
+                "· {} prompter 처리중 → {} (1m29s)",
+                clock_hhmmss(start),
+                clock_hhmmss(start + 89)
+            )
+        );
+    }
+
+    // A prompt sent while a turn runs shows only the queue row; the echo waits for the turn that carries it.
+    #[test]
+    fn queued_prompt_is_not_echoed_while_busy() {
+        let mut app = App::new(80, 30);
+        app.busy = true;
+        type_str(&mut app, "next one");
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        app.apply(UiEvent::QueueTexts(vec!["next one".into()]));
+        let rows = plain_frame(&app, 80, 30);
+        assert!(
+            queue_rows(&rows)
+                .iter()
+                .any(|r| r.contains("대기 next one"))
+        );
+        assert!(
+            !app.transcript
+                .iter()
+                .any(|r| render::strip_sgr(r).contains("> next one"))
+        );
+    }
+
+    // The queued prompt is echoed once, when QueueTexts drains and it goes out as the next turn.
+    #[test]
+    fn queued_prompt_echoes_once_when_it_is_sent() {
+        let mut app = App::new(80, 30);
+        app.busy = true;
+        type_str(&mut app, "next one");
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        app.apply(UiEvent::QueueTexts(vec!["next one".into()]));
+        app.apply(UiEvent::QueueTexts(vec![]));
+        let echoes = app
+            .transcript
+            .iter()
+            .filter(|r| render::strip_sgr(r) == "> next one")
+            .count();
+        assert_eq!(echoes, 1, "{:?}", app.transcript);
+        assert_eq!(app.turn_prompt, "next one");
     }
 
     #[test]
@@ -3928,11 +4128,7 @@ mod tests {
             text: "done".into(),
         });
         app.apply(UiEvent::TurnEnd { duration_ms: 1000 });
-        let rows: Vec<String> = app
-            .transcript
-            .iter()
-            .map(|l| render::strip_sgr(l))
-            .collect();
+        let rows: Vec<String> = app.transcript.iter().map(|l| untime(l)).collect();
         assert_eq!(
             rows,
             vec!["● hi", "", "● Agent(scan repo)", "  ⎿  done", ""]
@@ -4289,7 +4485,9 @@ mod tests {
             input: serde_json::json!({"command": "ls"}),
         });
         assert!(
-            app.transcript.iter().any(|r| r.contains("● Bash(ls)")),
+            app.transcript
+                .iter()
+                .any(|r| untime(r).contains("● Bash(ls)")),
             "{:?}",
             app.transcript
         );
@@ -4474,9 +4672,13 @@ mod tests {
             phase: StagePhase::Done,
         });
         let n = app.transcript.len();
-        assert_eq!(
-            app.transcript[n - 4],
-            format!("{GREY_ON}· prompter 처리중{FG_OFF}")
+        // The working row keeps its start stamp and gains the end stamp and elapsed time when it finishes.
+        let working = &app.transcript[n - 4];
+        assert!(working.starts_with(GREY_ON), "{working:?}");
+        let plain = render::strip_sgr(working);
+        assert!(
+            plain.starts_with("· ") && plain.contains("prompter 처리중 → "),
+            "{plain:?}"
         );
         assert_eq!(app.transcript[n - 3], "");
         assert_eq!(
@@ -5164,6 +5366,49 @@ mod tests {
                 .iter()
                 .any(|l| l.contains("session resumed: new-2 (was old-1)"))
         );
+    }
+
+    // /view at any size, both levels, long Korean text: the overlay fills exactly the body rows, so every frame
+    // keeps the screen height and a redraw (which compares the previous frame row by row) never slices past it.
+    #[test]
+    fn view_overlay_fills_the_body_and_redraws_at_any_size() {
+        let now = std::time::SystemTime::now();
+        let korean = "한글 질문입니다 ".repeat(40);
+        let build = |level2: bool| {
+            let info = |id: &str| sessview::SessionInfo {
+                id: id.into(),
+                path: std::path::PathBuf::from(format!("{id}.jsonl")),
+                modified: now,
+                turns: 2,
+                first: korean.clone(),
+                last: "second".into(),
+            };
+            let list = vec![info("sessaaa1"), info("sessbbb2")];
+            if level2 {
+                sessview::SessView {
+                    list,
+                    id: "sessaaa1".into(),
+                    turns: Some(vec![korean.clone(), "two".into()]),
+                    ..Default::default()
+                }
+            } else {
+                sessview::SessView {
+                    list,
+                    ..Default::default()
+                }
+            }
+        };
+        for level2 in [false, true] {
+            for (w, h) in [(1, 1), (5, 3), (10, 6), (20, 8), (40, 12), (80, 30)] {
+                let mut app = App::new(w, h);
+                app.sess = Some(build(level2));
+                let mut prev = Vec::new();
+                for _ in 0..2 {
+                    draw(&mut Vec::new(), &app, &mut prev).unwrap();
+                    assert_eq!(prev.len(), h, "level2={level2} size={w}x{h}");
+                }
+            }
+        }
     }
 
     #[test]

@@ -1,17 +1,55 @@
 # chaude
 
+A chat-style terminal for Claude Code that hands the routine work to Haiku agents.
+
 [![Latest release](https://img.shields.io/github/v/release/int-ttt/chaude)](https://github.com/int-ttt/chaude/releases/latest)
 [![Rust stable](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)](rust-toolchain.toml)
-[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#install)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#installation)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **English** | [한국어](README.ko.md)
 
-> **Deprecation notice:** The Go implementation under `deprecated/` is deprecated. Release archives are built from the Rust workspace at the repo root (`crates/cli`, binary `chaude`) from the Rust switch on, with the same asset names. The Go build is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. The Rust version does not yet cover every Go feature; see `plan/rust-port.md`.
+## What is it
 
-## Effect
+`chaude` wraps the `claude` CLI in a chat-style terminal screen. Opus is the main session. Haiku agents do lookups, small edits, and checks. When the context gets large, `chaude` writes a handoff note and continues the conversation in a new session.
 
-Ping-pong game benchmark (3 prompts), chaude vs plain Opus:
+## How it works
+
+Opus is the main session. It reads your request, decides the plan, and writes the final answer. It does not read or edit files itself. Hooks enforce this. Haiku agents do the actual work, such as searching, editing, and checking.
+
+| Agent | Model | Used for |
+|---|---|---|
+| `opus-architect` | Opus | Design and judgment. Hands work to the `haiku-*` agents |
+| `haiku-scout` | Haiku | Finding files and past conversations |
+| `haiku-researcher` | Haiku | Web research with sources |
+| `haiku-extractor` | Haiku | Facts, decisions, and open items from long conversations |
+| `haiku-drafter` | Haiku | Writing or editing text |
+| `haiku-batch-worker` | Haiku | Format conversion, bulk replace, splitting and merging |
+| `haiku-coder` | Haiku | Small, scoped code and bug fixes |
+| `haiku-checker` | Haiku | Read-only checks of the changes |
+| `haiku-runner` | Haiku | Long jobs in the background |
+| `haiku-prompter` | Haiku | Repeated or looped tasks (main thread only) |
+| `haiku-tui` | Haiku | Turns agent results into a polite Korean reply |
+
+The full list, tools, and routing rules are in [Models and agents](docs/guide/models-and-agents.md) (Korean).
+
+**Context and rotation.** When the context reaches the threshold, `chaude` moves to a new session with a handoff note. The `rot N` count in the status line shows how many times this happened. The threshold is 200,000 tokens for Opus. Other models use 80,000 by default, set with `--threshold`. If background agents are still running when a rotation is due, it waits up to 10 minutes (`--rotate-defer-timeout`) and then rotates.
+
+**Claude Code sessions.** You can continue a Claude Code conversation with `/import [ID|latest]` or `/resume claude`, or run `chaude --from-claude latest`. The import view shows the whole transcript, including thinking, tool calls and results, and subagent messages.
+
+## Effect: Rust port usage
+
+Measured from 2026-10-28 (the first commit on the rust-port branch) to 2026-11-05 14:00 UTC on the maintainer's machine: 229 main sessions, 2,039 subagent runs, 22,754 API requests (18,698 Haiku, 2,137 Sonnet, 1,919 Opus). Method: [scripts/rust_port_usage.py](scripts/rust_port_usage.py) reads the Claude Code transcripts (main and subagent), drops duplicate requests, and prices each request at its model's list price. The all-Opus column prices the same token counts at Opus rates. It is a conservative lower bound: one long Opus session would carry a larger context on each turn, so its real cost would be higher.
+
+| | Measured (Opus main + Sonnet and Haiku agents) | All-Opus lower bound | Saved |
+|---|---|---|---|
+| API requests | 22,754 | 22,754 | - |
+| Total tokens (input, cache write, cache read, output) | 771.8M | 771.8M | - |
+| Approx. cost (USD) | 177.60 | 1,021.83 | 82.6% |
+
+These numbers are approximate. Prices are the list prices in notes/FACTS.md (confirmed 2026-10-29). The all-Opus column is a conservative lower bound estimate, not a measured Opus session.
+
+**Cost.** In a ping-pong game benchmark (3 prompts), chaude was compared with plain Opus:
 
 - **Cost: -42.7%** vs plain Opus (USD, mean of 2 runs, 2026-11-01).
 - **Cost range: -37.5% to -50.0%** across effort settings (unset, low, medium; re-run 2026-11-02).
@@ -20,8 +58,6 @@ Ping-pong game benchmark (3 prompts), chaude vs plain Opus:
 
 Source: [docs/pingpong-bench.md](docs/pingpong-bench.md).
 
-`chaude` wraps the `claude` CLI in a chat-style terminal screen. Run `chaude` with no arguments to open the REPL. When the context gets large, it writes a handoff note and continues the conversation in a new session.
-
 ## Features
 
 - Chat-style REPL with a status line: context bar, rotation count, permission mode, running agents.
@@ -29,12 +65,15 @@ Source: [docs/pingpong-bench.md](docs/pingpong-bench.md).
 - Opus main decides; Haiku agents do lookups, small edits, and checks.
 - Four permission modes (`default`, `acceptEdits`, `plan`, `auto`), switched with `shift+tab`.
 - Cost, 5-hour usage, and rotation count in the status line. `/usage` shows plan usage and limits.
-- Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing (0.9.14).
 - Prompt history per project, saved in `.chaude/history.jsonl`. Search it with `chaude search-history`.
 - Import Claude Code sessions with `/import`, `/resume claude`, or `chaude --from-claude`.
-- Prebuilt binaries: macOS Apple Silicon (arm64), Linux (amd64, arm64), Windows (amd64; arm64 PCs run it through x64 emulation). Intel Macs are not supported. The installers check `checksums.txt` before installing.
+- Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing (0.9.14).
 
-## Install
+## Installation
+
+Prebuilt binaries are published for macOS on Apple Silicon (arm64), Linux (amd64, arm64), and Windows (amd64; arm64 PCs run it through x64 emulation). Intel Macs are not supported. The installers check `checksums.txt` before installing anything.
+
+You also need the Claude Code CLI (`claude`) on your `PATH`. The installers warn if it is missing.
 
 ### macOS / Linux
 
@@ -43,11 +82,12 @@ curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | 
 chaude --version
 ```
 
-Supported: macOS on Apple Silicon (arm64) and Linux (amd64, arm64). Intel Macs (darwin/amd64) are not supported and the installer exits with an error.
+Supported: macOS on Apple Silicon (arm64) and Linux (amd64, arm64). Intel Macs (darwin/amd64) exit with an error.
 
 Installs to `/usr/local/bin/chaude`. The directory is created if missing. `sudo` is used only for the copy, and only when the directory is not writable. An existing `chaude` is kept as `chaude.<old version>.bak`.
 
 To pin a version, set `CHAUDE_VERSION`:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.0 bash
 ```
@@ -65,7 +105,18 @@ On Windows on ARM64, the installer downloads the amd64 build (x64 emulation) and
 
 Installs to `%LOCALAPPDATA%\Programs\chaude\chaude.exe`. The installer adds that folder to your user `PATH` once. Open a new terminal after installing.
 
-Requirements: the Claude Code CLI (`claude`) must be on your `PATH`. The installer warns if it is missing. No token is needed. If GitHub rate-limits you (HTTP 403), set `GH_TOKEN` and run the installer again. The installer also reads `GITHUB_TOKEN` and `gh auth token`.
+No token is needed. If GitHub rate-limits you (HTTP 403), set `GH_TOKEN` and run the installer again. The installer also reads `GITHUB_TOKEN` and `gh auth token`.
+
+### From source
+
+You need Rust stable. `rust-toolchain.toml` pins the version. From the repo root:
+
+```sh
+cargo build --release -p chaude-cli
+./target/release/chaude --version
+```
+
+The binary is `target/release/chaude`. Copy it to a folder on your `PATH`.
 
 ## Quick start
 
@@ -74,7 +125,7 @@ cd ~/my-project
 chaude
 ```
 
-Type a question or task in the input box at the bottom and press `Enter`. The default model is Opus and the default permission mode is `auto`. Change the mode with `shift+tab` or `/mode`.
+Type a question or task in the input box at the bottom and press `Enter`. The default model is Opus. Change the permission mode with `shift+tab` or `/mode`.
 
 ## Usage
 
@@ -145,32 +196,39 @@ While an answer is running, only `/usage`, `/version`, `/help`, `/status`, `/mod
 | `chaude update` | Check for a newer release and replace this binary |
 | `chaude --version` | Print the version |
 
-Main REPL flags (`chaude repl`): `--model` (default `opus`), `--cwd`, `--threshold` (default `80000`; Opus is fixed at `200000`), `--show-rotation`, `--metrics-dir`. Run `chaude repl -h` for all flags.
+Run `chaude repl -h` for all REPL flags.
 
-## Updating
+### Updating
 
 - In the REPL, run `/update`. It checks the latest release and replaces the binary if a newer one exists. Restart chaude to use it.
 - From a shell, run `chaude update`. It does the same check.
 
-## How it works
+## Configuration
 
-Opus is the main session. It reads your request, decides the plan, and writes the final answer. It does not read or edit files itself. Hooks enforce this. Haiku agents do the actual work, such as searching, editing, and checking.
+Settings you can change in the REPL are on the `/settings` screen. Values are saved on `esc` and apply at the next session start.
 
-| Agent | Model | Used for |
+The project keeps its settings in `.claude/settings.json`. Starting a session creates it with the guard hooks when it is missing. `chaude gen-settings` writes one for a given OS.
+
+Main REPL flags (`chaude repl`):
+
+| Flag | Default | Meaning |
 |---|---|---|
-| `opus-architect` | Opus | Design and judgment. Hands work to the `haiku-*` agents |
-| `haiku-scout` | Haiku | Finding files and past conversations |
-| `haiku-researcher` | Haiku | Web research with sources |
-| `haiku-extractor` | Haiku | Facts, decisions, and open items from long conversations |
-| `haiku-drafter` | Haiku | Writing or editing text |
-| `haiku-batch-worker` | Haiku | Format conversion, bulk replace, splitting and merging |
-| `haiku-coder` | Haiku | Small, scoped code and bug fixes |
-| `haiku-checker` | Haiku | Read-only checks of the changes |
-| `haiku-runner` | Haiku | Long jobs in the background |
-| `haiku-prompter` | Haiku | Repeated or looped tasks (main thread only) |
-| `haiku-tui` | Haiku | Turns agent results into a polite Korean reply |
+| `--model` | `opus` | Main model |
+| `--cwd` | see `chaude repl -h` | Project folder |
+| `--threshold` | `80000` | Rotation threshold for models other than Opus. Opus is fixed at `200000` |
+| `--rotate-defer-timeout` | `10m` | How long a due rotation waits for background agents before it runs anyway |
+| `--show-rotation` | see `chaude repl -h` | Print a one-line rotation marker |
+| `--metrics-dir` | see `chaude repl -h` | Folder for per-turn metrics (JSONL) |
 
-The full list, tools, and routing rules are in [Models and agents](docs/guide/models-and-agents.md) (Korean).
+Prompt history is saved per project in `.chaude/history.jsonl`.
+
+The installers read these environment variables:
+
+| Variable | Meaning |
+|---|---|
+| `CHAUDE_VERSION` | Version to install (default: latest), for example `v0.11.0` |
+| `CHAUDE_REPO` | GitHub repo to install from (default: `int-ttt/chaude`) |
+| `GH_TOKEN`, `GITHUB_TOKEN` | Optional token for rate limits or private forks. `gh auth token` is used when neither is set |
 
 ## Documentation
 
@@ -183,20 +241,14 @@ The user guide is written in Korean.
 - [Hooks and skills](docs/guide/hooks-and-skills.md)
 - [Pingpong benchmark](docs/pingpong-bench.md)
 - [Changelog](CHANGELOG.md)
+- [Rust port plan](plan/rust-port.md)
 
-## FAQ
+## Upgrading from Go
 
-**Q. What happens when the conversation gets long?**
-A. When the context reaches the threshold, chaude moves to a new session with a handoff note. The `rot N` count in the status line shows how many times this happened. The threshold is 200,000 tokens for Opus. Other models use 80,000 by default, set with `--threshold`.
+> **Deprecation notice:** The Go implementation under `deprecated/` is deprecated. Release archives are built from the Rust workspace at the repo root (`crates/cli`, binary `chaude`) from the Rust switch on, with the same asset names. The Go build is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. The Rust version does not yet cover every Go feature; see `plan/rust-port.md`.
 
-**Q. A background agent is still running when a rotation is due.**
-A. The rotation waits for running agents for up to 10 minutes (`--rotate-defer-timeout`). After that, it rotates.
+To upgrade, run the installer again or run `chaude update`. The installers remove an old `~/.local/bin` install and its `PATH` line.
 
-**Q. How much does it save?**
-A. In one ping-pong game comparison, cost was -42.7% versus plain Opus (average of 2 runs). Two runs is a small sample, so read this as a rough range. See [docs/pingpong-bench.md](docs/pingpong-bench.md).
-
-**Q. Can I continue a Claude Code conversation?**
-A. Yes. Use `/import [ID|latest]` or `/resume claude`, or run `chaude --from-claude latest`. The import view shows the whole transcript, including thinking, tool calls and results, and subagent messages.
 ## Contributing
 
 Build (Rust stable, pinned by `rust-toolchain.toml`) and test from the repo root:
@@ -212,7 +264,7 @@ Issues: report bugs and request features on [GitHub Issues](https://github.com/i
 
 Contribution guidelines: not published yet.
 
-## Releasing
+### Releasing
 
 Run the **release-dispatch** workflow on `master` (Actions → release-dispatch → Run workflow, enter `X.Y.Z` without the `v`), or from a shell:
 

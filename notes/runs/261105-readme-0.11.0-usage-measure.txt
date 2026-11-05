@@ -1,0 +1,13 @@
+period_start: 2026-10-28
+period_until: 2026-11-05T14:00:00Z
+sessions_main: 229
+subagent_files: 2039
+ledger_entries_since_start: 300
+assistant_requests: 22754
+model haiku: requests=18698 input=38066 cache_write_5m=49526936 cache_write_1h=6882721 cache_read=539480797 output=20941919
+model opus: requests=1919 input=5342 cache_write_5m=4043809 cache_write_1h=3461599 cache_read=95433846 output=2259068
+model sonnet: requests=2137 input=4844 cache_write_5m=6890618 cache_write_1h=266911 cache_read=40781985 output=1764150
+total_tokens: 771782611 (input+cache_write+cache_read+output)
+measured_usd_approx: 177.60
+all_opus_usd_approx: 1021.83
+saved_pct: 82.6
