@@ -1789,6 +1789,53 @@ fn prompter_failure_falls_back_to_raw_prompt() {
 }
 
 #[test]
+fn dead_prompter_slot_is_respawned_and_raw_when_respawn_fails() {
+    let _g = lock();
+    let f = fake(
+        "prompter_respawn",
+        &[
+            "resume_agent_turn.jsonl",
+            "resume_agent_turn.jsonl",
+            "resume_agent_turn.jsonl",
+        ],
+    );
+    fs::write(f.dir.join("prompter.jsonl"), "").unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    let raw = UiEvent::Notice {
+        text: "prompter 실패(오류: exited): 원문 그대로 메인에 보냄".into(),
+    };
+    // The first prompt kills the prompter child: raw prompt and the failure notice.
+    h.submit("one");
+    let evs = until_idle(&rx);
+    assert!(evs.contains(&raw), "{evs:?}");
+    // The respawned child exits again: the respawn failed, so the raw prompt goes out once more.
+    h.submit("two");
+    let evs = until_idle(&rx);
+    assert!(evs.contains(&raw), "{evs:?}");
+    // The prompter now replies: the dead slot is respawned and the summary wraps the prompt.
+    fs::write(
+        f.dir.join("prompter.jsonl"),
+        "{\"type\":\"result\",\"result\":\"caveman summary\"}\n",
+    )
+    .unwrap();
+    h.submit("three");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.contains(&UiEvent::Stage {
+            slot: "prompter".into(),
+            phase: StagePhase::Done,
+        }),
+        "{evs:?}"
+    );
+    let stdin = wait_for(&f.dir.join("stdin.log"), "caveman summary");
+    assert!(stdin.contains("[original]"), "{stdin}");
+    h.shutdown();
+}
+
+#[test]
 fn no_stage_rows_without_residents() {
     let _g = lock();
     let f = fake("stage_off", &["resume_agent_turn.jsonl"]);
