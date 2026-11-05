@@ -2647,10 +2647,16 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     Ok(())
 }
 
-// One prompt per stdin line, answered before the next line is read. Engine events are printed as plain text.
+// Go repl.go loop (1200-1262): one line at a time, answered before the next line is read. Local commands run here
+// through commands::dispatch; the rest goes to the engine as a turn. "> " + line is echoed when stdin is not a char
+// device (Go !interactive); /quit, /rotate and /mode are answered before that echo, as in Go.
 fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     // Go r.ui == nil: no UI answers permission asks, so idle asks are denied by the engine.
     cfg.no_ui = true;
+    let interactive = stdin_is_char_device();
+    let model = cfg.model.clone();
+    let threshold = cfg.rotate_threshold;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let (engine, rx) = Engine::try_start(cfg).unwrap_or_else(|e| start_failed(&e));
     let mut app = App::new(80, 24);
     if let Some(imp) = startup {
@@ -2665,21 +2671,109 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        engine.submit(&line);
-        while let Ok(ev) = rx.recv() {
-            let finished = ev == UiEvent::Busy(false);
-            let before = app.transcript.len();
-            app.apply(ev);
-            for l in &app.transcript[before..] {
-                println!("{l}");
+        let quiet =
+            line == "/quit" || line == "/exit" || line == "/rotate" || line.starts_with("/mode");
+        if !interactive && !quiet {
+            println!("> {line}");
+        }
+        let ctx = Ctx {
+            model: &model,
+            last_ctx: 0,
+            threshold,
+            rotations: 0,
+            session_id: None,
+            mode: PermMode::Default,
+            chaude_version: env!("CARGO_PKG_VERSION"),
+            busy: false,
+        };
+        match commands::dispatch(&line, &ctx) {
+            Some(Dispatch::Quit) => break,
+            Some(Dispatch::Note(s)) => println!("{s}"),
+            Some(Dispatch::SetMode(_)) => {
+                let arg = line.split_whitespace().nth(1).unwrap_or("");
+                engine.set_mode(arg);
+                pump(&rx, &mut app, false);
             }
-            if finished {
-                break;
+            Some(Dispatch::Import { arg, .. }) => {
+                match import_claude::load_import_arg(&arg, &cwd.display().to_string()) {
+                    Err(e) => println!("{e}"),
+                    Ok((_, imp)) => {
+                        app.show_import(&imp);
+                        for l in &app.transcript {
+                            println!("{l}");
+                        }
+                        engine.install_import(imp);
+                    }
+                }
+            }
+            Some(Dispatch::Resume { args }) => {
+                // Go resumeLine: the record path only; the TUI picker for several matches is not in plain mode.
+                let arg = args.join(" ");
+                let root = chaude_core::record::dir_for(&cwd);
+                match chaude_core::record_turn::resume(&root, &arg, &records::list_date) {
+                    Err(e) => println!("{e}"),
+                    Ok((lines, entries)) => {
+                        for l in &lines {
+                            println!("{l}");
+                        }
+                        for e in &entries {
+                            println!("{}", e.text);
+                        }
+                    }
+                }
+            }
+            Some(Dispatch::Update) => {
+                println!("{}", chaude_update::text(env!("CARGO_PKG_VERSION")))
+            }
+            Some(Dispatch::OpenUsage) => {
+                engine.usage();
+                pump(&rx, &mut app, false);
+            }
+            // Go plain has no views or mouse: such a line is sent to the engine as a turn (Go handle(line)).
+            Some(Dispatch::OpenView { .. } | Dispatch::ToggleMouse | Dispatch::OpenSettings)
+            | None => {
+                engine.submit(&line);
+                pump(&rx, &mut app, true);
+            }
+            Some(
+                Dispatch::Rotate { .. }
+                | Dispatch::Clear
+                | Dispatch::Model { .. }
+                | Dispatch::Passthrough { .. },
+            ) => {
+                engine.submit(&line);
+                pump(&rx, &mut app, true);
             }
         }
     }
     engine.shutdown();
     Ok(())
+}
+
+// Prints the engine events of one line. A turn waits for Busy(false); other calls only drain what is queued.
+fn pump(rx: &Receiver<UiEvent>, app: &mut App, turn: bool) {
+    loop {
+        let ev = if turn {
+            match rx.recv() {
+                Ok(ev) => ev,
+                Err(_) => return,
+            }
+        } else {
+            match rx.try_recv() {
+                Ok(ev) => ev,
+                Err(_) => return,
+            }
+        };
+        let finished = ev == UiEvent::Busy(false);
+        let before = app.transcript.len();
+        app.apply(ev);
+        for l in &app.transcript[before..] {
+            println!("{l}");
+        }
+        if turn && finished {
+            return;
+        }
+    }
 }
 
 // Go ratestatus.go rateNum: a JSON number, or a numeric string.
