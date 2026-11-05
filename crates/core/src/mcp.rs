@@ -14,6 +14,7 @@ use std::net::{Shutdown, TcpStream};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -212,11 +213,14 @@ impl Drop for McpConfig {
 pub fn start_owned(run: Arc<CoderFn>) -> io::Result<McpConfig> {
     let token = new_token();
     let exe = std::env::current_exe()?;
+    // The pid, the clock and a process-wide sequence keep parallel callers in distinct dirs (the clock alone can tie).
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("chaude-mcp-{}-{nanos}", std::process::id()));
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("chaude-mcp-{}-{nanos}-{seq}", std::process::id()));
     make_private_dir(&dir)?;
     let path = dir.join("mcp.json");
     // Created before serve, so a failed serve still removes the dir.
@@ -381,6 +385,15 @@ mod tests {
         assert!(path.is_file());
         drop(cfg);
         assert!(!dir.exists(), "{}", dir.display());
+    }
+
+    // Back-to-back callers (same pid, clock may tie) each get their own dir, so neither fails or loses its socket.
+    #[test]
+    fn owned_configs_started_together_use_distinct_dirs() {
+        let a = start_owned(Arc::new(ok_run)).expect("a");
+        let b = start_owned(Arc::new(ok_run)).expect("b");
+        assert_ne!(a.path(), b.path());
+        assert!(a.path().is_file() && b.path().is_file());
     }
 
     #[test]
