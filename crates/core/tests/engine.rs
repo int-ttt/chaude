@@ -639,9 +639,10 @@ done
 }
 
 // Go drain.consume (drain.go:317-327): a drained child's <task-notification> does not end its background agent.
-// The agent ends when the drain closes at drain_timeout (Go drain.finished), 1 s after the notice would arrive.
+// Go pollDrains (repl.go:1040-1062): when the drain closes at drain_timeout, the agent only gets a "[agent done]"
+// notice (타임아웃, it was still running) in front of the next user message. It is not marked done.
 #[test]
-fn drained_background_agent_ends_at_drain_timeout_not_on_notice() {
+fn drained_background_agent_gets_done_notice_and_stays_running() {
     let _g = lock();
     let notice = "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<task-notification><tool-use-id>toolu_bg1</tool-use-id></task-notification>\"}}\n";
     let f = fake_drain(
@@ -661,23 +662,26 @@ fn drained_background_agent_ends_at_drain_timeout_not_on_notice() {
         !evs.iter().any(|e| matches!(e, UiEvent::Rotated { .. })),
         "{evs:?}"
     );
-    let mut rotated_at = None;
-    let mut ended_at = None;
-    while ended_at.is_none() {
+    let mut evs = Vec::new();
+    loop {
         match rx.recv_timeout(WAIT).expect("engine went silent") {
-            UiEvent::Rotated { .. } => rotated_at = Some(std::time::Instant::now()),
-            UiEvent::AgentEnd { id, .. } if id == "toolu_bg1" => {
-                ended_at = Some(std::time::Instant::now())
-            }
-            _ => {}
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
         }
     }
-    let waited = ended_at
-        .unwrap()
-        .duration_since(rotated_at.expect("agent ended before the rotation"));
+    // Let the drain close at drain_timeout, then send the next user message: it carries the queued notice.
+    std::thread::sleep(Duration::from_secs(3));
+    h.submit("second");
+    evs.extend(until_idle(&rx));
+    let log = wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
     assert!(
-        waited >= Duration::from_millis(1500),
-        "agent ended on the drained notice, not at drain_timeout: {waited:?}"
+        log.contains("[agent done] toolu_bg1") && log.contains("타임아웃"),
+        "no timed-out done notice for the drained agent: {log}"
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1")),
+        "drained agent was marked done: {evs:?}"
     );
     h.shutdown();
 }

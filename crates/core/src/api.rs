@@ -3317,10 +3317,6 @@ impl State {
                     .map(|i| (i.task.clone(), i.out_path.clone()))
                     .unwrap_or_default();
                 self.notices.push(drain_done_notice(id, &task, &out, done));
-                // The drained child's agent ends with its drain, or its row stays busy forever (no feed ends it).
-                if self.agents.contains_key(id) {
-                    self.finish_agent(id.clone());
-                }
             }
             d.proc.kill();
         }
