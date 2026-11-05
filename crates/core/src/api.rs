@@ -541,16 +541,38 @@ pub struct Engine;
 impl Engine {
     // Spawn failures are reported as UiEvent::Error; the returned handle then rejects work with Error too.
     pub fn start(cfg: Config) -> (EngineHandle, Receiver<UiEvent>) {
+        let (handle, rx, _boot) = Self::spawn(cfg);
+        (handle, rx)
+    }
+
+    // Go repl.go runTUI: waits for the first claude spawn. A failure returns its error for the caller to print.
+    pub fn try_start(cfg: Config) -> Result<(EngineHandle, Receiver<UiEvent>), String> {
+        let (handle, rx, boot) = Self::spawn(cfg);
+        match boot.recv() {
+            Ok(Err(e)) => Err(e),
+            _ => Ok((handle, rx)),
+        }
+    }
+
+    fn spawn(
+        cfg: Config,
+    ) -> (
+        EngineHandle,
+        Receiver<UiEvent>,
+        Receiver<Result<(), String>>,
+    ) {
         let (in_tx, in_rx) = mpsc::channel::<Input>();
         let (ui_tx, ui_rx) = mpsc::channel::<UiEvent>();
+        let (boot_tx, boot_rx) = mpsc::channel();
         let self_tx = in_tx.clone();
-        let join = thread::spawn(move || actor(cfg, self_tx, in_rx, ui_tx));
+        let join = thread::spawn(move || actor(cfg, self_tx, in_rx, ui_tx, boot_tx));
         (
             EngineHandle {
                 tx: in_tx,
                 join: Some(join),
             },
             ui_rx,
+            boot_rx,
         )
     }
 }
@@ -774,7 +796,13 @@ struct AgentInfo {
     started_at: u64,
 }
 
-fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<UiEvent>) {
+fn actor(
+    cfg: Config,
+    self_tx: Sender<Input>,
+    rx: Receiver<Input>,
+    ui: Sender<UiEvent>,
+    boot: Sender<Result<(), String>>,
+) {
     // Session loads: a killed or below-threshold previous session resumes (handoff::resume_mode). An explicit
     // cfg.resume wins for the main child.
     let mut main_resume = cfg.resume.clone();
@@ -922,7 +950,7 @@ fn actor(cfg: Config, self_tx: Sender<Input>, rx: Receiver<Input>, ui: Sender<Ui
     }
     st.persist_live();
     st.restore_agents_at_start();
-    st.start_child();
+    let _ = boot.send(st.start_child());
     loop {
         let input = match st.wait_budget() {
             Some(d) => match rx.recv_timeout(d) {
@@ -3127,7 +3155,7 @@ impl State {
         self.ctx_tokens = 0;
         self.last_api = None;
         self.opts.resume = None;
-        self.start_child();
+        let _ = self.start_child();
         old
     }
 
@@ -3283,7 +3311,7 @@ impl State {
         self.ctx_tokens = 0;
         self.last_api = None;
         self.opts.resume = Some(session_id.to_string());
-        self.start_child();
+        let _ = self.start_child();
         self.emit(UiEvent::SessionResumed {
             old_session: old,
             session_id: session_id.to_string(),
@@ -3306,7 +3334,8 @@ impl State {
         self.mcp_cfg.as_ref().map(|c| c.path().to_path_buf())
     }
 
-    fn start_child(&mut self) {
+    // Returns the spawn error text; the UiEvent::Error is sent either way when the spawn fails.
+    fn start_child(&mut self) -> Result<(), String> {
         let mut opts = self.opts.clone();
         if let Some(path) = self.mcp_config() {
             opts.shape = Shape {
@@ -3321,8 +3350,12 @@ impl State {
             Ok(p) => {
                 self.upsert_live(p.pid(), opts.resume.clone().unwrap_or_default());
                 self.proc = Some(p);
+                Ok(())
             }
-            Err(e) => self.emit(UiEvent::Error(format!("claude spawn failed: {e}"))),
+            Err(e) => {
+                self.emit(UiEvent::Error(format!("claude spawn failed: {e}")));
+                Err(e.to_string())
+            }
         }
     }
 

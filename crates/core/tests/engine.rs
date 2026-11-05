@@ -536,6 +536,19 @@ fn spawn_failure_reports_error_and_rejects_work() {
     h.shutdown();
 }
 
+// Go repl.go:1364-1368: the first claude spawn is awaited, so a failure reaches the caller (exit 1 in the CLI).
+#[test]
+fn try_start_returns_the_spawn_failure() {
+    let _g = lock();
+    let f = fake("try-start-fail", &[]);
+    let cfg = Config {
+        claude_bin: "/nonexistent/chaude-x01/claude".into(),
+        ..config(&f)
+    };
+    let err = Engine::try_start(cfg).err().expect("spawn error returned");
+    assert!(!err.is_empty(), "spawn error text: {err}");
+}
+
 #[test]
 fn background_agent_replay_has_no_agent_end_for_async_launch() {
     let _g = lock();

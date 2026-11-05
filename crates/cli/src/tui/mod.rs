@@ -2311,6 +2311,12 @@ impl Drop for TermGuard {
     }
 }
 
+// Go repl.go:1364-1368 and 1270-1273: a failed claude start prints one line to stderr and exits 1.
+fn start_failed(err: &str) -> ! {
+    eprintln!("chaude: cannot start claude: {err}");
+    std::process::exit(1)
+}
+
 // Entry point for `chaude` with no arguments. Non-TTY stdin falls back to plain line mode.
 pub fn run(cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     // Go repl.go: the TUI needs an interactive stdin and HARNESS_PLAIN unset (empty counts as unset).
@@ -2481,7 +2487,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         cfg.rotate_threshold,
         cfg.resume.is_some(),
     );
-    let (engine, rx) = Engine::start(cfg);
+    let (engine, rx) = Engine::try_start(cfg).unwrap_or_else(|e| start_failed(&e));
     let _guard = TermGuard::enter()?;
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
     let mut app = App::new(cols as usize, rows as usize);
@@ -2645,7 +2651,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
 fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     // Go r.ui == nil: no UI answers permission asks, so idle asks are denied by the engine.
     cfg.no_ui = true;
-    let (engine, rx) = Engine::start(cfg);
+    let (engine, rx) = Engine::try_start(cfg).unwrap_or_else(|e| start_failed(&e));
     let mut app = App::new(80, 24);
     if let Some(imp) = startup {
         app.show_import(&imp);
