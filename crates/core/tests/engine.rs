@@ -749,19 +749,8 @@ fn drained_background_agent_gets_done_notice_and_stays_running() {
     h.shutdown();
 }
 
-// Metrics rows of every file in <dir>, read as they stand.
-fn metric_rows(dir: &Path) -> Vec<serde_json::Value> {
-    let mut rows = Vec::new();
-    for e in fs::read_dir(dir).into_iter().flatten().flatten() {
-        for line in fs::read_to_string(e.path()).unwrap_or_default().lines() {
-            rows.push(serde_json::from_str(line).unwrap());
-        }
-    }
-    rows
-}
-
 // Go drain.consume (drain.go:317-327, drain_test.go TestDrainConsumeDenies): the drained child's can_use_tool prompt
-// gets a deny control_response on its stdin, and each of its lines is logged as drain_deny or drain_event.
+// gets a deny control_response on its stdin, and each of its lines is added to the transcript as drain_deny or drain_event.
 #[test]
 fn drained_child_prompt_is_denied_and_lines_are_logged() {
     let _g = lock();
@@ -772,9 +761,9 @@ fn drained_child_prompt_is_denied_and_lines_are_logged() {
         &fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap(),
         notice,
     );
-    let metrics = f.dir.join("metrics");
+    let trace = f.dir.join("transcript.jsonl");
     let mut cfg = Config {
-        metrics_dir: Some(metrics.clone()),
+        transcript: Some(trace.clone()),
         ..config(&f)
     };
     cfg.rotate_threshold = 50;
@@ -797,23 +786,29 @@ fn drained_child_prompt_is_denied_and_lines_are_logged() {
     assert_eq!(deny["response"]["response"]["behavior"], "deny", "{stdin}");
     let t0 = Instant::now();
     let rows = loop {
-        let rows = metric_rows(&metrics);
-        let has = |stage: &str| rows.iter().any(|r| r["stage"] == stage);
+        let rows: Vec<serde_json::Value> = fs::read_to_string(&trace)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let has = |kind: &str| rows.iter().any(|r| r["kind"] == kind);
         if (has("drain_deny") && has("drain_event")) || t0.elapsed() > WAIT {
             break rows;
         }
         std::thread::sleep(Duration::from_millis(50));
     };
     assert!(
-        rows.iter()
-            .any(|r| r["stage"] == "drain_deny" && r["type"] == "control_request"),
+        rows.iter().any(|r| r["kind"] == "drain_deny"
+            && r["type"] == "control_request"
+            && r["session"].is_string()),
         "{rows:?}"
     );
     assert!(
         rows.iter()
-            .any(|r| r["stage"] == "drain_event" && r["type"] == "user"),
+            .any(|r| r["kind"] == "drain_event" && r["type"] == "user" && r["session"].is_string()),
         "{rows:?}"
     );
+    assert!(rows.iter().all(|r| r["t"].is_f64()), "{rows:?}");
     h.shutdown();
 }
 

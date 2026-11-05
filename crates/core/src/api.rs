@@ -2249,6 +2249,11 @@ impl State {
 
     // Go repl.go _unparsed -> Transcript.add("unparsed"): trace only, the turn is not affected. Write errors are ignored.
     fn log_unparsed(&self, line: &str) {
+        self.log_transcript("unparsed", json!({"raw": line}));
+    }
+
+    // Go Transcript.add: one JSONL row {"t", "kind", ...fields} appended to the transcript. Write errors are ignored.
+    fn log_transcript(&self, kind: &str, fields: Value) {
         let Some(path) = &self.cfg.transcript else {
             return;
         };
@@ -2256,7 +2261,10 @@ impl State {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
-        let row = json!({"t": t, "kind": "unparsed", "raw": line});
+        let mut row = json!({"t": t, "kind": kind});
+        if let (Some(m), Value::Object(f)) = (row.as_object_mut(), fields) {
+            m.extend(f);
+        }
         let _ = OpenOptions::new()
             .create(true)
             .append(true)
@@ -3501,7 +3509,7 @@ impl State {
     }
 
     // Go drain.consume: a drained child's permission prompts are denied and every line is logged as drain_deny or
-    // drain_event (metrics rows, Go tracker add). They never finish the shared tracker's agents. Eof only returns,
+    // drain_event (transcript rows, Go r.tr.add). They never finish the shared tracker's agents. Eof only returns,
     // as Go consume does on stdout close; the drain ends in reap_drains (Go pollDrains).
     fn on_drain_msg(&mut self, epoch: u64, msg: ProcMsg) {
         let ProcMsg::Line(line) = msg else {
@@ -3523,11 +3531,8 @@ impl State {
             .ok()
             .and_then(|v| v["type"].as_str().map(str::to_string))
             .unwrap_or_default();
-        let _ = self.metrics.log(json!({
-            "stage": kind,
-            "type": ty,
-            "session": self.drains[i].session,
-        }));
+        let session = self.drains[i].session.clone();
+        self.log_transcript(kind, json!({"type": ty, "session": session}));
     }
 
     // Go pollDrains: finished drains are closed (done when the shared tracker is empty, timed out at drain_timeout).
