@@ -29,7 +29,7 @@ type LinkFn = fn(&[u8], usize) -> Option<usize>;
 
 // Length of the CSI escape at b[i] (ESC [ params intermediates final), or None.
 // Same shape as links.go linkSGRRe: \x1b\[[0-9;:?]*[ -/]*[@-~].
-fn csi_len(b: &[u8], i: usize) -> Option<usize> {
+pub fn csi_len(b: &[u8], i: usize) -> Option<usize> {
     if b.get(i) != Some(&0x1b) || b.get(i + 1) != Some(&b'[') {
         return None;
     }

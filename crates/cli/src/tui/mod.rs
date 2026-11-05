@@ -876,6 +876,18 @@ impl App {
                 }
                 Action::Continue
             }
+            // Go tui.go KeyBackspace with Alt (opt+delete) deletes the previous word.
+            KeyCode::Backspace if alt => {
+                self.editor.delete_word();
+                self.sugg_sel = 0;
+                Action::Continue
+            }
+            // Cmd+Backspace: terminals send ^U (handled above); kitty CSI-u sends Backspace with Super.
+            KeyCode::Backspace if key.modifiers.contains(KeyModifiers::SUPER) => {
+                self.editor.kill_to_start();
+                self.sugg_sel = 0;
+                Action::Continue
+            }
             KeyCode::Backspace => {
                 self.editor.backspace();
                 self.sugg_sel = 0;
@@ -1380,8 +1392,14 @@ impl App {
         let status_row = self.busy_row(false);
         let esc_row = self.busy_row(true);
         let mut lines: Vec<&str> = self.transcript.iter().map(String::as_str).collect();
+        // The unfinished line gets the lead feed() would give it, so it hangs like the finished rows.
+        let live_main = format!(
+            "{}{}",
+            if self.main_open { "  " } else { ASST_FIRST },
+            self.pending_main
+        );
         if !self.pending_main.is_empty() {
-            lines.push(&self.pending_main);
+            lines.push(&live_main);
         }
         if !self.pending_agent.is_empty() {
             lines.push(&agent);
@@ -1947,14 +1965,52 @@ fn wrap_key(line: &str, width: usize, linked: bool) -> u64 {
     h.finish()
 }
 
+// Go indent (tui.go:353-378): the text after a block's lead is wrapped at width - hang, and every row after the
+// first is indented by the hang, so continuation rows line up under the text. Returns the byte index where the
+// text starts and the hang in cells. Plain notes (no lead) get no hang, as Go's note row has none.
+// Linked rows are assistant and user blocks, whose continuation lead is "  "; tool and result rows are not linked.
+fn hang_split(line: &str, linked: bool) -> (usize, usize) {
+    let mut i = 0;
+    while let Some(n) = render::csi_len(line.as_bytes(), i) {
+        i += n;
+    }
+    let leads: &[(&str, usize)] = if linked {
+        &[("● ", 2), ("> ", 2), ("  ⎿  ", 5), ("  ", 2)]
+    } else {
+        &[("● ", 2), ("  ⎿  ", 5)]
+    };
+    for (lead, hang) in leads {
+        if line[i..].starts_with(lead) {
+            return (i + lead.len(), *hang);
+        }
+    }
+    (0, 0)
+}
+
 // One logical row wrapped to `w` cells, split into screen rows. Linked rows get link styles (wrapLinked).
 fn wrap_row(line: &str, w: usize, linked: bool) -> Vec<String> {
+    let (at, hang) = hang_split(line, linked);
+    // A pane too narrow for the lead plus two text cells wraps without the hang, as before.
+    let (at, hang) = if w >= hang + 2 { (at, hang) } else { (0, 0) };
+    let (head, text) = line.split_at(at);
+    let tw = w - hang;
     let wrapped = if linked {
-        render::wrap_linked(line, |s| render::wrap_cells(s, w))
+        render::wrap_linked(text, |s| render::wrap_cells(s, tw))
     } else {
-        render::wrap_cells(line, w)
+        render::wrap_cells(text, tw)
     };
-    wrapped.split('\n').map(str::to_string).collect()
+    let pad = " ".repeat(hang);
+    wrapped
+        .split('\n')
+        .enumerate()
+        .map(|(i, row)| {
+            if i == 0 {
+                format!("{head}{row}")
+            } else {
+                format!("{pad}{row}")
+            }
+        })
+        .collect()
 }
 
 // Go stage lines (repl.go stage calls): "· <slot> 처리중" on start, "· <slot> 완료" on success,
@@ -3803,6 +3859,85 @@ mod tests {
         );
     }
 
+    // Go indent (tui.go:353-378): wrapped rows of a block line up under its text after the lead; a plain note
+    // (no lead) wraps at column 0 as Go's note row does.
+    #[test]
+    fn wrapped_rows_keep_go_hanging_indent() {
+        let plain = |rows: Vec<String>| -> Vec<String> {
+            rows.iter().map(|r| render::strip_sgr(r)).collect()
+        };
+        assert_eq!(
+            plain(wrap_row(&format!("{ASST_FIRST}aaaaaaaaaaaa"), 8, true)),
+            vec!["● aaaaaa", "  aaaaaa"]
+        );
+        assert_eq!(
+            plain(wrap_row(&format!("{GREY_ON}> cccccccc{FG_OFF}"), 6, true)),
+            vec!["> cccc", "  cccc"]
+        );
+        assert_eq!(
+            plain(wrap_row(
+                &format!("{GREY_ON}  ⎿  bbbbbbbbbbbb{FG_OFF}"),
+                10,
+                false
+            )),
+            vec!["  ⎿  bbbbb", "     bbbbb", "     bb"]
+        );
+        assert_eq!(
+            plain(wrap_row(&format!("{TOOL_ON}● dddddddd{FG_OFF}"), 6, false)),
+            vec!["● dddd", "  dddd"]
+        );
+        assert_eq!(
+            plain(wrap_row("  eeeeeeee", 6, false)),
+            vec!["  eeee", "eeee"]
+        );
+        // A pane too narrow for the lead plus two cells wraps without the hang.
+        assert_eq!(plain(wrap_row("● ffff", 3, true)), vec!["● f", "fff"]);
+    }
+
+    // The unfinished assistant line hangs like the finished ones: "● " first, "  " once the block has a line.
+    #[test]
+    fn live_assistant_row_hangs_under_its_lead() {
+        let mut app = App::new(40, 12);
+        app.apply(text("xxxxxxxxxxxxxxxx"));
+        let rows = app.body(8);
+        let tail: Vec<String> = rows[rows.len() - 3..]
+            .iter()
+            .map(|r| render::strip_sgr(r))
+            .collect();
+        assert_eq!(tail, vec!["● xxxxxx", "  xxxxxx", "  xxxx"]);
+
+        let mut app = App::new(40, 12);
+        app.apply(text("hi\nxxxxxxxxxxxxxxxx"));
+        let rows = app.body(8);
+        let tail: Vec<String> = rows[rows.len() - 4..]
+            .iter()
+            .map(|r| render::strip_sgr(r))
+            .collect();
+        assert_eq!(tail, vec!["● hi", "  xxxxxx", "  xxxxxx", "  xxxx"]);
+    }
+
+    // Go input.go: opt+delete (Alt+Backspace, ESC DEL from macOS) deletes a word; cmd+delete arrives as ^U
+    // (Ctrl+U) and kills to the line start; kitty CSI-u Cmd+Backspace (Backspace with Super) does the same.
+    #[test]
+    fn opt_delete_is_delete_word_and_cmd_delete_kills_to_line_start() {
+        let mut app = App::new(40, 12);
+        for c in "hello, world".chars() {
+            app.editor.insert_char(c);
+        }
+        app.on_key(key(KeyCode::Backspace, KeyModifiers::ALT));
+        assert_eq!(app.editor.text(), "hello, ");
+        app.on_key(key(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert_eq!(app.editor.text(), "");
+
+        for c in "ab\ncd ef".chars() {
+            app.editor.insert_char(c);
+        }
+        app.on_key(key(KeyCode::Backspace, KeyModifiers::SUPER));
+        assert_eq!(app.editor.text(), "ab\n");
+        app.on_key(key(KeyCode::Backspace, KeyModifiers::NONE));
+        assert_eq!(app.editor.text(), "ab");
+    }
+
     // R04 (tui.go:481): an agent caveman return adds no transcript row; a plain tool result still does.
     #[test]
     fn caveman_tool_result_is_hidden_from_the_transcript() {
@@ -3843,7 +3978,7 @@ mod tests {
         let rows = app.body(20);
         let tail = rows
             .iter()
-            .find(|r| render::strip_sgr(r).trim() == "op")
+            .find(|r| render::strip_sgr(r).trim() == "mnop")
             .expect("tail row");
         assert!(tail.contains(render::LINK_URL_ON));
         assert!(
