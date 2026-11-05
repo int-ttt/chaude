@@ -521,10 +521,11 @@ impl App {
                 self.usage.set_text(&text, w, h);
             }
             // While the window waits for /usage, its failure goes into the window (Go usageFetch).
-            // Go repl.go stage(): one grey note per stage change, same as the Go stageMsg block.
+            // Go repl.go stage(): one grey note per stage change, then a blank row (Go note block adds "").
             UiEvent::Stage { slot, phase } => {
                 self.end_main_block();
-                self.note(&stage_text(&slot, &phase));
+                self.note(&format!("{GREY_ON}{}{FG_OFF}", stage_text(&slot, &phase)));
+                self.transcript.push(String::new());
             }
             // Go resident.go notice(): a failed prompter or tui pass, one note line.
             UiEvent::Notice { text } => {
@@ -4421,6 +4422,31 @@ mod tests {
         );
         // Go prints no "◆ agent started" or "◆ agent done in" rows.
         assert!(app.transcript.iter().all(|r| !r.contains("◆")));
+    }
+
+    // Go repl.go stage() + tui.go note block: each stage row is grey and followed by one blank row.
+    #[test]
+    fn stage_rows_are_grey_and_separated_by_a_blank_row() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::Stage {
+            slot: "prompter".to_string(),
+            phase: StagePhase::Working,
+        });
+        app.apply(UiEvent::Stage {
+            slot: "prompter".to_string(),
+            phase: StagePhase::Done,
+        });
+        let n = app.transcript.len();
+        assert_eq!(
+            app.transcript[n - 4],
+            format!("{GREY_ON}· prompter 처리중{FG_OFF}")
+        );
+        assert_eq!(app.transcript[n - 3], "");
+        assert_eq!(
+            app.transcript[n - 2],
+            format!("{GREY_ON}· prompter 완료{FG_OFF}")
+        );
+        assert_eq!(app.transcript[n - 1], "");
     }
 
     // Go repl.go:721-754 and drain.go doneLine: the stage row names the subagent_type label, and the done
