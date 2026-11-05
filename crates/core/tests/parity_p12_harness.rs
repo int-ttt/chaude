@@ -289,10 +289,8 @@ parity_ignored! {
     agentview_click_read_only_close = "parity: panel-row mouse click opens agent view; panel_click at crates/cli/src/tui/mod.rs:1556 is private (key part ported at agentview.rs:340)";
     scroll_bottom_on_input_and_update = "parity: agent view refresh and close scroll not ported; AgentView scroll state at crates/cli/src/tui/agentview.rs:195 (main body parts at mod.rs:3508)";
     child_pid_recorded_on_park = "parity: parked child pid write is private; upsert_live at crates/core/src/api.rs:3636 has no pub seam";
-    version_note_shows_chaude_version = "parity: version note test not ported; version_note at crates/cli/src/tui/commands.rs:295 is pub";
     prune_record_files = "parity: no prune_record_files in crates/core/src (record pruning absent)";
     resident_slots_fixed_four = "parity: diff, Rust uses 8-slot floor RESIDENT_MAX_WORKERS (crates/core/src/api.rs:270)";
-    settings_file_empty_cwd_uses_working_dir = "parity: no settings_file helper in crates/core/src (settingsFileFor absent)";
     max_workers_cap_refuses = "parity: diff, Rust child_set::admit evicts oldest instead of refusing (crates/core/src/child_set.rs:147)";
     drain_consume_denies = "parity: drain consume not pub; import_view consume at crates/core/src/import_view.rs:157 is a different path";
     agent_tracker_drain_half = "parity: drain finished and timeout not pub; AgentTracker::running at crates/core/src/agent_store.rs:777";
