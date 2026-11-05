@@ -99,6 +99,7 @@ case "$*" in
   *) role=main ;;
 esac
 printf '%s\n' "$role" >> 'DIR/spawned.log'
+[ "$role" = prompter ] && [ -f 'DIR/prompter.idle' ] && cat 'DIR/prompter.idle'
 [ "$role" = main ] && printf '%s\n' "$*" >> 'DIR/args.log'
 while IFS= read -r line; do
   if [ "$role" = coder ]; then
@@ -1678,6 +1679,36 @@ fn prompter_then_tui_stage_rows_follow_go_order() {
         ],
         "{evs:?}"
     );
+    h.shutdown();
+}
+
+// Go TestSpawnSlotParksReadingChild (resident_route_test.go:55): a spawned resident child is read while it is idle,
+// so output with no task pending is still seen. The fake prompter prints one unsolicited result at start.
+#[test]
+fn spawned_resident_is_read_while_idle() {
+    let _g = lock();
+    let f = fake("idle_read", &["text_turn.jsonl"]);
+    fs::write(
+        f.dir.join("prompter.idle"),
+        "{\"type\":\"result\",\"session_id\":\"p-idle\"}\n",
+    )
+    .unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        let ev = rx
+            .recv_timeout(left)
+            .unwrap_or_else(|e| panic!("no idle prompter id seen: {e}"));
+        if let UiEvent::SessionIds { residents, .. } = &ev
+            && residents.get("prompter").map(String::as_str) == Some("p-idle")
+        {
+            break;
+        }
+    }
     h.shutdown();
 }
 

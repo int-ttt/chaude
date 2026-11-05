@@ -11,13 +11,6 @@ fn go_run_turn_shows_tui_output_only() {
     panic!("not ported: run_turn TUI-only output");
 }
 
-// Go TestSpawnSlotParksReadingChild (resident_route_test.go:55)
-#[test]
-#[ignore = "parity: resident slots have no parked or idle-reader state (crates/core/src/api.rs:1672-1680 spawn_residents)"]
-fn go_spawn_slot_parks_reading_child() {
-    panic!("not ported: spawn_slot parks reading child");
-}
-
 // Go TestViewHelpers (resume_test.go:42)
 #[test]
 #[ignore = "N-A: Go formatTranscript (resume.go:174-175) has no production caller, only resume_test.go:61; list/match/prompts covered by cli sessview::list_match_and_prompts_follow_go_view_helpers"]
