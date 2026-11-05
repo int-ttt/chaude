@@ -24,10 +24,3 @@ fn go_spawn_slot_parks_reading_child() {
 fn go_view_helpers() {
     panic!("not ported: sessview helper set (cli-private)");
 }
-
-// Go TestReleaseCopiesSelection (selection_test.go:50)
-#[test]
-#[ignore = "parity: copy_text hard-wires native clipboard (crates/cli/src/tui/mod.rs:1952), no injectable hook; partial cli test tui::release_returns_the_dragged_text_for_copy"]
-fn go_release_copies_selection() {
-    panic!("not ported: release copies selection (cli-private)");
-}

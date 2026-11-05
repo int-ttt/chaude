@@ -1953,12 +1953,30 @@ fn input_window(n: usize, cur: usize) -> (usize, usize) {
 
 // Copies `text` like Go copyToClipboard (selection.go:115-120): the native copy runs first, then OSC 52 is written
 // to the terminal (reaches the local clipboard over SSH) even when the native copy failed. The error is the native copy's;
-// elsewhere only OSC 52 is written, so success there is unverified.
-fn copy_text(out: &mut impl Write, text: &str) -> Result<(), String> {
-    let native = native_copy(text);
+// elsewhere only OSC 52 is written, so success there is unverified. `native` is the injected clipboard write (native_copy in the loop).
+fn copy_text(
+    out: &mut impl Write,
+    text: &str,
+    native: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let result = native(text);
     let osc = format!("\x1b]52;c;{}\x07", base64(text.as_bytes()));
     let _ = out.write_all(osc.as_bytes()).and_then(|()| out.flush());
-    native
+    result
+}
+
+// Left release over a selection: copies the selected text and records the note (Go selectMouse release + copyNoteMsg).
+fn release_copy(
+    app: &mut App,
+    out: &mut impl Write,
+    native: impl FnOnce(&str) -> Result<(), String>,
+    x: u16,
+    y: u16,
+) {
+    if let Some(text) = app.select_release(x, y) {
+        let result = copy_text(out, &text, native);
+        app.copy_done(text.chars().count(), result);
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -2645,10 +2663,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                     }
                     MouseEventKind::Drag(MouseButton::Left) => app.select_drag(m.column, m.row),
                     MouseEventKind::Up(MouseButton::Left) => {
-                        if let Some(text) = app.select_release(m.column, m.row) {
-                            let result = copy_text(&mut out, &text);
-                            app.copy_done(text.chars().count(), result);
-                        }
+                        release_copy(&mut app, &mut out, native_copy, m.column, m.row);
                     }
                     _ => {}
                 },
@@ -4389,21 +4404,49 @@ mod tests {
     }
 
     #[test]
-    fn release_returns_the_dragged_text_for_copy() {
-        // Partial port of Go TestReleaseCopiesSelection (selection_test.go:50). The clipboard write is not
-        // injectable: copy_text (mod.rs copy_text) calls the native copy directly, so the stub stays ignored.
+    fn release_copies_selection_once_and_notes_it() {
+        // Go TestReleaseCopiesSelection (selection_test.go:50): a drag does not copy, release copies the selected
+        // text once and shows the note, a plain click copies nothing.
         let mut app = App::new(30, 6);
         app.transcript.push("alpha".into());
         app.transcript.push("beta gamma".into());
         assert_eq!(screen(&app, 30, 6)[..2], ["alpha", "beta gamma"]);
+        let mut copied: Vec<String> = Vec::new();
+        let mut osc: Vec<u8> = Vec::new();
         app.select_press(0, 1);
         app.select_drag(4, 1);
-        assert_eq!(app.select_release(4, 1), Some("beta".to_string()));
-        app.copy_done(4, Ok(()));
+        assert!(copied.is_empty(), "{copied:?}");
+        release_copy(
+            &mut app,
+            &mut osc,
+            |s| {
+                copied.push(s.to_string());
+                Ok(())
+            },
+            4,
+            1,
+        );
+        assert_eq!(copied, ["beta"]);
+        assert_eq!(
+            String::from_utf8_lossy(&osc),
+            format!("\x1b]52;c;{}\x07", base64(b"beta"))
+        );
         assert_eq!(
             app.copy_note.as_ref().map(|n| n.0.as_str()),
             Some("복사됨 (4자)")
         );
+        app.select_press(2, 0);
+        release_copy(
+            &mut app,
+            &mut osc,
+            |s| {
+                copied.push(s.to_string());
+                Ok(())
+            },
+            2,
+            0,
+        );
+        assert_eq!(copied, ["beta"], "plain click copied");
     }
 
     #[test]
