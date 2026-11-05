@@ -22,3 +22,15 @@ queue:
   - checks: test-isolated EXIT=0, 708 passed / 0 failed / 3 ignored; clippy EXIT=0 0 warnings; fmt --check EXIT=0
   - size: du -sh 4.0G
 - open: round-2 log entry left uncommitted (only item commit requested)
+
+## round 3
+- item 3 (loop4 R5 item2 non-coder role case): DIFF, fixed, commit 6ab5e3a fix(core)
+  - go: livechild.go:42-49 parkedIdleEvent answers every parked child's can_use_tool (`case t == "control_request" && ... "can_use_tool"`, deny at :48 `"denied: session parked (another model is active)"`); resident.go:155 wires it for every resident slot (tui, prompter, coder); resident_coder.go:85-88 coderMayUse false for non-coder role (`!strings.HasPrefix(c.Role, "coder")`).
+  - rust before: on_prompter_line (api.rs:1578) and on_tui_line dropped non-result lines, so tui/prompter can_use_tool got no reply (child hangs). Coder path (on_coder_line, coder_permission) was already right.
+  - rust after: api.rs:1578 on_prompter_line and api.rs:2022 on_tui_line check can_use_tool first and call deny_parked (api.rs:4052, helper; write error ignored like Go `_ =`).
+  - checks: scripts/test-isolated.sh rc=0, 708 passed, 0 failed, 3 ignored (28 result blocks); cargo clippy --workspace --all-targets rc=0, 0 warnings; cargo fmt --all --check rc=0.
+  - DOUBT: no new test covers the tui/prompter deny path (needs a fake child emitting can_use_tool on those roles); verified by code read + green suite only.
+  - DOUBT: loop4 R5 item2 doubt "non-coder role not modeled" is now closed by code, not by a test.
+- loop5 round 2 log committed alone: 96d1769 (docs(notes)); this round-3 entry left uncommitted.
+- disk: repo du -sh 4.0G before fix (under 15GB).
+- NOT DONE: none for items (a) and item 3. Not pushed. No reset/stash/tag/amend.
