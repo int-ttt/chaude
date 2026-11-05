@@ -335,9 +335,9 @@ pub struct Config {
     pub show_rotation: bool,
     // Go --no-handoff-validate: accept the handoff note without the section and file checks (no retry).
     pub no_handoff_validate: bool,
-    // Go --max-drain: concurrently draining old sessions (0 = never drain). No engine effect yet.
+    // Go --max-drain: concurrently draining old sessions (0 = never drain). A rotation with agents running keeps the old child.
     pub max_drain: usize,
-    // Go --drain-timeout: how long a draining agent is awaited. No engine effect yet.
+    // Go --drain-timeout: how long a draining child is awaited before it is closed.
     pub drain_timeout: Duration,
     // Go --rotate-cooldown: after a held rotation, no automatic context rotation for this long.
     pub rotate_cooldown: Duration,
@@ -698,6 +698,8 @@ struct State {
     tui_epoch: u64,
     // When the running tui wait gives up (Go tuiTimeout).
     tui_deadline: Option<Instant>,
+    // Old main children kept alive while their agents run (Go repl.go draining, drain.go); oldest first.
+    drains: Vec<Drain>,
     // Coder residents (Go coder, coder2..): slot 0 is "coder", slot i is "coder{i+1}". Grown on demand.
     coders: Vec<Coder>,
     coder_epoch: u64,
@@ -774,6 +776,40 @@ fn restored_row(s: &SavedAgent) -> AgentRow {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs()),
     }
+}
+
+// Go drain: an old main child that keeps running its agents after a rotation. Its lines are tagged with its epoch.
+struct Drain {
+    proc: ClaudeProc,
+    epoch: u64,
+    since: Instant,
+    // Agents of the old child still running (tool_use ids); the drain ends when this set is empty.
+    agents: HashSet<String>,
+}
+
+// Go rotate: an old child is drained only when agents are running and --max-drain allows it.
+fn drain_wanted(max_drain: usize, running: usize) -> bool {
+    max_drain > 0 && running > 0
+}
+
+// Tool_result ids in one child line, with whether the result is an async launch (the agent keeps running).
+fn tool_result_ids(line: &str) -> Vec<(String, bool)> {
+    let Ok(raw) = serde_json::from_str::<Value>(line) else {
+        return Vec::new();
+    };
+    raw["message"]["content"]
+        .as_array()
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter(|b| b["type"] == "tool_result")
+                .filter_map(|b| {
+                    let id = b["tool_use_id"].as_str()?.to_string();
+                    Some((id, b["content"].to_string().contains(ASYNC_AGENT_MARK)))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // What the handoff snapshot needs about a delegated agent (Go agentRec: Name, ResultPath, Background, Started,
@@ -938,6 +974,7 @@ fn actor(
         tui_proc: None,
         tui_epoch: 0,
         tui_deadline: None,
+        drains: Vec::new(),
         coders: Vec::new(),
         coder_epoch: 0,
         usage_poll_at: None,
@@ -990,6 +1027,9 @@ fn actor(
                 ProcMsg::Line(line) => st.on_line(&line),
                 ProcMsg::Eof => st.on_eof(),
             },
+            Input::Proc(epoch, msg) if st.drains.iter().any(|d| d.epoch == epoch) => {
+                st.on_drain_msg(epoch, msg)
+            }
             Input::Proc(_, _) => {}
             Input::Prompter(epoch, msg) if epoch == st.prompter_epoch => match msg {
                 ProcMsg::Line(line) => st.on_prompter_line(&line),
@@ -1031,6 +1071,10 @@ fn actor(
         if let Some(mut p) = c.proc.take() {
             p.kill();
         }
+    }
+    // Go closeDrains on exit: draining children are closed.
+    for mut d in std::mem::take(&mut st.drains) {
+        d.proc.kill();
     }
 }
 
@@ -2636,7 +2680,7 @@ impl State {
     // A coder wait can run during a busy main turn, so its deadline is only added to the main timers.
     fn wait_budget(&self) -> Option<Duration> {
         // A busy coder wakes at its deadline; an idle extra coder wakes at its expiry.
-        let own = self
+        let coders = self
             .coders
             .iter()
             .enumerate()
@@ -2644,6 +2688,16 @@ impl State {
                 Some(t) => Some(t.saturating_duration_since(Instant::now())),
                 None => self.coder_idle_left(i),
             })
+            .min();
+        // A draining child wakes at its drain timeout.
+        let drains = self
+            .drains
+            .iter()
+            .map(|d| self.cfg.drain_timeout.saturating_sub(d.since.elapsed()))
+            .min();
+        let own = [coders, drains]
+            .into_iter()
+            .flatten()
             .min()
             .map(|d| d.max(Duration::from_millis(1)));
         match (self.main_wait_budget(), own) {
@@ -2686,6 +2740,7 @@ impl State {
     // Inactivity notice. Informational only: the turn is never interrupted, and the clock restarts so the
     // notice repeats once per quiet period rather than on every wakeup.
     fn on_quiet(&mut self) {
+        self.reap_drains();
         if self.prompter_left().is_some_and(|d| d.is_zero()) {
             self.prompter_timeout();
         }
@@ -3152,9 +3207,21 @@ impl State {
 
     // Closes the current child and starts a fresh one (no --resume). Returns the closed session id.
     fn restart_child(&mut self) -> String {
+        self.restart_child_with(false).0
+    }
+
+    // Returns the old session id and whether the old child was kept draining (Go rotate: drained).
+    fn restart_child_with(&mut self, drain: bool) -> (String, bool) {
         let old = self.sid.clone();
+        let old_epoch = self.epoch;
+        let mut drained = false;
         if let Some(mut p) = self.proc.take() {
-            p.kill();
+            if drain {
+                self.start_drain(p, old_epoch);
+                drained = true;
+            } else {
+                p.kill();
+            }
         }
         self.next_epoch();
         self.rotations += 1;
@@ -3167,7 +3234,73 @@ impl State {
         self.last_api = None;
         self.opts.resume = None;
         let _ = self.start_child();
-        old
+        (old, drained)
+    }
+
+    // Go drain: the old child keeps its running agents. Its agents are the ones still in self.agents. The oldest
+    // drains beyond max_drain are closed.
+    fn start_drain(&mut self, proc: ClaudeProc, epoch: u64) {
+        let agents = self.agents.keys().cloned().collect();
+        self.drains.push(Drain {
+            proc,
+            epoch,
+            since: Instant::now(),
+            agents,
+        });
+        while self.drains.len() > self.cfg.max_drain {
+            let mut oldest = self.drains.remove(0);
+            oldest.proc.kill();
+        }
+    }
+
+    // Ends one drain: its child is killed and the entry dropped.
+    fn end_drain(&mut self, epoch: u64) {
+        if let Some(i) = self.drains.iter().position(|d| d.epoch == epoch) {
+            let mut d = self.drains.remove(i);
+            d.proc.kill();
+        }
+    }
+
+    // Go drain.consume: a drained child's agent results finish its agents. A background agent keeps running after
+    // its launch result, so only its later completion counts (not seen here; the drain timeout ends it).
+    fn on_drain_msg(&mut self, epoch: u64, msg: ProcMsg) {
+        match msg {
+            ProcMsg::Line(line) => {
+                for (id, launch) in tool_result_ids(&line) {
+                    if launch {
+                        continue;
+                    }
+                    let Some(d) = self.drains.iter_mut().find(|d| d.epoch == epoch) else {
+                        return;
+                    };
+                    if d.agents.remove(&id) && self.agents.contains_key(&id) {
+                        self.finish_agent(id);
+                    }
+                }
+                if self
+                    .drains
+                    .iter()
+                    .any(|d| d.epoch == epoch && d.agents.is_empty())
+                {
+                    self.end_drain(epoch);
+                }
+            }
+            ProcMsg::Eof => self.end_drain(epoch),
+        }
+    }
+
+    // Drains past drain_timeout are closed (Go drain.finished timedOut).
+    fn reap_drains(&mut self) {
+        let timeout = self.cfg.drain_timeout;
+        let expired: Vec<u64> = self
+            .drains
+            .iter()
+            .filter(|d| d.since.elapsed() >= timeout)
+            .map(|d| d.epoch)
+            .collect();
+        for epoch in expired {
+            self.end_drain(epoch);
+        }
     }
 
     // Takes the next epoch from the monotonic counter, so a restored parked child keeps a unique tag.
@@ -3258,7 +3391,8 @@ impl State {
 
     // Closes the current child and starts a fresh one that gets the snapshot with its next prompt.
     fn rotate_child(&mut self, snapshot: String, reason: String, valid: bool, attempts: u32) {
-        let old = self.restart_child();
+        let drain = drain_wanted(self.cfg.max_drain, self.agents.len());
+        let (old, drained) = self.restart_child_with(drain);
         self.pending_snapshot = snapshot;
         let _ = self.metrics.log(json!({
             "stage": "rotate",
@@ -3266,7 +3400,8 @@ impl State {
             "old_session": old,
             "handoff_valid": valid,
             "attempts": attempts,
-            "outcome": "closed",
+            "drained": drained,
+            "outcome": if drained { "drained" } else { "closed" },
         }));
         self.emit(UiEvent::RotatedFrom { old_session: old });
         self.emit(UiEvent::Rotated { reason });
@@ -3831,6 +3966,24 @@ mod tests {
         );
         assert_eq!(idle_deadline(Duration::ZERO, "1h"), Duration::ZERO);
         assert_eq!(idle_deadline(Duration::ZERO, "5m"), Duration::ZERO);
+    }
+
+    // Go repl.go rotate: the old child drains only with agents running and max_drain > 0.
+    #[test]
+    fn drain_only_with_running_agents_and_max_drain() {
+        assert!(drain_wanted(3, 1));
+        assert!(!drain_wanted(0, 1));
+        assert!(!drain_wanted(3, 0));
+    }
+
+    // Go drain.consume: a foreground tool_result finishes its agent; an async launch result does not.
+    #[test]
+    fn tool_result_ids_mark_async_launches() {
+        let fg = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"done"}]}}"#;
+        assert_eq!(tool_result_ids(fg), vec![("t1".to_string(), false)]);
+        let bg = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"Async agent launched, agentId: x"}]}}"#;
+        assert_eq!(tool_result_ids(bg), vec![("t2".to_string(), true)]);
+        assert!(tool_result_ids("not json").is_empty());
     }
 
     // Go warmDeadline: idle expiry off still keeps a parked child warm for neverCold (pickChild is never cold).
