@@ -442,8 +442,8 @@ mod tests {
     }
 
     // Go drain.consume (drain_test.go TestDrainConsumeDenies): the deny answer reaches the child's stdin as a
-    // control_response. Proxy: runs `cat` as the child and reads the frame back. The drain_kinds log (drain_deny,
-    // drain_event) is not ported, so only the response half of the Go test is covered.
+    // control_response. Proxy: runs `cat` as the child and reads the frame back. The drain_deny/drain_event log is
+    // covered end to end by drained_child_prompt_is_denied_and_lines_are_logged (tests/engine.rs).
     #[test]
     fn drain_deny_frame_reaches_child_stdin() {
         let mut child = Command::new("cat")

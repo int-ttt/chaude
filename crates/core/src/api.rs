@@ -820,6 +820,7 @@ fn restored_row(s: &SavedAgent) -> AgentRow {
 struct Drain {
     proc: ClaudeProc,
     epoch: u64,
+    session: String,
     since: Instant,
     // Every agent the drain waited for, sorted (its end notices).
     started: Vec<String>,
@@ -3443,7 +3444,7 @@ impl State {
                 for id in self.pending_perm.keys() {
                     let _ = p.write_permission(id, false, Value::Null, DRAIN_DENY);
                 }
-                self.start_drain(p, old_epoch);
+                self.start_drain(p, old_epoch, old.clone());
                 drained = true;
             } else {
                 p.kill();
@@ -3465,12 +3466,13 @@ impl State {
 
     // Go drain: the old child keeps its running agents. Its agents are the ones still in self.agents. The oldest
     // drains beyond max_drain are closed.
-    fn start_drain(&mut self, proc: ClaudeProc, epoch: u64) {
+    fn start_drain(&mut self, proc: ClaudeProc, epoch: u64, session: String) {
         let mut started: Vec<String> = self.agents.keys().cloned().collect();
         started.sort();
         self.drains.push(Drain {
             proc,
             epoch,
+            session,
             since: Instant::now(),
             started,
         });
@@ -3498,20 +3500,34 @@ impl State {
         }
     }
 
-    // Go drain.consume: a drained child's lines only get the permission deny. They never finish the shared tracker's
-    // agents, so a drain ends in reap_drains (Go pollDrains) or at Eof.
+    // Go drain.consume: a drained child's permission prompts are denied and every line is logged as drain_deny or
+    // drain_event (metrics rows, Go tracker add). They never finish the shared tracker's agents. Eof only returns,
+    // as Go consume does on stdout close; the drain ends in reap_drains (Go pollDrains).
     fn on_drain_msg(&mut self, epoch: u64, msg: ProcMsg) {
-        match msg {
-            ProcMsg::Line(line) => {
-                let Some(id) = drain_permission_id(&line) else {
-                    return;
-                };
-                if let Some(d) = self.drains.iter_mut().find(|d| d.epoch == epoch) {
-                    let _ = d.proc.write_permission(&id, false, Value::Null, DRAIN_DENY);
-                }
+        let ProcMsg::Line(line) = msg else {
+            return;
+        };
+        let Some(i) = self.drains.iter().position(|d| d.epoch == epoch) else {
+            return;
+        };
+        let kind = match drain_permission_id(&line) {
+            Some(id) => {
+                let _ = self.drains[i]
+                    .proc
+                    .write_permission(&id, false, Value::Null, DRAIN_DENY);
+                "drain_deny"
             }
-            ProcMsg::Eof => self.end_drain(epoch, true),
-        }
+            None => "drain_event",
+        };
+        let ty = serde_json::from_str::<Value>(&line)
+            .ok()
+            .and_then(|v| v["type"].as_str().map(str::to_string))
+            .unwrap_or_default();
+        let _ = self.metrics.log(json!({
+            "stage": kind,
+            "type": ty,
+            "session": self.drains[i].session,
+        }));
     }
 
     // Go pollDrains: finished drains are closed (done when the shared tracker is empty, timed out at drain_timeout).
