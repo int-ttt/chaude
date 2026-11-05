@@ -7,13 +7,14 @@
 // #[ignore = "parity: <reason>"]. The stub bodies panic, so --include-ignored cannot pass them.
 
 use chaude_core::agent_store::AgentTracker;
+use chaude_core::clients::{ClientRec, ClientRegistry, EXPIRED, PARKED, now_stamp};
 use chaude_core::mcp;
 use chaude_core::resident::agent_body;
 use chaude_core::turn_spend::TurnSpend;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 macro_rules! parity_ignored {
     ($($name:ident = $reason:literal;)*) => {
@@ -248,17 +249,46 @@ fn mcp_config_args() {
     assert_eq!(server["env"][mcp::TOKEN_ENV], json!("tok"));
 }
 
+// Go budget_test.go TestReconcileParkedAliveChild: a parked row whose child is alive is expired as
+// orphan-alive and its child_pid cleared; a parked row with no child stays parked.
+#[test]
+fn reconcile_parked_alive_child() {
+    let dir = scratch("reconcile-parked");
+    let reg = ClientRegistry::new(dir.join("clients.json"));
+    let now = now_stamp();
+    // owner_pid 0 is a dead owner, so reconcile looks at the child.
+    let row = |cwd: &str, child_pid: u32| ClientRec {
+        cwd: cwd.into(),
+        model: "opus".into(),
+        session_id: format!("s-{cwd}"),
+        state: PARKED.into(),
+        last_api: now,
+        child_pid,
+        ..Default::default()
+    };
+    reg.upsert(row("/w/a", std::process::id()));
+    reg.upsert(row("/w/b", 0));
+
+    let orphans = reg.reconcile(now, Duration::from_secs(3600));
+    assert_eq!(orphans.len(), 1, "{orphans:?}");
+    assert_eq!(orphans[0].cwd, "/w/a");
+    let a = reg.get("/w/a", "opus").unwrap();
+    assert!(
+        a.state == EXPIRED && a.ended_reason == "orphan-alive" && a.child_pid == 0,
+        "alive-child row {a:?}"
+    );
+    let b = reg.get("/w/b", "opus").unwrap();
+    assert_eq!(b.state, PARKED, "dead-child parked row changed {b:?}");
+}
+
 // Stubs for rows that cannot be reached from crates/*/tests/ yet. Each panics when run with
 // --include-ignored, so a missing port cannot pass silently.
 parity_ignored! {
     // p1 (missing rows)
-    live_streaming_multiple_deltas = "parity: live-only, needs real claude CLI (crates/core/src/api.rs:2205-2211 TextDelta path)";
-    agentview_click_read_only_close = "parity: agent view click is private to the TUI; panel_click at crates/cli/src/tui/mod.rs:1556";
-    typing_keeps_scroll = "parity: typing scroll follow is private to the TUI; scroll_to at crates/cli/src/tui/mod.rs:1733";
-    scroll_bottom_on_input_and_update = "parity: scroll-to-bottom on input is private to the TUI; scroll at crates/cli/src/tui/mod.rs:1722";
-    child_pid_recorded_on_park = "parity: Repl.parkOld has no pub Rust seam; park_active at crates/core/src/api.rs:1383 is private";
-    reconcile_parked_alive_child = "parity: parked-child reconcile has no pub Rust seam; park_active at crates/core/src/api.rs:1383 is private";
-    busy_slash_allowed_and_refused = "parity: slash gate is private to the TUI key handler; on_key at crates/cli/src/tui/mod.rs:665";
+    live_streaming_multiple_deltas = "parity: Go test is live-only; no fixture with more than 3 main text deltas (text_turn.jsonl has 2, engine.rs:212)";
+    agentview_click_read_only_close = "parity: panel-row mouse click opens agent view; panel_click at crates/cli/src/tui/mod.rs:1556 is private (key part ported at agentview.rs:340)";
+    scroll_bottom_on_input_and_update = "parity: agent view refresh and close scroll not ported; AgentView scroll state at crates/cli/src/tui/agentview.rs:195 (main body parts at mod.rs:3508)";
+    child_pid_recorded_on_park = "parity: parked child pid write is private; upsert_live at crates/core/src/api.rs:3636 has no pub seam";
     version_note_shows_chaude_version = "parity: version note test not ported; version_note at crates/cli/src/tui/commands.rs:295 is pub";
     prune_record_files = "parity: no prune_record_files in crates/core/src (record pruning absent)";
     resident_slots_fixed_four = "parity: diff, Rust uses 8-slot floor RESIDENT_MAX_WORKERS (crates/core/src/api.rs:270)";
