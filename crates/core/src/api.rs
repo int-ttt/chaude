@@ -4490,4 +4490,91 @@ mod tests {
         assert_eq!(worker_floor(3, 4), 12);
         assert_eq!(worker_floor(20, 4), 20);
     }
+
+    // Go parkedIdleEvent (livechild.go:42-49): a parked non-coder child's can_use_tool gets a deny, never silence.
+    // Drives the real actor: the prompter and tui children are fake claude scripts that ask can_use_tool and
+    // block on the answer, so a missing deny fails the test (engine silent) instead of hanging it.
+    #[cfg(unix)]
+    #[test]
+    fn parked_non_coder_can_use_tool_is_denied_on_prompter_and_tui() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("item3-deny");
+        let log = dir.path().join("deny.log");
+        let turn = dir.path().join("turn.jsonl");
+        std::fs::write(
+            &turn,
+            "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n\
+             {\"type\":\"result\",\"session_id\":\"s1\",\"result\":\"ok\"}\n",
+        )
+        .expect("write turn");
+        // Role by argv: main has --mcp-config, the prompter rule is "input summarizer", tui is the rest.
+        let script = r#"#!/bin/sh
+case "$*" in
+  *--mcp-config*) ROLE=main ;;
+  *"input summarizer"*) ROLE=prompter ;;
+  *) ROLE=tui ;;
+esac
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"user"'*)
+      if [ "$ROLE" = main ]; then
+        cat 'TURN'
+      else
+        printf '%s\n' '{"type":"control_request","request_id":"req-'"$ROLE"'","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{}}}'
+        read -r reply
+        printf '%s\n' "$reply" >> 'LOG'
+        printf '%s\n' '{"type":"result","session_id":"s-'"$ROLE"'","result":"ok"}'
+      fi
+      ;;
+  esac
+done
+"#
+        .replace("TURN", &turn.display().to_string())
+        .replace("LOG", &log.display().to_string());
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, script).expect("write fake claude");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        // SAFETY: set before this test's engine starts; no other test in this binary drives the engine.
+        unsafe { std::env::set_var("HARNESS_RECORD_DIR", dir.path().join("record")) };
+        let cfg = Config {
+            claude_bin: bin.display().to_string(),
+            model: "haiku".into(),
+            residents: true,
+            ..isolated(dir.path())
+        };
+        let (h, rx) = Engine::try_start(cfg).expect("engine boots");
+        h.submit("hello");
+        loop {
+            let ev = rx
+                .recv_timeout(Duration::from_secs(60))
+                .expect("engine went silent: a parked child's can_use_tool got no answer");
+            if ev == UiEvent::Busy(false) {
+                break;
+            }
+        }
+        h.shutdown();
+        let text = std::fs::read_to_string(&log).unwrap_or_default();
+        let frames: Vec<Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("answer is json"))
+            .collect();
+        assert_eq!(
+            frames.len(),
+            2,
+            "prompter and tui each answered once: {text}"
+        );
+        for id in ["req-prompter", "req-tui"] {
+            let f = frames
+                .iter()
+                .find(|v| v["response"]["request_id"] == id)
+                .unwrap_or_else(|| panic!("no answer for {id}: {text}"));
+            assert_eq!(f["type"], "control_response");
+            assert_eq!(f["response"]["subtype"], "success");
+            assert_eq!(f["response"]["response"]["behavior"], "deny");
+            assert_eq!(
+                f["response"]["response"]["message"],
+                "denied: session parked (another model is active)"
+            );
+        }
+    }
 }
