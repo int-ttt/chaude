@@ -19,13 +19,6 @@ fn go_agent_prompt_missing_notice() {
     panic!("not ported: missing agent prompt notice and agent-less spawn");
 }
 
-// Go TestRegistryNilWhenNoFile, wireClients wiring (cachettl_test.go:23-43)
-#[test]
-#[ignore = "parity: Go cachettl_test.go:23-43 wireClients wiring; Rust api.rs:773 wires the registry inside api.rs, no test seam"]
-fn go_registry_nil_when_no_file_wiring() {
-    panic!("not ported: wireClients registry wiring");
-}
-
 // Go TestIdleControlRequestAnswered, assertions beyond the can_use_tool ask/answer path (idle_test.go:40-53)
 #[test]
 #[ignore = "parity: Go idle_test.go:40-53 idle canUse between turns; no idle control-request fixture in tests/ (api.rs idle loop)"]
@@ -39,13 +32,6 @@ fn go_idle_control_request_answered_rest() {
 #[ignore = "parity: Go resumeshift_test.go rotate with pending snapshot needs a fake newSessionFn seam; not pub in Rust"]
 fn go_rotate_keeps_pending_snapshot() {
     panic!("not ported: rotate keeps pending import snapshot via Repl seam");
-}
-
-// Go TestStageLinesOrder, full stage order list (resident_agent_test.go:61-102)
-#[test]
-#[ignore = "parity: Go resident_agent_test.go:61-102 full stage line order; text lives in cli/src/tui/mod.rs:1758, cli is bin-only (no lib target)"]
-fn go_stage_lines_full_order() {
-    panic!("not ported: stage lines full order");
 }
 
 // Go TestInputWrapWide, cases beyond the wide-cell wrap (input_test.go:30-51)
