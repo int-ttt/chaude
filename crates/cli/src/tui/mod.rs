@@ -2332,8 +2332,11 @@ pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Resu
             write!(out, "{row}")?;
         }
     }
-    let (x, y) = cursor(app, app.cols, app.rows);
-    queue!(out, MoveTo(x, y))?;
+    // Go syncCursor (tui.go:1009): under a permission prompt the cursor is not parked on the input row.
+    if app.perm.is_none() {
+        let (x, y) = cursor(app, app.cols, app.rows);
+        queue!(out, MoveTo(x, y))?;
+    }
     if app.hide_cursor {
         queue!(out, Hide)?;
     } else {
@@ -3167,6 +3170,22 @@ mod tests {
         assert!(out.ends_with("\x1b[?25l"), "{out:?}");
         assert!(!out.contains("\x1b[?25h"), "{out:?}");
         assert!(out.contains("H\x1b[?25l"), "{out:?}");
+    }
+
+    // Go syncCursor (tui.go:1009): under a permission prompt the cursor is not parked on the input row.
+    #[test]
+    fn draw_does_not_park_the_cursor_under_a_permission_prompt() {
+        let mut app = App::new(30, 10);
+        type_str(&mut app, "ab");
+        app.perm = Some("p1".into());
+        let mut buf = Vec::new();
+        draw(&mut buf, &app, &mut Vec::new()).unwrap();
+        let out = String::from_utf8_lossy(&buf);
+        let (x, y) = cursor(&app, 30, 10);
+        assert!(
+            !out.contains(&format!("\x1b[{};{}H", y + 1, x + 1)),
+            "{out:?}"
+        );
     }
 
     fn agent_row(id: &str, background: bool, done: bool) -> AgentRow {
