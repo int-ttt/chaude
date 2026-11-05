@@ -2157,6 +2157,30 @@ fn text_block_notice_finishes_background_agent() {
     h.shutdown();
 }
 
+// Go TestUserEventNotificationFinishesBackground (panel_test.go:384): a string-content
+// <task-notification> in a user event finishes the background agent it names.
+#[test]
+fn user_event_notification_finishes_background() {
+    let _g = lock();
+    let f = fake("bg_string_notice", &["bg_string_notice_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_sn1")),
+        "{evs:?}"
+    );
+    // The row the panel shows must be done, not still running.
+    let rows = evs.iter().rev().find_map(|e| match e {
+        UiEvent::AgentRows { rows } => Some(rows),
+        _ => None,
+    });
+    let done = rows.and_then(|rows| rows.iter().find(|r| r.id == "toolu_sn1"));
+    assert!(done.is_some_and(|r| r.done), "{evs:?}");
+    h.shutdown();
+}
+
 #[test]
 fn resume_after_agent_ended_keeps_start_label() {
     let _g = lock();
