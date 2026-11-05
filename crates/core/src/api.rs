@@ -4353,12 +4353,26 @@ mod tests {
         assert_eq!(drain_finished(0, t, t), Some(false));
     }
 
-    // Go TestAgentTrackerAndDrain (drain_test.go:11): running follows the launch ack, the foreground result and the
-    // completion notification. Proxy: Go finished() also reads the drain file and quiet period, but finished()
-    // in Go (drain.go:305) only checks the tracker and timeout, so drain_finished is driven by running().len().
+    // Go TestAgentTrackerAndDrain (drain_test.go:11-59): running follows the launch ack, the foreground result and the
+    // completion notification. Go drain.finished(now) (drain.go:305-313) reads only d.tr.running() and d.since/d.timeout,
+    // never the drain file or a quiet period, so the Go file checks (drain_test.go:33-48) only pin "not done while the
+    // tracker still runs", which the running() checks below cover. go_finished is a test-only mirror of d.finished(now)
+    // over a real AgentTracker, returning Go's (done, timedOut); no production change.
     #[test]
     fn agent_tracker_drain_half() {
         use crate::agent_store::AgentTracker;
+        fn go_finished(
+            tr: &AgentTracker,
+            since: SystemTime,
+            now: SystemTime,
+            timeout: Duration,
+        ) -> (bool, bool) {
+            let elapsed = now.duration_since(since).unwrap_or(Duration::ZERO);
+            match drain_finished(tr.running().len(), elapsed, timeout) {
+                Some(timed_out) => (true, timed_out),
+                None => (false, false),
+            }
+        }
         let tr = AgentTracker::new(None, "p", "");
         let now = SystemTime::now();
         let t = Duration::from_secs(3600);
@@ -4376,23 +4390,27 @@ mod tests {
         let running = tr.running();
         assert_eq!(running.len(), 1);
         assert_eq!(running[0].id, "a");
-        assert_eq!(drain_finished(running.len(), Duration::ZERO, t), None);
-        tr.on_notification("<task-notification><tool-use-id>a</tool-use-id></task-notification>");
+        // Go d.finished: not done before the tracker empties (drain_test.go:31, 36, 41, 46).
+        assert_eq!(go_finished(&tr, now, now, t), (false, false));
         assert_eq!(
-            drain_finished(tr.running().len(), Duration::ZERO, t),
-            Some(false)
+            go_finished(&tr, now, now + Duration::from_secs(60), t),
+            (false, false)
         );
+        // Go drain_test.go:49-52: the completion notification empties the tracker, done without timeout.
+        tr.on_notification("<task-notification><tool-use-id>a</tool-use-id></task-notification>");
+        assert_eq!(go_finished(&tr, now, now, t), (true, false));
 
-        // Go d2.finished past the timeout with an agent still running: done and timed out.
+        // Go d2.finished past the timeout (drain_test.go:53-58) with an agent still running: done and timed out.
         let tr2 = AgentTracker::new(None, "p", "");
         tr2.on_tool_use("z", "Agent", &json!({"run_in_background": true}), now);
         assert_eq!(
-            drain_finished(
-                tr2.running().len(),
-                Duration::from_secs(120),
+            go_finished(
+                &tr2,
+                now,
+                now + Duration::from_secs(120),
                 Duration::from_secs(60)
             ),
-            Some(true)
+            (true, true)
         );
     }
 
