@@ -792,6 +792,18 @@ fn drain_wanted(max_drain: usize, running: usize) -> bool {
     max_drain > 0 && running > 0
 }
 
+// Go drain.consume: the deny message for a permission prompt of a draining child.
+const DRAIN_DENY: &str = "denied: session is draining";
+
+// request_id of a can_use_tool control_request line (Go drain.consume denies it); None for other lines.
+fn drain_permission_id(line: &str) -> Option<String> {
+    let raw = serde_json::from_str::<Value>(line).ok()?;
+    if raw["type"] != "control_request" || raw["request"]["subtype"] != "can_use_tool" {
+        return None;
+    }
+    raw["request_id"].as_str().map(str::to_string)
+}
+
 // Tool_result ids in one child line, with whether the result is an async launch (the agent keeps running).
 fn tool_result_ids(line: &str) -> Vec<(String, bool)> {
     let Ok(raw) = serde_json::from_str::<Value>(line) else {
@@ -3217,6 +3229,10 @@ impl State {
         let mut drained = false;
         if let Some(mut p) = self.proc.take() {
             if drain {
+                // Go drain.consume: prompts still pending on the old child are denied as it drains.
+                for id in self.pending_perm.keys() {
+                    let _ = p.write_permission(id, false, Value::Null, DRAIN_DENY);
+                }
                 self.start_drain(p, old_epoch);
                 drained = true;
             } else {
@@ -3266,6 +3282,12 @@ impl State {
     fn on_drain_msg(&mut self, epoch: u64, msg: ProcMsg) {
         match msg {
             ProcMsg::Line(line) => {
+                if let Some(id) = drain_permission_id(&line) {
+                    if let Some(d) = self.drains.iter_mut().find(|d| d.epoch == epoch) {
+                        let _ = d.proc.write_permission(&id, false, Value::Null, DRAIN_DENY);
+                    }
+                    return;
+                }
                 for (id, launch) in tool_result_ids(&line) {
                     if launch {
                         continue;
@@ -3984,6 +4006,19 @@ mod tests {
         let bg = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","content":"Async agent launched, agentId: x"}]}}"#;
         assert_eq!(tool_result_ids(bg), vec![("t2".to_string(), true)]);
         assert!(tool_result_ids("not json").is_empty());
+    }
+
+    // Go drain.consume: only can_use_tool control_requests are denied while draining.
+    #[test]
+    fn drain_denies_only_permission_requests() {
+        let ask = r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash"}}"#;
+        assert_eq!(drain_permission_id(ask), Some("r1".to_string()));
+        let other =
+            r#"{"type":"control_request","request_id":"r2","request":{"subtype":"interrupt"}}"#;
+        assert_eq!(drain_permission_id(other), None);
+        let text = r#"{"type":"assistant","message":{"content":[]}}"#;
+        assert_eq!(drain_permission_id(text), None);
+        assert_eq!(drain_permission_id("not json"), None);
     }
 
     // Go warmDeadline: idle expiry off still keeps a parked child warm for neverCold (pickChild is never cold).
