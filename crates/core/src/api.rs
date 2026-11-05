@@ -683,6 +683,8 @@ struct State {
     ttl_seen: String,
     // Snapshot for the next prompt sent to a fresh child; empty when none is pending.
     pending_snapshot: String,
+    // Go repl.go notices: "[agent done]" lines of drained agents, sent in front of the next user message.
+    notices: Vec<String>,
     // Set while a hidden handoff turn runs; its text is not shown.
     handoff: Option<Handoff>,
     // Model switch waiting for its handoff turn (Go switchChild): target model and the held prompt.
@@ -785,11 +787,27 @@ struct Drain {
     since: Instant,
     // Agents of the old child still running (tool_use ids); the drain ends when this set is empty.
     agents: HashSet<String>,
+    // Every agent the drain waited for, sorted (its end notices).
+    started: Vec<String>,
 }
 
 // Go rotate: an old child is drained only when agents are running and --max-drain allows it.
 fn drain_wanted(max_drain: usize, running: usize) -> bool {
     max_drain > 0 && running > 0
+}
+
+// Go pollDrains: the notice of one agent a drain waited for. done is false when the drain timed out or the agent is still running.
+fn drain_done_notice(id: &str, task: &str, out: &str, done: bool) -> String {
+    let st = if done { "완료" } else { "타임아웃" };
+    format!("[agent done] {id} · {task} · {out} · {st}")
+}
+
+// Go repl.go runTurn: queued notices, one per line, lead the user text (empty list: text unchanged).
+fn with_notices(notices: &[String], text: &str) -> String {
+    if notices.is_empty() {
+        return text.to_string();
+    }
+    format!("{}\n\n{}", notices.join("\n"), text)
 }
 
 // Ids named by the <task-notification>s of one child line (string content or text blocks).
@@ -1010,6 +1028,7 @@ fn actor(
         cat: String::new(),
         ttl_seen: String::new(),
         pending_snapshot: String::new(),
+        notices: Vec::new(),
         handoff: None,
         switch_to: None,
         prompter: Prompter::new(),
@@ -1976,13 +1995,15 @@ impl State {
         let Some(p) = self.proc.as_mut() else {
             return false;
         };
-        // Go runTurn: the pending snapshot of a rotated session goes in front of the first prompt sent to it.
+        // Go runTurn: queued notices go in front of the prompt; the pending snapshot of a rotated session goes in
+        // front of the first prompt sent to it.
+        let body = with_notices(&std::mem::take(&mut self.notices), text);
         let frame = if self.pending_snapshot.is_empty() {
-            text.to_string()
+            body
         } else {
             format!(
                 "{}\n\n## Current user message\n{}",
-                self.pending_snapshot, text
+                self.pending_snapshot, body
             )
         };
         match p.write_user(&frame) {
@@ -3282,12 +3303,15 @@ impl State {
     // Go drain: the old child keeps its running agents. Its agents are the ones still in self.agents. The oldest
     // drains beyond max_drain are closed.
     fn start_drain(&mut self, proc: ClaudeProc, epoch: u64) {
-        let agents = self.agents.keys().cloned().collect();
+        let agents: HashSet<String> = self.agents.keys().cloned().collect();
+        let mut started: Vec<String> = agents.iter().cloned().collect();
+        started.sort();
         self.drains.push(Drain {
             proc,
             epoch,
             since: Instant::now(),
             agents,
+            started,
         });
         while self.drains.len() > self.cfg.max_drain {
             let mut oldest = self.drains.remove(0);
@@ -3295,10 +3319,20 @@ impl State {
         }
     }
 
-    // Ends one drain: its child is killed and the entry dropped.
-    fn end_drain(&mut self, epoch: u64) {
+    // Ends one drain: its child is killed, the entry dropped, and one "[agent done]" notice queued per agent
+    // (Go pollDrains). timed_out marks every agent 타임아웃, as Go does.
+    fn end_drain(&mut self, epoch: u64, timed_out: bool) {
         if let Some(i) = self.drains.iter().position(|d| d.epoch == epoch) {
             let mut d = self.drains.remove(i);
+            for id in &d.started {
+                let done = !timed_out && !d.agents.contains(id);
+                let (task, out) = self
+                    .agent_info
+                    .get(id)
+                    .map(|i| (i.name.clone(), i.result_path.clone()))
+                    .unwrap_or_default();
+                self.notices.push(drain_done_notice(id, &task, &out, done));
+            }
             d.proc.kill();
         }
     }
@@ -3338,10 +3372,10 @@ impl State {
                     .iter()
                     .any(|d| d.epoch == epoch && d.agents.is_empty())
                 {
-                    self.end_drain(epoch);
+                    self.end_drain(epoch, false);
                 }
             }
-            ProcMsg::Eof => self.end_drain(epoch),
+            ProcMsg::Eof => self.end_drain(epoch, true),
         }
     }
 
@@ -3355,7 +3389,7 @@ impl State {
             .map(|d| d.epoch)
             .collect();
         for epoch in expired {
-            self.end_drain(epoch);
+            self.end_drain(epoch, true);
         }
     }
 
@@ -4067,6 +4101,25 @@ mod tests {
         );
         let plain = r#"{"type":"user","message":{"content":"hello <tool-use-id>x</tool-use-id>"}}"#;
         assert!(notification_ids(plain).is_empty());
+    }
+
+    // Go pollDrains notice text and repl.go takeNotices prefix (notices, a blank line, then the text).
+    #[test]
+    fn drain_notice_text_and_prefix() {
+        assert_eq!(
+            drain_done_notice("a1", "lint", "notes/runs/x.md", true),
+            "[agent done] a1 · lint · notes/runs/x.md · 완료"
+        );
+        assert_eq!(
+            drain_done_notice("a2", "fix", "", false),
+            "[agent done] a2 · fix ·  · 타임아웃"
+        );
+        assert_eq!(with_notices(&[], "hi"), "hi");
+        let ns = vec!["[agent done] a1 · t · o · 완료".to_string()];
+        assert_eq!(
+            with_notices(&ns, "hi"),
+            "[agent done] a1 · t · o · 완료\n\nhi"
+        );
     }
 
     // Go warmDeadline: idle expiry off still keeps a parked child warm for neverCold (pickChild is never cold).
