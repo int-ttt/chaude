@@ -136,6 +136,9 @@ fn run_tui(args: &[String]) -> i32 {
     if let Err(e) = settings::project::ensure_project_settings(Path::new(&cwd), home.as_deref()) {
         eprintln!("project settings: {e}");
     }
+    // Go repl.go:1357: the startup prune of old records uses the loaded SessionRetentionDays.
+    let set = tui::settings::load(tui::settings::file_for(Some(Path::new(&cwd))).as_deref());
+    tui::settings::prune_records_at_startup(Path::new(&cwd), &set, std::time::SystemTime::now());
     match tui::run(cfg, startup.map(|(_, imp)| imp)) {
         Ok(()) => 0,
         Err(e) => {

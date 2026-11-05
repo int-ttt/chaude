@@ -5,7 +5,10 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
+use chaude_core::record::dir_for;
+use chaude_core::record_folder::prune_record_files;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 
@@ -103,6 +106,12 @@ pub fn load(path: Option<&Path>) -> Settings {
         s.main_model = m.to_string();
     }
     s.clamp()
+}
+
+// Go repl.go:1357 pruneRecordFiles(recordDir(cwd), SessionRetentionDays, time.Now()): the startup prune of
+// old records. Errors are ignored, as in Go (`_, _ =`). Returns the removed count.
+pub fn prune_records_at_startup(cwd: &Path, s: &Settings, now: SystemTime) -> usize {
+    prune_record_files(&dir_for(cwd), s.session_retention_days, now).unwrap_or(0)
 }
 
 // Go saveChaudeSettings: writes the clamped settings through a tmp file and a rename, keys in Go's order.
@@ -282,6 +291,27 @@ mod tests {
 
     fn press(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    // Go repl.go:1357 startup prune: records older than SessionRetentionDays are removed by the same helper
+    // run_tui calls; days 0 keeps everything.
+    #[test]
+    fn startup_prune_removes_old_records_by_retention() {
+        let cwd = tmp_dir("prune-startup");
+        let proj = dir_for(&cwd).join("proj");
+        fs::create_dir_all(&proj).unwrap();
+        let month_ahead = SystemTime::now() + std::time::Duration::from_secs(31 * 24 * 60 * 60);
+        fs::write(proj.join("old.md"), "x").unwrap();
+        fs::write(proj.join("note.txt"), "x").unwrap();
+        let mut s = Settings::default();
+        assert_eq!(prune_records_at_startup(&cwd, &s, month_ahead), 1);
+        assert!(!proj.join("old.md").exists());
+        assert!(proj.join("note.txt").exists());
+
+        fs::write(proj.join("kept.md"), "x").unwrap();
+        s.session_retention_days = 0;
+        assert_eq!(prune_records_at_startup(&cwd, &s, month_ahead), 0);
+        assert!(proj.join("kept.md").exists());
     }
 
     // Go TestSettingsDefaultsWhenMissing.
