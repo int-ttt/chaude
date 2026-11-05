@@ -387,6 +387,11 @@ pub fn worker_floor(current: usize, extra_coders: usize) -> usize {
     current.max(RESIDENT_MAX_WORKERS + extra_coders)
 }
 
+// Go wireClients: the client registry exists only when cfg.clients_file is set; None otherwise (Go nil registry).
+pub fn wire_clients(cfg: &Config) -> Option<ClientRegistry> {
+    cfg.clients_file.clone().map(ClientRegistry::new)
+}
+
 impl Default for Config {
     fn default() -> Self {
         let state = crate::osenv::home_dir().join(".chaude");
@@ -926,7 +931,7 @@ fn actor(
     if let Some(store) = &agent_store {
         store.interrupt_running(false);
     }
-    let clients = cfg.clients_file.clone().map(ClientRegistry::new);
+    let clients = wire_clients(&cfg);
     let metrics = Arc::new(Metrics::new(
         cfg.metrics_dir.clone(),
         // Go repl.go:1375-1377 newMetrics flags, same keys; the first three are Rust-only extras.

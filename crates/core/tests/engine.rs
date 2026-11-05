@@ -2921,3 +2921,18 @@ fn idle_reply_is_logged_to_metrics_as_background() {
         "{text}"
     );
 }
+
+// Go TestRegistryNilWhenNoFile (cachettl_test.go:23-43): no clients_file means no registry; a set path wires one.
+#[test]
+fn wire_clients_is_none_without_clients_file() {
+    let none = Config {
+        clients_file: None,
+        ..Config::default()
+    };
+    assert!(chaude_core::api::wire_clients(&none).is_none());
+    let some = Config {
+        clients_file: Some(PathBuf::from("/tmp/chaude-wire-clients-test.json")),
+        ..Config::default()
+    };
+    assert!(chaude_core::api::wire_clients(&some).is_some());
+}
