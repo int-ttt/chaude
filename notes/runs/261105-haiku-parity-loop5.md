@@ -34,3 +34,13 @@ queue:
 - loop5 round 2 log committed alone: 96d1769 (docs(notes)); this round-3 entry left uncommitted.
 - disk: repo du -sh 4.0G before fix (under 15GB).
 - NOT DONE: none for items (a) and item 3. Not pushed. No reset/stash/tag/amend.
+
+## round 4
+- item 4 (agent_tracker_drain_half proxy, api.rs ~4356): choice = real assertion (test-only), commit 8eacfc3 test(core)
+  - go: drain.go:305-313 drain.finished reads only d.tr.running() + since/timeout (no file, no quiet period); drain_test.go:11-59 TestAgentTrackerAndDrain.
+  - rust: api.rs:4356-4420 go_finished (test-local) = drain_finished(tr.running().len(), elapsed, timeout) mapped to Go (done, timedOut); old proxy comment was wrong (said Go reads file/quiet period).
+  - checks: cargo test --lib agent_tracker_drain_half 1 passed; scripts/test-isolated.sh EXIT=0, 708 passed / 0 failed / 3 ignored; clippy --workspace --all-targets 0 warnings; fmt --check rc=0; du -sh 4.0G.
+  - DOUBT: production seam: reap_drains (api.rs:3552) counts self.agents (HashMap<String,Instant>, api.rs:619), not AgentTracker; Go drain holds tr. Not fixable test-only; left as is.
+  - DOUBT: design D5 said #[ignore] if drain test-only; drain struct is production in Go (switchchild.go:101), so no ignore (brief forbids #[ignore]).
+- loop5 round 3 log committed alone: b2d5bd6 (docs(notes)).
+- NOT DONE: no push, no ignore, no test for on_prompter_line/on_tui_line deny (item 3 doubt stands).
