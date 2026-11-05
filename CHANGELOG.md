@@ -2,8 +2,11 @@
 
 ## Unreleased
 - Release: the release archives are now built from the Rust workspace (`crates/cli`, binary `chaude`) for the same four targets: darwin/arm64, linux/amd64, linux/arm64, windows/amd64. Asset names (`chaude_<version>_<os>_<arch>.tar.gz`, windows `.zip`) and `checksums.txt` are unchanged, so `install.sh`, `install.ps1` and `chaude update` keep working.
+  - 릴리스: 릴리스 아카이브를 같은 네 대상(darwin/arm64, linux/amd64, linux/arm64, windows/amd64)에 대해 이제 Rust 워크스페이스(`crates/cli`, 바이너리 `chaude`)에서 빌드합니다. 에셋 이름(`chaude_<version>_<os>_<arch>.tar.gz`, windows `.zip`)과 `checksums.txt`는 그대로이므로 `install.sh`, `install.ps1`, `chaude update`는 계속 동작합니다.
 - Release: the Go build under `deprecated/` is no longer published. Its release job is disabled, not deleted.
+  - 릴리스: `deprecated/` 아래의 Go 빌드는 더 이상 배포하지 않습니다. 릴리스 작업은 삭제하지 않고 비활성화했습니다.
 - Parity: the Rust build does not yet cover every Go feature. The open phases are listed in `plan/rust-port.md`.
+  - 기능 동등성: Rust 빌드는 아직 Go의 모든 기능을 다루지 않습니다. 남은 단계는 `plan/rust-port.md`에 나와 있습니다.
 
 ## 0.10.2 - 2026-11-04
 - Project setup: when chaude opens a folder, it writes the agent definitions (`haiku-*.md`, `opus-architect.md`) into `<cwd>/.claude/agents`. Existing files are never overwritten.

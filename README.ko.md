@@ -1,13 +1,13 @@
 # chaude
 
 [![Latest release](https://img.shields.io/github/v/release/int-ttt/chaude)](https://github.com/int-ttt/chaude/releases/latest)
-[![Go 1.22+](https://img.shields.io/badge/Go-1.22%2B-00ADD8?logo=go&logoColor=white)](deprecated/src/main/intt/go.mod)
+[![Rust stable](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)](rust-toolchain.toml)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](#설치)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [English](README.md) | **한국어**
 
-> **Deprecation notice:** The Go implementation under `deprecated/` is deprecated. It is still the binary shipped in releases. It is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. The Rust workspace at the repo root is the successor and is still in progress.
+> **지원 중단 안내:** `deprecated/` 아래의 Go 구현은 지원이 중단되었습니다. Rust 전환 이후부터 릴리스 아카이브는 저장소 루트의 Rust 워크스페이스(`crates/cli`, 바이너리 `chaude`)에서 빌드하며, 에셋 이름은 같습니다. Go 빌드는 0.10.0 이후 5개 릴리스까지 유지하고, 0.10.0 이후 6번째 릴리스에서 삭제합니다. Rust 버전은 아직 Go의 모든 기능을 다루지 않습니다. `plan/rust-port.md`를 보세요.
 
 ## 효과
 
@@ -32,7 +32,7 @@
 - 세션을 시작하면 `.claude/settings.json`이 없을 때 가드 훅이 들어간 파일을 만듭니다 (0.9.14).
 - 프로젝트별 입력 기록을 `.chaude/history.jsonl`에 저장합니다. `chaude search-history`로 찾을 수 있습니다.
 - `/import`, `/resume claude`, `chaude --from-claude`로 Claude Code 세션을 가져옵니다.
-- 빌드 파일: macOS Apple Silicon(arm64), Linux(amd64, arm64), Windows(amd64; arm64 PC는 x64 에뮬레이션으로 실행합니다). Intel Mac은 지원하지 않습니다. 설치 스크립트는 설치 전에 `checksums.txt`를 확인합니다.
+- 미리 빌드된 바이너리: macOS Apple Silicon(arm64), Linux(amd64, arm64), Windows(amd64; arm64 PC는 x64 에뮬레이션으로 실행합니다). Intel Mac은 지원하지 않습니다. 설치 스크립트는 설치 전에 `checksums.txt`를 확인합니다.
 
 ## 설치
 
@@ -75,7 +75,6 @@ chaude
 ```
 
 아래쪽 입력창에 질문이나 작업을 쓰고 `Enter`를 누르세요. 기본 모델은 Opus이고, 기본 권한 모드는 `auto`입니다. 모드는 `shift+tab` 또는 `/mode`로 바꿉니다.
-
 
 ## 사용법
 
@@ -155,23 +154,23 @@ REPL 주요 플래그(`chaude repl`): `--model`(기본값 `opus`), `--cwd`, `--t
 
 ## 작동 방식
 
-Opus가 메인 세션입니다. 요청을 읽고, 계획을 정하고, 최종 답변을 씁니다. 파일을 직접 읽거나 고치지는 않습니다. 이 제한은 훅이 강제합니다. 실제 작업은 Haiku 에이전트가 합니다.
+Opus가 메인 세션입니다. 요청을 읽고, 계획을 정하고, 최종 답변을 씁니다. 파일을 직접 읽거나 고치지는 않습니다. 이 제한은 훅이 강제합니다. 실제 작업(조회, 수정, 검증 등)은 Haiku 에이전트가 합니다.
 
-| 에이전트 | 역할 |
-|---|---|
-| `opus-architect` | 설계와 판단. 작업을 `haiku-*` 에이전트에게 나눠 줍니다 |
-| `haiku-scout` | 파일과 예전 대화 찾기 |
-| `haiku-researcher` | 출처를 붙인 웹 조사 |
-| `haiku-extractor` | 긴 대화에서 사실, 결정, 미결 사항 뽑기 |
-| `haiku-drafter` | 글 쓰기 또는 고치기 |
-| `haiku-batch-worker` | 형식 변환, 일괄 치환, 나누기와 합치기 |
-| `haiku-coder` | 범위가 좁은 코드 수정과 버그 수정 |
-| `haiku-checker` | 바뀐 내용을 읽기 전용으로 검증 |
-| `haiku-runner` | 오래 걸리는 작업을 백그라운드로 실행 |
-| `haiku-prompter` | 반복, 루프 작업 (메인 스레드에서만 호출) |
-| `haiku-tui` | 에이전트 결과를 한국어 존댓말 답변으로 바꿈 |
+| 에이전트 | 모델 | 용도 |
+|---|---|---|
+| `opus-architect` | Opus | 설계와 판단. 작업을 `haiku-*` 에이전트에게 나눠 줍니다 |
+| `haiku-scout` | Haiku | 파일과 예전 대화 찾기 |
+| `haiku-researcher` | Haiku | 출처를 붙인 웹 조사 |
+| `haiku-extractor` | Haiku | 긴 대화에서 사실, 결정, 미결 사항 뽑기 |
+| `haiku-drafter` | Haiku | 글 쓰기 또는 고치기 |
+| `haiku-batch-worker` | Haiku | 형식 변환, 일괄 치환, 나누기와 합치기 |
+| `haiku-coder` | Haiku | 범위가 좁은 코드 수정과 버그 수정 |
+| `haiku-checker` | Haiku | 바뀐 내용을 읽기 전용으로 검증 |
+| `haiku-runner` | Haiku | 오래 걸리는 작업을 백그라운드로 실행 |
+| `haiku-prompter` | Haiku | 반복, 루프 작업 (메인 스레드에서만 호출) |
+| `haiku-tui` | Haiku | 에이전트 결과를 한국어 존댓말 답변으로 바꿈 |
 
-에이전트는 모두 11개입니다. 전체 목록, 도구, 배분 규칙은 [모델과 에이전트](docs/guide/models-and-agents.md)에 있습니다.
+전체 목록, 도구, 배분 규칙은 [모델과 에이전트](docs/guide/models-and-agents.md)에 있습니다.
 
 ## 문서
 
@@ -198,27 +197,31 @@ A. 핑퐁 게임 비교에서 일반 Opus 대비 비용이 -42.7%였습니다(2�
 
 **Q. Claude Code 대화를 이어서 쓸 수 있나요?**
 A. 네. `/import [ID|latest]` 또는 `/resume claude`를 쓰거나, `chaude --from-claude latest`를 실행하세요. 가져오기 화면에는 생각, 도구 호출과 결과, 하위 에이전트 메시지를 포함한 전체 대화가 나옵니다.
+
 ## 기여
 
-Go 1.22 이상으로 `deprecated/src/main/intt`에서 빌드하고 테스트합니다:
+저장소 루트에서 빌드하고 테스트합니다(Rust stable, `rust-toolchain.toml`로 버전 고정):
 
 ```sh
-cd deprecated/src/main/intt && go build -o ../../../../bin/chaude ./cmd/chaude && go test ./...
+cargo build --release -p chaude-cli   # binary: target/release/chaude
+cargo test
 ```
+
+Go 구현은 참고용으로 `deprecated/src/main/intt`(Go 1.22 이상)에 남아 있습니다.
 
 이슈: 버그 제보와 기능 제안은 [GitHub Issues](https://github.com/int-ttt/chaude/issues)에 남겨 주세요.
 
 기여 가이드라인: 아직 공개되지 않았습니다.
 
-## Releasing
+## 릴리스
 
-Run the **release-dispatch** workflow on `master` (Actions → release-dispatch → Run workflow, enter `X.Y.Z` without the `v`), or from a shell:
+**release-dispatch** 워크플로를 `master`에서 실행하세요 (Actions → release-dispatch → Run workflow, `v` 없이 `X.Y.Z`를 입력합니다). 또는 셸에서 실행하세요:
 
 ```sh
 gh workflow run release-dispatch.yml -f version=X.Y.Z
 ```
 
-It bumps the version in the code and docs, moves `CHANGELOG.md` `## Unreleased` to `## X.Y.Z - DATE`, commits `release: X.Y.Z`, pushes the `vX.Y.Z` tag, and publishes the four release archives with `checksums.txt` (via `release.yml`). Add the entries to `## Unreleased` in `CHANGELOG.md` before you run it.
+워크플로가 코드와 문서의 버전을 올리고, `CHANGELOG.md`의 `## Unreleased`를 `## X.Y.Z - DATE`로 옮긴 뒤, `release: X.Y.Z` 커밋을 만듭니다. 이어서 `vX.Y.Z` 태그를 푸시하고, `release.yml`로 `checksums.txt`와 릴리스 아카이브 4개를 배포합니다. 실행하기 전에 `CHANGELOG.md`의 `## Unreleased`에 항목을 추가하세요.
 
 ## 라이선스
 
