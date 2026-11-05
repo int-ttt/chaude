@@ -3457,6 +3457,33 @@ mod tests {
         assert_eq!(cursor(&app, 80, 30).1, base);
     }
 
+    // Go TestIdleTickRefreshesWhenBackgroundFinishes (panel_test.go:55-77): a background agent that
+    // finishes while idle leaves the panel on the next tick. PROXY: Go's tick re-reads the agent list
+    // and relayouts (lastRun, bgH, vp.Height); Rust has no tick-driven refresh. The done row arrives
+    // as UiEvent::AgentRows (pushed by the engine on finish), so this checks the panel after
+    // AgentRows then tick, not a tick that fetches rows itself.
+    #[test]
+    fn idle_tick_drops_background_row_after_it_finishes() {
+        let mut app = App::new(80, 30);
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("bg1", true, false)],
+        });
+        let running = plain_frame(&app, 80, 30);
+        assert!(
+            running.iter().any(|r| r.contains("task bg1")),
+            "running background row shows: {running:?}"
+        );
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("bg1", true, true)],
+        });
+        app.tick(Instant::now());
+        let after = plain_frame(&app, 80, 30);
+        assert!(
+            !after.iter().any(|r| r.contains("task bg1")),
+            "finished background row leaves the panel: {after:?}"
+        );
+    }
+
     #[test]
     fn empty_size_shows_the_starting_frame() {
         let app = App::new(0, 0);

@@ -2138,6 +2138,21 @@ fn idle_reply_without_notice_finishes_oldest_background_agent() {
     while !ended(&evs) {
         evs.push(rx.recv_timeout(WAIT).expect("engine went silent"));
     }
+    // Go TestIdleTickRefreshesWhenBackgroundFinishes (panel_test.go:55) needs the panel to show the
+    // agent done with no user input. Rust pushes rows as UiEvent::AgentRows right after AgentEnd.
+    let done = |evs: &[UiEvent]| {
+        evs.iter()
+            .rev()
+            .find_map(|e| match e {
+                UiEvent::AgentRows { rows } => Some(rows),
+                _ => None,
+            })
+            .and_then(|rows| rows.iter().find(|r| r.id == "toolu_idle1"))
+            .is_some_and(|r| r.done)
+    };
+    while !done(&evs) {
+        evs.push(rx.recv_timeout(WAIT).expect("engine went silent"));
+    }
     h.shutdown();
 }
 
