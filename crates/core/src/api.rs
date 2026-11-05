@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
@@ -1899,6 +1899,12 @@ impl State {
 
     // The coder's result line is its reply. An empty reply is a failure, as for the tui.
     fn on_coder_line(&mut self, i: usize, line: &str) {
+        if let Ok(Event::ControlRequest(c)) = parse_line(line)
+            && c.request.subtype == "can_use_tool"
+        {
+            self.coder_permission(i, c);
+            return;
+        }
         if self.coders[i].deadline.is_none() {
             return;
         }
@@ -1912,6 +1918,28 @@ impl State {
             self.finish_coder(i, Err("coder empty reply".to_string()));
         } else {
             self.finish_coder(i, Ok(text));
+        }
+    }
+
+    // Go parkedIdleEvent: a resident coder's can_use_tool is approved only while it is busy (coder_may_use);
+    // every other request is denied with the Go parked note.
+    fn coder_permission(&mut self, i: usize, c: crate::event::ControlRequest) {
+        let tool = c.request.tool_name.unwrap_or_default();
+        let input = c.request.input.unwrap_or(Value::Null);
+        let busy = self.coders[i].deadline.is_some();
+        let allow = coder_may_use(busy, self.opts.cwd.as_deref(), &tool, &input);
+        let res = match self.coders[i].proc.as_mut() {
+            Some(p) if allow => p.write_permission(&c.request_id, true, input, ""),
+            Some(p) => p.write_permission(
+                &c.request_id,
+                false,
+                Value::Null,
+                "denied: session parked (another model is active)",
+            ),
+            None => Ok(()),
+        };
+        if let Err(e) = res {
+            self.emit(UiEvent::Error(format!("permission reply failed: {e}")));
         }
     }
 
@@ -3951,10 +3979,87 @@ fn switch_needs_handoff(
     pending.is_empty() && recent > 0 && running && !handoff_active && pick == ChildAction::StartNew
 }
 
+// Go coderMayUse: a busy resident coder may use Bash, and Read/Edit/Write on paths inside cwd. An idle
+// coder gets no approval. Relative paths join cwd; ".." segments are cleaned before the cwd check.
+fn coder_may_use(busy: bool, cwd: Option<&Path>, tool: &str, input: &Value) -> bool {
+    if !busy {
+        return false;
+    }
+    match tool {
+        "Bash" => true,
+        "Read" | "Edit" | "Write" => {
+            let Some(cwd) = cwd else { return false };
+            let Some(p) = input.get("file_path").and_then(Value::as_str) else {
+                return false;
+            };
+            if p.is_empty() {
+                return false;
+            }
+            let p = if Path::new(p).is_absolute() {
+                PathBuf::from(p)
+            } else {
+                cwd.join(p)
+            };
+            lexically_clean(&p).starts_with(lexically_clean(cwd))
+        }
+        _ => false,
+    }
+}
+
+// Drops "." and resolves ".." against earlier normal segments, without touching the filesystem.
+fn lexically_clean(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) =>
+            {
+                out.pop();
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::{TempDir, isolated};
+
+    // Go TestCoderPermissionOnlyWhenBusy: idle denied, busy allowed inside cwd, outside cwd denied, Bash idle denied.
+    #[test]
+    fn coder_permission_only_when_busy() {
+        let cwd = Path::new("/work/repo");
+        let edit = |p: &str| json!({"file_path": p});
+        assert!(!coder_may_use(
+            false,
+            Some(cwd),
+            "Edit",
+            &edit("/work/repo/a.go")
+        ));
+        assert!(coder_may_use(
+            true,
+            Some(cwd),
+            "Edit",
+            &edit("/work/repo/a.go")
+        ));
+        assert!(coder_may_use(true, Some(cwd), "Edit", &edit("a.go")));
+        assert!(coder_may_use(true, Some(cwd), "Read", &edit("sub/../b.go")));
+        assert!(!coder_may_use(true, Some(cwd), "Edit", &edit("/etc/hosts")));
+        assert!(!coder_may_use(true, Some(cwd), "Write", &edit("../x.go")));
+        assert!(!coder_may_use(true, Some(cwd), "Edit", &edit("")));
+        assert!(!coder_may_use(true, None, "Edit", &edit("/work/repo/a.go")));
+        assert!(!coder_may_use(false, Some(cwd), "Bash", &Value::Null));
+        assert!(coder_may_use(true, Some(cwd), "Bash", &Value::Null));
+        assert!(!coder_may_use(
+            true,
+            Some(cwd),
+            "Grep",
+            &edit("/work/repo/a.go")
+        ));
+    }
 
     // Go switchChild snapshot rule (resumeshift_test.go TestRotateKeepsPendingSnapshot: no handoff when a snapshot is pending).
     #[test]
