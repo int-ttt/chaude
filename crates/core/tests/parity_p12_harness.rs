@@ -297,13 +297,6 @@ parity_ignored! {
 
     // p2 (missing rows)
     idle_tick_refreshes_when_background_finishes = "parity: Rust tick does not refresh agent rows; rows are pushed by UiEvent::AgentRows (crates/cli/src/tui/mod.rs:638 tick, panel_lines at mod.rs:1465)";
-    background_rows_below_input_box = "parity: panel rows are private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
-    background_small_height_no_overflow = "parity: panel overflow is private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
-    stalled_output_file_keeps_agent_running = "parity: file-based drain finish not pub; AgentTracker::running at crates/core/src/agent_store.rs:777";
-    queue_lines_dim_above_input = "parity: queue render is private to the TUI; queue_lines at crates/cli/src/tui/mod.rs:1438";
-    queue_small_height_no_overflow = "parity: queue overflow is private to the TUI; queue_lines at crates/cli/src/tui/mod.rs:1438";
-    cursor_row_includes_background_rows = "parity: panel cursor row is private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
-    panel_scroll_window = "parity: panel scroll window is private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
     user_event_notification_finishes_background = "parity: user-event path is private; idle_result at crates/core/src/api.rs:2755";
     set_rate_logs_on_five_hour_change = "parity: setRate has no Rust counterpart (no set_rate in crates/core/src)";
     set_rate_top_level_fallback = "parity: setRate has no Rust counterpart (no set_rate in crates/core/src)";

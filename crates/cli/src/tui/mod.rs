@@ -3194,6 +3194,38 @@ mod tests {
         assert_eq!(rows[more], "  … 1-3/5 (마우스 휠로 스크롤)");
     }
 
+    // Port of TestPanelScrollWindow (panel_test.go:367): the window starts at the scroll offset and clamps at the end.
+    #[test]
+    fn panel_window_starts_at_scroll_offset_and_clamps() {
+        let mut app = App::new(60, 30);
+        app.apply(UiEvent::AgentRows {
+            rows: (0..12)
+                .map(|i| agent_row(&format!("{i:02}"), false, false))
+                .collect(),
+        });
+        app.pan_off = 2;
+        let rows = plain_frame(&app, 60, 30);
+        assert!(rows.iter().any(|r| r.contains("task 02)")), "{rows:?}");
+        assert!(!rows.iter().any(|r| r.contains("task 01)")), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("3-5/12")), "{rows:?}");
+        app.pan_off = 99;
+        let rows = plain_frame(&app, 60, 30);
+        assert!(rows.iter().any(|r| r.contains("task 09)")), "{rows:?}");
+        assert!(rows.iter().any(|r| r.contains("10-12/12")), "{rows:?}");
+    }
+
+    // Port of the queue half of TestQueueSmallHeightNoOverflow (panel_test.go:289): seven waiting prompts at small heights.
+    #[test]
+    fn queue_overflow_never_overflows_small_heights() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::QueueTexts(
+            (0..7).map(|i| format!("q{i}")).collect(),
+        ));
+        for h in [8, 10, 12, 20] {
+            assert_eq!(frame(&app, 60, h).len(), h, "h={h}");
+        }
+    }
+
     // Port of TestSessionPanelAndThinking (panel_test.go:17), panel part; the thinking row is covered in bar.rs.
     #[test]
     fn session_panel_lists_running_agents_and_clears_when_done() {
