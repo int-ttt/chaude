@@ -885,6 +885,8 @@ struct AgentInfo {
     done: bool,
     // The result file was written. Not set yet: Rust has no agentresult port (Go agentresult.go).
     result_done: bool,
+    // Go agentRec OutPath: the first notes/runs/*.md path named in the prompt (drain notice).
+    out_path: String,
     // The Agent call's `model` input; empty when the agent inherits the session model.
     model: String,
     // Go agentRec Task, Prompt, Name (session name), AgentID, Started (unix secs) for AgentRow.
@@ -2448,6 +2450,11 @@ impl State {
                     started: Instant::now(),
                     done: false,
                     result_done: false,
+                    out_path: input
+                        .get("prompt")
+                        .and_then(Value::as_str)
+                        .map(out_path_in)
+                        .unwrap_or_default(),
                     model: input
                         .get("model")
                         .and_then(Value::as_str)
@@ -3329,7 +3336,7 @@ impl State {
                 let (task, out) = self
                     .agent_info
                     .get(id)
-                    .map(|i| (i.name.clone(), i.result_path.clone()))
+                    .map(|i| (i.task.clone(), i.out_path.clone()))
                     .unwrap_or_default();
                 self.notices.push(drain_done_notice(id, &task, &out, done));
             }
@@ -3796,6 +3803,22 @@ fn clip(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
+// Go outPathRe `notes/runs/[^\s"'`)]+\.md`: the longest such run, ending at its last ".md".
+fn out_path_in(prompt: &str) -> String {
+    let Some(start) = prompt.find("notes/runs/") else {
+        return String::new();
+    };
+    let rest = &prompt[start..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ')'))
+        .unwrap_or(rest.len());
+    let run = &rest[..end];
+    match run.rfind(".md") {
+        Some(i) if i > "notes/runs/".len() => run[..i + 3].to_string(),
+        _ => String::new(),
+    }
+}
+
 fn elapsed_ms(since: Option<Instant>) -> u64 {
     since.map(|t| t.elapsed().as_millis() as u64).unwrap_or(0)
 }
@@ -4104,6 +4127,18 @@ mod tests {
     }
 
     // Go pollDrains notice text and repl.go takeNotices prefix (notices, a blank line, then the text).
+    #[test]
+    fn out_path_matches_go_regex() {
+        assert_eq!(
+            out_path_in("read notes/runs/a-b.md, then stop"),
+            "notes/runs/a-b.md"
+        );
+        assert_eq!(out_path_in("see `notes/runs/x.md`."), "notes/runs/x.md");
+        assert_eq!(out_path_in("notes/runs/x.md.bak"), "notes/runs/x.md");
+        assert_eq!(out_path_in("no path here"), "");
+        assert_eq!(out_path_in("notes/runs/.md"), "");
+    }
+
     #[test]
     fn drain_notice_text_and_prefix() {
         assert_eq!(
