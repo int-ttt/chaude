@@ -4,23 +4,16 @@
 // Rust counterpart with the same names. cli items live in a bin-only crate (no lib target), so they stay
 // ignored here until a cli test seam exists.
 
-// Go TestViaTUIFailureNotice (resident_pipeline_test.go)
+// Go TestRunTurnShowsTUIOutputOnly (resident_pipeline_test.go:88)
 #[test]
-#[ignore = "parity: resident TUI translator failure notice seam not wired in Rust (api.rs in progress)"]
-fn go_via_tui_failure_notice() {
-    panic!("not ported: resident TUI translator failure notice");
-}
-
-// Go TestRunTurnShowsTUIOutputOnly (resident_pipeline_test.go)
-#[test]
-#[ignore = "parity: run_turn TUI-only output seam (residentRepl) not wired in Rust"]
+#[ignore = "parity: with residents the Go pane shows only the tui answer; Rust streams main TextDelta (crates/core/src/api.rs:2205-2211) and cli has no TuiAnswer arm"]
 fn go_run_turn_shows_tui_output_only() {
     panic!("not ported: run_turn TUI-only output");
 }
 
 // Go TestSpawnSlotParksReadingChild (resident_route_test.go:55)
 #[test]
-#[ignore = "parity: spawnSlot seam not wired in Rust; parked reading child has no Rust equivalent"]
+#[ignore = "parity: resident slots have no parked or idle-reader state (crates/core/src/api.rs:1672-1680 spawn_residents)"]
 fn go_spawn_slot_parks_reading_child() {
     panic!("not ported: spawn_slot parks reading child");
 }

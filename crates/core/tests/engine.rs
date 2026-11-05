@@ -1796,6 +1796,49 @@ fn tui_exit_keeps_main_reply_and_reports_notice() {
     h.shutdown();
 }
 
+// Go TestViaTUIFailureNotice (resident_pipeline_test.go:63): a tui that exits and a tui that never answers both
+// keep the main reply and show the haiku-tui notice; the silent one ends at tui_timeout with the timeout notice.
+#[test]
+fn go_via_tui_failure_notice() {
+    let _g = lock();
+    let f = fake(
+        "tui_failure_notice",
+        &["text_turn.jsonl", "text_turn.jsonl"],
+    );
+    fs::write(f.dir.join("tui.jsonl"), "").unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    cfg.tui_timeout = Duration::from_secs(1);
+    let (h, rx) = Engine::start(cfg);
+    // The tui exits on its first prompt: the notice is the exit failure.
+    h.submit("one");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            UiEvent::Notice { text } if text.starts_with("haiku-tui 실패(오류")
+        )),
+        "{evs:?}"
+    );
+    // The respawned tui prints a line without a result and stays silent: the timeout notice.
+    fs::write(f.dir.join("tui.jsonl"), "{\"type\":\"system\"}\n").unwrap();
+    h.submit("two");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            UiEvent::Notice { text } if text.starts_with("haiku-tui 실패(") && text.contains("시간초과")
+        )),
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::TuiAnswer { .. })),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
 #[test]
 fn prompter_summary_wraps_prompt_for_main_child() {
     let _g = lock();
