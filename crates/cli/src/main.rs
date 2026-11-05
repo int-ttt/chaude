@@ -141,7 +141,8 @@ fn run_tui(args: &[String]) -> i32 {
     match tui::run(cfg, startup.map(|(_, imp)| imp)) {
         Ok(()) => 0,
         Err(e) => {
-            eprintln!("chaude: {e}");
+            // Go tui.go:1408-1412: a program error prints "harness: <err>" and exits 1.
+            eprintln!("harness: {e}");
             1
         }
     }
