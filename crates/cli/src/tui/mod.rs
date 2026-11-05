@@ -3137,6 +3137,20 @@ mod tests {
         assert_eq!(av.id, "r");
     }
 
+    // AgentRow.started_at is Unix seconds (api.rs restored_row); AgentRec.started_at is ms.
+    #[test]
+    fn restored_row_started_at_converts_seconds_to_ms() {
+        let mut app = App::new(80, 24);
+        let row = AgentRow {
+            started_at: 1_700_000_000,
+            ..agent_row("r", false, true)
+        };
+        app.apply(UiEvent::AgentsRestored { rows: vec![row] });
+        let recs = app.agent_recs();
+        let rec = recs.iter().find(|r| r.id == "r").expect("restored agent");
+        assert_eq!(rec.started_at, 1_700_000_000_000, "{rec:?}");
+    }
+
     #[test]
     fn background_rows_follow_the_foreground_rows() {
         let mut app = App::new(60, 20);
