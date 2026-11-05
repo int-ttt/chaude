@@ -3013,6 +3013,48 @@ fn idle_reply_is_logged_to_metrics_as_background() {
     );
 }
 
+// Go TestIdleSpendRow (background row): the idle turn row carries sub_output_tokens, spawns and result_model_usage.
+#[test]
+fn go_idle_spend_row_background_row() {
+    let _g = lock();
+    let f = fake("idle_spend_row", &["bg_idle_spend_turn.jsonl"]);
+    let metrics = f.dir.join("metrics");
+    let cfg = Config {
+        metrics_dir: Some(metrics.clone()),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let mut evs = until_idle(&rx);
+    while !evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_idle1"))
+    {
+        evs.push(rx.recv_timeout(WAIT).expect("engine went silent"));
+    }
+    h.shutdown();
+    let rows: Vec<serde_json::Value> = fs::read_dir(&metrics)
+        .unwrap()
+        .flat_map(|e| {
+            fs::read_to_string(e.unwrap().path())
+                .unwrap()
+                .lines()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        })
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(&l).ok())
+        .filter(|r| r["source"] == "background")
+        .collect();
+    assert_eq!(rows.len(), 1, "background rows: {rows:?}");
+    let row = &rows[0];
+    assert_eq!(row["sub_output_tokens"], serde_json::json!(7.0), "{row}");
+    assert_eq!(row["spawns"], serde_json::json!(1), "{row}");
+    assert!(
+        row["result_model_usage"]["claude-haiku-4-5"].is_object(),
+        "{row}"
+    );
+}
+
 // Go TestRegistryNilWhenNoFile (cachettl_test.go:23-43): no clients_file means no registry; a set path wires one.
 #[test]
 fn wire_clients_is_none_without_clients_file() {

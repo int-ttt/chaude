@@ -397,10 +397,28 @@ fn idle_spend_live_fixture_parses_line_by_line() {
     assert!(seen_result, "fixture has no result line");
 }
 
-// Go TestIdleSpendRow: a subagent's output tokens count into sub_output_tokens and the Agent spawn into spawns.
-// Diff: Rust has no background spend row (record_turn saves result_model_usage "{}" and no bg row).
+// Go TestIdleSpendRow (turn-spend half): a subagent's output tokens count into sub_output_tokens and the
+// Agent spawn into spawns. The background row itself is the engine test go_idle_spend_row_background_row.
 #[test]
-#[ignore = "parity: Rust has no background spend row (no sub_output_tokens / spawns)"]
 fn idle_spend_row_counts_subagent_tokens_and_spawns() {
-    panic!("parity: background spend row is not implemented in Rust");
+    let mut sp = chaude_core::turn_spend::TurnSpend::new();
+    let feed = |sp: &mut chaude_core::turn_spend::TurnSpend, line: &str| {
+        let ev: serde_json::Value = serde_json::from_str(line).expect("event json");
+        sp.on_event(&ev);
+    };
+    feed(
+        &mut sp,
+        r#"{"type":"assistant","parent_tool_use_id":"tu1","message":{"id":"m1","content":[],"usage":{"input_tokens":3,"output_tokens":7,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}"#,
+    );
+    feed(
+        &mut sp,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tu1","name":"Agent","input":{"subagent_type":"Explore"}}]}}"#,
+    );
+    let f = sp.fields();
+    assert_eq!(
+        f["sub_output_tokens"],
+        serde_json::json!(7.0),
+        "fields: {f}"
+    );
+    assert_eq!(f["spawns"], serde_json::json!(1), "fields: {f}");
 }
