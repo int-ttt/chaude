@@ -31,7 +31,7 @@ use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, UiEvent}
 use chaude_core::handoff;
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::resident::StagePhase;
-use crossterm::cursor::{MoveTo, Show};
+use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
     KeyModifiers, MouseButton, MouseEventKind,
@@ -105,6 +105,8 @@ pub enum Action {
 pub struct App {
     // Cursor column shift for IME preedit (Go imeShift, read once at start from the env).
     ime_shift: i32,
+    // Keep the hardware cursor hidden (parked for IME only). JetBrains-JediTerm would show it next to the drawn cell.
+    hide_cursor: bool,
     // /import or --from-claude: the loaded transcript, taken by the event loop and installed into the engine.
     import_install: Option<ClaudeImport>,
     editor: Editor,
@@ -273,6 +275,7 @@ impl App {
             quiet_noted: false,
             mouse: true,
             ime_shift: 0,
+            hide_cursor: false,
             sugg_sel: 0,
             usage: usage::Usage::default(),
             settings: None,
@@ -2301,7 +2304,12 @@ pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Resu
         }
     }
     let (x, y) = cursor(app, app.cols, app.rows);
-    queue!(out, MoveTo(x, y), Show)?;
+    queue!(out, MoveTo(x, y))?;
+    if app.hide_cursor {
+        queue!(out, Hide)?;
+    } else {
+        queue!(out, Show)?;
+    }
     *prev = rows;
     out.flush()
 }
@@ -2603,6 +2611,8 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         std::env::var("CHAUDE_IME_SHIFT").ok(),
         std::env::var("TERMINAL_EMULATOR").ok(),
     );
+    app.hide_cursor =
+        std::env::var("TERMINAL_EMULATOR").ok().as_deref() == Some("JetBrains-JediTerm");
     if let Some(imp) = startup {
         app.show_import(&imp);
         engine.install_import(imp);
@@ -3114,6 +3124,20 @@ mod tests {
         assert!(out.ends_with("\x1b[?25h"), "{out:?}");
         // Cursor after "cd" on the second input row: 0-based (5, 7), so MoveTo is 1-based row 8, column 6.
         assert!(out.contains("\x1b[8;6H\x1b[?25h"), "{out:?}");
+    }
+
+    // JetBrains-JediTerm: the hardware cursor stays hidden but is still parked on the input cell for IME.
+    #[test]
+    fn draw_hides_the_real_cursor_under_jediterm_and_still_parks_it() {
+        let mut app = App::new(30, 10);
+        app.hide_cursor = true;
+        type_str(&mut app, "ab");
+        let mut buf = Vec::new();
+        draw(&mut buf, &app, &mut Vec::new()).unwrap();
+        let out = String::from_utf8_lossy(&buf);
+        assert!(out.ends_with("\x1b[?25l"), "{out:?}");
+        assert!(!out.contains("\x1b[?25h"), "{out:?}");
+        assert!(out.contains("H\x1b[?25l"), "{out:?}");
     }
 
     fn agent_row(id: &str, background: bool, done: bool) -> AgentRow {
