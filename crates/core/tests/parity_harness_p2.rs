@@ -374,9 +374,8 @@ fn agent_prompt_body_loads_from_cwd_without_frontmatter() {
 }
 
 // Go TestAgentPromptMissingNotice: a missing agent file should start a default session with a Korean notice.
-// Diff: Rust agent_body returns Err("no agent file ...") and spawn fails; no notice, no default session.
+// The notice itself is emitted by api.rs agent_rule; this checks the Err text it is built from.
 #[test]
-#[ignore = "parity: Rust errors on a missing agent file, Go prints a notice and starts a default session"]
 fn agent_prompt_missing_gives_korean_notice_and_default_session() {
     let cwd = temp_cwd("agent-missing");
     let err = resident::agent_body(&cwd, "haiku-missing").expect_err("missing agent");

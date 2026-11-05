@@ -58,7 +58,7 @@ pub fn agent_body(cwd: &Path, name: &str) -> Result<String, String> {
             }
         }
     }
-    Err(format!("no agent file {name:?}"))
+    Err(format!("에이전트 규칙 없음({name})"))
 }
 
 // Go stripFrontmatter: when the first line is `---`, drops the lines up to and including the second `---`.

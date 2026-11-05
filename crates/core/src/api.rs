@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -1568,7 +1568,7 @@ impl State {
     fn spawn_tui(&mut self) -> Result<(), String> {
         self.resident_sids.remove("tui");
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
-        let rule = agent_body(&cwd, "haiku-tui")?;
+        let rule = self.agent_rule(&cwd, "haiku-tui");
         let opts = SpawnOpts {
             model: "haiku".to_string(),
             resume: self.resume_pending.remove("tui"),
@@ -1641,7 +1641,7 @@ impl State {
     fn spawn_coder(&mut self, i: usize) -> Result<(), String> {
         self.resident_sids.remove(&coder_role(i));
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
-        let rule = agent_body(&cwd, "haiku-coder")?;
+        let rule = self.agent_rule(&cwd, "haiku-coder");
         let opts = SpawnOpts {
             model: "haiku".to_string(),
             resume: self.resume_pending.remove(&coder_role(i)),
@@ -2619,6 +2619,17 @@ impl State {
     fn notice(&mut self, text: String) {
         if self.cfg.residents {
             self.emit(UiEvent::Notice { text });
+        }
+    }
+
+    // Go spawnSlot: a missing agent file shows the notice and the slot starts a default session (no rule).
+    fn agent_rule(&mut self, cwd: &Path, name: &str) -> String {
+        match agent_body(cwd, name) {
+            Ok(body) => body,
+            Err(e) => {
+                self.notice(format!("{e}: 기본 세션으로 시작"));
+                String::new()
+            }
         }
     }
 
