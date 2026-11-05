@@ -12,3 +12,13 @@ queue:
   - checks: test-isolated EXIT=0, 707 passed / 0 failed / 3 ignored; clippy no warnings; fmt --check clean
 - loop4 log committed alone: a37b13d
 - note: queue holds only item 1 (no other queue list found in notes/runs)
+
+## round 2
+
+- item 2 idle tick: DONE, commit 9671d2d
+  - go: tui.go:454 `if n := m.runningN(); m.busy || n != m.lastRun { m.refresh() }` (spinner.TickMsg); lastRun set at tui.go:403 in refresh; runningN tui.go:1445
+  - rust: crates/cli/src/tui/mod.rs tick() gate (~665-673): re-read agent_src only when busy || n != last_run; last_run field (~131), AgentRows arm sets last_run (~607); running_n no longer cfg(test)
+  - test: crates/cli/src/tui/mod.rs `tui::tests::idle_tick_gate_skips_unless_busy_or_count_moved` (count 0->1 fires; idle same-count skips; busy fires; idle same-count skips; 1->0 fires); existing idle_tick_refreshes_when_background_finishes still passes
+  - checks: test-isolated EXIT=0, 708 passed / 0 failed / 3 ignored; clippy EXIT=0 0 warnings; fmt --check EXIT=0
+  - size: du -sh 4.0G
+- open: round-2 log entry left uncommitted (only item commit requested)
