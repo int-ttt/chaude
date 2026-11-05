@@ -1,8 +1,8 @@
 // Parity stubs for Go harness group 3 rows that are not ported yet (see plan/rust-test-parity-p3.md).
 // Each test is #[ignore]d with its reason and panics when run with --ignored, so it cannot pass by accident.
 // Go seams (viaTUI, viaPrompter, residentRepl, fakeSession, spawnSlot, residentSlots, newSessionFn) have no
-// Rust counterpart with the same names. cli items live in a bin-only crate (no lib target), so they stay
-// ignored here until a cli test seam exists.
+// Rust counterpart with the same names. cli items are private to crates/cli/src/tui, so they stay
+// ignored here until the owning #[cfg(test)] mod (D6) reaches them.
 
 // Go TestRunTurnShowsTUIOutputOnly (resident_pipeline_test.go:88)
 #[test]

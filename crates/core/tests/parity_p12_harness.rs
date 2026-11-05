@@ -252,41 +252,41 @@ fn mcp_config_args() {
 // --include-ignored, so a missing port cannot pass silently.
 parity_ignored! {
     // p1 (missing rows)
-    live_streaming_multiple_deltas = "parity: live-only, needs real claude CLI";
-    agentview_click_read_only_close = "parity: TUI agent view, cli is bin-only (no lib target)";
-    typing_keeps_scroll = "parity: TUI agent view, cli is bin-only (no lib target)";
-    scroll_bottom_on_input_and_update = "parity: TUI agent view, cli is bin-only (no lib target)";
-    child_pid_recorded_on_park = "parity: Repl.parkOld and client registry not pub in Rust";
-    reconcile_parked_alive_child = "parity: Repl.parkOld and client registry not pub in Rust";
-    busy_slash_allowed_and_refused = "parity: TUI slash gate, cli is bin-only (no lib target)";
-    version_note_shows_chaude_version = "parity: TUI version note, cli is bin-only (no lib target)";
-    prune_record_files = "parity: pruneRecordFiles not pub in Rust";
-    resident_slots_fixed_four = "parity: diff, Rust uses 8-slot floor (RESIDENT_MAX_WORKERS)";
-    settings_file_empty_cwd_uses_working_dir = "parity: settingsFileFor not pub in Rust";
-    max_workers_cap_refuses = "parity: diff, Rust child_set::admit evicts oldest instead of refusing";
-    drain_consume_denies = "parity: drain.consume not pub in Rust";
-    agent_tracker_drain_half = "parity: drain finished and timeout not pub in Rust";
-    up_down_history_with_slash_completer = "parity: TUI history, cli is bin-only (no lib target)";
-    up_moves_completer_when_not_at_top = "parity: TUI history, cli is bin-only (no lib target)";
+    live_streaming_multiple_deltas = "parity: live-only, needs real claude CLI (crates/core/src/api.rs:2205-2211 TextDelta path)";
+    agentview_click_read_only_close = "parity: agent view click is private to the TUI; panel_click at crates/cli/src/tui/mod.rs:1556";
+    typing_keeps_scroll = "parity: typing scroll follow is private to the TUI; scroll_to at crates/cli/src/tui/mod.rs:1733";
+    scroll_bottom_on_input_and_update = "parity: scroll-to-bottom on input is private to the TUI; scroll at crates/cli/src/tui/mod.rs:1722";
+    child_pid_recorded_on_park = "parity: Repl.parkOld has no pub Rust seam; park_active at crates/core/src/api.rs:1383 is private";
+    reconcile_parked_alive_child = "parity: parked-child reconcile has no pub Rust seam; park_active at crates/core/src/api.rs:1383 is private";
+    busy_slash_allowed_and_refused = "parity: slash gate is private to the TUI key handler; on_key at crates/cli/src/tui/mod.rs:665";
+    version_note_shows_chaude_version = "parity: version note test not ported; version_note at crates/cli/src/tui/commands.rs:295 is pub";
+    prune_record_files = "parity: no prune_record_files in crates/core/src (record pruning absent)";
+    resident_slots_fixed_four = "parity: diff, Rust uses 8-slot floor RESIDENT_MAX_WORKERS (crates/core/src/api.rs:270)";
+    settings_file_empty_cwd_uses_working_dir = "parity: no settings_file helper in crates/core/src (settingsFileFor absent)";
+    max_workers_cap_refuses = "parity: diff, Rust child_set::admit evicts oldest instead of refusing (crates/core/src/child_set.rs:147)";
+    drain_consume_denies = "parity: drain consume not pub; import_view consume at crates/core/src/import_view.rs:157 is a different path";
+    agent_tracker_drain_half = "parity: drain finished and timeout not pub; AgentTracker::running at crates/core/src/agent_store.rs:777";
+    up_down_history_with_slash_completer = "parity: history key path private to the TUI; history_prev at crates/cli/src/tui/edit.rs:230";
+    up_moves_completer_when_not_at_top = "parity: completer key move private to the TUI; on_key at crates/cli/src/tui/mod.rs:665";
 
     // p2 (missing rows)
-    idle_denies_when_no_prompt = "parity: idle canUse loop lives in Repl, not pub in Rust";
-    idle_background_followup_rendered = "parity: idle followup render lives in Repl/TUI, not pub in Rust";
-    idle_tick_refreshes_when_background_finishes = "parity: idle loop lives in Repl, not pub in Rust";
-    plain_local_cmds_no_send = "parity: TUI local commands, cli is bin-only (no lib target)";
-    cursor_row_matches_panel_after_tick = "parity: TUI panel, cli is bin-only (no lib target)";
-    background_rows_below_input_box = "parity: TUI panel, cli is bin-only (no lib target)";
-    background_small_height_no_overflow = "parity: TUI panel, cli is bin-only (no lib target)";
-    stalled_output_file_keeps_agent_running = "parity: file-based drain finish, drain not pub in Rust";
-    queue_lines_dim_above_input = "parity: TUI queue render, cli is bin-only (no lib target)";
-    queue_small_height_no_overflow = "parity: TUI queue render, cli is bin-only (no lib target)";
-    cursor_row_includes_background_rows = "parity: TUI panel, cli is bin-only (no lib target)";
-    panel_scroll_window = "parity: TUI panel, cli is bin-only (no lib target)";
-    user_event_notification_finishes_background = "parity: Repl user-event path, not pub in Rust";
-    set_rate_logs_on_five_hour_change = "parity: setRate not pub in Rust";
-    set_rate_top_level_fallback = "parity: setRate not pub in Rust";
-    resident_running_list_shows_only_busy_sessions = "parity: residentRepl running list not pub in Rust";
-    resident_coder_slot_reuse = "parity: resident slot pool not pub in Rust";
-    coder_permission_only_when_busy = "parity: coder permission path not pub in Rust";
+    idle_denies_when_no_prompt = "parity: idle canUse loop is private; idle_deadline at crates/core/src/api.rs:3155";
+    idle_background_followup_rendered = "parity: idle followup render is private to the TUI; idle_result at crates/core/src/api.rs:2755";
+    idle_tick_refreshes_when_background_finishes = "parity: idle tick is private; finish_oldest_background at crates/core/src/api.rs:2767";
+    plain_local_cmds_no_send = "parity: local command no-send gate is private to the TUI; on_key at crates/cli/src/tui/mod.rs:665";
+    cursor_row_matches_panel_after_tick = "parity: panel cursor row is private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
+    background_rows_below_input_box = "parity: panel rows are private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
+    background_small_height_no_overflow = "parity: panel overflow is private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
+    stalled_output_file_keeps_agent_running = "parity: file-based drain finish not pub; AgentTracker::running at crates/core/src/agent_store.rs:777";
+    queue_lines_dim_above_input = "parity: queue render is private to the TUI; queue_lines at crates/cli/src/tui/mod.rs:1438";
+    queue_small_height_no_overflow = "parity: queue overflow is private to the TUI; queue_lines at crates/cli/src/tui/mod.rs:1438";
+    cursor_row_includes_background_rows = "parity: panel cursor row is private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
+    panel_scroll_window = "parity: panel scroll window is private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
+    user_event_notification_finishes_background = "parity: user-event path is private; idle_result at crates/core/src/api.rs:2755";
+    set_rate_logs_on_five_hour_change = "parity: setRate has no Rust counterpart (no set_rate in crates/core/src)";
+    set_rate_top_level_fallback = "parity: setRate has no Rust counterpart (no set_rate in crates/core/src)";
+    resident_running_list_shows_only_busy_sessions = "parity: residentRepl running list has no pub Rust seam; AgentTracker::running at crates/core/src/agent_store.rs:777";
+    resident_coder_slot_reuse = "parity: coder slot reuse is private; coder_matches at crates/core/src/api.rs:1714";
+    coder_permission_only_when_busy = "parity: coder permission path is private; coder_idle_left at crates/core/src/api.rs:1873";
     resident_coder_busy_refuses = "parity: diff, Go refuses busy single coder, Rust pool errors (crates/core/src/api.rs:1046)";
 }
