@@ -350,7 +350,6 @@ parity_ignored! {
     scroll_bottom_on_input_and_update = "parity: agent view refresh and close scroll not ported; AgentView scroll state at crates/cli/src/tui/agentview.rs:195 (main body parts at mod.rs:3508)";
     child_pid_recorded_on_park = "parity: parked child pid write is private; upsert_live at crates/core/src/api.rs:3636 has no pub seam";
     max_workers_cap_refuses = "parity: N-A in Go, checkWorkerCap (dispatch.go:35) has no production caller; only dispatch_test.go:87,91 call it. Production admit evicts (dispatch.go admit ~53, Rust child_set.rs:147). Refusal proxy: child_set.rs admit_refuses_when_nothing_evictable (child_set.rs:339)";
-    drain_consume_denies = "parity: drain consume not pub; import_view consume at crates/core/src/import_view.rs:157 is a different path";
     agent_tracker_drain_half = "parity: drain finished and timeout not pub; AgentTracker::running at crates/core/src/agent_store.rs:777";
 
     // p2 (missing rows)

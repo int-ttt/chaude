@@ -441,6 +441,34 @@ mod tests {
         assert_eq!(a.matches('-').count(), 4);
     }
 
+    // Go drain.consume (drain_test.go TestDrainConsumeDenies): the deny answer reaches the child's stdin as a
+    // control_response. Proxy: runs `cat` as the child and reads the frame back. The drain_kinds log (drain_deny,
+    // drain_event) is not ported, so only the response half of the Go test is covered.
+    #[test]
+    fn drain_deny_frame_reaches_child_stdin() {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let mut p = ClaudeProc { child, stdin };
+        p.write_permission("r1", false, Value::Null, "denied: session is draining")
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(stdout).read_line(&mut line).unwrap();
+        let v: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["type"], "control_response");
+        assert_eq!(v["response"]["request_id"], "r1");
+        assert_eq!(v["response"]["response"]["behavior"], "deny");
+        assert_eq!(
+            v["response"]["response"]["message"],
+            "denied: session is draining"
+        );
+        p.kill();
+    }
+
     // Parity with Go harness cleanenv_test.go: TestCleanEnvDropsAPIKey. Checks the recorded env delta, not the
     // inherited environment, so it does not depend on the test runner's own env.
     #[test]
