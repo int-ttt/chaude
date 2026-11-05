@@ -4,7 +4,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::record::{self, Entry};
 
@@ -83,6 +83,48 @@ pub fn migrate_root(root: &Path) -> io::Result<()> {
         fs::rename(root.join(&name), dst.join(&name))?;
     }
     Ok(())
+}
+
+// Go pruneRecordFiles: deletes the .md records in project folders under root whose mtime is older than
+// `days`. days <= 0 keeps everything. Emptied project folders are removed too. Returns the removed count.
+pub fn prune_record_files(root: &Path, days: i64, now: SystemTime) -> io::Result<usize> {
+    if days <= 0 {
+        return Ok(0);
+    }
+    let Some(cutoff) = now.checked_sub(Duration::from_secs(days as u64 * 24 * 60 * 60)) else {
+        return Ok(0);
+    };
+    let Ok(dirs) = fs::read_dir(root) else {
+        return Ok(0);
+    };
+    let mut removed = 0;
+    for d in dirs.flatten() {
+        let name = d.file_name().to_string_lossy().into_owned();
+        if !d.file_type().is_ok_and(|t| t.is_dir()) || name.starts_with('.') {
+            continue;
+        }
+        let dir = root.join(&name);
+        let Ok(files) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for f in files.flatten() {
+            let fname = f.file_name().to_string_lossy().into_owned();
+            if !fname.ends_with(".md") || !f.file_type().is_ok_and(|t| t.is_file()) {
+                continue;
+            }
+            let old = f
+                .metadata()
+                .and_then(|m| m.modified())
+                .is_ok_and(|m| m < cutoff);
+            if old && fs::remove_file(dir.join(&fname)).is_ok() {
+                removed += 1;
+            }
+        }
+        if fs::read_dir(&dir).is_ok_and(|mut left| left.next().is_none()) {
+            let _ = fs::remove_dir(&dir);
+        }
+    }
+    Ok(removed)
 }
 
 // Go listRecordProjects: the project folders under root (old files migrated first), most recently
@@ -185,7 +227,6 @@ mod tests {
     use super::*;
     use crate::record::{Block, Stamp, render};
     use crate::testutil::TempDir;
-    use std::time::Duration;
 
     fn stamp() -> Stamp {
         Stamp::new(2026, 11, 4, 9, 5, 7)

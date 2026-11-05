@@ -9,6 +9,7 @@
 use chaude_core::agent_store::AgentTracker;
 use chaude_core::clients::{ClientRec, ClientRegistry, EXPIRED, PARKED, now_stamp};
 use chaude_core::mcp;
+use chaude_core::record_folder;
 use chaude_core::resident::agent_body;
 use chaude_core::turn_spend::TurnSpend;
 use serde_json::{Value, json};
@@ -281,6 +282,52 @@ fn reconcile_parked_alive_child() {
     assert_eq!(b.state, PARKED, "dead-child parked row changed {b:?}");
 }
 
+// Go chaude_settings_test.go TestPruneRecordFiles (Go pruneRecordFiles at exit_handoff.go:116).
+#[test]
+fn prune_record_files() {
+    let root = scratch("prune");
+    let proj = root.join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    let old = proj.join("old.md");
+    let fresh = proj.join("fresh.md");
+    let keep = proj.join("note.txt");
+    for f in [&old, &fresh, &keep] {
+        fs::write(f, "x").unwrap();
+    }
+    let now = SystemTime::now();
+    let past = now - Duration::from_secs(40 * 24 * 3600);
+    fs::File::options()
+        .write(true)
+        .open(&old)
+        .unwrap()
+        .set_modified(past)
+        .unwrap();
+    // days 0 keeps everything.
+    assert_eq!(record_folder::prune_record_files(&root, 0, now).unwrap(), 0);
+    assert_eq!(
+        record_folder::prune_record_files(&root, 30, now).unwrap(),
+        1
+    );
+    assert!(!old.exists(), "old record kept");
+    assert!(
+        fresh.exists() && keep.exists(),
+        "fresh or non-md file removed"
+    );
+    // An emptied project folder is removed too.
+    let empty = root.join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    let empty_old = empty.join("a.md");
+    fs::write(&empty_old, "x").unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&empty_old)
+        .unwrap()
+        .set_modified(past)
+        .unwrap();
+    record_folder::prune_record_files(&root, 30, now).unwrap();
+    assert!(!empty.exists(), "empty project folder kept");
+}
+
 // Stubs for rows that cannot be reached from crates/*/tests/ yet. Each panics when run with
 // --include-ignored, so a missing port cannot pass silently.
 parity_ignored! {
@@ -289,7 +336,6 @@ parity_ignored! {
     agentview_click_read_only_close = "parity: panel-row mouse click opens agent view; panel_click at crates/cli/src/tui/mod.rs:1556 is private (key part ported at agentview.rs:340)";
     scroll_bottom_on_input_and_update = "parity: agent view refresh and close scroll not ported; AgentView scroll state at crates/cli/src/tui/agentview.rs:195 (main body parts at mod.rs:3508)";
     child_pid_recorded_on_park = "parity: parked child pid write is private; upsert_live at crates/core/src/api.rs:3636 has no pub seam";
-    prune_record_files = "parity: no prune_record_files in crates/core/src (record pruning absent)";
     resident_slots_fixed_four = "parity: diff, Rust uses 8-slot floor RESIDENT_MAX_WORKERS (crates/core/src/api.rs:270)";
     max_workers_cap_refuses = "parity: diff, Rust child_set::admit evicts oldest instead of refusing (crates/core/src/child_set.rs:147)";
     drain_consume_denies = "parity: drain consume not pub; import_view consume at crates/core/src/import_view.rs:157 is a different path";
