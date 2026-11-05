@@ -4148,6 +4148,49 @@ mod tests {
         assert_eq!(drain_finished(0, t, t), Some(false));
     }
 
+    // Go TestAgentTrackerAndDrain (drain_test.go:11): running follows the launch ack, the foreground result and the
+    // completion notification. Proxy: Go finished() also reads the drain file and quiet period, but finished()
+    // in Go (drain.go:305) only checks the tracker and timeout, so drain_finished is driven by running().len().
+    #[test]
+    fn agent_tracker_drain_half() {
+        use crate::agent_store::AgentTracker;
+        let tr = AgentTracker::new(None, "p", "");
+        let now = SystemTime::now();
+        let t = Duration::from_secs(3600);
+        tr.on_tool_use(
+            "a",
+            "Agent",
+            &json!({"description": "d", "prompt": "write notes/runs/x.md", "run_in_background": true}),
+            now,
+        );
+        tr.on_tool_use("b", "Task", &json!({"description": "fg"}), now);
+        tr.on_tool_use("c", "Bash", &json!({}), now);
+        assert_eq!(tr.sorted_all().len(), 2, "Bash is not tracked");
+        tr.on_tool_result("a"); // background: launch ack, still running
+        tr.on_tool_result("b"); // foreground: finishes
+        let running = tr.running();
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].id, "a");
+        assert_eq!(drain_finished(running.len(), Duration::ZERO, t), None);
+        tr.on_notification("<task-notification><tool-use-id>a</tool-use-id></task-notification>");
+        assert_eq!(
+            drain_finished(tr.running().len(), Duration::ZERO, t),
+            Some(false)
+        );
+
+        // Go d2.finished past the timeout with an agent still running: done and timed out.
+        let tr2 = AgentTracker::new(None, "p", "");
+        tr2.on_tool_use("z", "Agent", &json!({"run_in_background": true}), now);
+        assert_eq!(
+            drain_finished(
+                tr2.running().len(),
+                Duration::from_secs(120),
+                Duration::from_secs(60)
+            ),
+            Some(true)
+        );
+    }
+
     // Go drain.consume: only can_use_tool control_requests are denied while draining.
     #[test]
     fn drain_denies_only_permission_requests() {
