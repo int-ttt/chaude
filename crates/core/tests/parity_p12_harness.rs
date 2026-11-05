@@ -418,7 +418,6 @@ fn set_rate_top_level_fallback() {
 // --include-ignored, so a missing port cannot pass silently.
 parity_ignored! {
     // p1 (missing rows)
-    scroll_bottom_on_input_and_update = "parity: agent view refresh and close scroll not ported; AgentView scroll state at crates/cli/src/tui/agentview.rs:195 (main body parts at mod.rs:3508)";
     max_workers_cap_refuses = "parity: N-A in Go, checkWorkerCap (dispatch.go:35) has no production caller; only dispatch_test.go:87,91 call it. Production admit evicts (dispatch.go admit ~53, Rust child_set.rs:147). Refusal proxy: child_set.rs admit_refuses_when_nothing_evictable (child_set.rs:339)";
 
     // p2 (missing rows)

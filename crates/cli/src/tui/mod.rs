@@ -4114,6 +4114,47 @@ mod tests {
         assert!(app.editor.is_empty(), "q is not typed");
     }
 
+    // Go TestScrollBottomOnInputAndUpdate (agentview_test.go:130-163): new content and submit follow the tail; typing
+    // keeps the scroll position; the agent view keeps its own offset across frames; closing it returns to the bottom.
+    #[test]
+    fn scroll_bottom_on_input_and_update() {
+        let mut app = App::new(80, 24);
+        for _ in 0..80 {
+            app.note("line");
+        }
+        assert!(app.follow, "content must follow the tail");
+        app.scroll(-10_000);
+        assert_eq!(app.top, 0);
+        app.on_key(key(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert!(!app.follow, "typing must keep the scroll position");
+        assert_eq!(app.top, 0, "typing must keep the scroll position");
+        app.scroll(10_000);
+        assert!(app.follow, "scrolled back to the bottom");
+        app.apply(text("more"));
+        assert!(app.follow, "update must scroll to bottom");
+        app.scroll(-10_000);
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.follow, "submit must scroll to bottom");
+        // Go keeps the agent view scroll across refresh; Rust frame() reads &App, so it cannot change it.
+        app.apply(UiEvent::AgentStart {
+            id: "w1".to_string(),
+            description: "worker".to_string(),
+            started_at: 0,
+        });
+        app.on_key(key(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        app.av.as_mut().expect("view open").off = 2;
+        plain_frame(&app, 80, 24);
+        assert_eq!(
+            app.av.as_ref().map(|v| v.off),
+            Some(2),
+            "refresh must not reset the view scroll"
+        );
+        app.scroll(-10_000);
+        app.on_key(key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.av.is_none(), "esc closes the view");
+        assert!(app.follow, "closing the view puts the body at the bottom");
+    }
+
     #[test]
     fn agent_end_adds_the_done_line() {
         let mut app = App::new(80, 24);
