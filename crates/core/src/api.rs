@@ -688,6 +688,8 @@ struct State {
     // Prompt and assistant text of the running turn.
     turn_prompt: String,
     turn_reply: String,
+    // Filtered main text held back while residents route the reply to the tui; shown only when the tui fails.
+    routed_text: String,
     // Hides [cat: X] markers from the streamed text of the main child (Go markerFilter).
     mark: MarkerFilter,
     // Current task category from the last normal turn (Go r.cat).
@@ -1015,6 +1017,7 @@ fn actor(
         last_rot_fail: None,
         turn_prompt: String::new(),
         turn_reply: String::new(),
+        routed_text: String::new(),
         mark: MarkerFilter::default(),
         cat: String::new(),
         ttl_seen: String::new(),
@@ -1579,8 +1582,7 @@ impl State {
         if self.tui_proc.is_none()
             && let Err(e) = self.spawn_tui()
         {
-            self.notice(tui_notice(&format!("오류: {e}")));
-            self.after_turn();
+            self.finish_tui(Err(format!("오류: {e}")));
             return;
         }
         self.stage("tui", StagePhase::Working);
@@ -1970,12 +1972,23 @@ impl State {
         if self.tui_deadline.take().is_some() {
             self.resident_busy("tui", false);
         }
+        let raw = std::mem::take(&mut self.routed_text);
         match out {
             Ok(text) => {
                 self.stage("tui", StagePhase::Done);
                 self.emit(UiEvent::TuiAnswer { text });
             }
-            Err(detail) => self.notice(tui_notice(&detail)),
+            Err(detail) => {
+                // Go viaTUI: on failure the raw main reply is shown, then the notice.
+                if !raw.is_empty() {
+                    self.emit(UiEvent::TextDelta {
+                        role: Role::Main,
+                        text: raw,
+                    });
+                    self.emit(UiEvent::MessageDone { role: Role::Main });
+                }
+                self.notice(tui_notice(&detail));
+            }
         }
         self.after_turn();
     }
@@ -2023,6 +2036,7 @@ impl State {
                 self.pending_snapshot.clear();
                 self.turn_prompt = text.to_string();
                 self.turn_reply.clear();
+                self.routed_text.clear();
                 self.mark = MarkerFilter::default();
                 self.turn_started = Some(Instant::now());
                 self.stage("main", StagePhase::Working);
@@ -2207,14 +2221,19 @@ impl State {
                         } else {
                             text
                         };
-                        if self.handoff.is_none() && !shown.is_empty() {
+                        // With residents the pane shows only the tui answer (Go runTurn routed): hold main text back.
+                        if self.cfg.residents && matches!(role, Role::Main) {
+                            self.routed_text.push_str(&shown);
+                        } else if self.handoff.is_none() && !shown.is_empty() {
                             self.emit(UiEvent::TextDelta { role, text: shown });
                         }
                     }
                     StreamInner::MessageStop if self.handoff.is_none() => {
                         if matches!(role, Role::Main) {
                             let rest = self.mark.flush();
-                            if !rest.is_empty() {
+                            if self.cfg.residents {
+                                self.routed_text.push_str(&rest);
+                            } else if !rest.is_empty() {
                                 self.emit(UiEvent::TextDelta {
                                     role: role.clone(),
                                     text: rest,

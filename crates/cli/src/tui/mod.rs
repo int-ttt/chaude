@@ -312,7 +312,7 @@ impl App {
             UiEvent::TextDelta {
                 role: Role::Main,
                 ..
-            }
+            } | UiEvent::TuiAnswer { .. }
         ) {
             self.got_text = true;
         }
@@ -320,17 +320,11 @@ impl App {
             UiEvent::TextDelta {
                 role: Role::Main,
                 text,
-            } => {
-                let at = self.transcript.len();
-                feed(
-                    &mut self.pending_main,
-                    &text,
-                    (ASST_FIRST, "  "),
-                    &mut self.main_open,
-                    &mut self.transcript,
-                    asst_text,
-                );
-                self.link_from(at);
+            } => self.feed_main(&text),
+            // With residents the tui answer is the whole main reply (Go viaTUI): it replaces the streamed text.
+            UiEvent::TuiAnswer { text } => {
+                self.feed_main(&text);
+                self.end_main_block();
             }
             UiEvent::TextDelta {
                 role: Role::Agent(_),
@@ -1262,6 +1256,19 @@ impl App {
     }
 
     // Closes the open assistant block: flushes its unfinished line and adds Go's blank row after it.
+    fn feed_main(&mut self, text: &str) {
+        let at = self.transcript.len();
+        feed(
+            &mut self.pending_main,
+            text,
+            (ASST_FIRST, "  "),
+            &mut self.main_open,
+            &mut self.transcript,
+            asst_text,
+        );
+        self.link_from(at);
+    }
+
     fn end_main_block(&mut self) {
         let at = self.transcript.len();
         flush(
@@ -3704,6 +3711,18 @@ mod tests {
             text: "plain result".to_string(),
         });
         assert!(app.transcript.len() > before);
+    }
+
+    // Go TestRunTurnShowsTUIOutputOnly (resident_pipeline_test.go:88): the tui answer is the whole main block.
+    #[test]
+    fn tui_answer_fills_and_closes_the_main_block() {
+        let mut app = app_with_lines(0);
+        app.apply(UiEvent::TuiAnswer {
+            text: "번역 답변".to_string(),
+        });
+        assert!(app.transcript.join("\n").contains("번역 답변"));
+        assert!(!app.main_open);
+        assert!(app.pending_main.is_empty());
     }
 
     // R03/R08 (tui.go:374): assistant text gets **bold** and link styling, and keeps its visible text.

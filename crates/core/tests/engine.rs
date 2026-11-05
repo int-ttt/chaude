@@ -1803,6 +1803,36 @@ fn tui_answer_replaces_main_reply_after_turn() {
     h.shutdown();
 }
 
+// Go runTurn routed (repl.go): with residents the pane gets only the tui answer, never the streamed main text.
+#[test]
+fn residents_pane_shows_only_the_tui_answer() {
+    let _g = lock();
+    let f = fake("tui_on", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter().any(|e| matches!(
+            e,
+            UiEvent::TextDelta {
+                role: Role::Main,
+                ..
+            }
+        )),
+        "{evs:?}"
+    );
+    assert!(
+        evs.contains(&UiEvent::TuiAnswer {
+            text: "tui answer".into(),
+        }),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
 #[test]
 fn tui_exit_keeps_main_reply_and_reports_notice() {
     let _g = lock();
@@ -1817,6 +1847,13 @@ fn tui_exit_keeps_main_reply_and_reports_notice() {
     assert!(
         evs.contains(&UiEvent::Notice {
             text: "haiku-tui 실패(오류: exited): 메인 원문 표시".into(),
+        }),
+        "{evs:?}"
+    );
+    assert!(
+        evs.contains(&UiEvent::TextDelta {
+            role: Role::Main,
+            text: "Hello".into(),
         }),
         "{evs:?}"
     );
