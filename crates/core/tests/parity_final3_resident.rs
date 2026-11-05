@@ -34,6 +34,8 @@ fn fresh_dir(tag: &str) -> PathBuf {
 }
 
 // Fake claude: logs its argv, then answers every user line with one text block and a result.
+// Only the main child (argv with --mcp-config) logs: resident children share the dir, and their
+// concurrent appends split long main lines in the shell printf (Go resident_agent_test.go:199 filter).
 // Returns the script path and the test dir.
 fn fake_claude(tag: &str) -> (PathBuf, PathBuf) {
     static RECORD: Once = Once::new();
@@ -52,7 +54,7 @@ fn fake_claude(tag: &str) -> (PathBuf, PathBuf) {
     .expect("write turn");
     let log = dir.join("args.log");
     let script = format!(
-        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\nwhile IFS= read -r line; do\n  case \"$line\" in\n    *'\"type\":\"user\"'*) cat '{turn}' ;;\n  esac\ndone\n",
+        "#!/bin/sh\ncase \"$*\" in *--mcp-config*) printf '%s\\n' \"$*\" >> '{log}' ;; esac\nwhile IFS= read -r line; do\n  case \"$line\" in\n    *'\"type\":\"user\"'*) cat '{turn}' ;;\n  esac\ndone\n",
         log = log.display(),
         turn = turn.display(),
     );
