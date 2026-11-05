@@ -3379,6 +3379,30 @@ mod tests {
         assert_eq!(y as usize, input, "{rows:?}");
     }
 
+    // Go TestCursorRowMatchesPanelAfterTick (panel_test.go:79): the cursor row follows the panel when a
+    // foreground agent starts and again when it ends.
+    #[test]
+    fn cursor_row_matches_panel_after_agent_rows_change() {
+        let mut app = App::new(80, 30);
+        type_str(&mut app, "ab");
+        let base = cursor(&app, 80, 30).1;
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("f1", false, false)],
+        });
+        let rows = plain_frame(&app, 80, 30);
+        let input = rows.iter().position(|r| r.contains("> ab")).unwrap();
+        assert_eq!(cursor(&app, 80, 30).1 as usize, input, "{rows:?}");
+        assert!(
+            (input as u16) < base,
+            "panel row moves the input up: {base} {input}"
+        );
+        assert!(rows.len() <= 30, "{rows:?}");
+        app.apply(UiEvent::AgentRows {
+            rows: vec![agent_row("f1", false, true)],
+        });
+        assert_eq!(cursor(&app, 80, 30).1, base);
+    }
+
     #[test]
     fn empty_size_shows_the_starting_frame() {
         let app = App::new(0, 0);
@@ -3448,6 +3472,48 @@ mod tests {
         app.on_key(key(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.editor.text(), "/mode ");
         assert!(screen(&app, 30, 8).iter().all(|r| !r.contains("/mouse")));
+    }
+
+    // Go TestUpDownHistoryWithSlashCompleter (history_file_test.go:77): with the completer open on "/",
+    // Up at its top reaches history, also for a recalled prompt that starts with "/".
+    #[test]
+    fn up_down_history_with_slash_completer() {
+        let mut app = App::new(80, 30);
+        for prompt in ["older prompt", "/mo"] {
+            app.editor.insert_str(prompt);
+            app.editor.take();
+        }
+        app.editor.insert_str("/");
+        assert!(!app.suggest().is_empty(), "completer open for /");
+        app.on_key(key(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(app.editor.text(), "/mo");
+        assert!(app.editor.browsing());
+        app.on_key(key(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(app.editor.text(), "older prompt");
+        app.on_key(key(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.editor.text(), "/mo");
+        app.on_key(key(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.editor.text(), "/");
+        assert!(!app.editor.browsing());
+    }
+
+    // Go TestUpMovesCompleterWhenNotAtTop (history_file_test.go:109): Up above the completer top moves the
+    // selection, and Down keeps moving it without touching the editor.
+    #[test]
+    fn up_moves_completer_when_not_at_top() {
+        let mut app = App::new(80, 30);
+        app.editor.insert_str("older prompt");
+        app.editor.take();
+        app.editor.insert_str("/");
+        app.sugg_sel = 2;
+        app.on_key(key(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(app.sugg_sel, 1);
+        assert_eq!(app.editor.text(), "/");
+        assert!(!app.editor.browsing());
+        app.on_key(key(KeyCode::Down, KeyModifiers::NONE));
+        app.on_key(key(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.sugg_sel, 3);
+        assert_eq!(app.editor.text(), "/");
     }
 
     #[test]
@@ -3680,6 +3746,29 @@ mod tests {
         let text = app.transcript.join("\n");
         assert!(text.contains("rotations 0"), "{text}");
         assert!(text.contains("session -"), "{text}");
+    }
+
+    // Go TestPlainLocalCmdsNoSend (localcmd_test.go:11): /help, /status and /exit are answered in the app and
+    // nothing is submitted to the child session.
+    #[test]
+    fn plain_local_commands_are_answered_without_send() {
+        let mut app = App::new(80, 24);
+        for line in ["/help", "/status"] {
+            type_str(&mut app, line);
+            assert_eq!(
+                app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
+                Action::Continue,
+                "{line} must not be submitted"
+            );
+        }
+        let text = app.transcript.join("\n");
+        assert!(text.contains("show commands and keys"), "{text}");
+        assert!(text.contains("rotations 0"), "{text}");
+        type_str(&mut app, "/exit");
+        assert_eq!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::Quit
+        );
     }
 
     #[test]

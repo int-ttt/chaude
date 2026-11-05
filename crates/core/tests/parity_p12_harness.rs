@@ -294,15 +294,9 @@ parity_ignored! {
     max_workers_cap_refuses = "parity: diff, Rust child_set::admit evicts oldest instead of refusing (crates/core/src/child_set.rs:147)";
     drain_consume_denies = "parity: drain consume not pub; import_view consume at crates/core/src/import_view.rs:157 is a different path";
     agent_tracker_drain_half = "parity: drain finished and timeout not pub; AgentTracker::running at crates/core/src/agent_store.rs:777";
-    up_down_history_with_slash_completer = "parity: history key path private to the TUI; history_prev at crates/cli/src/tui/edit.rs:230";
-    up_moves_completer_when_not_at_top = "parity: completer key move private to the TUI; on_key at crates/cli/src/tui/mod.rs:665";
 
     // p2 (missing rows)
-    idle_denies_when_no_prompt = "parity: idle canUse loop is private; idle_deadline at crates/core/src/api.rs:3155";
-    idle_background_followup_rendered = "parity: idle followup render is private to the TUI; idle_result at crates/core/src/api.rs:2755";
-    idle_tick_refreshes_when_background_finishes = "parity: idle tick is private; finish_oldest_background at crates/core/src/api.rs:2767";
-    plain_local_cmds_no_send = "parity: local command no-send gate is private to the TUI; on_key at crates/cli/src/tui/mod.rs:665";
-    cursor_row_matches_panel_after_tick = "parity: panel cursor row is private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
+    idle_tick_refreshes_when_background_finishes = "parity: Rust tick does not refresh agent rows; rows are pushed by UiEvent::AgentRows (crates/cli/src/tui/mod.rs:638 tick, panel_lines at mod.rs:1465)";
     background_rows_below_input_box = "parity: panel rows are private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
     background_small_height_no_overflow = "parity: panel overflow is private to the TUI; panel_lines at crates/cli/src/tui/mod.rs:1460";
     stalled_output_file_keeps_agent_running = "parity: file-based drain finish not pub; AgentTracker::running at crates/core/src/agent_store.rs:777";
