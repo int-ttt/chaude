@@ -240,6 +240,12 @@ fn resident_coder_busy_refuses_second_task() {
         )),
         "{evs:?}"
     );
+    // Go waitCall(first): the busy task still finishes and its reply arrives.
+    let rest = until_coder_done(&rx, 1);
+    assert!(
+        rest.iter().any(|e| matches!(e, UiEvent::CoderReply { .. })),
+        "{rest:?}"
+    );
     h.shutdown();
 }
 
