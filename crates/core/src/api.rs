@@ -26,7 +26,7 @@ use crate::haiku_pool::WorkerPool;
 use crate::handoff::{self, ExitHandoff};
 use crate::import_claude::{ClaudeImport, import_note};
 use crate::mcp;
-use crate::metrics::{Metrics, usage_fields, yymmdd_today};
+use crate::metrics::{Metrics, RateLog, usage_fields, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::orch;
 use crate::osenv::resolve_bin;
@@ -652,6 +652,8 @@ struct State {
     // Go usagePollAt/usagePolling: last background /usage poll start, and whether one is in flight.
     usage_poll_at: Option<Instant>,
     usage_polling: Arc<AtomicBool>,
+    // Go setRate metrics state: last five-hour utilization logged, and whether rate_raw was written.
+    rate_log: RateLog,
     // Go r.reg: client rows in clients.json; None when cfg.clients_file is unset.
     clients: Option<ClientRegistry>,
     // Session id from the child's system event (Go sess.SessionID); "" until the child reports one.
@@ -1037,6 +1039,7 @@ fn actor(
         coder_epoch: 0,
         usage_poll_at: None,
         usage_polling: Arc::new(AtomicBool::new(false)),
+        rate_log: RateLog::default(),
         clients,
     };
     for (role, pid, model) in orphans {
@@ -2368,6 +2371,7 @@ impl State {
             }
             Event::RateLimitEvent(ev) => {
                 if let Some(info) = ev.rate_limit_info {
+                    self.rate_log.set_rate(&info, &self.metrics);
                     self.emit(UiEvent::RateLimit { info });
                 }
             }

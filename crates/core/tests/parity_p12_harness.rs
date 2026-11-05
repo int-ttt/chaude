@@ -341,6 +341,40 @@ fn resident_slots_fixed_four() {
     }
 }
 
+// Go TestSetRateLogsOnFiveHourChange (ratestatus_test.go:12): a "rate" row only when the five-hour
+// utilization changes; "rate_raw" once per process. Port of Repl.setRate metrics via RateLog.
+#[test]
+fn set_rate_logs_on_five_hour_change() {
+    let dir = scratch("set-rate-change");
+    let metrics = chaude_core::metrics::Metrics::new(Some(dir.clone()), json!({}));
+    let mut log = chaude_core::metrics::RateLog::default();
+    let info = |u: f64| json!({"unifiedWindows": {"five_hour": {"utilization": u}}});
+    let rows = || -> Vec<Value> {
+        let mut out = Vec::new();
+        for entry in fs::read_dir(&dir).unwrap() {
+            let text = fs::read_to_string(entry.unwrap().path()).unwrap();
+            out.extend(
+                text.lines()
+                    .map(|l| serde_json::from_str::<Value>(l).expect("row json")),
+            );
+        }
+        out
+    };
+    let count = || rows().iter().filter(|r| r["stage"] == "rate").count();
+
+    log.set_rate(&info(0.37), &metrics);
+    log.set_rate(&info(0.37), &metrics);
+    assert_eq!(count(), 1, "same value twice: one rate row");
+    log.set_rate(&info(0.40), &metrics);
+    assert_eq!(count(), 2, "changed value: two rate rows");
+    for row in rows() {
+        assert!(
+            row["stage"] == "rate" || row["stage"] == "rate_raw",
+            "row stage: {row}"
+        );
+    }
+}
+
 // Stubs for rows that cannot be reached from crates/*/tests/ yet. Each panics when run with
 // --include-ignored, so a missing port cannot pass silently.
 parity_ignored! {
@@ -354,7 +388,6 @@ parity_ignored! {
     // p2 (missing rows)
     idle_tick_refreshes_when_background_finishes = "parity: Rust tick does not refresh agent rows; rows are pushed by UiEvent::AgentRows (crates/cli/src/tui/mod.rs:638 tick, panel_lines at mod.rs:1465)";
     user_event_notification_finishes_background = "parity: user-event path is private; idle_result at crates/core/src/api.rs:2755";
-    set_rate_logs_on_five_hour_change = "parity: setRate has no Rust counterpart (no set_rate in crates/core/src)";
     set_rate_top_level_fallback = "parity: setRate has no Rust counterpart (no set_rate in crates/core/src)";
     resident_running_list_shows_only_busy_sessions = "parity: residentRepl running list has no pub Rust seam; AgentTracker::running at crates/core/src/agent_store.rs:777";
     resident_coder_slot_reuse = "parity: coder slot reuse is private; coder_matches at crates/core/src/api.rs:1714";

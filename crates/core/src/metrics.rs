@@ -46,6 +46,61 @@ impl Metrics {
     }
 }
 
+// Go rateNum: a JSON number, or a numeric string.
+fn rate_num(v: Option<&Value>) -> Option<f64> {
+    match v? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.parse().ok(),
+        _ => None,
+    }
+}
+
+// Go fiveHourUtil: five-hour utilization (raw scale) from unifiedWindows, else the top-level fallback.
+// Top-level fields only count when rateLimitType is "" or "five_hour".
+pub fn five_hour_util(info: &Value) -> Option<f64> {
+    let window = info.get("unifiedWindows").and_then(|u| u.get("five_hour"));
+    let v = rate_num(window.and_then(|w| w.get("utilization")));
+    let top = info
+        .get("rateLimitType")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if v.is_none() && (top.is_empty() || top == "five_hour") {
+        return rate_num(info.get("utilization"));
+    }
+    v
+}
+
+// Go Repl rate log state (repl.go lastFiveHour, fiveHourSeen, rawRateLogged).
+#[derive(Default)]
+pub struct RateLog {
+    five_hour: Option<f64>,
+    raw_logged: bool,
+}
+
+impl RateLog {
+    // Go setRate metrics part: one "rate_raw" row (key names only) for the first info of the
+    // process, and a "rate" row each time the five-hour utilization changes.
+    pub fn set_rate(&mut self, info: &Value, metrics: &Metrics) {
+        if !self.raw_logged {
+            self.raw_logged = true;
+            let mut keys: Vec<&String> = info
+                .as_object()
+                .map(|m| m.keys().collect())
+                .unwrap_or_default();
+            keys.sort();
+            let top = info
+                .get("rateLimitType")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let _ = metrics.log(json!({"stage": "rate_raw", "keys": keys, "rate_limit_type": top}));
+        }
+        if let Some(v) = five_hour_util(info).filter(|v| self.five_hour != Some(*v)) {
+            self.five_hour = Some(v);
+            let _ = metrics.log(json!({"stage": "rate", "five_hour": v}));
+        }
+    }
+}
+
 // Token counts of one API usage object (Go usageFields); ctx is the context-size proxy (Go ctxTokens).
 pub fn usage_fields(usage: &Value) -> Value {
     let input = num(usage.get("input_tokens"));
