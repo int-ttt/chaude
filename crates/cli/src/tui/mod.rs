@@ -2415,9 +2415,26 @@ fn restore_terminal() {
         MouseCellMotion(false),
         DisableBracketedPaste,
         LeaveAlternateScreen,
+        CursorShape(false),
         Show
     );
     let _ = terminal::disable_raw_mode();
+}
+
+// DECSCUSR (CSI Ps SP q): steady block while the TUI runs, so the shown hardware cursor does not blink.
+// false restores the terminal's own cursor shape on exit (Ps 0). Go leaves the shape alone.
+struct CursorShape(bool);
+
+impl crossterm::Command for CursorShape {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        let ps = if self.0 { 2 } else { 0 };
+        write!(f, "\x1b[{ps} q")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 // Go tui.go:1394 WithMouseCellMotion: button and drag motion (?1002) with SGR coordinates (?1006) only.
@@ -2451,7 +2468,8 @@ impl TermGuard {
             EnterAlternateScreen,
             Clear(ClearType::All),
             EnableBracketedPaste,
-            MouseCellMotion(true)
+            MouseCellMotion(true),
+            CursorShape(true)
         )?;
         // The default hook prints while the alternate screen is still up, so restore before it runs.
         let hook = panic::take_hook();
@@ -3154,6 +3172,16 @@ mod tests {
         assert_eq!(UnicodeWidthStr::width(rows[6].as_str()), 30);
         assert_eq!(UnicodeWidthStr::width(rows[7].as_str()), 30);
         assert_eq!(cursor(&app, 30, 10), (11, 7));
+    }
+
+    // The TUI sets a steady block cursor on start and the terminal default on exit (DECSCUSR 2 / 0).
+    #[test]
+    fn cursor_shape_is_steady_on_start_and_default_on_exit() {
+        let mut on = String::new();
+        crossterm::Command::write_ansi(&CursorShape(true), &mut on).unwrap();
+        let mut off = String::new();
+        crossterm::Command::write_ansi(&CursorShape(false), &mut off).unwrap();
+        assert_eq!((on.as_str(), off.as_str()), ("\x1b[2 q", "\x1b[0 q"));
     }
 
     // draw() ends by showing the real cursor at the editor cell (1-based MoveTo: row+1, col+1).
