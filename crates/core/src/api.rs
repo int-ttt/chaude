@@ -846,6 +846,21 @@ fn drain_finished(running: usize, elapsed: Duration, timeout: Duration) -> Optio
     }
 }
 
+// Go pollDrains over drain.finished (drain.go:305-313): the drains that finish now, as (epoch, timed_out).
+// running is the shared tracker's running count; each drain is (epoch, time since its start).
+fn finished_drains(
+    drains: &[(u64, Duration)],
+    running: usize,
+    timeout: Duration,
+) -> Vec<(u64, bool)> {
+    drains
+        .iter()
+        .filter_map(|&(epoch, elapsed)| {
+            drain_finished(running, elapsed, timeout).map(|to| (epoch, to))
+        })
+        .collect()
+}
+
 // Go pollDrains: the notice of one agent a drain waited for. done is false when the drain timed out or the agent is still running.
 fn drain_done_notice(id: &str, task: &str, out: &str, done: bool) -> String {
     let st = if done { "완료" } else { "타임아웃" };
@@ -3560,16 +3575,14 @@ impl State {
 
     // Go pollDrains: finished drains are closed (done when the shared tracker is empty, timed out at drain_timeout).
     // Runs at the start of each user submit and on quiet, as Go polls at handle().
+    // self.agents is the engine's tracker of running background agents (Go d.tr.running()).
     fn reap_drains(&mut self) {
-        let timeout = self.cfg.drain_timeout;
-        let running = self.agents.len();
-        let finished: Vec<(u64, bool)> = self
+        let ages: Vec<(u64, Duration)> = self
             .drains
             .iter()
-            .filter_map(|d| {
-                drain_finished(running, d.since.elapsed(), timeout).map(|to| (d.epoch, to))
-            })
+            .map(|d| (d.epoch, d.since.elapsed()))
             .collect();
+        let finished = finished_drains(&ages, self.agents.len(), self.cfg.drain_timeout);
         for (epoch, timed_out) in finished {
             self.end_drain(epoch, timed_out);
         }
@@ -4367,8 +4380,8 @@ mod tests {
     // Go TestAgentTrackerAndDrain (drain_test.go:11-59): running follows the launch ack, the foreground result and the
     // completion notification. Go drain.finished(now) (drain.go:305-313) reads only d.tr.running() and d.since/d.timeout,
     // never the drain file or a quiet period, so the Go file checks (drain_test.go:33-48) only pin "not done while the
-    // tracker still runs", which the running() checks below cover. go_finished is a test-only mirror of d.finished(now)
-    // over a real AgentTracker, returning Go's (done, timedOut); no production change.
+    // tracker still runs", which the running() checks below cover. go_finished feeds a real AgentTracker's
+    // running count to finished_drains, the seam reap_drains uses, and returns Go's (done, timedOut).
     #[test]
     fn agent_tracker_drain_half() {
         use crate::agent_store::AgentTracker;
@@ -4379,8 +4392,8 @@ mod tests {
             timeout: Duration,
         ) -> (bool, bool) {
             let elapsed = now.duration_since(since).unwrap_or(Duration::ZERO);
-            match drain_finished(tr.running().len(), elapsed, timeout) {
-                Some(timed_out) => (true, timed_out),
+            match finished_drains(&[(1, elapsed)], tr.running().len(), timeout).first() {
+                Some(&(_, timed_out)) => (true, timed_out),
                 None => (false, false),
             }
         }
