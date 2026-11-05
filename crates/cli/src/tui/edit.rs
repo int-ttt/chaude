@@ -580,6 +580,21 @@ mod tests {
         assert!(!first.move_row(-1));
     }
 
+    // Port of TestInputWidthMixed (input_test.go:9-29): cursor cell column, left moves, backspace over a wide char.
+    #[test]
+    fn mixed_width_cursor_and_backspace_follow_cells() {
+        let mut e = typed("ab한글cd");
+        assert_eq!(e.cursor(), 6);
+        assert_eq!(cells(&e.buf[..e.cursor()]), 8);
+        e.left();
+        e.left();
+        e.left();
+        assert_eq!(cells(&e.buf[..e.cursor()]), 4, "before 글");
+        e.backspace();
+        assert_eq!(e.text(), "ab글cd");
+        assert_eq!(cells(&e.buf[..e.cursor()]), 2);
+    }
+
     #[test]
     fn backslash_enter_turns_a_trailing_backslash_into_a_newline() {
         let mut e = typed("a\\");

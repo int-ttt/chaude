@@ -12,8 +12,8 @@ Dedupe key: Go test name (320 unique names, no collisions across packages). Prec
 
 | status | count |
 |---|---|
-| covered | 235 |
-| partial | 12 |
+| covered | 237 |
+| partial | 10 |
 | ignored | 48 |
 | missing | 0 |
 | n-a | 25 |
@@ -31,7 +31,7 @@ Ignored by reason (sum 48):
 
 ## Remaining
 
-- partial (12): Rust test covers the part of the Go body that is ported; the rest has an ignored stub in
+- partial (10): Rust test covers the part of the Go body that is ported; the rest has an ignored stub in
   crates/core/tests/parity_final3_ignored.rs (or the stub named in the note). Stubs panic when run with --ignored.
 - ignored (48): stubs exist; each needs its seam wired (core Repl seam, TUI, or cli test seam) before #[ignore] can be removed.
 - design (2): TestResidentSlotsFixedFour, TestResidentCoderBusyRefuses. Go fixes four resident roles and refuses a busy single coder;
@@ -178,7 +178,7 @@ N-A ignores and rows kept with reason:
 | TestIdleSpendRow | internal/harness/idlespend_test.go | crates/core/tests/parity_final3.rs::idle_spend_row_sub_and_spawns | partial | background row sub tokens and spawns covered (final3); result_model_usage stub: crates/core/tests/parity_final3_ignored.rs::go_idle_spend_row_background_row  [p12: idle_spend_row] |
 | TestIdleSpendLiveReplay | internal/harness/idlespend_test.go | crates/core/tests/parity_final3.rs::idle_spend_live_replay | covered | reads crates/core/tests/fixtures/bg_turn_live.jsonl (final3) |
 | TestReadClaudeTranscriptFullView | internal/harness/importview_test.go | crates/core/src/import_view.rs::tool_use_result_and_thinking_are_rendered_in_order, crates/core/src/import_view.rs::subagent_renders_after_its_agent_call, crates/core/tests/parity_final3.rs::read_claude_transcript_full_view | covered | full view read (final3) plus import_view unit tests |
-| TestInputWidthMixed | internal/harness/input_test.go | crates/cli/src/tui/render.rs::mixed_width_measure | partial | mixed-width measure covered; remaining cases stub: crates/core/tests/parity_final3_ignored.rs::go_input_width_mixed_rest |
+| TestInputWidthMixed | internal/harness/input_test.go | crates/cli/src/tui/render.rs::mixed_width_measure; crates/cli/src/tui/edit.rs::mixed_width_cursor_and_backspace_follow_cells | covered | round 3: cursor cells, left moves and backspace over a wide char ported (Editor has no width; cell column via cells()) |
 | TestInputWrapWide | internal/harness/input_test.go | crates/cli/src/tui/render.rs::wrap_cells_breaks_by_cell_width | partial | wide-cell wrap covered; remaining cases stub: crates/core/tests/parity_final3_ignored.rs::go_input_wrap_wide_rest |
 | TestInputNewline | internal/harness/input_test.go | crates/cli/src/tui/edit.rs::newline_is_a_marker_column_and_home_end_stay_on_the_line | covered | name-level match |
 | TestInputKillToStart | internal/harness/input_test.go | crates/cli/src/tui/edit.rs::kill_to_start_cases | covered | name-level match |
@@ -229,7 +229,7 @@ N-A ignores and rows kept with reason:
 | TestWSHandoffRuneCap | internal/harness/orchws_test.go | crates/core/src/orch.rs::handoff_is_rune_capped_with_prefix | covered | name-level match |
 | TestRouteOrchBReturnsLine | internal/harness/orchws_test.go | crates/core/src/orch.rs::route_non_f_mode_keeps_line | covered | body read: route_non_f_mode_keeps_line checks the returned line |
 | TestSessionPanelAndThinking | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::thinking_row_shows_only_for_opus_resident_or_pre_text | partial | thinking row covered; panel assertions stub: crates/core/tests/parity_final3_ignored.rs::go_session_panel_rest |
-| TestEscInterruptClearsForegroundPanel | internal/harness/panel_test.go | crates/cli/src/tui/mod.rs::a_single_escape_interrupts_only_while_busy | partial | esc interrupt covered; foreground panel clear stub: crates/core/tests/parity_final3_ignored.rs::go_esc_interrupt_clears_foreground_panel |
+| TestEscInterruptClearsForegroundPanel | internal/harness/panel_test.go | crates/cli/src/tui/mod.rs::a_single_escape_interrupts_only_while_busy; crates/cli/src/tui/mod.rs::interrupt_finishes_foreground_agents_only; crates/cli/src/tui/mod.rs::turn_end_finishes_foreground_agents_only | covered | round 3: turn end (Busy(false)) finishes foreground agents like Go doneMsg (tui.go:517); fixed in mod.rs Busy handler |
 | TestIdleTickRefreshesWhenBackgroundFinishes | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): idle tick refresh of panel after background finishes  [p12: idle_tick_refreshes_when_background_finishes] |
 | TestCursorRowMatchesPanelAfterTick | internal/harness/panel_test.go | none | ignored | ignored (TUI behaviour not in Rust yet): cursor row vs panel after tick  [p12: cursor_row_matches_panel_after_tick] |
 | TestPanelMoreRowAndSmallHeight | internal/harness/panel_test.go | crates/cli/src/tui/bar.rs::every_running_agent_stays_visible_when_row_is_narrow | ignored | bin-only (cli has no lib target): more-row and small-height panel; stub: crates/core/tests/parity_final3_ignored.rs::go_panel_more_row_small_height |

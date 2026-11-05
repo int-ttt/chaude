@@ -460,6 +460,9 @@ impl App {
                     self.last_tool.clear();
                     // A new turn is past any late AgentEnd of the interrupted one.
                     self.finished_fg.clear();
+                } else {
+                    // Go doneMsg (tui.go:517): turn over, no foreground agent can still be running.
+                    self.finish_foreground();
                 }
                 // A new turn starts its quiet count now, not at the last event of the previous turn.
                 self.quiet_since = Some(self.clock);
@@ -3851,6 +3854,27 @@ mod tests {
         });
         assert_eq!(app.transcript.len(), before);
         assert!(app.finished_fg.is_empty());
+    }
+
+    // Port of TestEscInterruptClearsForegroundPanel, second half (panel_test.go:50-54): a turn that ends with
+    // a foreground agent still listed (no tool_result) clears it; the background agent stays.
+    #[test]
+    fn turn_end_finishes_foreground_agents_only() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "bg".into(),
+            description: "bg".into(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentBackground { id: "bg".into() });
+        app.apply(UiEvent::AgentStart {
+            id: "fg".into(),
+            description: "fg".into(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::Busy(false));
+        assert_eq!(app.agents.len(), 1);
+        assert_eq!(app.agents[0].0, "bg");
     }
 
     // E23: a background agent's AgentEnd removes its row and adds the done notice (Go onUserEvent path).

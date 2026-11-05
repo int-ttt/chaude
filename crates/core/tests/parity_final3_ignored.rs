@@ -55,13 +55,6 @@ fn go_stage_lines_full_order() {
     panic!("not ported: stage lines full order");
 }
 
-// Go TestInputWidthMixed, cases beyond the mixed-width measure (input_test.go:9-29)
-#[test]
-#[ignore = "parity: Go input_test.go:9-29 mixed-width input cases; cli is bin-only (no lib target)"]
-fn go_input_width_mixed_rest() {
-    panic!("not ported: input width mixed remaining cases");
-}
-
 // Go TestInputWrapWide, cases beyond the wide-cell wrap (input_test.go:30-51)
 #[test]
 #[ignore = "parity: Go input_test.go:30-51 wide-cell input wrap cases; cli is bin-only (no lib target)"]
@@ -74,13 +67,6 @@ fn go_input_wrap_wide_rest() {
 #[ignore = "parity: Go panel_test.go:17-37 session panel and thinking row; cli is bin-only (no lib target)"]
 fn go_session_panel_rest() {
     panic!("not ported: session panel assertions");
-}
-
-// Go TestEscInterruptClearsForegroundPanel, foreground panel clear (panel_test.go:38-54)
-#[test]
-#[ignore = "parity: Go panel_test.go:38-54 esc interrupt clears foreground panel; cli is bin-only (no lib target)"]
-fn go_esc_interrupt_clears_foreground_panel() {
-    panic!("not ported: esc interrupt clears foreground panel");
 }
 
 // Go TestPanelMoreRowAndSmallHeight, more-row and small-height panel (panel_test.go)
