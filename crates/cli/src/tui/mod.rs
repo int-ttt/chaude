@@ -105,7 +105,7 @@ pub enum Action {
 pub struct App {
     // Cursor column shift for IME preedit (Go imeShift, read once at start from the env).
     ime_shift: i32,
-    // Keep the hardware cursor hidden (parked for IME only). JetBrains-JediTerm would show it next to the drawn cell.
+    // Keep the hardware cursor hidden (parked for IME only). Off by default; CHAUDE_IME_HIDE=1 turns it on.
     hide_cursor: bool,
     // /import or --from-claude: the loaded transcript, taken by the event loop and installed into the engine.
     import_install: Option<ClaudeImport>,
@@ -2279,14 +2279,10 @@ fn ime_col_shift(ime: Option<String>, emulator: Option<String>) -> i32 {
     0
 }
 
-// Whether draw() hides the hardware cursor (it is still parked for IME). Default: hidden under JediTerm only.
-// CHAUDE_IME_HIDE=1 always hides, CHAUDE_IME_HIDE=0 never hides (shown cursor, for IME placement tests).
-fn hide_cursor_for(hide: Option<String>, emulator: Option<String>) -> bool {
-    match hide.as_deref().map(str::trim) {
-        Some("1") => true,
-        Some("0") => false,
-        _ => emulator.as_deref() == Some("JetBrains-JediTerm"),
-    }
+// Whether draw() hides the hardware cursor (it is still parked for IME). Default: shown, as in Go.
+// CHAUDE_IME_HIDE=1 hides it, CHAUDE_IME_HIDE=0 or unset/other shows it (JediTerm Hangul placement checked with both).
+fn hide_cursor_for(hide: Option<String>) -> bool {
+    matches!(hide.as_deref().map(str::trim), Some("1"))
 }
 
 // How far the body's rows moved since the last draw, so the terminal can scroll them instead of repainting:
@@ -2672,10 +2668,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         std::env::var("CHAUDE_IME_SHIFT").ok(),
         std::env::var("TERMINAL_EMULATOR").ok(),
     );
-    app.hide_cursor = hide_cursor_for(
-        std::env::var("CHAUDE_IME_HIDE").ok(),
-        std::env::var("TERMINAL_EMULATOR").ok(),
-    );
+    app.hide_cursor = hide_cursor_for(std::env::var("CHAUDE_IME_HIDE").ok());
     if let Some(imp) = startup {
         app.show_import(&imp);
         engine.install_import(imp);
@@ -3199,9 +3192,9 @@ mod tests {
         assert!(out.contains("\x1b[8;6H\x1b[?25h"), "{out:?}");
     }
 
-    // JetBrains-JediTerm: the hardware cursor stays hidden but is still parked on the input cell for IME.
+    // CHAUDE_IME_HIDE=1: the hardware cursor stays hidden but is still parked on the input cell for IME.
     #[test]
-    fn draw_hides_the_real_cursor_under_jediterm_and_still_parks_it() {
+    fn draw_hides_the_real_cursor_when_hidden_and_still_parks_it() {
         let mut app = App::new(30, 10);
         app.hide_cursor = true;
         type_str(&mut app, "ab");
@@ -3739,15 +3732,13 @@ mod tests {
         assert_eq!(ime_col_shift(Some("x".into()), None), 0);
     }
 
+    // Default is shown (Go parity), also under JediTerm; CHAUDE_IME_HIDE=1 is the only value that hides.
     #[test]
-    fn hide_cursor_default_is_jediterm_only_and_env_overrides_it() {
-        let jediterm = Some("JetBrains-JediTerm".to_string());
-        assert!(!hide_cursor_for(None, None));
-        assert!(hide_cursor_for(None, jediterm.clone()));
-        assert!(!hide_cursor_for(Some("0".into()), jediterm.clone()));
-        assert!(hide_cursor_for(Some(" 1 ".into()), None));
-        assert!(!hide_cursor_for(Some("x".into()), None));
-        assert!(hide_cursor_for(Some("x".into()), jediterm));
+    fn hide_cursor_default_is_shown_and_env_overrides_it() {
+        assert!(!hide_cursor_for(None));
+        assert!(!hide_cursor_for(Some("0".into())));
+        assert!(!hide_cursor_for(Some("x".into())));
+        assert!(hide_cursor_for(Some(" 1 ".into())));
     }
 
     #[test]
