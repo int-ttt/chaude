@@ -1181,6 +1181,25 @@ impl App {
                 ..Default::default()
             })
             .collect();
+        // Restored rows are finished and interrupted; they open in the view like running agents.
+        recs.extend(
+            self.restored_rows
+                .iter()
+                .filter(|r| self.agents.iter().all(|(id, _, _)| *id != r.id))
+                .map(|r| agentview::AgentRec {
+                    id: r.id.clone(),
+                    task: r.task.clone(),
+                    prompt: r.prompt.clone(),
+                    model: r.model.clone(),
+                    name: r.name.clone(),
+                    done: true,
+                    interrupted: true,
+                    started: true,
+                    started_at: r.started_at * 1000,
+                    log: self.agent_logs.get(&r.id).cloned().unwrap_or_default(),
+                    ..Default::default()
+                }),
+        );
         agentview::sort_all(&mut recs);
         recs
     }
@@ -3103,6 +3122,19 @@ mod tests {
         app.apply(UiEvent::AgentsRestored { rows: Vec::new() });
         let rows = plain_frame(&app, 60, 20);
         assert!(!rows.iter().any(|r| r.contains("task r")), "{rows:?}");
+    }
+
+    #[test]
+    fn restored_row_opens_in_the_agent_view() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentsRestored {
+            rows: vec![agent_row("r", false, true)],
+        });
+        let recs = app.agent_recs();
+        let rec = recs.iter().find(|r| r.id == "r").expect("restored agent");
+        assert!(rec.done && rec.interrupted, "{rec:?}");
+        let av = agentview::AgentView::open_first(&recs).expect("restored agent opens");
+        assert_eq!(av.id, "r");
     }
 
     #[test]
