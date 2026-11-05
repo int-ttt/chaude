@@ -44,3 +44,12 @@ queue:
   - DOUBT: design D5 said #[ignore] if drain test-only; drain struct is production in Go (switchchild.go:101), so no ignore (brief forbids #[ignore]).
 - loop5 round 3 log committed alone: b2d5bd6 (docs(notes)).
 - NOT DONE: no push, no ignore, no test for on_prompter_line/on_tui_line deny (item 3 doubt stands).
+
+## round 5
+- item 3 test (E1 doubt closed by test): commit d020290 test(core), api.rs test module only (mod tests, ~api.rs:4493-4577, fn parked_non_coder_can_use_tool_is_denied_on_prompter_and_tui).
+  - seam: Engine::try_start with fake claude (residents on); prompter and tui children are sh scripts, role by argv; each emits can_use_tool then blocks on read. No production change.
+  - assert: prompter and tui each get control_response, response.subtype success, response.behavior deny, response.message "denied: session parked (another model is active)".
+  - checks: cargo test --lib parked_non_coder_can_use_tool_is_denied 1 passed; mutation (deny_parked removed) -> FAILED, engine silent after 60s; scripts/test-isolated.sh EXIT=0, 709 passed / 0 failed / 3 ignored (28 result blocks); clippy --workspace --all-targets 0 warnings; fmt --all --check rc=0; du -sh 4.1G.
+  - DOUBT: fake children rely on argv marker "input summarizer" for prompter; a prompter rule change breaks role detection (test would fail, not pass silently).
+  - DOUBT: test sets HARNESS_RECORD_DIR process-wide via unsafe set_var; safe only while no other lib test drives the engine.
+- NOT DONE: no push. Round-4 commit 233b80a, log commit follows as docs(notes).
