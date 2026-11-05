@@ -4582,7 +4582,7 @@ mod tests {
     // Frame bench: 2000-row history, then 200 streamed text events (one frame each) like 200 events/s.
     // Run: cargo test -p chaude-cli --release bench_frame -- --ignored --nocapture
     #[test]
-    #[ignore]
+    #[ignore = "bench: timing run only, no Go counterpart; run with --ignored"]
     fn bench_frame_large_history_streaming() {
         let mut app = App::new(120, 40);
         for i in 0..2000 {

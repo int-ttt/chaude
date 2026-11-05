@@ -28,7 +28,7 @@ fn go_registry_nil_when_no_file_wiring() {
 
 // Go TestAgentTrackerAndDrain, drain.finished check after the tracker finishes (drain_test.go:11-63)
 #[test]
-#[ignore = "parity: Go drain_test.go:11-63 drain.finished flag; Rust has no drain type (api.rs:322 'No engine effect yet')"]
+#[ignore = "parity: Go drain_test.go:11-63 feeds a drain tracker that Go production never builds (drain.go:317-327); Rust drains end by drain_timeout (api.rs end_drain)"]
 fn go_agent_tracker_drain_finished() {
     panic!("not ported: agent tracker drain.finished");
 }
