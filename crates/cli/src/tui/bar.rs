@@ -86,12 +86,32 @@ pub fn fmt_g4(x: f64) -> String {
     }
 }
 
-// fmtK-style token count for the ctx bar: "0" below 1000, otherwise thousands with a "k" suffix.
+// Go fmtK (repl.go:142-162): "0" to "999", then k or M with 2, 1 or 0 decimals by magnitude.
 fn fmt_k(n: u64) -> String {
     if n < 1_000 {
-        n.to_string()
+        return n.to_string();
+    }
+    let (unit, div) = if n >= 1_000_000 {
+        ("M", 1_000_000)
     } else {
+        ("k", 1_000)
+    };
+    let x = n / div;
+    if x >= 100 {
+        format!("{x}{unit}")
+    } else if x >= 10 {
+        format!("{x}.{}{unit}", (n / (div / 10)) % 10)
+    } else {
+        format!("{x}.{:02}{unit}", (n / (div / 100)) % 100)
+    }
+}
+
+// Go fmtLimit (repl.go:164-169): whole thousands as "200k", otherwise fmtK.
+fn fmt_limit(n: u64) -> String {
+    if n >= 1_000 && n.is_multiple_of(1_000) {
         format!("{}k", n / 1_000)
+    } else {
+        fmt_k(n)
     }
 }
 
@@ -151,7 +171,7 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
     let mut bottom = format!(
         " M {}/{} P {}/{r} T {}/{r} C {}/{r}{rate}{}",
         fmt_k(b.tokens),
-        fmt_k(b.limit),
+        fmt_limit(b.limit),
         role("prompter"),
         role("tui"),
         role("coder"),
@@ -393,6 +413,51 @@ mod tests {
     }
 
     #[test]
+    fn fmt_k_matches_go_fmt_k() {
+        // Go TestFmtK (unit_test.go:133); fmtLimit cases included.
+        let cases = [
+            (0, "0"),
+            (999, "999"),
+            (1_000, "1.00k"),
+            (1_234, "1.23k"),
+            (1_999, "1.99k"),
+            (12_345, "12.3k"),
+            (123_456, "123k"),
+            (999_999, "999k"),
+            (1_234_567, "1.23M"),
+            (200_000, "200k"),
+            (80_000, "80.0k"),
+        ];
+        for (n, want) in cases {
+            assert_eq!(fmt_k(n), want, "fmt_k({n})");
+        }
+        assert_eq!(fmt_limit(200_000), "200k");
+        assert_eq!(fmt_limit(80_000), "80k");
+    }
+
+    #[test]
+    fn ctx_bar_row_matches_go_ctx_bar() {
+        // Go TestCtxBar (unit_test.go:149): the M/P/T/C context part of the bottom status row.
+        let empty = BarInput {
+            limit: 200_000,
+            ..BarInput::default()
+        };
+        assert!(rows(&empty, '⠋', 200)[1].starts_with(" M 0/200k P 0/80k T 0/80k C 0/80k"));
+        let coder = BarInput {
+            tokens: 12_345,
+            limit: 200_000,
+            role_tokens: BTreeMap::from([
+                ("prompter".to_string(), 1_000),
+                ("coder".to_string(), 999),
+            ]),
+            ..BarInput::default()
+        };
+        assert!(
+            rows(&coder, '⠋', 200)[1].starts_with(" M 12.3k/200k P 1.00k/80k T 0/80k C 999/80k")
+        );
+    }
+
+    #[test]
     fn idle_bar_without_status_says_so() {
         let b = BarInput {
             limit: 200_000,
@@ -426,7 +491,7 @@ mod tests {
         assert_eq!(top, "⠙ running 12s · agent 리뷰 3s");
         assert_eq!(
             bottom,
-            " M 12k/200k P 0/80k T 0/80k C 0/80k · rot 0 · mode auto · agents 1 running · queued 2"
+            " M 12.3k/200k P 0/80k T 0/80k C 0/80k · rot 0 · mode auto · agents 1 running · queued 2"
         );
     }
 
@@ -439,7 +504,10 @@ mod tests {
             ..BarInput::default()
         };
         let [_, bottom] = rows(&b, ' ', 200);
-        assert!(bottom.contains(" P 1k/80k T 12k/80k C 0/80k"), "{bottom}");
+        assert!(
+            bottom.contains(" P 1.50k/80k T 12.0k/80k C 0/80k"),
+            "{bottom}"
+        );
     }
 
     #[test]

@@ -756,4 +756,52 @@ mod tests {
         assert_eq!(v.key(press(KeyCode::Esc), w, h), Action::None);
         assert!(v.turns.is_none());
     }
+
+    #[test]
+    fn prompt_view_scrolls_inside_transcript_like_go() {
+        // Go TestViewPromptScrollsInsideTranscript (sessview_test.go:139).
+        let (w, h) = (80, 10);
+        let mut v = SessView {
+            id: "sessaaa1".into(),
+            turns: Some(vec!["long prompt text ".repeat(200)]),
+            ..Default::default()
+        };
+        let len = v.body(w).len();
+        let last = len - (h - 1);
+        assert!(last > 3, "prompt too short to scroll: body={len} lines");
+        v.key(press(KeyCode::Down), w, h);
+        assert_eq!(v.off, 1);
+        v.key(press(KeyCode::PageDown), w, h);
+        assert!(v.off > 1, "pgdown did not move: off={}", v.off);
+        v.key(press(KeyCode::End), w, h);
+        assert_eq!(v.off, last);
+        v.key(press(KeyCode::Down), w, h);
+        assert_eq!(v.off, last, "down past end clamps");
+        v.key(press(KeyCode::Home), w, h);
+        assert_eq!(v.off, 0);
+        v.wheel(false, w, h);
+        assert_eq!(v.off, 3, "wheel down scrolls three lines");
+        v.wheel(true, w, h);
+        assert_eq!(v.off, 0, "wheel up returns to the top");
+    }
+
+    #[test]
+    fn list_match_and_prompts_follow_go_view_helpers() {
+        // Partial port of Go TestViewHelpers (resume_test.go:42): list, prefix match, list format and prompts.
+        // Go formatTranscript (resume.go:175) has no Rust counterpart, so the stub stays ignored.
+        let (dir, list) = fixture("helpers");
+        assert_eq!(match_sessions(&list, "sessa").len(), 1);
+        assert_eq!(match_sessions(&list, "sess").len(), 2);
+        let refs: Vec<&SessionInfo> = list.iter().collect();
+        let text = format_session_list(&refs);
+        assert!(
+            text.contains("sessaaa1") && text.contains("first prompt"),
+            "{text}"
+        );
+        assert_eq!(
+            read_prompts(&list[0].path).unwrap(),
+            vec!["first prompt".to_string(), "second prompt".to_string()]
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

@@ -27,35 +27,14 @@ fn go_spawn_slot_parks_reading_child() {
 
 // Go TestViewHelpers (resume_test.go:42)
 #[test]
-#[ignore = "parity: cli-private sessview helpers; bin-only crate has no lib target for integration tests"]
+#[ignore = "parity: formatTranscript has no Rust counterpart (Go resume.go:175); partial cli test sessview::list_match_and_prompts_follow_go_view_helpers"]
 fn go_view_helpers() {
     panic!("not ported: sessview helper set (cli-private)");
 }
 
 // Go TestReleaseCopiesSelection (selection_test.go:50)
 #[test]
-#[ignore = "parity: clipboard copy on release is cli-private; bin-only crate has no lib target"]
+#[ignore = "parity: copy_text hard-wires native clipboard (crates/cli/src/tui/mod.rs:1952), no injectable hook; partial cli test tui::release_returns_the_dragged_text_for_copy"]
 fn go_release_copies_selection() {
     panic!("not ported: release copies selection (cli-private)");
-}
-
-// Go TestViewPromptScrollsInsideTranscript (sessview_test.go:139)
-#[test]
-#[ignore = "parity: sessview prompt scroll is cli-private; bin-only crate has no lib target"]
-fn go_view_prompt_scrolls_inside_transcript() {
-    panic!("not ported: sessview prompt scroll (cli-private)");
-}
-
-// Go TestFmtK (unit_test.go:133)
-#[test]
-#[ignore = "parity: fmt_k is private in crates/cli/src/tui/bar.rs:90; bin-only crate has no lib target"]
-fn go_fmt_k() {
-    panic!("not ported: fmtK/fmtLimit cases (cli-private fmt_k)");
-}
-
-// Go TestCtxBar (unit_test.go:149)
-#[test]
-#[ignore = "parity: ctx bar helper is cli-private; bin-only crate has no lib target"]
-fn go_ctx_bar() {
-    panic!("not ported: ctx bar (cli-private)");
 }

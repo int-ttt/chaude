@@ -3761,7 +3761,7 @@ mod tests {
             tokens: 12_000,
         });
         let [_, bottom] = bar::rows(&app.bar_input(), ' ', 200);
-        assert!(bottom.contains(" T 12k/80k"), "{bottom}");
+        assert!(bottom.contains(" T 12.0k/80k"), "{bottom}");
         app.apply(UiEvent::SessionIds {
             main: "m1".to_string(),
             residents: std::collections::BTreeMap::from([(
@@ -4260,6 +4260,24 @@ mod tests {
         assert!(app.copy_note.is_some());
         app.tick(t + Duration::from_millis(2000));
         assert!(app.copy_note.is_none());
+    }
+
+    #[test]
+    fn release_returns_the_dragged_text_for_copy() {
+        // Partial port of Go TestReleaseCopiesSelection (selection_test.go:50). The clipboard write is not
+        // injectable: copy_text (mod.rs copy_text) calls the native copy directly, so the stub stays ignored.
+        let mut app = App::new(30, 6);
+        app.transcript.push("alpha".into());
+        app.transcript.push("beta gamma".into());
+        assert_eq!(screen(&app, 30, 6)[..2], ["alpha", "beta gamma"]);
+        app.select_press(0, 1);
+        app.select_drag(4, 1);
+        assert_eq!(app.select_release(4, 1), Some("beta".to_string()));
+        app.copy_done(4, Ok(()));
+        assert_eq!(
+            app.copy_note.as_ref().map(|n| n.0.as_str()),
+            Some("복사됨 (4자)")
+        );
     }
 
     #[test]
