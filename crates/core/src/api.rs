@@ -108,6 +108,10 @@ pub enum UiEvent {
         elapsed_ms: u64,
         // The Agent call's `model` input (Go agentRec.Model, shown by doneLine); empty = inherits the session model.
         model: String,
+        // Go agentRec.Name for doneLine: the `name` input, else `subagent_type`.
+        name: String,
+        // Go agentRec.Task for doneLine: the `description` input.
+        task: String,
     },
     // A background agent resumed by SendMessage runs again under its original tool id until its AgentEnd.
     AgentResumed {
@@ -635,6 +639,8 @@ struct State {
     agent_ids: HashMap<String, String>,
     // Start label by tool_use id. Kept after the agent ends, so a later SendMessage resume still shows it.
     agent_labels: HashMap<String, String>,
+    // Go subagentLabel by tool_use id (subagent_type, else "agent"): the stage row's agent name.
+    agent_types: HashMap<String, String>,
     // tool_use ids still waiting for their tool_result; the inactivity timer is paused while non-empty.
     open_tools: HashSet<String>,
     // Last claude line or turn start; the inactivity timer measures from here.
@@ -1025,6 +1031,7 @@ fn actor(
         agent_store,
         agent_ids: HashMap::new(),
         agent_labels: HashMap::new(),
+        agent_types: HashMap::new(),
         open_tools: HashSet::new(),
         last_activity: Instant::now(),
         interrupted_at: None,
@@ -2560,6 +2567,12 @@ impl State {
             self.pool.note_edit(&self.sid, &self.cur_task, fp);
         }
         self.open_tools.insert(id.clone());
+        // Go repl.go:721: an Agent call's "· agent <label> 호출" row comes before its tool line.
+        if name == "Agent" || name == "Task" {
+            let label = subagent_label(&input);
+            self.stage(&agent_slot(&label), StagePhase::Working);
+            self.agent_types.insert(id.clone(), label);
+        }
         let summary = tool_summary(&input);
         self.emit(UiEvent::ToolStart {
             id: id.clone(),
@@ -2641,7 +2654,6 @@ impl State {
                     started_at,
                 },
             );
-            self.stage(&agent_slot(&description), StagePhase::Working);
             self.emit(UiEvent::AgentStart {
                 id: id.clone(),
                 description,
@@ -2659,10 +2671,6 @@ impl State {
             ok: !is_error,
         });
         let text = result_text(content.as_ref());
-        self.emit(UiEvent::ToolResult {
-            id: id.clone(),
-            text: text.clone(),
-        });
         // SendMessage to a background agent resumes it: it runs again under its original tool id.
         // The SendMessage result is JSON: {"success":true,"message":"Resuming agent <short>","resumedAgentId":"<full>"}.
         let resume = serde_json::from_str::<Value>(&text)
@@ -2688,6 +2696,7 @@ impl State {
                 info.done = false;
             }
             self.persist_agent(&tool, STO_RUNNING);
+            self.emit_tool_result(id, text);
             self.emit(UiEvent::AgentResumed {
                 id: tool,
                 description,
@@ -2707,11 +2716,22 @@ impl State {
             if let Some(info) = self.agent_info.get_mut(&id) {
                 info.background = true;
             }
+            self.emit_tool_result(id.clone(), text);
             self.emit(UiEvent::AgentBackground { id });
             self.emit_agent_rows();
             return;
         }
-        self.finish_agent(id);
+        if self.agents.contains_key(&id) {
+            self.finish_agent(id.clone());
+            self.emit_tool_result(id, text);
+        } else {
+            self.emit_tool_result(id.clone(), text);
+            self.finish_agent(id);
+        }
+    }
+
+    fn emit_tool_result(&self, id: String, text: String) {
+        self.emit(UiEvent::ToolResult { id, text });
     }
 
     // Ends a delegated agent: AgentEnd, and the deferred rotation runs if this was the last agent.
@@ -2838,23 +2858,27 @@ impl State {
     fn finish_agent(&mut self, id: String) {
         self.opus_set(&id, false);
         if let Some(t0) = self.agents.remove(&id) {
-            let name = self.agent_info.get_mut(&id).map(|i| {
-                i.done = true;
-                i.name.clone()
-            });
-            if let Some(name) = name {
-                self.stage(&agent_slot(&name), StagePhase::Done);
-            }
-            let model = self
-                .agent_info
+            let label = self
+                .agent_types
                 .get(&id)
-                .map(|i| i.model.clone())
+                .cloned()
+                .unwrap_or_else(|| "agent".to_string());
+            self.stage(&agent_slot(&label), StagePhase::Done);
+            let (name, task, model) = self
+                .agent_info
+                .get_mut(&id)
+                .map(|i| {
+                    i.done = true;
+                    (i.session_name.clone(), i.task.clone(), i.model.clone())
+                })
                 .unwrap_or_default();
             self.persist_agent(&id, STO_DONE);
             self.emit(UiEvent::AgentEnd {
                 id,
                 elapsed_ms: t0.elapsed().as_millis() as u64,
                 model,
+                name,
+                task,
             });
             self.emit_agent_rows();
         }
@@ -3044,19 +3068,18 @@ impl State {
         for id in ids {
             self.opus_set(&id, false);
             if let Some(t0) = self.agents.remove(&id) {
-                let model = self
+                let (model, name, task) = self
                     .agent_info
                     .get(&id)
-                    .map(|i| i.model.clone())
+                    .map(|i| (i.model.clone(), i.session_name.clone(), i.task.clone()))
                     .unwrap_or_default();
-                if let Some(i) = self.agent_info.get(&id) {
-                    self.stage(&agent_slot(&i.name), StagePhase::Done);
-                }
                 self.persist_agent(&id, STO_DONE);
                 self.emit(UiEvent::AgentEnd {
                     id,
                     elapsed_ms: t0.elapsed().as_millis() as u64,
                     model,
+                    name,
+                    task,
                 });
             }
         }
@@ -3947,8 +3970,18 @@ fn coder_role(i: usize) -> String {
 // First short string field of a tool input, for the one-line ToolStart summary.
 // Go tui.go resultText: a plain string, or the "text" of each block joined by newlines.
 // The id that follows `marker` in `text`, e.g. the agentId in "agentId: a1b2".
-fn agent_slot(description: &str) -> String {
-    format!("agent:{description}")
+fn agent_slot(label: &str) -> String {
+    format!("agent:{label}")
+}
+
+// Go subagentLabel (resident_coder.go:60): the subagent_type input, else "agent".
+fn subagent_label(input: &Value) -> String {
+    input
+        .get("subagent_type")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("agent")
+        .to_string()
 }
 
 fn after_marker(text: &str, marker: &str) -> Option<String> {

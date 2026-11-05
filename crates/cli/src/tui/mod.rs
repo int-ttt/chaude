@@ -202,8 +202,8 @@ pub struct App {
     session_id: String,
     // Tool rows by tool id: transcript index and tool name. ToolInput rewrites the row in place.
     tool_rows: HashMap<String, (usize, String)>,
-    // Agent outcome by tool id until its AgentEnd: failed (ToolEnd ok=false) and the result's first line.
-    agent_outcome: HashMap<String, (bool, String)>,
+    // Agents whose tool_result was an error (ToolEnd ok=false), by tool id until their AgentEnd.
+    agent_outcome: HashSet<String>,
     // Foreground agents already finished by an interrupt (Go finishForeground); core's later AgentEnd for them is dropped.
     finished_fg: Vec<String>,
     // Main text streamed in this turn (Go gotText). Cleared when a turn starts.
@@ -297,7 +297,7 @@ impl App {
             this_run: BTreeSet::new(),
             rot_from: String::new(),
             tool_rows: HashMap::new(),
-            agent_outcome: HashMap::new(),
+            agent_outcome: HashSet::new(),
             finished_fg: Vec::new(),
             got_text: false,
             wraps: RefCell::new(WrapCache::default()),
@@ -389,20 +389,11 @@ impl App {
             UiEvent::ToolEnd { id, ok } => {
                 self.open_tools.remove(&id);
                 if !ok && self.is_agent_tool(&id) {
-                    self.agent_outcome.entry(id).or_default().0 = true;
+                    self.agent_outcome.insert(id);
                 }
             }
             // Go toolResultMsg: the first line cut to 160 runes, then "… (+N lines)" for the rest.
-            UiEvent::ToolResult { id, text } => {
-                if self.is_agent_tool(&id) {
-                    let first = text
-                        .lines()
-                        .map(str::trim)
-                        .find(|l| !l.is_empty())
-                        .unwrap_or_default()
-                        .to_string();
-                    self.agent_outcome.entry(id).or_default().1 = first;
-                }
+            UiEvent::ToolResult { text, .. } => {
                 // Go hides an agent's caveman return from the transcript (tui.go:481); None means hidden.
                 let Some(head) = render::tool_result_text(&text) else {
                     return;
@@ -417,8 +408,6 @@ impl App {
                 description,
                 started_at,
             } => {
-                self.transcript
-                    .push(format!("◆ agent started: {description}"));
                 self.agents
                     .push((id, description, Instant::now(), started_at * 1000));
             }
@@ -436,13 +425,19 @@ impl App {
                     self.bg_agents.push(id);
                 }
             }
-            UiEvent::AgentEnd { id, elapsed_ms, .. } => {
+            UiEvent::AgentEnd {
+                id,
+                model,
+                name,
+                task,
+                ..
+            } => {
                 // Already finished by an interrupt (finish_foreground): drop the late duplicate.
                 if let Some(pos) = self.finished_fg.iter().position(|f| *f == id) {
                     self.finished_fg.remove(pos);
                     self.agent_outcome.remove(&id);
                 } else {
-                    self.agent_done(&id, elapsed_ms / 1000);
+                    self.agent_done(&id, &model, &name, &task);
                 }
             }
             UiEvent::Status {
@@ -565,24 +560,9 @@ impl App {
                     .push(format!("{GREY_ON}[interrupted]{FG_OFF}"));
                 self.transcript.push(String::new());
             }
-            // Go record_turn.go: the measurement line follows the turn's assistant text, at column 0.
-            UiEvent::TurnStats {
-                duration_ms,
-                cost_turn_usd,
-                cost_usd,
-                ctx,
-                delegations,
-            } => {
-                let line = format!(
-                    "[측정] duration_ms={duration_ms} cost_turn_usd={} cost_usd={} ctx={ctx} rotations={} delegations={delegations}",
-                    bar::fmt_g4(cost_turn_usd),
-                    bar::fmt_g4(cost_usd),
-                    self.rot
-                );
-                self.end_main_block();
-                self.transcript.push(line);
-                self.transcript.push(String::new());
-            }
+            // Go record_turn.go writes the [측정] line to the record file only; the Go TUI never showed it
+            // (repl.go:1143 prints to os.Stdout under bubbletea), so the transcript has no row for it.
+            UiEvent::TurnStats { .. } => {}
             // Go modeLine / setMode: the start state is not announced, so only later changes print.
             UiEvent::ModeChanged { mode } => {
                 self.transcript
@@ -1336,34 +1316,25 @@ impl App {
     // Go finishForeground: on interrupt the foreground panel agents are done at once, not when core reports them.
     // Background agents (bg_agents) keep running.
     fn finish_foreground(&mut self) {
-        let fg: Vec<(String, Instant)> = self
+        let fg: Vec<(String, String)> = self
             .agents
             .iter()
             .filter(|(id, _, _, _)| !self.bg_agents.contains(id))
-            .map(|(id, _, started, _)| (id.clone(), *started))
+            .map(|(id, desc, _, _)| (id.clone(), desc.clone()))
             .collect();
-        for (id, started) in fg {
-            self.agent_done(&id, started.elapsed().as_secs());
+        for (id, desc) in fg {
+            // Core's AgentEnd (model, name) normally arrives first; this fallback has only the start label.
+            self.agent_done(&id, "", &desc, &desc);
             self.finished_fg.push(id);
         }
     }
 
-    // One agent's done lines (Go markDoneLocked): the elapsed row, then the doneLine notice in grey.
-    fn agent_done(&mut self, id: &str, elapsed_secs: u64) {
-        let desc = self
-            .agents
-            .iter()
-            .find(|(aid, _, _, _)| aid == id)
-            .map(|(_, d, _, _)| d.clone())
-            .unwrap_or_default();
-        let (failed, what) = self.agent_outcome.remove(id).unwrap_or_default();
+    // One agent's done notice (Go markDoneLocked, doneLine): model, name and task come from the AgentEnd.
+    fn agent_done(&mut self, id: &str, model: &str, name: &str, task: &str) {
+        let failed = self.agent_outcome.remove(id);
         self.agents.retain(|(aid, _, _, _)| aid != id);
         self.bg_agents.retain(|aid| aid != id);
-        self.transcript
-            .push(format!("◆ agent done in {}", bar::fmt_secs(elapsed_secs)));
-        // Go doneLine: the result's first line, else the description. The model is not in the event.
-        let what = if what.is_empty() { desc.clone() } else { what };
-        let notice = bar::done_line(failed, "", &desc, &what);
+        let notice = bar::done_line(failed, model, name, task);
         self.note(&format!("{GREY_ON}{notice}{FG_OFF}"));
     }
 
@@ -1986,7 +1957,8 @@ fn wrap_row(line: &str, w: usize, linked: bool) -> Vec<String> {
 }
 
 // Go stage lines (repl.go stage calls): "· <slot> 처리중" on start, "· <slot> 완료" on success,
-// "· <slot> 실패: <err>" on failure. Agent slots use Go's "호출" on start and "agent <desc>" as the name.
+// "· <slot> 실패: <err>" on failure. Agent slots use Go's "호출" on start and "agent <label>" as the name,
+// where the label is Go subagentLabel (subagent_type, else "agent").
 fn stage_text(slot: &str, phase: &StagePhase) -> String {
     let (name, start) = match slot.strip_prefix("agent:") {
         Some(desc) => (format!("agent {desc}"), "호출"),
@@ -4259,11 +4231,49 @@ mod tests {
             id: "a1".to_string(),
             elapsed_ms: 1500,
             model: String::new(),
+            name: "haiku-coder".to_string(),
+            task: "Scan repo".to_string(),
         });
         assert!(
             app.transcript
                 .iter()
-                .any(|r| r.contains("[agent 완료] 상속 Scan repo · Scan repo")),
+                .any(|r| r.contains("[agent 완료] 상속 haiku-coder · Scan repo")),
+            "{:?}",
+            app.transcript
+        );
+        // Go prints no "◆ agent started" or "◆ agent done in" rows.
+        assert!(app.transcript.iter().all(|r| !r.contains("◆")));
+    }
+
+    // Go repl.go:721-754 and drain.go doneLine: the stage row names the subagent_type label, and the done
+    // notice takes the model, name and task from the Agent call.
+    #[test]
+    fn agent_stage_and_done_follow_go_labels() {
+        assert_eq!(
+            stage_text("agent:haiku-coder", &StagePhase::Working),
+            "· agent haiku-coder 호출"
+        );
+        assert_eq!(
+            stage_text("agent:agent", &StagePhase::Done),
+            "· agent agent 완료"
+        );
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "a2".to_string(),
+            description: "Scan".to_string(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentEnd {
+            id: "a2".to_string(),
+            elapsed_ms: 1000,
+            model: "haiku".to_string(),
+            name: "scan-1".to_string(),
+            task: "Scan repo".to_string(),
+        });
+        assert!(
+            app.transcript
+                .iter()
+                .any(|r| r.contains("[agent 완료] haiku scan-1 · Scan repo")),
             "{:?}",
             app.transcript
         );
@@ -4284,13 +4294,15 @@ mod tests {
         app.finish_foreground();
         assert_eq!(app.agents.len(), 1);
         assert_eq!(app.agents[0].0, "bg");
-        assert!(app.transcript.iter().any(|r| r.contains("◆ agent done in")));
+        assert!(app.transcript.iter().any(|r| r.contains("[agent 완료]")));
         // Core's late AgentEnd for the finished foreground agent adds no second done line.
         let before = app.transcript.len();
         app.apply(UiEvent::AgentEnd {
             id: "fg".into(),
             elapsed_ms: 900,
             model: String::new(),
+            name: "fg".into(),
+            task: "fg".into(),
         });
         assert_eq!(app.transcript.len(), before);
         assert!(app.finished_fg.is_empty());
@@ -4331,13 +4343,15 @@ mod tests {
             id: "b1".into(),
             elapsed_ms: 2000,
             model: String::new(),
+            name: "b1".into(),
+            task: "Watch".into(),
         });
         assert!(app.agents.is_empty());
         assert!(app.bg_agents.is_empty());
         assert!(
             app.transcript
                 .iter()
-                .any(|r| r.contains("◆ agent done in") && r.contains("2s"))
+                .any(|r| r.contains("[agent 완료] 상속 b1 · Watch"))
         );
     }
 

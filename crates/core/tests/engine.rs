@@ -1763,8 +1763,8 @@ fn resident_stage_rows_bracket_main_turn_and_agent_calls() {
             stage("prompter", StagePhase::Working),
             stage("prompter", StagePhase::Done),
             stage("main", StagePhase::Working),
-            stage("agent:scan", StagePhase::Working),
-            stage("agent:scan", StagePhase::Done),
+            stage("agent:general", StagePhase::Working),
+            stage("agent:general", StagePhase::Done),
             stage("main", StagePhase::Done),
         ],
         "{evs:?}"
@@ -2374,17 +2374,8 @@ fn resume_after_agent_ended_keeps_start_label() {
     let evs = until_idle(&rx);
     // The task-notification ended the agent and dropped its live info; the resume reuses the start label.
     assert!(
-        evs.contains(&UiEvent::AgentEnd {
-            id: "toolu_bg2".into(),
-            elapsed_ms: evs
-                .iter()
-                .find_map(|e| match e {
-                    UiEvent::AgentEnd { id, elapsed_ms, .. } if id == "toolu_bg2" =>
-                        Some(*elapsed_ms),
-                    _ => None,
-                })
-                .unwrap_or_else(|| panic!("{evs:?}")),
-            model: String::new(),
+        evs.iter().any(|e| {
+            matches!(e, UiEvent::AgentEnd { id, model, .. } if id == "toolu_bg2" && model.is_empty())
         }),
         "{evs:?}"
     );
