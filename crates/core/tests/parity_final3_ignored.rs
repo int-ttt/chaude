@@ -1,13 +1,14 @@
 // Parity stubs for the Go test body parts that the partial rows in plan/rust-test-parity.md still lack
 // (final3 workstream). Each test is #[ignore]d with its reason and panics when run with --ignored, so it
-// cannot pass by accident. Core items need a Repl/loop seam that is not pub in Rust; cli items live in the
-// bin-only crate (no lib target), so they stay ignored here until a cli test seam exists.
+// cannot pass by accident. Covered rows were removed and point at their active engine.rs tests. The remaining
+// core items need a test seam; cli items live in the bin-only crate (no lib target), so they stay ignored
+// here until a cli test seam exists.
 // The covered halves of these rows are real tests in parity_final3.rs, parity_final3_resident.rs and
 // parity_p12_harness.rs. The MCP spawn-once and created-once rows are converted in parity_final3_resident.rs.
 
 // Go TestIdleSpendRow, background-row write and result_model_usage (idlespend_test.go:46-82)
 #[test]
-#[ignore = "parity: Go idlespend_test.go:46-82 background row and result_model_usage; Rust api.rs:2506-2508 does not produce result_model_usage"]
+#[ignore = "parity: Go idlespend_test.go:46-82 background row and result_model_usage; Rust api.rs:2991-2994 emits result_model_usage on the background row (D3 I4); the Go row body still needs a test"]
 fn go_idle_spend_row_background_row() {
     panic!("not ported: idle spend background row and result_model_usage");
 }
