@@ -26,7 +26,7 @@ use crate::haiku_pool::WorkerPool;
 use crate::handoff::{self, ExitHandoff};
 use crate::import_claude::{ClaudeImport, import_note};
 use crate::mcp;
-use crate::metrics::{Metrics, yymmdd_today};
+use crate::metrics::{Metrics, usage_fields, yymmdd_today};
 use crate::mode::{self, PermMode, Verdict};
 use crate::orch;
 use crate::osenv::resolve_bin;
@@ -627,6 +627,9 @@ struct State {
     // Go r.spend: subagent usage and spawn counts of the running turn, merged into its turn row.
     spend: TurnSpend,
     delegations: u32,
+    // Go result usage and modelUsage of the turn that just ended (repl.go result_* keys); taken by log_turn.
+    result_usage: Option<Usage>,
+    result_model_usage: Option<Value>,
     // Harness permission mode (Go permMode); decides can_use_tool before any prompt.
     mode: PermMode,
     // can_use_tool requests waiting for a UI answer, keyed by request_id, with the tool input to echo back.
@@ -967,6 +970,8 @@ fn actor(
         turn_cost_base: 0.0,
         spend: TurnSpend::new(),
         delegations: 0,
+        result_usage: None,
+        result_model_usage: None,
         mode: PermMode::Default,
         pending_perm: HashMap::new(),
         budget,
@@ -2237,6 +2242,8 @@ impl State {
                     self.stray_results -= 1;
                     return;
                 }
+                self.result_usage = r.usage.clone();
+                self.result_model_usage = r.model_usage.clone();
                 if !self.busy {
                     self.idle_result();
                     return;
@@ -2884,8 +2891,8 @@ impl State {
         self.end_turn(duration_ms);
     }
 
-    // Go repl.go turn record (stage "turn"). Keys the Rust engine does not produce yet (draining, rotations,
-    // result_* usage) are left out until their groups land. Write errors are ignored, as in Go.
+    // Go repl.go turn record (stage "turn"). Keys the Rust engine does not produce yet (draining, rotations)
+    // are left out until their groups land. Write errors are ignored, as in Go.
     // Go recordSave: the turn that just ended goes to its project folder under the record root (slash
     // commands and empty replies are skipped by RecordState). A failed write is reported as an Error.
     // Go clearMark: a /clear splits /resume groups at this time, in the record dir of cwd.
@@ -2918,7 +2925,7 @@ impl State {
         }
     }
 
-    fn log_turn(&self, duration_ms: u64, source: Option<&str>) {
+    fn log_turn(&mut self, duration_ms: u64, source: Option<&str>) {
         let end_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -2938,6 +2945,20 @@ impl State {
         });
         if let Some(source) = source {
             row["source"] = json!(source);
+        }
+        // Go repl.go: result usage is summed over the turn's API calls; keys are written even when absent (zeros).
+        let ru = serde_json::to_value(self.result_usage.take().unwrap_or_default())
+            .unwrap_or(Value::Null);
+        let usage = usage_fields(&ru);
+        if let Some(fields) = usage.as_object() {
+            for (k, v) in fields {
+                row[format!("result_{k}")] = v.clone();
+            }
+        }
+        if let Some(mu) = self.result_model_usage.take()
+            && mu.as_object().is_some_and(|o| !o.is_empty())
+        {
+            row["result_model_usage"] = mu;
         }
         let _ = self.metrics.log(with_spend(row, &self.spend));
     }

@@ -2,7 +2,7 @@
 // Mirrors the event types handled by deprecated/src/main/intt/internal/harness (core.go, repl.go, livechild.go).
 // Owned types only: no lifetimes. Unknown top-level types map to `Unknown`.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Deserialize)]
@@ -111,7 +111,7 @@ pub enum Block {
     Other,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Usage {
     pub input_tokens: Option<u64>,
     pub cache_creation_input_tokens: Option<u64>,
@@ -137,6 +137,9 @@ pub struct ResultEvent {
     pub duration_ms: Option<u64>,
     pub total_cost_usd: Option<f64>,
     pub usage: Option<Usage>,
+    // Go result["modelUsage"]: per-model usage of the turn, written to the turn row when non-empty.
+    #[serde(rename = "modelUsage")]
+    pub model_usage: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
