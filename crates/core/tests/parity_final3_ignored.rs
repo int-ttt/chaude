@@ -13,20 +13,6 @@ fn go_idle_spend_row_background_row() {
     panic!("not ported: idle spend background row and result_model_usage");
 }
 
-// Go TestAgentPromptMissingNotice, notice text and no agent argument (resident_agent_test.go:37-59)
-#[test]
-#[ignore = "parity: Go resident_agent_test.go:37-59 expects the missing-prompt notice; Rust errors with no notice (parity_harness_p2.rs ~380)"]
-fn go_agent_prompt_missing_notice() {
-    panic!("not ported: missing agent prompt notice and agent-less spawn");
-}
-
-// Go TestIdleControlRequestAnswered, assertions beyond the can_use_tool ask/answer path (idle_test.go:40-53)
-#[test]
-#[ignore = "parity: Go idle_test.go:40-53 idle canUse between turns; no idle control-request fixture in tests/ (api.rs idle loop)"]
-fn go_idle_control_request_answered_rest() {
-    panic!("not ported: idle control request remaining assertions");
-}
-
 // Go TestInputWrapWide, Up-key row move after the wrap (input_test.go:43-50). The wrap and cursor part is
 // covered by tui::tests::input_wraps_wide_cells_and_places_cursor. Up calls Editor::move_row, which moves
 // logical lines (mod.rs Up key, edit.rs move_row), while Go MoveRow (input.go:185) moves visual rows.

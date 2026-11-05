@@ -1924,6 +1924,54 @@ fn residents_spawn_eagerly_with_main_four_slots() {
     h.shutdown();
 }
 
+// Go TestAgentPromptMissingNotice (resident_agent_test.go:37): with no agent file under cwd or HOME, the slot
+// shows the Korean notice and still starts as a default session.
+#[test]
+fn residents_without_agent_files_notice_and_start_default_session() {
+    let _g = lock();
+    let f = fake("agent_missing", &["text_turn.jsonl"]);
+    let empty = f.dir.join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    let old_home = std::env::var_os("HOME");
+    // SAFETY: tests hold lock(); HOME is restored below before this test returns.
+    unsafe { std::env::set_var("HOME", &empty) };
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(empty.clone());
+    let (h, rx) = Engine::start(cfg);
+    let want = "에이전트 규칙 없음(haiku-tui): 기본 세션으로 시작";
+    let mut notices = Vec::new();
+    let found = loop {
+        match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(UiEvent::Notice { text }) if text == want => break true,
+            Ok(UiEvent::Notice { text }) => notices.push(text),
+            Ok(_) => {}
+            Err(_) => break false,
+        }
+    };
+    // The fake labels a role by a marker in its rule, so the tui slot with no rule is logged as "main".
+    // Its spawn is the second "main" line, next to the main session.
+    let t0 = Instant::now();
+    let mut spawned = String::new();
+    while t0.elapsed() < Duration::from_secs(10) {
+        spawned = fs::read_to_string(f.dir.join("spawned.log")).unwrap_or_default();
+        if spawned.lines().filter(|l| *l == "main").count() >= 2 && spawned.contains("prompter") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    h.shutdown();
+    match old_home {
+        Some(v) => unsafe { std::env::set_var("HOME", v) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+    assert!(found, "no missing-agent notice: {notices:?}");
+    assert!(
+        spawned.lines().filter(|l| *l == "main").count() >= 2 && spawned.contains("prompter"),
+        "default sessions did not start: {spawned}"
+    );
+}
+
 #[test]
 fn no_stage_rows_without_residents() {
     let _g = lock();
