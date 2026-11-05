@@ -115,7 +115,8 @@ pub struct App {
     turn_start: Option<Instant>,
     // First line of the prompt that started the turn (Go curPrompt), shown in the busy row.
     turn_prompt: String,
-    agents: Vec<(String, String, Instant)>,
+    // (id, description, elapsed clock, started_at in ms since epoch: AgentStart carries Unix seconds).
+    agents: Vec<(String, String, Instant, u64)>,
     // Ids of the agents launched in the background (UiEvent::AgentBackground); they have no AgentEnd until done.
     bg_agents: Vec<String>,
     // Go opusRunning / residentBusy: an opus Agent is running, and the resident roles with a command in flight.
@@ -407,18 +408,24 @@ impl App {
             }
             UiEvent::AgentBackground { id } => self.bg_agents.push(id),
             UiEvent::AgentStart {
-                id, description, ..
+                id,
+                description,
+                started_at,
             } => {
                 self.transcript
                     .push(format!("◆ agent started: {description}"));
-                self.agents.push((id, description, Instant::now()));
+                self.agents
+                    .push((id, description, Instant::now(), started_at * 1000));
             }
             // A background agent resumed by SendMessage runs again under its original tool id (core keeps background=true).
             UiEvent::AgentResumed {
-                id, description, ..
+                id,
+                description,
+                started_at,
             } => {
-                if !self.agents.iter().any(|(aid, _, _)| *aid == id) {
-                    self.agents.push((id.clone(), description, Instant::now()));
+                if !self.agents.iter().any(|(aid, _, _, _)| *aid == id) {
+                    self.agents
+                        .push((id.clone(), description, Instant::now(), started_at * 1000));
                 }
                 if !self.bg_agents.contains(&id) {
                     self.bg_agents.push(id);
@@ -1172,11 +1179,12 @@ impl App {
         let mut recs: Vec<agentview::AgentRec> = self
             .agents
             .iter()
-            .map(|(id, desc, _)| agentview::AgentRec {
+            .map(|(id, desc, _, started_at)| agentview::AgentRec {
                 id: id.clone(),
                 task: desc.clone(),
                 name: desc.clone(),
                 started: true,
+                started_at: *started_at,
                 log: self.agent_logs.get(id).cloned().unwrap_or_default(),
                 ..Default::default()
             })
@@ -1185,7 +1193,7 @@ impl App {
         recs.extend(
             self.restored_rows
                 .iter()
-                .filter(|r| self.agents.iter().all(|(id, _, _)| *id != r.id))
+                .filter(|r| self.agents.iter().all(|(id, _, _, _)| *id != r.id))
                 .map(|r| agentview::AgentRec {
                     id: r.id.clone(),
                     task: r.task.clone(),
@@ -1272,8 +1280,8 @@ impl App {
         let fg: Vec<(String, Instant)> = self
             .agents
             .iter()
-            .filter(|(id, _, _)| !self.bg_agents.contains(id))
-            .map(|(id, _, started)| (id.clone(), *started))
+            .filter(|(id, _, _, _)| !self.bg_agents.contains(id))
+            .map(|(id, _, started, _)| (id.clone(), *started))
             .collect();
         for (id, started) in fg {
             self.agent_done(&id, started.elapsed().as_secs());
@@ -1286,11 +1294,11 @@ impl App {
         let desc = self
             .agents
             .iter()
-            .find(|(aid, _, _)| aid == id)
-            .map(|(_, d, _)| d.clone())
+            .find(|(aid, _, _, _)| aid == id)
+            .map(|(_, d, _, _)| d.clone())
             .unwrap_or_default();
         let (failed, what) = self.agent_outcome.remove(id).unwrap_or_default();
-        self.agents.retain(|(aid, _, _)| aid != id);
+        self.agents.retain(|(aid, _, _, _)| aid != id);
         self.bg_agents.retain(|aid| aid != id);
         self.transcript
             .push(format!("◆ agent done in {}", bar::fmt_secs(elapsed_secs)));
@@ -1352,7 +1360,7 @@ impl App {
         let fg = self
             .agents
             .iter()
-            .any(|(id, _, _)| !self.bg_agents.contains(id));
+            .any(|(id, _, _, _)| !self.bg_agents.contains(id));
         match bar::thinking_row(
             fg,
             self.opus_busy,
@@ -1745,12 +1753,12 @@ impl App {
         b.agents = self
             .agents
             .iter()
-            .map(|(_, d, t)| (d.clone(), self.clock.duration_since(*t).as_secs()))
+            .map(|(_, d, t, _)| (d.clone(), self.clock.duration_since(*t).as_secs()))
             .collect();
         b.bg = self
             .agents
             .iter()
-            .filter(|(id, _, _)| self.bg_agents.contains(id))
+            .filter(|(id, _, _, _)| self.bg_agents.contains(id))
             .count();
         b.fg = self.agents.len() - b.bg;
         b.rot = self.rot;
@@ -3760,6 +3768,20 @@ mod tests {
             text: "hi\n".to_string(),
         });
         assert!(!app.body(80).iter().any(|r| r.contains("생각중")));
+    }
+
+    // Live AgentStart carries Unix seconds; the running rec must show that start in ms, not 0.
+    #[test]
+    fn live_agent_started_at_converts_seconds_to_ms() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "a1".to_string(),
+            description: "Scan repo".to_string(),
+            started_at: 1_700_000_000,
+        });
+        let recs = app.agent_recs();
+        let rec = recs.iter().find(|r| r.id == "a1").expect("running agent");
+        assert_eq!(rec.started_at, 1_700_000_000_000, "{rec:?}");
     }
 
     // Go onSubEvent: AgentLog lines land in the running agent's view log, capped, and add no transcript row.
