@@ -13,6 +13,17 @@ Claude Code를 채팅 스타일 터미널에서 쓰고, 반복 작업은 Haiku �
 
 `chaude`는 `claude` CLI를 채팅 스타일 터미널 화면으로 감쌉니다. Opus가 메인 세션을 맡고, Haiku 에이전트가 조회, 작은 수정, 검증을 합니다. 문맥이 커지면 `chaude`가 인수인계 노트를 남기고 새 세션에서 대화를 이어 갑니다. 인자 없이 `chaude`를 실행하면 REPL이 열립니다.
 
+## 기능
+
+- 상태 줄이 있는 채팅형 REPL: 문맥 막대, 세션 교체 횟수, 권한 모드, 실행 중인 에이전트를 보여 줍니다.
+- 인수인계 노트를 남기고 세션을 자동으로 바꿔서 긴 대화도 이어집니다.
+- Opus 메인이 판단하고, Haiku 에이전트가 조회, 작은 수정, 검증을 맡습니다.
+- 권한 모드 네 가지(`default`, `acceptEdits`, `plan`, `auto`)를 `shift+tab`으로 바꿉니다.
+- 상태 줄에 비용, 5시간 사용량, 세션 교체 횟수를 보여 줍니다. `/usage`는 요금제 사용량과 한도를 보여 줍니다.
+- 프로젝트별 입력 기록을 `.chaude/history.jsonl`에 저장합니다. `chaude search-history`로 찾을 수 있습니다.
+- `/import`, `/resume claude`, `chaude --from-claude`로 Claude Code 세션을 가져옵니다.
+- 세션을 시작하면 `.claude/settings.json`이 없을 때 가드 훅이 들어간 파일을 만듭니다 (0.9.14).
+
 ## 작동 방식
 
 Opus가 메인 세션입니다. 요청을 읽고, 계획을 정하고, 최종 답변을 씁니다. 파일을 직접 읽거나 고치지는 않습니다. 이 제한은 훅이 강제합니다. 실제 작업(조회, 수정, 검증 등)은 Haiku 에이전트가 합니다.
@@ -37,38 +48,6 @@ Opus가 메인 세션입니다. 요청을 읽고, 계획을 정하고, 최종 �
 
 **Claude Code 세션.** `/import [ID|latest]` 또는 `/resume claude`를 쓰거나, `chaude --from-claude latest`를 실행하면 Claude Code 대화를 이어서 쓸 수 있습니다. 가져오기 화면에는 생각, 도구 호출과 결과, 하위 에이전트 메시지를 포함한 전체 대화가 나옵니다.
 
-## 효과: Rust 포트 사용량
-
-메인테이너 기기에서 2026-10-28(rust-port 브랜치의 첫 커밋)부터 2026-11-05 14:00 UTC까지 측정했습니다. 메인 세션 229개, 하위 에이전트 실행 2,039회, API 요청 22,754건(Haiku 18,698건, Sonnet 2,137건, Opus 1,919건)입니다. 방법: [scripts/rust_port_usage.py](scripts/rust_port_usage.py)가 Claude Code 기록(메인과 하위 에이전트)을 읽고, 중복 요청을 뺀 뒤 요청마다 모델의 정가로 계산합니다. 모두 Opus 열은 같은 토큰 수를 Opus 가격으로 계산한 값입니다. 이는 보수적인 최소 추정치입니다. 긴 Opus 세션 하나는 턴마다 문맥이 더 크기 때문에 실제 비용은 더 높았을 것입니다.
-
-| | 측정값 (Opus 메인 + Sonnet·Haiku 에이전트) | 모두 Opus 최소 추정 | 절감 |
-|---|---|---|---|
-| API 요청 | 22,754 | 22,754 | - |
-| 총 토큰 (입력, 캐시 쓰기, 캐시 읽기, 출력) | 771.8M | 771.8M | - |
-| 대략적 비용 (USD) | 177.60 | 1,021.83 | 82.6% |
-
-이 수치는 대략적인 값입니다. 가격은 notes/FACTS.md의 정가(2026-10-29 확인)를 따랐습니다. 모두 Opus 열은 보수적인 최소 추정치이며, 측정한 Opus 세션이 아닙니다.
-
-**비용.** 핑퐁 게임 벤치마크(프롬프트 3개)에서 chaude와 일반 Opus를 비교했습니다:
-
-- **비용: -42.7%** (일반 Opus 대비, USD, 2회 평균, 2026-11-01).
-- **비용 범위: -37.5% ~ -50.0%** (effort 설정별 unset, low, medium; 2026-11-02 재측정).
-- **총 토큰: +73.0%** (Haiku 포함, 2026-11-01). 비용은 그래도 줄었습니다. 캐시 읽기가 비용을 크게 좌우합니다.
-- **표본: 방식당 2회, 프롬프트 3개씩.** 표본이 작으니 대략적인 범위로만 보세요.
-
-출처: [docs/pingpong-bench.md](docs/pingpong-bench.md).
-
-## 기능
-
-- 상태 줄이 있는 채팅형 REPL: 문맥 막대, 세션 교체 횟수, 권한 모드, 실행 중인 에이전트를 보여 줍니다.
-- 인수인계 노트를 남기고 세션을 자동으로 바꿔서 긴 대화도 이어집니다.
-- Opus 메인이 판단하고, Haiku 에이전트가 조회, 작은 수정, 검증을 맡습니다.
-- 권한 모드 네 가지(`default`, `acceptEdits`, `plan`, `auto`)를 `shift+tab`으로 바꿉니다.
-- 상태 줄에 비용, 5시간 사용량, 세션 교체 횟수를 보여 줍니다. `/usage`는 요금제 사용량과 한도를 보여 줍니다.
-- 프로젝트별 입력 기록을 `.chaude/history.jsonl`에 저장합니다. `chaude search-history`로 찾을 수 있습니다.
-- `/import`, `/resume claude`, `chaude --from-claude`로 Claude Code 세션을 가져옵니다.
-- 세션을 시작하면 `.claude/settings.json`이 없을 때 가드 훅이 들어간 파일을 만듭니다 (0.9.14).
-
 ## 설치
 
 미리 빌드된 바이너리를 제공합니다: macOS Apple Silicon(arm64), Linux(amd64, arm64), Windows(amd64; arm64 PC는 x64 에뮬레이션으로 실행합니다). Intel Mac은 지원하지 않습니다. 설치 스크립트는 설치 전에 `checksums.txt`를 확인합니다.
@@ -89,7 +68,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.0 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.1 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -226,9 +205,34 @@ REPL 주요 플래그(`chaude repl`):
 
 | 변수 | 뜻 |
 |---|---|
-| `CHAUDE_VERSION` | 설치할 버전(기본값: 최신), 예: `v0.11.0` |
+| `CHAUDE_VERSION` | 설치할 버전(기본값: 최신), 예: `v0.11.1` |
 | `CHAUDE_REPO` | 설치할 GitHub 저장소(기본값: `int-ttt/chaude`) |
 | `GH_TOKEN`, `GITHUB_TOKEN` | 요청 제한이나 비공개 포크에 쓰는 선택 토큰. 둘 다 없으면 `gh auth token`을 씁니다 |
+
+## 효과 분석
+
+### Rust 포트 사용량
+
+메인테이너 기기에서 2026-10-28(rust-port 브랜치의 첫 커밋)부터 2026-11-05 14:00 UTC까지 측정했습니다. 메인 세션 229개, 하위 에이전트 실행 2,039회, API 요청 22,754건(Haiku 18,698건, Sonnet 2,137건, Opus 1,919건)입니다. 방법: [scripts/rust_port_usage.py](scripts/rust_port_usage.py)가 Claude Code 기록(메인과 하위 에이전트)을 읽고, 중복 요청을 뺀 뒤 요청마다 모델의 정가로 계산합니다. 모두 Opus 열은 같은 토큰 수를 Opus 가격으로 계산한 값입니다. 이는 보수적인 최소 추정치입니다. 긴 Opus 세션 하나는 턴마다 문맥이 더 크기 때문에 실제 비용은 더 높았을 것입니다.
+
+| | 측정값 (Opus 메인 + Sonnet·Haiku 에이전트) | 모두 Opus 최소 추정 | 절감 |
+|---|---|---|---|
+| API 요청 | 22,754 | 22,754 | - |
+| 총 토큰 (입력, 캐시 쓰기, 캐시 읽기, 출력) | 771.8M | 771.8M | - |
+| 대략적 비용 (USD) | 177.60 | 1,021.83 | 82.6% |
+
+이 수치는 대략적인 값입니다. 가격은 notes/FACTS.md의 정가(2026-10-29 확인)를 따랐습니다. 모두 Opus 열은 보수적인 최소 추정치이며, 측정한 Opus 세션이 아닙니다.
+
+### 이전 벤치마크
+
+핑퐁 게임 벤치마크(프롬프트 3개)에서 chaude와 일반 Opus를 비교했습니다:
+
+- **비용: -42.7%** (일반 Opus 대비, USD, 2회 평균, 2026-11-01).
+- **비용 범위: -37.5% ~ -50.0%** (effort 설정별 unset, low, medium; 2026-11-02 재측정).
+- **총 토큰: +73.0%** (Haiku 포함, 2026-11-01). 비용은 그래도 줄었습니다. 캐시 읽기가 비용을 크게 좌우합니다.
+- **표본: 방식당 2회, 프롬프트 3개씩.** 표본이 작으니 대략적인 범위로만 보세요.
+
+출처: [docs/pingpong-bench.md](docs/pingpong-bench.md).
 
 ## 문서
 

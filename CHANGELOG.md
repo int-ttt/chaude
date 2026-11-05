@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.11.1 - 2026-11-06
+- TUI: agents resumed with SendMessage are shown back in the agent list, and running rows are yellow.
+  - TUI: SendMessage로 재개된 에이전트를 에이전트 목록에 다시 표시하고, 실행 중인 행은 노란색으로 표시합니다.
+- TUI: timed action rows, and queued input is no longer echoed. A `/view` crash is fixed.
+  - TUI: 시간이 표시되는 작업 행을 추가하고, 대기 중인 입력은 다시 출력하지 않습니다. `/view` 충돌을 고쳤습니다.
+- Docs: README install section and feature order reordered (EN and KO), with a usage effect note.
+  - 문서: README(EN/KO) 설치 섹션과 기능 순서를 재배치하고 사용 효과 설명을 추가했습니다.
+
 ## 0.11.0 - 2026-11-05
 - Release: the release archives are now built from the Rust workspace (`crates/cli`, binary `chaude`) for the same four targets: darwin/arm64, linux/amd64, linux/arm64, windows/amd64. Asset names (`chaude_<version>_<os>_<arch>.tar.gz`, windows `.zip`) and `checksums.txt` are unchanged, so `install.sh`, `install.ps1` and `chaude update` keep working.
   - 릴리스: 릴리스 아카이브를 같은 네 대상(darwin/arm64, linux/amd64, linux/arm64, windows/amd64)에 대해 이제 Rust 워크스페이스(`crates/cli`, 바이너리 `chaude`)에서 빌드합니다. 에셋 이름(`chaude_<version>_<os>_<arch>.tar.gz`, windows `.zip`)과 `checksums.txt`는 그대로이므로 `install.sh`, `install.ps1`, `chaude update`는 계속 동작합니다.

@@ -13,6 +13,17 @@ A chat-style terminal for Claude Code that hands the routine work to Haiku agent
 
 `chaude` wraps the `claude` CLI in a chat-style terminal screen. Opus is the main session. Haiku agents do lookups, small edits, and checks. When the context gets large, `chaude` writes a handoff note and continues the conversation in a new session.
 
+## Features
+
+- Chat-style REPL with a status line: context bar, rotation count, permission mode, running agents.
+- Automatic session rotation with a handoff note, so long conversations continue.
+- Opus main decides; Haiku agents do lookups, small edits, and checks.
+- Four permission modes (`default`, `acceptEdits`, `plan`, `auto`), switched with `shift+tab`.
+- Cost, 5-hour usage, and rotation count in the status line. `/usage` shows plan usage and limits.
+- Prompt history per project, saved in `.chaude/history.jsonl`. Search it with `chaude search-history`.
+- Import Claude Code sessions with `/import`, `/resume claude`, or `chaude --from-claude`.
+- Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing (0.9.14).
+
 ## How it works
 
 Opus is the main session. It reads your request, decides the plan, and writes the final answer. It does not read or edit files itself. Hooks enforce this. Haiku agents do the actual work, such as searching, editing, and checking.
@@ -37,38 +48,6 @@ The full list, tools, and routing rules are in [Models and agents](docs/guide/mo
 
 **Claude Code sessions.** You can continue a Claude Code conversation with `/import [ID|latest]` or `/resume claude`, or run `chaude --from-claude latest`. The import view shows the whole transcript, including thinking, tool calls and results, and subagent messages.
 
-## Effect: Rust port usage
-
-Measured from 2026-10-28 (the first commit on the rust-port branch) to 2026-11-05 14:00 UTC on the maintainer's machine: 229 main sessions, 2,039 subagent runs, 22,754 API requests (18,698 Haiku, 2,137 Sonnet, 1,919 Opus). Method: [scripts/rust_port_usage.py](scripts/rust_port_usage.py) reads the Claude Code transcripts (main and subagent), drops duplicate requests, and prices each request at its model's list price. The all-Opus column prices the same token counts at Opus rates. It is a conservative lower bound: one long Opus session would carry a larger context on each turn, so its real cost would be higher.
-
-| | Measured (Opus main + Sonnet and Haiku agents) | All-Opus lower bound | Saved |
-|---|---|---|---|
-| API requests | 22,754 | 22,754 | - |
-| Total tokens (input, cache write, cache read, output) | 771.8M | 771.8M | - |
-| Approx. cost (USD) | 177.60 | 1,021.83 | 82.6% |
-
-These numbers are approximate. Prices are the list prices in notes/FACTS.md (confirmed 2026-10-29). The all-Opus column is a conservative lower bound estimate, not a measured Opus session.
-
-**Cost.** In a ping-pong game benchmark (3 prompts), chaude was compared with plain Opus:
-
-- **Cost: -42.7%** vs plain Opus (USD, mean of 2 runs, 2026-11-01).
-- **Cost range: -37.5% to -50.0%** across effort settings (unset, low, medium; re-run 2026-11-02).
-- **Total tokens: +73.0%** with Haiku included (2026-11-01). Cost still fell; cache reads dominate the cost.
-- **Sample: 2 runs per method, 3 prompts each.** Small sample, so read these as a rough range.
-
-Source: [docs/pingpong-bench.md](docs/pingpong-bench.md).
-
-## Features
-
-- Chat-style REPL with a status line: context bar, rotation count, permission mode, running agents.
-- Automatic session rotation with a handoff note, so long conversations continue.
-- Opus main decides; Haiku agents do lookups, small edits, and checks.
-- Four permission modes (`default`, `acceptEdits`, `plan`, `auto`), switched with `shift+tab`.
-- Cost, 5-hour usage, and rotation count in the status line. `/usage` shows plan usage and limits.
-- Prompt history per project, saved in `.chaude/history.jsonl`. Search it with `chaude search-history`.
-- Import Claude Code sessions with `/import`, `/resume claude`, or `chaude --from-claude`.
-- Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing (0.9.14).
-
 ## Installation
 
 Prebuilt binaries are published for macOS on Apple Silicon (arm64), Linux (amd64, arm64), and Windows (amd64; arm64 PCs run it through x64 emulation). Intel Macs are not supported. The installers check `checksums.txt` before installing anything.
@@ -89,7 +68,7 @@ Installs to `/usr/local/bin/chaude`. The directory is created if missing. `sudo`
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.0 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.1 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -226,9 +205,34 @@ The installers read these environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `CHAUDE_VERSION` | Version to install (default: latest), for example `v0.11.0` |
+| `CHAUDE_VERSION` | Version to install (default: latest), for example `v0.11.1` |
 | `CHAUDE_REPO` | GitHub repo to install from (default: `int-ttt/chaude`) |
 | `GH_TOKEN`, `GITHUB_TOKEN` | Optional token for rate limits or private forks. `gh auth token` is used when neither is set |
+
+## Effect analysis
+
+### Rust port usage
+
+Measured from 2026-10-28 (the first commit on the rust-port branch) to 2026-11-05 14:00 UTC on the maintainer's machine: 229 main sessions, 2,039 subagent runs, 22,754 API requests (18,698 Haiku, 2,137 Sonnet, 1,919 Opus). Method: [scripts/rust_port_usage.py](scripts/rust_port_usage.py) reads the Claude Code transcripts (main and subagent), drops duplicate requests, and prices each request at its model's list price. The all-Opus column prices the same token counts at Opus rates. It is a conservative lower bound: one long Opus session would carry a larger context on each turn, so its real cost would be higher.
+
+| | Measured (Opus main + Sonnet and Haiku agents) | All-Opus lower bound | Saved |
+|---|---|---|---|
+| API requests | 22,754 | 22,754 | - |
+| Total tokens (input, cache write, cache read, output) | 771.8M | 771.8M | - |
+| Approx. cost (USD) | 177.60 | 1,021.83 | 82.6% |
+
+These numbers are approximate. Prices are the list prices in notes/FACTS.md (confirmed 2026-10-29). The all-Opus column is a conservative lower bound estimate, not a measured Opus session.
+
+### Older benchmark
+
+In a ping-pong game benchmark (3 prompts), chaude was compared with plain Opus:
+
+- **Cost: -42.7%** vs plain Opus (USD, mean of 2 runs, 2026-11-01).
+- **Cost range: -37.5% to -50.0%** across effort settings (unset, low, medium; re-run 2026-11-02).
+- **Total tokens: +73.0%** with Haiku included (2026-11-01). Cost still fell; cache reads dominate the cost.
+- **Sample: 2 runs per method, 3 prompts each.** Small sample, so read these as a rough range.
+
+Source: [docs/pingpong-bench.md](docs/pingpong-bench.md).
 
 ## Documentation
 

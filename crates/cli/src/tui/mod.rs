@@ -78,6 +78,8 @@ const AGENT_PREFIX: &str = "  │ ";
 // Go tui.go render(): orange "● " opens an assistant block, green "● " opens a tool block.
 const ASST_FIRST: &str = "\x1b[38;2;217;119;87m● \x1b[39m";
 const TOOL_ON: &str = "\x1b[38;2;95;175;135m";
+// Running agent panel rows: yellow, the same 220 as their dot (Go running colour).
+const RUNNING_ON: &str = "\x1b[38;5;220m";
 
 // What the event loop must do after a key press.
 #[derive(Debug, PartialEq)]
@@ -225,6 +227,8 @@ pub struct App {
     stage_rows: HashMap<String, StageRow>,
     // Agents whose tool_result was an error (ToolEnd ok=false), by tool id until their AgentEnd.
     agent_outcome: HashSet<String>,
+    // Timed rows of resumed background agents (UiEvent::AgentResumed), by agent tool id; closed by its AgentEnd.
+    resume_rows: HashMap<String, ToolRow>,
     // Foreground agents already finished by an interrupt (Go finishForeground); core's later AgentEnd for them is dropped.
     finished_fg: Vec<String>,
     // Main text streamed in this turn (Go gotText). Cleared when a turn starts.
@@ -320,6 +324,7 @@ impl App {
             tool_rows: HashMap::new(),
             stage_rows: HashMap::new(),
             agent_outcome: HashSet::new(),
+            resume_rows: HashMap::new(),
             finished_fg: Vec::new(),
             got_text: false,
             wraps: RefCell::new(WrapCache::default()),
@@ -457,11 +462,35 @@ impl App {
                 started_at,
             } => {
                 if !self.agents.iter().any(|(aid, _, _, _)| *aid == id) {
-                    self.agents
-                        .push((id.clone(), description, Instant::now(), started_at * 1000));
+                    self.agents.push((
+                        id.clone(),
+                        description.clone(),
+                        Instant::now(),
+                        started_at * 1000,
+                    ));
                 }
                 if !self.bg_agents.contains(&id) {
-                    self.bg_agents.push(id);
+                    self.bg_agents.push(id.clone());
+                }
+                // The SendMessage resume opens a timed row, "resume(type)" with the agent type when known.
+                // A resume while its row is still open adds none; the AgentEnd closes and removes the row.
+                if !self.resume_rows.contains_key(&id) {
+                    self.end_main_block();
+                    let head = if description.is_empty() {
+                        "resume".to_string()
+                    } else {
+                        format!("resume({description})")
+                    };
+                    let row = ToolRow {
+                        row: self.transcript.len(),
+                        name: "resume".to_string(),
+                        head,
+                        start: unix_now(),
+                        at: Instant::now(),
+                        end: None,
+                    };
+                    self.transcript.push(tool_line(&row));
+                    self.resume_rows.insert(id, row);
                 }
             }
             UiEvent::AgentEnd {
@@ -1421,6 +1450,13 @@ impl App {
         let failed = self.agent_outcome.remove(id);
         self.agents.retain(|(aid, _, _, _)| aid != id);
         self.bg_agents.retain(|aid| aid != id);
+        // A resumed agent's timed row gets its end time and elapsed, like the other timed rows.
+        if let Some(mut r) = self.resume_rows.remove(id) {
+            r.end = Some((unix_now(), r.at.elapsed().as_secs()));
+            if let Some(line) = self.transcript.get_mut(r.row) {
+                *line = tool_line(&r);
+            }
+        }
         let notice = bar::done_line(failed, model, name, what);
         self.note(&format!("{GREY_ON}{notice}{FG_OFF}"));
     }
@@ -2312,9 +2348,14 @@ fn agent_row_line(r: &AgentRow, session_model: &str, width: usize) -> String {
         bar::AgentState::Running
     };
     let text = bar::agent_status_text(state, &r.model, session_model, &r.name, summary);
+    // The running text is yellow (the dot's Go running colour, 220); finished rows keep the grey.
+    let text_on = match state {
+        bar::AgentState::Running => RUNNING_ON,
+        _ => GREY_ON,
+    };
     let dot = "\x1b[38;5;220m●\x1b[39m";
     format!(
-        "  {dot}{GREY_ON} {}{FG_OFF}",
+        "  {dot}{text_on} {}{FG_OFF}",
         bar::clip(&text, width.saturating_sub(4))
     )
 }
@@ -4517,6 +4558,146 @@ mod tests {
         let recs = app.agent_recs();
         let rec = recs.iter().find(|r| r.id == "a1").expect("running agent");
         assert_eq!(rec.started_at, 1_700_000_000_000, "{rec:?}");
+    }
+
+    // Real session df475489 (trimmed): the Agent toolu_01W8CwJ19T97U8jH2TVUbiT4 (subagent_type haiku-drafter) ran in the
+    // background, its launch result gave agentId ab5377649aa7c5a8f. A later SendMessage toolu_018ZUBi19cWS6Un85jMz5UTG
+    // resumed it (result {"success":true,"resumedAgentId":"ab5377649aa7c5a8f"}). The resume row runs until its AgentEnd.
+    #[test]
+    fn sendmessage_resume_opens_a_timed_row_until_the_agent_ends() {
+        let mut app = App::new(100, 30);
+        let agent = "toolu_01W8CwJ19T97U8jH2TVUbiT4";
+        let send = "toolu_018ZUBi19cWS6Un85jMz5UTG";
+        app.apply(UiEvent::ToolStart {
+            id: agent.into(),
+            name: "Agent".into(),
+            summary: "haiku-drafter".into(),
+        });
+        app.apply(UiEvent::ToolEnd {
+            id: agent.into(),
+            ok: true,
+        });
+        app.apply(UiEvent::AgentBackground { id: agent.into() });
+        app.apply(UiEvent::AgentStart {
+            id: agent.into(),
+            description: "haiku-drafter".into(),
+            started_at: 0,
+        });
+        // The first run ends by its task-notification, before the resume.
+        app.apply(UiEvent::AgentEnd {
+            id: agent.into(),
+            elapsed_ms: 1000,
+            model: "haiku".into(),
+            name: "haiku-drafter".into(),
+            summary: "README drafted".into(),
+        });
+        assert!(app.resume_rows.is_empty());
+        app.apply(UiEvent::ToolStart {
+            id: send.into(),
+            name: "SendMessage".into(),
+            summary: "ab5377649aa7c5a8f".into(),
+        });
+        app.apply(UiEvent::ToolEnd {
+            id: send.into(),
+            ok: true,
+        });
+        app.apply(UiEvent::AgentResumed {
+            id: agent.into(),
+            description: "haiku-drafter".into(),
+            started_at: 0,
+        });
+        let row = app.resume_rows.get(agent).expect("resume row opens").row;
+        let line = &app.transcript[row];
+        let plain = render::strip_sgr(line);
+        assert!(line.starts_with(TOOL_ON), "{line:?}");
+        assert!(
+            plain.starts_with("● ") && plain.ends_with(" resume(haiku-drafter)"),
+            "{plain:?}"
+        );
+        assert!(!plain.contains(" → "), "open row has no end: {plain:?}");
+
+        // A resume while the row is open adds no second row.
+        app.apply(UiEvent::AgentResumed {
+            id: agent.into(),
+            description: "haiku-drafter".into(),
+            started_at: 0,
+        });
+        let resumes = app
+            .transcript
+            .iter()
+            .filter(|r| render::strip_sgr(r).contains("resume("))
+            .count();
+        assert_eq!(resumes, 1, "{:?}", app.transcript);
+
+        // The resumed run's task-notification ends the agent: the row gets its end time and elapsed.
+        app.apply(UiEvent::AgentEnd {
+            id: agent.into(),
+            elapsed_ms: 2000,
+            model: "haiku".into(),
+            name: "haiku-drafter".into(),
+            summary: "README updated".into(),
+        });
+        assert!(app.resume_rows.is_empty());
+        let plain = render::strip_sgr(&app.transcript[row]);
+        assert!(
+            plain.starts_with("● ")
+                && plain.contains(" resume(haiku-drafter) → ")
+                && plain.ends_with(')'),
+            "{plain:?}"
+        );
+    }
+
+    // Running panel rows are yellow (the Go running colour 220); finished rows keep the grey text.
+    #[test]
+    fn running_panel_text_is_yellow_and_finished_rows_stay_grey() {
+        let mut app = App::new(120, 20);
+        let mut running = agent_row("a1", true, false);
+        running.task = "버그 수정".into();
+        running.name = "fixer".into();
+        running.model = "haiku".into();
+        app.apply(UiEvent::AgentRows {
+            rows: vec![running],
+        });
+        let (fg, bg) = app.panel_lines(120, 20);
+        let run: Vec<&String> = fg
+            .iter()
+            .chain(bg.iter())
+            .filter(|r| r.contains("실행 중"))
+            .collect();
+        assert_eq!(run.len(), 1, "{fg:?} {bg:?}");
+        assert!(
+            run[0].contains(&format!("{RUNNING_ON} 실행 중-haiku-fixer")),
+            "{:?}",
+            run[0]
+        );
+        assert!(
+            !run[0].contains(&format!("{GREY_ON} 실행 중")),
+            "{:?}",
+            run[0]
+        );
+
+        let mut app = App::new(120, 20);
+        let finished = agent_row("r1", true, true);
+        app.apply(UiEvent::AgentsRestored {
+            rows: vec![finished],
+        });
+        let (fg, bg) = app.panel_lines(120, 20);
+        let done: Vec<&String> = fg
+            .iter()
+            .chain(bg.iter())
+            .filter(|r| r.contains("중단"))
+            .collect();
+        assert_eq!(done.len(), 1, "{fg:?} {bg:?}");
+        assert!(
+            done[0].contains(&format!("{GREY_ON} 중단")),
+            "{:?}",
+            done[0]
+        );
+        assert!(
+            !done[0].contains(&format!("{RUNNING_ON} 중단")),
+            "{:?}",
+            done[0]
+        );
     }
 
     // Go onSubEvent: AgentLog lines land in the running agent's view log, capped, and add no transcript row.
