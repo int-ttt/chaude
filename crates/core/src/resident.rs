@@ -7,12 +7,6 @@ use std::time::Duration;
 // The prompter's system prompt: the Go resident-prompter rules, copied so the engine does not depend on deprecated/.
 pub const PROMPTER_RULE: &str = include_str!("rules/resident-prompter.md");
 
-// How long the prompter may take to summarize (Go prompterTimeout). On timeout the input goes unchanged.
-pub const PROMPTER_TIMEOUT: Duration = Duration::from_secs(60);
-
-// How long the tui may take to translate the main reply (Go tuiTimeout). On timeout the main reply stays.
-pub const TUI_TIMEOUT: Duration = Duration::from_secs(120);
-
 // How long one coder task may run (Go residentCoderTimeout). On timeout the coder child is replaced.
 pub const CODER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
@@ -142,12 +136,12 @@ impl Prompter {
         ))
     }
 
-    // The wait exceeded PROMPTER_TIMEOUT. None when nothing is pending.
-    pub fn timeout(&mut self) -> Option<PrompterOutcome> {
+    // The wait exceeded the prompter timeout (Config.prompter_timeout, Go prompterTimeout). None when nothing is pending.
+    pub fn timeout(&mut self, after: Duration) -> Option<PrompterOutcome> {
         let original = self.pending.take()?;
         Some(failed(
             original,
-            &prompter_notice(&format!("{}초 시간초과", PROMPTER_TIMEOUT.as_secs())),
+            &prompter_notice(&format!("{}초 시간초과", after.as_secs_f64())),
         ))
     }
 }
@@ -323,7 +317,7 @@ mod tests {
     fn timeout_fails_and_passes_input_through() {
         let mut p = Prompter::new();
         p.start("hi").unwrap();
-        let out = p.timeout().unwrap();
+        let out = p.timeout(Duration::from_secs(60)).unwrap();
         assert_eq!(out.text, "hi");
         assert_eq!(
             out.stage,
@@ -331,7 +325,7 @@ mod tests {
                 "prompter 실패(60초 시간초과): 원문 그대로 메인에 보냄".into()
             ))
         );
-        assert!(p.timeout().is_none());
+        assert!(p.timeout(Duration::from_secs(60)).is_none());
     }
 
     #[test]

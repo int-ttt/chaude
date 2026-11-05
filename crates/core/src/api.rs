@@ -35,9 +35,8 @@ use crate::proc::{self, ClaudeProc, ProcMsg, Shape, SpawnOpts};
 use crate::record::{self, Stamp};
 use crate::record_turn::{self, RecordState};
 use crate::resident::{
-    CODER_REPLY_FORMAT, CODER_RULE, CODER_TIMEOUT, PROMPTER_RULE, PROMPTER_TIMEOUT, Prompter,
-    PrompterOutcome, StagePhase, TUI_TIMEOUT, agent_body, prompter_notice, summarize_reply,
-    tui_notice, tui_prompt,
+    CODER_REPLY_FORMAT, CODER_RULE, CODER_TIMEOUT, PROMPTER_RULE, Prompter, PrompterOutcome,
+    StagePhase, agent_body, prompter_notice, summarize_reply, tui_notice, tui_prompt,
 };
 use crate::resume_group;
 use crate::rotate::{
@@ -320,6 +319,10 @@ pub struct Config {
     pub extra_coders: usize,
     // Go extraCoderTTL: an idle extra coder (coder2 and up) is ended after this long. The base coder stays.
     pub coder_idle_ttl: Duration,
+    // Go tuiTimeout: how long the resident tui may take to translate the main reply. On timeout the main reply stays.
+    pub tui_timeout: Duration,
+    // Go prompterTimeout: how long the resident prompter may take to summarize. On timeout the input goes unchanged.
+    pub prompter_timeout: Duration,
     // Go exit_handoff.go: JSON of this run's session ids, written on shutdown or disconnect. None = off.
     pub handoff_path: Option<PathBuf>,
     // Go --max-workers (env CHAUDE_MAX_WORKERS): cap on concurrent live worker sessions. Resolve with
@@ -409,6 +412,8 @@ impl Default for Config {
             residents: true,
             extra_coders: 4,
             coder_idle_ttl: Duration::from_secs(270),
+            tui_timeout: Duration::from_secs(120),
+            prompter_timeout: Duration::from_secs(60),
             handoff_path: None,
             max_workers: DEFAULT_MAX_WORKERS,
             max_auto_rotations: -1,
@@ -1461,7 +1466,7 @@ impl State {
             }
         };
         self.stage("prompter", phase);
-        self.prompter_deadline = Some(Instant::now() + PROMPTER_TIMEOUT);
+        self.prompter_deadline = Some(Instant::now() + self.cfg.prompter_timeout);
         self.resident_busy("prompter", true);
         let wrote = match self.prompter_proc.as_mut() {
             Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
@@ -1524,7 +1529,7 @@ impl State {
             p.kill();
         }
         self.prompter_epoch += 1;
-        if let Some(o) = self.prompter.timeout() {
+        if let Some(o) = self.prompter.timeout(self.cfg.prompter_timeout) {
             self.finish_prompter(o);
         }
     }
@@ -1552,7 +1557,7 @@ impl State {
             return;
         }
         self.stage("tui", StagePhase::Working);
-        self.tui_deadline = Some(Instant::now() + TUI_TIMEOUT);
+        self.tui_deadline = Some(Instant::now() + self.cfg.tui_timeout);
         self.resident_busy("tui", true);
         let wrote = match self.tui_proc.as_mut() {
             Some(p) => p.write_user(&tui_prompt(&reply)).map_err(|e| e.to_string()),
@@ -1916,7 +1921,10 @@ impl State {
             p.kill();
         }
         self.tui_epoch += 1;
-        self.finish_tui(Err(format!("{}초 시간초과", TUI_TIMEOUT.as_secs())));
+        self.finish_tui(Err(format!(
+            "{}초 시간초과",
+            self.cfg.tui_timeout.as_secs_f64()
+        )));
     }
 
     // Ends the tui wait: the answer (or its failure row), then the turn is over.
