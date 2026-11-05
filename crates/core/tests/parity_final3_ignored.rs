@@ -26,13 +26,6 @@ fn go_registry_nil_when_no_file_wiring() {
     panic!("not ported: wireClients registry wiring");
 }
 
-// Go TestAgentTrackerAndDrain, drain.finished check after the tracker finishes (drain_test.go:11-63)
-#[test]
-#[ignore = "parity: Go drain_test.go:11-63 feeds a drain tracker that Go production never builds (drain.go:317-327); Rust drains end by drain_timeout (api.rs end_drain)"]
-fn go_agent_tracker_drain_finished() {
-    panic!("not ported: agent tracker drain.finished");
-}
-
 // Go TestIdleControlRequestAnswered, assertions beyond the can_use_tool ask/answer path (idle_test.go:40-53)
 #[test]
 #[ignore = "parity: Go idle_test.go:40-53 idle canUse between turns; no idle control-request fixture in tests/ (api.rs idle loop)"]

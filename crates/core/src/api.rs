@@ -800,8 +800,6 @@ struct Drain {
     proc: ClaudeProc,
     epoch: u64,
     since: Instant,
-    // Agents of the old child still running (tool_use ids); the drain ends when this set is empty.
-    agents: HashSet<String>,
     // Every agent the drain waited for, sorted (its end notices).
     started: Vec<String>,
 }
@@ -809,6 +807,18 @@ struct Drain {
 // Go rotate: an old child is drained only when agents are running and --max-drain allows it.
 fn drain_wanted(max_drain: usize, running: usize) -> bool {
     max_drain > 0 && running > 0
+}
+
+// Go drain.finished: done once the shared tracker has no running agent, timed out at drain_timeout, else still
+// waiting (None).
+fn drain_finished(running: usize, elapsed: Duration, timeout: Duration) -> Option<bool> {
+    if running == 0 {
+        Some(false)
+    } else if elapsed >= timeout {
+        Some(true)
+    } else {
+        None
+    }
 }
 
 // Go pollDrains: the notice of one agent a drain waited for. done is false when the drain timed out or the agent is still running.
@@ -1181,6 +1191,8 @@ impl State {
     }
 
     fn submit(&mut self, text: String) {
+        // Go handle (repl.go:1080): pollDrains runs first, so finished drains queue their notices for this turn.
+        self.reap_drains();
         // Go handle (repl.go:1081): the next user line hides the restored agents.
         if !self.restored_rows.is_empty() {
             self.restored_rows.clear();
@@ -3349,14 +3361,12 @@ impl State {
     // Go drain: the old child keeps its running agents. Its agents are the ones still in self.agents. The oldest
     // drains beyond max_drain are closed.
     fn start_drain(&mut self, proc: ClaudeProc, epoch: u64) {
-        let agents: HashSet<String> = self.agents.keys().cloned().collect();
-        let mut started: Vec<String> = agents.iter().cloned().collect();
+        let mut started: Vec<String> = self.agents.keys().cloned().collect();
         started.sort();
         self.drains.push(Drain {
             proc,
             epoch,
             since: Instant::now(),
-            agents,
             started,
         });
         while self.drains.len() > self.cfg.max_drain {
@@ -3371,7 +3381,7 @@ impl State {
         if let Some(i) = self.drains.iter().position(|d| d.epoch == epoch) {
             let mut d = self.drains.remove(i);
             for id in &d.started {
-                let done = !timed_out && !d.agents.contains(id);
+                let done = !timed_out && !self.agents.contains_key(id);
                 let (task, out) = self
                     .agent_info
                     .get(id)
@@ -3383,40 +3393,36 @@ impl State {
         }
     }
 
-    // Go drain.consume: a drained child's lines only get the permission deny. Nothing feeds the drain's agents, so
-    // the drain ends by drain_timeout (Go drain.finished), or at Eof.
+    // Go drain.consume: a drained child's lines only get the permission deny. They never finish the shared tracker's
+    // agents, so a drain ends in reap_drains (Go pollDrains) or at Eof.
     fn on_drain_msg(&mut self, epoch: u64, msg: ProcMsg) {
         match msg {
             ProcMsg::Line(line) => {
-                if let Some(id) = drain_permission_id(&line) {
-                    if let Some(d) = self.drains.iter_mut().find(|d| d.epoch == epoch) {
-                        let _ = d.proc.write_permission(&id, false, Value::Null, DRAIN_DENY);
-                    }
+                let Some(id) = drain_permission_id(&line) else {
                     return;
-                }
-                if self
-                    .drains
-                    .iter()
-                    .any(|d| d.epoch == epoch && d.agents.is_empty())
-                {
-                    self.end_drain(epoch, false);
+                };
+                if let Some(d) = self.drains.iter_mut().find(|d| d.epoch == epoch) {
+                    let _ = d.proc.write_permission(&id, false, Value::Null, DRAIN_DENY);
                 }
             }
             ProcMsg::Eof => self.end_drain(epoch, true),
         }
     }
 
-    // Drains past drain_timeout are closed (Go drain.finished timedOut).
+    // Go pollDrains: finished drains are closed (done when the shared tracker is empty, timed out at drain_timeout).
+    // Runs at the start of each user submit and on quiet, as Go polls at handle().
     fn reap_drains(&mut self) {
         let timeout = self.cfg.drain_timeout;
-        let expired: Vec<u64> = self
+        let running = self.agents.len();
+        let finished: Vec<(u64, bool)> = self
             .drains
             .iter()
-            .filter(|d| d.since.elapsed() >= timeout)
-            .map(|d| d.epoch)
+            .filter_map(|d| {
+                drain_finished(running, d.since.elapsed(), timeout).map(|to| (d.epoch, to))
+            })
             .collect();
-        for epoch in expired {
-            self.end_drain(epoch, true);
+        for (epoch, timed_out) in finished {
+            self.end_drain(epoch, timed_out);
         }
     }
 
@@ -4107,6 +4113,16 @@ mod tests {
         assert!(drain_wanted(3, 1));
         assert!(!drain_wanted(0, 1));
         assert!(!drain_wanted(3, 0));
+    }
+
+    // Go drain.finished: done when the shared tracker is empty, timed out at drain_timeout.
+    #[test]
+    fn drain_finished_follows_shared_tracker_then_timeout() {
+        let t = Duration::from_secs(10);
+        assert_eq!(drain_finished(0, Duration::ZERO, t), Some(false));
+        assert_eq!(drain_finished(2, Duration::from_secs(9), t), None);
+        assert_eq!(drain_finished(2, t, t), Some(true));
+        assert_eq!(drain_finished(0, t, t), Some(false));
     }
 
     // Go drain.consume: only can_use_tool control_requests are denied while draining.
