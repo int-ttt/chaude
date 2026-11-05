@@ -792,6 +792,39 @@ fn drain_wanted(max_drain: usize, running: usize) -> bool {
     max_drain > 0 && running > 0
 }
 
+// Ids named by the <task-notification>s of one child line (string content or text blocks).
+fn notification_ids(line: &str) -> Vec<String> {
+    let Ok(raw) = serde_json::from_str::<Value>(line) else {
+        return Vec::new();
+    };
+    let content = &raw["message"]["content"];
+    let texts: Vec<&str> = match content {
+        Value::String(s) => vec![s.as_str()],
+        Value::Array(blocks) => blocks
+            .iter()
+            .filter(|b| b["type"] == "text")
+            .filter_map(|b| b["text"].as_str())
+            .collect(),
+        _ => Vec::new(),
+    };
+    texts.into_iter().flat_map(task_notification_ids).collect()
+}
+
+// Tool-use ids named by one <task-notification> text (Go drain.go onNotification); empty for other text.
+fn task_notification_ids(text: &str) -> Vec<String> {
+    if !text.contains("<task-notification>") {
+        return Vec::new();
+    }
+    text.split("<tool-use-id>")
+        .skip(1)
+        .map(|part| {
+            part.chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
+                .collect()
+        })
+        .collect()
+}
+
 // Go drain.consume: the deny message for a permission prompt of a draining child.
 const DRAIN_DENY: &str = "denied: session is draining";
 
@@ -2647,15 +2680,8 @@ impl State {
     // A <task-notification> names the background agents that finished (Go drain.go onNotification).
     // Returns whether it names a tracked agent, finished or not.
     fn on_task_notification(&mut self, text: &str) -> bool {
-        if !text.contains("<task-notification>") {
-            return false;
-        }
         let mut found = false;
-        for part in text.split("<tool-use-id>").skip(1) {
-            let id: String = part
-                .chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-                .collect();
+        for id in task_notification_ids(text) {
             if self.agent_info.contains_key(&id) {
                 found = true;
             }
@@ -3278,7 +3304,7 @@ impl State {
     }
 
     // Go drain.consume: a drained child's agent results finish its agents. A background agent keeps running after
-    // its launch result, so only its later completion counts (not seen here; the drain timeout ends it).
+    // its launch result; its <task-notification> finishes it (Go drain.go onNotification).
     fn on_drain_msg(&mut self, epoch: u64, msg: ProcMsg) {
         match msg {
             ProcMsg::Line(line) => {
@@ -3287,6 +3313,14 @@ impl State {
                         let _ = d.proc.write_permission(&id, false, Value::Null, DRAIN_DENY);
                     }
                     return;
+                }
+                for id in notification_ids(&line) {
+                    let Some(d) = self.drains.iter_mut().find(|d| d.epoch == epoch) else {
+                        return;
+                    };
+                    if d.agents.remove(&id) && self.agents.contains_key(&id) {
+                        self.finish_agent(id);
+                    }
                 }
                 for (id, launch) in tool_result_ids(&line) {
                     if launch {
@@ -4019,6 +4053,20 @@ mod tests {
         let text = r#"{"type":"assistant","message":{"content":[]}}"#;
         assert_eq!(drain_permission_id(text), None);
         assert_eq!(drain_permission_id("not json"), None);
+    }
+
+    // Go drain.go onNotification: a drained child's <task-notification> names the background agents it finished.
+    #[test]
+    fn notification_ids_read_string_and_text_blocks() {
+        let s = r#"{"type":"user","message":{"content":"<task-notification><tool-use-id>a1</tool-use-id></task-notification>"}}"#;
+        assert_eq!(notification_ids(s), vec!["a1".to_string()]);
+        let b = r#"{"type":"user","message":{"content":[{"type":"text","text":"<task-notification><tool-use-id>b2</tool-use-id><tool-use-id>c3</tool-use-id></task-notification>"}]}}"#;
+        assert_eq!(
+            notification_ids(b),
+            vec!["b2".to_string(), "c3".to_string()]
+        );
+        let plain = r#"{"type":"user","message":{"content":"hello <tool-use-id>x</tool-use-id>"}}"#;
+        assert!(notification_ids(plain).is_empty());
     }
 
     // Go warmDeadline: idle expiry off still keeps a parked child warm for neverCold (pickChild is never cold).
