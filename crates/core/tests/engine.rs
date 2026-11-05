@@ -257,6 +257,32 @@ fn text_turn_emits_deltas_then_done() {
     h.shutdown();
 }
 
+// Go acceptance_test.go:81-96 TestLiveStreamingMultipleDeltas (live claude, asserts deltas > 3). The
+// fixture stands in for the live stream: 30 text deltas, one per count number.
+#[test]
+fn live_streaming_multiple_deltas() {
+    let _g = lock();
+    let f = fake("many-deltas", &["count_deltas_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("Count from 1 to 30, one per line. No tools.");
+    let evs = until_idle(&rx);
+    let deltas: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| match e {
+            UiEvent::TextDelta {
+                role: Role::Main,
+                text,
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(deltas.len() > 3, "deltas={}", deltas.len());
+    assert_eq!(deltas.len(), 30, "one TextDelta per streamed delta");
+    let expected: String = (1..=30).map(|i| format!("{i} ")).collect();
+    assert_eq!(deltas.concat(), expected, "streamed text in order");
+    h.shutdown();
+}
+
 #[test]
 fn submit_while_busy_queues_and_never_interrupts() {
     let _g = lock();

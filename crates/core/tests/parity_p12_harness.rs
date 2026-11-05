@@ -418,7 +418,6 @@ fn set_rate_top_level_fallback() {
 // --include-ignored, so a missing port cannot pass silently.
 parity_ignored! {
     // p1 (missing rows)
-    live_streaming_multiple_deltas = "parity: Go test is live-only; no fixture with more than 3 main text deltas (text_turn.jsonl has 2, engine.rs:212)";
     agentview_click_read_only_close = "parity: panel-row mouse click opens agent view; panel_click at crates/cli/src/tui/mod.rs:1556 is private (key part ported at agentview.rs:340)";
     scroll_bottom_on_input_and_update = "parity: agent view refresh and close scroll not ported; AgentView scroll state at crates/cli/src/tui/agentview.rs:195 (main body parts at mod.rs:3508)";
     child_pid_recorded_on_park = "parity: parked child pid write is private; upsert_live at crates/core/src/api.rs:3636 has no pub seam";
