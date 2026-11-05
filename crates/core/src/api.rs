@@ -1576,6 +1576,12 @@ impl State {
 
     // The prompter's result line is its reply.
     fn on_prompter_line(&mut self, line: &str) {
+        if let Ok(Event::ControlRequest(c)) = parse_line(line)
+            && c.request.subtype == "can_use_tool"
+        {
+            deny_parked(self.prompter_proc.as_mut(), &c.request_id);
+            return;
+        }
         let Ok(Event::Result(r)) = parse_line(line) else {
             return;
         };
@@ -2014,6 +2020,12 @@ impl State {
 
     // The tui's result line is its answer. An empty answer is a failure (Go empty reply).
     fn on_tui_line(&mut self, line: &str) {
+        if let Ok(Event::ControlRequest(c)) = parse_line(line)
+            && c.request.subtype == "can_use_tool"
+        {
+            deny_parked(self.tui_proc.as_mut(), &c.request_id);
+            return;
+        }
         if self.tui_deadline.is_none() {
             return;
         }
@@ -4035,6 +4047,19 @@ fn switch_needs_handoff(
     handoff_active: bool,
 ) -> bool {
     pending.is_empty() && recent > 0 && running && !handoff_active && pick == ChildAction::StartNew
+}
+
+// Go parkedIdleEvent for a non-coder resident (tui, prompter): coderMayUse is false for it, so the request
+// is always denied with the parked note. The write error is ignored, as Go does (`_ = s.RespondPermission`).
+fn deny_parked(proc: Option<&mut ClaudeProc>, request_id: &str) {
+    if let Some(p) = proc {
+        let _ = p.write_permission(
+            request_id,
+            false,
+            Value::Null,
+            "denied: session parked (another model is active)",
+        );
+    }
 }
 
 // Go coderMayUse: a busy resident coder may use Bash, and Read/Edit/Write on paths inside cwd. An idle
