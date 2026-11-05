@@ -2750,9 +2750,8 @@ fn idle_reply_is_shown_as_main_message_after_agent_ends() {
 }
 
 // Go idleFinish (repl.go:518-575): the idle reply is also logged as a background turn (metrics stage=turn,
-// source=background). Rust logs metrics only for prompted turns, so this stays ignored until that is ported.
+// source=background).
 #[test]
-#[ignore = "Go idleFinish logs idle turns to metrics with source=background (repl.go:518-575); Rust does not"]
 fn idle_reply_is_logged_to_metrics_as_background() {
     let _g = lock();
     let f = fake("bg_idle_metrics", &["bg_idle_stream_turn.jsonl"]);

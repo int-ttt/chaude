@@ -717,6 +717,8 @@ struct State {
 struct IdleTurn {
     active: bool,
     notif: bool,
+    // When the idle reply started (Go idleTurn.t0).
+    t0: Option<Instant>,
 }
 
 // One coder resident. A running deadline means a task is in flight (Go busyRec).
@@ -2150,7 +2152,7 @@ impl State {
                         delta: Delta::TextDelta { text },
                     } => {
                         if matches!(role, Role::Main) && !self.busy {
-                            self.idle_turn.active = true;
+                            self.idle_started();
                         }
                         // The raw reply keeps the [cat: X] marker for category_rotation; the screen gets it filtered.
                         let shown = if matches!(role, Role::Main) {
@@ -2184,7 +2186,7 @@ impl State {
                     return;
                 }
                 if !self.busy {
-                    self.idle_turn.active = true;
+                    self.idle_started();
                 }
                 if let Some(u) = &env.message.usage {
                     self.ctx_tokens = u.context_tokens();
@@ -2684,10 +2686,21 @@ impl State {
 
     // Go repl.go idleFinish: a child-initiated turn ends. Its reply with no visible completion notice means
     // the oldest background agent finished (Go drain.go finishOldestBackground).
+    fn idle_started(&mut self) {
+        self.idle_turn.active = true;
+        self.idle_turn.t0.get_or_insert_with(Instant::now);
+    }
+
+    // Go idleFinish: a child-initiated reply ends the oldest background agent unless a notice already named it,
+    // and is logged as a background turn (metrics stage=turn, source=background; repl.go:518-575).
     fn idle_result(&mut self) {
         let idle = std::mem::take(&mut self.idle_turn);
         if idle.active && !idle.notif {
             self.finish_oldest_background();
+        }
+        if idle.active {
+            let duration_ms = idle.t0.map_or(0, |t| t.elapsed().as_millis() as u64);
+            self.log_turn(duration_ms, Some("background"));
         }
     }
 
@@ -2886,13 +2899,13 @@ impl State {
         }
     }
 
-    fn log_turn(&self, duration_ms: u64) {
+    fn log_turn(&self, duration_ms: u64, source: Option<&str>) {
         let end_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         let cost_turn = (self.cost_usd - self.turn_cost_base).max(0.0);
-        let row = json!({
+        let mut row = json!({
             "stage": "turn",
             "start_ms": end_ms.saturating_sub(duration_ms),
             "end_ms": end_ms,
@@ -2904,6 +2917,9 @@ impl State {
             "duration_ms": duration_ms,
             "delegations": self.delegations,
         });
+        if let Some(source) = source {
+            row["source"] = json!(source);
+        }
         let _ = self.metrics.log(with_spend(row, &self.spend));
     }
 
@@ -2933,7 +2949,7 @@ impl State {
             self.ctx_tokens,
             Instant::now(),
         );
-        self.log_turn(duration_ms);
+        self.log_turn(duration_ms, None);
         self.turn_started = None;
         self.interrupted_at = None;
         self.open_tools.clear();
