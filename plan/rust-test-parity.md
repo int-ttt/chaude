@@ -41,6 +41,23 @@ Ignored by reason (sum 48):
 - n-a (25): parked-child pool (24, p2) and live usage CLI (1, needs HARNESS_LIVE_USAGE=1; Rust covered by engine.rs).
 - Update/install rows: covered via crates/update/tests/parity_update.rs (p3).
 
+## Platform and N-A listing (round 3, item 6a)
+
+Checked by grep of `#[ignore`, `cfg(unix|windows|target_os|not(unix))` under crates/ (2026-11-05).
+
+Platform-gated test sites (not `#[ignore]`d; skipped on non-unix builds, not counted in ignored):
+- crates/core/tests/engine.rs:1 `#![cfg(unix)]` (fake claude shell script; no Windows variant).
+- crates/core/tests/parity_harness_p2.rs:1 `#![cfg(unix)]`.
+- crates/core/tests/parity_final3.rs:44 and :111 `#[cfg(unix)]` (mcp over unix socket; Go serveMCPConn over net.Pipe).
+- Other `cfg(unix)` sites are src-level unit tests and branches (handoff.rs, mcp.rs, osenv.rs, cli tui mod.rs/settings.rs/sessview.rs, update crate); not parity rows.
+
+Ignores with a platform reason: none. No `#[ignore]` in crates/ is platform-specific.
+
+N-A ignores and rows kept with reason:
+- bench_frame_large_history_streaming (crates/cli/src/tui/mod.rs:4585): `#[ignore = "bench: timing run only, no Go counterpart; run with --ignored"]`. Not a parity row.
+- TestUsageLive (usagepoll_test.go): n-a; live CLI, needs HARNESS_LIVE_USAGE=1. No stub; Rust usage covered by engine.rs::usage_answers_with_result_text_from_one_shot_run.
+- 24 multiproc_s_test.go rows (TestTouchMainOnly ... TestQuitCloseAllWithNilSess, table rows above): n-a; Go parked-child pool, Rust uses the resident pool (api.rs). No stub.
+
 ## Table
 
 | Go test | Go file | Rust test | status | note |
