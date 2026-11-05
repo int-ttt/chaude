@@ -18,39 +18,11 @@ fn go_run_turn_shows_tui_output_only() {
     panic!("not ported: run_turn TUI-only output");
 }
 
-// Go TestSendResidentRespawnsDeadSlot (resident_respawn_test.go)
-#[test]
-#[ignore = "parity: resident dead-slot respawn not wired in Rust (no respawn hook in resident.rs)"]
-fn go_send_resident_respawns_dead_slot() {
-    panic!("not ported: resident respawn of a dead slot");
-}
-
-// Go TestViaPrompterRawWhenRespawnFails (resident_respawn_test.go)
-#[test]
-#[ignore = "parity: respawn-failure raw fallback path not wired in Rust (fallback exists for prompter failure only)"]
-fn go_via_prompter_raw_when_respawn_fails() {
-    panic!("not ported: raw prompt when respawn fails");
-}
-
 // Go TestSpawnSlotParksReadingChild (resident_route_test.go:55)
 #[test]
 #[ignore = "parity: spawnSlot seam not wired in Rust; parked reading child has no Rust equivalent"]
 fn go_spawn_slot_parks_reading_child() {
     panic!("not ported: spawn_slot parks reading child");
-}
-
-// Go TestResidentSpawnsEager (resident_test.go)
-#[test]
-#[ignore = "parity: eager resident spawn not exposed by a pub core API"]
-fn go_resident_spawns_eager() {
-    panic!("not ported: eager resident spawn");
-}
-
-// Go TestResidentSlotsFour (resident_test.go)
-#[test]
-#[ignore = "parity: resident slot count (4) not exposed by a pub core API; Config::default extra_coders is in parity_harness_p3.rs"]
-fn go_resident_slots_four() {
-    panic!("not ported: resident slot count check");
 }
 
 // Go TestViewHelpers (resume_test.go:42)
