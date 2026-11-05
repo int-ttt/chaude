@@ -1137,6 +1137,32 @@ fn plain_mode_denies_idle_permission_ask_with_notice() {
 }
 
 #[test]
+fn idle_ask_in_auto_mode_is_answered_not_left_pending() {
+    let _g = lock();
+    let f = fake("perm-idle-auto", &["text_turn.jsonl"]);
+    // The turn ends with its result; the ask follows while no turn runs (Go TestIdleControlRequestAnswered).
+    let turn = fs::read_to_string(fixture("text_turn.jsonl")).unwrap();
+    let ask = "{\"type\":\"control_request\",\"request_id\":\"perm-idle-2\",\"request\":{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":{\"command\":\"ls\"}}}\n";
+    fs::write(f.dir.join("turn1.jsonl"), format!("{turn}{ask}")).unwrap();
+    let cfg = Config {
+        auto_allow: true,
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("hi");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::PermissionRequest { .. })),
+        "{evs:?}"
+    );
+    let log = wait_for(&f.dir.join("stdin.log"), "control_response");
+    assert!(log.contains(r#""request_id":"perm-idle-2""#), "{log}");
+    assert!(log.contains(r#""behavior":"allow""#), "{log}");
+    h.shutdown();
+}
+
+#[test]
 fn pending_permission_is_dropped_when_turn_is_abandoned() {
     let _g = lock();
     let perm = "{\"type\":\"control_request\",\"request_id\":\"perm-1\",\"request\":{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":{\"command\":\"rm -rf x\"}}}\n";
