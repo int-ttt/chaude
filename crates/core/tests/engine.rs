@@ -603,6 +603,85 @@ done
     }
 }
 
+// Turn 1 is replayed on the first user frame. On the second (the handoff turn) the child replies, then a second later
+// prints <notice>, as a drained child does while its agents run.
+fn fake_drain(name: &str, first: &str, second: &str, notice: &str) -> Fake {
+    let dir = temp_dir(name);
+    fs::write(dir.join("turn1.jsonl"), first).unwrap();
+    fs::write(dir.join("turn2.jsonl"), second).unwrap();
+    fs::write(dir.join("notice.jsonl"), notice).unwrap();
+    let script = r#"#!/bin/sh
+n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> 'DIR/stdin.log'
+  case "$line" in
+    *'"type":"user"'*)
+      n=$((n + 1))
+      if [ $n -eq 1 ]; then
+        cat 'DIR/turn1.jsonl'
+      else
+        cat 'DIR/turn2.jsonl'
+        sleep 1
+        cat 'DIR/notice.jsonl'
+      fi
+      ;;
+  esac
+done
+"#
+    .replace("DIR", &dir.display().to_string());
+    let bin = dir.join("claude");
+    fs::write(&bin, script).unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    Fake {
+        bin: bin.display().to_string(),
+        dir,
+    }
+}
+
+// Go drain.consume (drain.go:317-327): a drained child's <task-notification> does not end its background agent.
+// The agent ends when the drain closes at drain_timeout (Go drain.finished), 1 s after the notice would arrive.
+#[test]
+fn drained_background_agent_ends_at_drain_timeout_not_on_notice() {
+    let _g = lock();
+    let notice = "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<task-notification><tool-use-id>toolu_bg1</tool-use-id></task-notification>\"}}\n";
+    let f = fake_drain(
+        "drain_end",
+        &fs::read_to_string(fixture("bg_rotate_turn.jsonl")).unwrap(),
+        &fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap(),
+        notice,
+    );
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(2);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::Rotated { .. })),
+        "{evs:?}"
+    );
+    let mut rotated_at = None;
+    let mut ended_at = None;
+    while ended_at.is_none() {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => rotated_at = Some(std::time::Instant::now()),
+            UiEvent::AgentEnd { id, .. } if id == "toolu_bg1" => {
+                ended_at = Some(std::time::Instant::now())
+            }
+            _ => {}
+        }
+    }
+    let waited = ended_at
+        .unwrap()
+        .duration_since(rotated_at.expect("agent ended before the rotation"));
+    assert!(
+        waited >= Duration::from_millis(1500),
+        "agent ended on the drained notice, not at drain_timeout: {waited:?}"
+    );
+    h.shutdown();
+}
+
 // agent_turn.jsonl split after its first line: the Agent tool_use, then everything else (incl. its result).
 fn agent_turn_split() -> (String, String) {
     let all = fs::read_to_string(fixture("agent_turn.jsonl")).unwrap();
