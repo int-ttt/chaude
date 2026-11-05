@@ -9,7 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::mpsc::Receiver;
-use std::sync::{Mutex, MutexGuard, Once};
+use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,7 @@ use chaude_core::api::{Config, Engine, UiEvent};
 // Longest wait for one engine event or file write. Same bound as engine.rs, for loaded machines.
 const WAIT: Duration = Duration::from_secs(60);
 
-// Engine tests share the record dir env var, so they run one at a time.
+// Engine tests run one at a time.
 static LOCK: Mutex<()> = Mutex::new(());
 
 fn lock() -> MutexGuard<'static, ()> {
@@ -38,12 +38,6 @@ fn fresh_dir(tag: &str) -> PathBuf {
 // concurrent appends split long main lines in the shell printf (Go resident_agent_test.go:199 filter).
 // Returns the script path and the test dir.
 fn fake_claude(tag: &str) -> (PathBuf, PathBuf) {
-    static RECORD: Once = Once::new();
-    RECORD.call_once(|| {
-        // Turn records go under a test dir, never the repo record/ folder.
-        // SAFETY: runs once, before any engine thread of this test binary starts reading the env.
-        unsafe { std::env::set_var("HARNESS_RECORD_DIR", fresh_dir("record")) };
-    });
     let dir = fresh_dir(tag);
     let turn = dir.join("turn.jsonl");
     fs::write(
@@ -71,6 +65,8 @@ fn engine_cfg(bin: &Path, dir: &Path) -> Config {
         residents: true,
         agents_file: Some(dir.join("agents.json")),
         clients_file: Some(dir.join("clients.json")),
+        // Turn records go under the test dir, never the repo record/ folder.
+        record_dir: Some(dir.join("record")),
         ..Config::default()
     }
 }

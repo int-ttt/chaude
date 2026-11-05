@@ -306,6 +306,8 @@ pub struct Config {
     pub metrics_dir: Option<PathBuf>,
     // Go --transcript: JSONL trace of unparsable child lines ({"kind":"unparsed"}). None = off (the CLI passes StateDir/transcript.jsonl).
     pub transcript: Option<PathBuf>,
+    // Go recordDir override (HARNESS_RECORD_DIR in the CLI): turn records and the /clear mark go here. None = record::dir_for(cwd).
+    pub record_dir: Option<PathBuf>,
     // Go context rotation: a turn that ends at or above this many context tokens starts a handoff and a fresh
     // child (Opus uses its own threshold, see rotate::threshold_for). Zero = rotation off.
     pub rotate_threshold: u64,
@@ -415,6 +417,7 @@ impl Default for Config {
             task_budget_usd: 0.0,
             metrics_dir: None,
             transcript: None,
+            record_dir: None,
             rotate_threshold: HAIKU_THRESHOLD,
             rotate_defer_timeout: Duration::from_secs(600),
             idle_rotate: Duration::from_secs(3599),
@@ -3057,11 +3060,19 @@ impl State {
     // Go clearMark: a /clear splits /resume groups at this time, in the record dir of cwd.
     fn clear_mark(&self) {
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
-        let root = record::dir_for(&cwd);
+        let root = self.record_root(&cwd);
         let cwd_text = cwd.to_string_lossy();
         if let Err(e) = resume_group::clear_mark_now(&root, &cwd_text) {
             self.emit(UiEvent::Error(format!("clear mark failed: {e}")));
         }
+    }
+
+    // Record root: Config.record_dir when set (tests and the CLI override), else Go recordDir for cwd.
+    fn record_root(&self, cwd: &Path) -> PathBuf {
+        self.cfg
+            .record_dir
+            .clone()
+            .unwrap_or_else(|| record::dir_for(cwd))
     }
 
     fn record_turn_save(&mut self, duration_ms: u64) {
@@ -3078,7 +3089,7 @@ impl State {
             return;
         };
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
-        let root = record::dir_for(&cwd);
+        let root = self.record_root(&cwd);
         if let Err(e) = self.record.save(&root, &cwd, &self.turn_prompt, &stamp) {
             self.emit(UiEvent::Error(format!("record save failed: {e}")));
         }
@@ -4534,12 +4545,11 @@ done
         let bin = dir.path().join("claude");
         std::fs::write(&bin, script).expect("write fake claude");
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
-        // SAFETY: set before this test's engine starts; no other test in this binary drives the engine.
-        unsafe { std::env::set_var("HARNESS_RECORD_DIR", dir.path().join("record")) };
         let cfg = Config {
             claude_bin: bin.display().to_string(),
             model: "haiku".into(),
             residents: true,
+            record_dir: Some(dir.path().join("record")),
             ..isolated(dir.path())
         };
         let (h, rx) = Engine::try_start(cfg).expect("engine boots");

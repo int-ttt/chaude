@@ -56,9 +56,6 @@ impl Drop for Fake {
 // Each user frame n sleeps 0.5 s, then prints turn{n}.jsonl. The sleep makes queueing deterministic.
 fn fake(name: &str, turns: &[&str]) -> Fake {
     let dir = temp_dir(name);
-    // Record turns land under this test dir, never the repo record/ folder. Tests hold lock(), so no race.
-    // SAFETY: set before any engine thread of this test starts; other engine tests are serialized by lock().
-    unsafe { std::env::set_var("HARNESS_RECORD_DIR", dir.join("record")) };
     for (i, f) in turns.iter().enumerate() {
         fs::copy(fixture(f), dir.join(format!("turn{}.jsonl", i + 1))).unwrap();
     }
@@ -167,6 +164,8 @@ fn config(f: &Fake) -> Config {
         // Clients and agents state stay in the test dir, never ~/.chaude.
         agents_file: Some(f.dir.join("agents.json")),
         clients_file: Some(f.dir.join("clients.json")),
+        // Record turns land under the test dir, never the repo record/ folder.
+        record_dir: Some(f.dir.join("record")),
         ..Config::default()
     }
 }
