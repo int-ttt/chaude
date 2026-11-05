@@ -1,9 +1,7 @@
 //! chaude command line. With no arguments it opens the inline TUI; gen-settings, --version and help are ported.
 //! The other commands are not ported yet.
 
-mod mcp_resident;
-mod repl_args;
-mod tui;
+use chaude_cli::{mcp_resident, repl_args, tui};
 
 use std::env;
 use std::path::{Path, PathBuf};
