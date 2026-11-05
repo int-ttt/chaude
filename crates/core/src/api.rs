@@ -1038,7 +1038,12 @@ fn actor(
     }
     st.persist_live();
     st.restore_agents_at_start();
-    let _ = boot.send(st.start_child());
+    let started = st.start_child();
+    let main_up = started.is_ok();
+    let _ = boot.send(started);
+    if main_up && st.cfg.residents {
+        st.spawn_residents();
+    }
     loop {
         let input = match st.wait_budget() {
             Some(d) => match rx.recv_timeout(d) {
@@ -1645,6 +1650,17 @@ impl State {
             self.drop_coder(i);
             self.finish_coder(i, Err(format!("coder write failed: {e}")));
         }
+    }
+
+    // Go spawnResident: after the main child starts, the prompter, tui and base coder start and stay parked.
+    // A failed spawn is left to its first use, which reports it.
+    fn spawn_residents(&mut self) {
+        if self.coders.is_empty() {
+            self.coders.resize_with(1, Coder::default);
+        }
+        let _ = self.spawn_prompter();
+        let _ = self.spawn_tui();
+        let _ = self.spawn_coder(0);
     }
 
     // Go residentSlots coder: haiku with the haiku-coder agent body, the coder tools, strict MCP and no slash commands.

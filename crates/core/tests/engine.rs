@@ -98,6 +98,7 @@ case "$*" in
   *" --system-prompt "*) role=prompter ;;
   *) role=main ;;
 esac
+printf '%s\n' "$role" >> 'DIR/spawned.log'
 [ "$role" = main ] && printf '%s\n' "$*" >> 'DIR/args.log'
 while IFS= read -r line; do
   if [ "$role" = coder ]; then
@@ -1832,6 +1833,35 @@ fn dead_prompter_slot_is_respawned_and_raw_when_respawn_fails() {
     );
     let stdin = wait_for(&f.dir.join("stdin.log"), "caveman summary");
     assert!(stdin.contains("[original]"), "{stdin}");
+    h.shutdown();
+}
+
+#[test]
+fn residents_spawn_eagerly_with_main_four_slots() {
+    let _g = lock();
+    let f = fake("eager_slots", &["resume_agent_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, _rx) = Engine::start(cfg);
+    // Go residentSlots: main, prompter, tui and coder start together, before any prompt.
+    let t0 = Instant::now();
+    loop {
+        let n = fs::read_to_string(f.dir.join("spawned.log"))
+            .unwrap_or_default()
+            .lines()
+            .count();
+        if n >= 4 || t0.elapsed() > Duration::from_secs(10) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    // A fifth spawn would show up within this grace; none may.
+    thread::sleep(Duration::from_millis(300));
+    let spawned = fs::read_to_string(f.dir.join("spawned.log")).unwrap_or_default();
+    let mut roles: Vec<&str> = spawned.lines().collect();
+    roles.sort_unstable();
+    assert_eq!(roles, ["coder", "main", "prompter", "tui"], "{spawned}");
     h.shutdown();
 }
 
