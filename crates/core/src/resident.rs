@@ -16,6 +16,17 @@ pub const CODER_REPLY_FORMAT: &str = "\n\n[reply] End with `status: done|partial
 // Appended to the main system prompt when the resident_coder tool is served (Go coderRule).
 pub const CODER_RULE: &str = "For important files (main code, user documents) call the resident_coder tool: one resident haiku-coder, same session, long context. For lookups and small edits use Task haiku-scout / haiku-batch-worker.";
 
+// Go residentSlots: the four always-on slots as (role, model). main runs on the active model, the rest on haiku.
+// Mirror table only: the engine still hardcodes these roles (api.rs prompter, tui, coder), so nothing reads it yet.
+pub fn resident_slots(main_model: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("main", main_model.to_string()),
+        ("prompter", "haiku".to_string()),
+        ("tui", "haiku".to_string()),
+        ("coder", "haiku".to_string()),
+    ]
+}
+
 // Go summarizeReply: keeps the status and changed lines; a reply without them is cut to 300 chars.
 pub fn summarize_reply(reply: &str) -> String {
     let keep: Vec<String> = reply

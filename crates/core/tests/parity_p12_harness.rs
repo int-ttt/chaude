@@ -10,7 +10,7 @@ use chaude_core::agent_store::AgentTracker;
 use chaude_core::clients::{ClientRec, ClientRegistry, EXPIRED, PARKED, now_stamp};
 use chaude_core::mcp;
 use chaude_core::record_folder;
-use chaude_core::resident::agent_body;
+use chaude_core::resident::{self, agent_body};
 use chaude_core::turn_spend::TurnSpend;
 use serde_json::{Value, json};
 use std::fs;
@@ -328,6 +328,19 @@ fn prune_record_files() {
     assert!(!empty.exists(), "empty project folder kept");
 }
 
+// Go TestResidentSlotsFour (resident_test.go:44): four slots in order, main on the given model, the rest haiku.
+// Proxy: checks the resident::resident_slots mirror table, not the engine's live slots.
+#[test]
+fn resident_slots_fixed_four() {
+    let slots = resident::resident_slots("opus");
+    let roles: Vec<&str> = slots.iter().map(|(role, _)| *role).collect();
+    assert_eq!(roles, ["main", "prompter", "tui", "coder"]);
+    assert_eq!(slots[0].1, "opus", "main model");
+    for (role, model) in &slots[1..] {
+        assert_eq!(model, "haiku", "{role} model");
+    }
+}
+
 // Stubs for rows that cannot be reached from crates/*/tests/ yet. Each panics when run with
 // --include-ignored, so a missing port cannot pass silently.
 parity_ignored! {
@@ -336,7 +349,6 @@ parity_ignored! {
     agentview_click_read_only_close = "parity: panel-row mouse click opens agent view; panel_click at crates/cli/src/tui/mod.rs:1556 is private (key part ported at agentview.rs:340)";
     scroll_bottom_on_input_and_update = "parity: agent view refresh and close scroll not ported; AgentView scroll state at crates/cli/src/tui/agentview.rs:195 (main body parts at mod.rs:3508)";
     child_pid_recorded_on_park = "parity: parked child pid write is private; upsert_live at crates/core/src/api.rs:3636 has no pub seam";
-    resident_slots_fixed_four = "parity: diff, Rust uses 8-slot floor RESIDENT_MAX_WORKERS (crates/core/src/api.rs:270)";
     max_workers_cap_refuses = "parity: diff, Rust child_set::admit evicts oldest instead of refusing (crates/core/src/child_set.rs:147)";
     drain_consume_denies = "parity: drain consume not pub; import_view consume at crates/core/src/import_view.rs:157 is a different path";
     agent_tracker_drain_half = "parity: drain finished and timeout not pub; AgentTracker::running at crates/core/src/agent_store.rs:777";
