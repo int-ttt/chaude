@@ -1649,6 +1649,39 @@ fn resident_stage_rows_bracket_main_turn_and_agent_calls() {
 }
 
 #[test]
+fn prompter_then_tui_stage_rows_follow_go_order() {
+    let _g = lock();
+    let f = fake("stage_order", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("plain");
+    let evs = until_idle(&rx);
+    // Go TestStageLinesOrder: prompter working and done, then tui working and done, in that order.
+    let rows: Vec<(String, StagePhase)> = evs
+        .iter()
+        .filter_map(|e| match e {
+            UiEvent::Stage { slot, phase } if slot == "prompter" || slot == "tui" => {
+                Some((slot.clone(), phase.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("prompter".to_string(), StagePhase::Working),
+            ("prompter".to_string(), StagePhase::Done),
+            ("tui".to_string(), StagePhase::Working),
+            ("tui".to_string(), StagePhase::Done),
+        ],
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
 fn session_ids_new_session_and_tool_input_are_emitted() {
     let _g = lock();
     let f = fake("clear", &["clear_turn.jsonl", "clear_after_turn.jsonl"]);
