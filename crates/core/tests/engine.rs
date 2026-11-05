@@ -2153,6 +2153,14 @@ fn idle_reply_without_notice_finishes_oldest_background_agent() {
     while !done(&evs) {
         evs.push(rx.recv_timeout(WAIT).expect("engine went silent"));
     }
+    // The list the TUI tick re-reads (App::set_agent_source) holds the same finished row.
+    assert!(
+        h.agent_rows()
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r.id == "toolu_idle1" && r.done)
+    );
     h.shutdown();
 }
 

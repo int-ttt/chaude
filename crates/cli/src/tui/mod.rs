@@ -23,6 +23,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, Write};
 use std::panic;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -122,6 +123,8 @@ pub struct App {
     // Go opusRunning / residentBusy: an opus Agent is running, and the resident roles with a command in flight.
     opus_busy: bool,
     resident_busy: BTreeSet<String>,
+    // Go tracker, shared with the engine: the tick re-reads it into agent_rows. None without an engine.
+    agent_src: Option<Arc<Mutex<Vec<AgentRow>>>>,
     // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
     agent_rows: Vec<AgentRow>,
     // Agents an earlier harness left unfinished, listed after the running rows (UiEvent::AgentsRestored).
@@ -242,6 +245,7 @@ impl App {
             agents: Vec::new(),
             bg_agents: Vec::new(),
             agent_rows: Vec::new(),
+            agent_src: None,
             restored_rows: Vec::new(),
             agent_logs: HashMap::new(),
             pan_off: 0,
@@ -628,9 +632,18 @@ impl App {
         self.busy || self.copy_note.is_some()
     }
 
+    // Hands the TUI the engine's agent list. The tick re-reads it (Go tick: m.r.tracker.running()).
+    pub fn set_agent_source(&mut self, src: Arc<Mutex<Vec<AgentRow>>>) {
+        self.agent_src = Some(src);
+    }
+
     // Records the time for elapsed counters and the spinner (Go spinner: one frame per 125 ms).
     pub fn tick(&mut self, now: Instant) {
         self.clock = now;
+        // Go tick refresh: re-read the agent list and relayout. Rust lays out per frame, so the list is enough.
+        if let Some(src) = &self.agent_src {
+            self.agent_rows = src.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        }
         // Go quiet(): one notice after a quiet stretch with no open tool call (Agent/Task calls are waited for).
         let quiet_for = self.quiet_since.map(|since| now.duration_since(since));
         if self.busy
@@ -2551,6 +2564,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     let _guard = TermGuard::enter()?;
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
     let mut app = App::new(cols as usize, rows as usize);
+    app.set_agent_source(engine.agent_rows());
     app.ime_shift = ime_col_shift(
         std::env::var("CHAUDE_IME_SHIFT").ok(),
         std::env::var("TERMINAL_EMULATOR").ok(),
@@ -2716,6 +2730,7 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let (engine, rx) = Engine::try_start(cfg).unwrap_or_else(|e| start_failed(&e));
     let mut app = App::new(80, 24);
+    app.set_agent_source(engine.agent_rows());
     if let Some(imp) = startup {
         app.show_import(&imp);
         for l in &app.transcript {
@@ -3457,30 +3472,30 @@ mod tests {
         assert_eq!(cursor(&app, 80, 30).1, base);
     }
 
-    // Go TestIdleTickRefreshesWhenBackgroundFinishes (panel_test.go:55-77): a background agent that
-    // finishes while idle leaves the panel on the next tick. PROXY: Go's tick re-reads the agent list
-    // and relayouts (lastRun, bgH, vp.Height); Rust has no tick-driven refresh. The done row arrives
-    // as UiEvent::AgentRows (pushed by the engine on finish), so this checks the panel after
-    // AgentRows then tick, not a tick that fetches rows itself.
+    // Go TestIdleTickRefreshesWhenBackgroundFinishes (panel_test.go:55-77, :79): the idle tick re-reads the agent
+    // list. The finish is written to the shared list only (Go onNotification changes the tracker, no event is sent).
     #[test]
-    fn idle_tick_drops_background_row_after_it_finishes() {
+    fn idle_tick_refreshes_when_background_finishes() {
+        let list = Arc::new(Mutex::new(vec![agent_row("b1", true, false)]));
         let mut app = App::new(80, 30);
-        app.apply(UiEvent::AgentRows {
-            rows: vec![agent_row("bg1", true, false)],
-        });
+        app.set_agent_source(Arc::clone(&list));
+        app.tick(Instant::now());
         let running = plain_frame(&app, 80, 30);
         assert!(
-            running.iter().any(|r| r.contains("task bg1")),
-            "running background row shows: {running:?}"
+            running.iter().any(|r| r.contains("task b1")),
+            "tick shows the running background row: {running:?}"
         );
-        app.apply(UiEvent::AgentRows {
-            rows: vec![agent_row("bg1", true, true)],
-        });
+        list.lock().unwrap()[0].done = true;
         app.tick(Instant::now());
         let after = plain_frame(&app, 80, 30);
+        assert_eq!(
+            after.len(),
+            30,
+            "tick relayouts to the full terminal height"
+        );
         assert!(
-            !after.iter().any(|r| r.contains("task bg1")),
-            "finished background row leaves the panel: {after:?}"
+            !after.iter().any(|r| r.contains("task b1")),
+            "finished background row leaves the panel on idle tick: {after:?}"
         );
     }
 

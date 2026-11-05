@@ -6,9 +6,9 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -470,9 +470,15 @@ enum Input {
 pub struct EngineHandle {
     tx: Sender<Input>,
     join: Option<JoinHandle<()>>,
+    agent_rows: Arc<Mutex<Vec<AgentRow>>>,
 }
 
 impl EngineHandle {
+    // Go agentTracker read by the TUI tick: the actor rewrites this list on every agent change (emit_agent_rows).
+    pub fn agent_rows(&self) -> Arc<Mutex<Vec<AgentRow>>> {
+        Arc::clone(&self.agent_rows)
+    }
+
     // Starts a turn, or queues it behind the running turn (Queued(n)). Never interrupts.
     pub fn submit(&self, text: &str) {
         let _ = self.tx.send(Input::Cmd(Cmd::Submit(text.to_string())));
@@ -575,11 +581,14 @@ impl Engine {
         let (ui_tx, ui_rx) = mpsc::channel::<UiEvent>();
         let (boot_tx, boot_rx) = mpsc::channel();
         let self_tx = in_tx.clone();
-        let join = thread::spawn(move || actor(cfg, self_tx, in_rx, ui_tx, boot_tx));
+        let agent_rows = Arc::new(Mutex::new(Vec::new()));
+        let shared = Arc::clone(&agent_rows);
+        let join = thread::spawn(move || actor(cfg, self_tx, in_rx, ui_tx, boot_tx, shared));
         (
             EngineHandle {
                 tx: in_tx,
                 join: Some(join),
+                agent_rows,
             },
             ui_rx,
             boot_rx,
@@ -589,6 +598,8 @@ impl Engine {
 
 struct State {
     cfg: Config,
+    // Shared with EngineHandle::agent_rows; written by emit_agent_rows.
+    agent_rows: Arc<Mutex<Vec<AgentRow>>>,
     proc: Option<ClaudeProc>,
     ui: Sender<UiEvent>,
     busy: bool,
@@ -894,6 +905,7 @@ fn actor(
     rx: Receiver<Input>,
     ui: Sender<UiEvent>,
     boot: Sender<Result<(), String>>,
+    agent_rows: Arc<Mutex<Vec<AgentRow>>>,
 ) {
     // Session loads: a killed or below-threshold previous session resumes (handoff::resume_mode). An explicit
     // cfg.resume wins for the main child.
@@ -963,6 +975,7 @@ fn actor(
     ));
     let mut st = State {
         cfg,
+        agent_rows,
         proc: None,
         ui,
         busy: false,
@@ -2622,9 +2635,9 @@ impl State {
             })
             .collect();
         rows.sort_by_key(|(started, _)| *started);
-        self.emit(UiEvent::AgentRows {
-            rows: rows.into_iter().map(|(_, r)| r).collect(),
-        });
+        let rows: Vec<AgentRow> = rows.into_iter().map(|(_, r)| r).collect();
+        *self.agent_rows.lock().unwrap_or_else(|e| e.into_inner()) = rows.clone();
+        self.emit(UiEvent::AgentRows { rows });
     }
 
     // Go restoreAgents (repl.go:1205, agentstore.go:221): recent interrupted agents of earlier runs are listed

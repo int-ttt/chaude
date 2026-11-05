@@ -425,7 +425,6 @@ parity_ignored! {
     max_workers_cap_refuses = "parity: N-A in Go, checkWorkerCap (dispatch.go:35) has no production caller; only dispatch_test.go:87,91 call it. Production admit evicts (dispatch.go admit ~53, Rust child_set.rs:147). Refusal proxy: child_set.rs admit_refuses_when_nothing_evictable (child_set.rs:339)";
 
     // p2 (missing rows)
-    idle_tick_refreshes_when_background_finishes = "parity: Rust tick does not refresh agent rows; rows are pushed by UiEvent::AgentRows (crates/cli/src/tui/mod.rs:638 tick, panel_lines at mod.rs:1465)";
     resident_running_list_shows_only_busy_sessions = "parity: residentRepl running list has no pub Rust seam; AgentTracker::running at crates/core/src/agent_store.rs:777";
     coder_permission_only_when_busy = "parity: coder permission path is private; coder_idle_left at crates/core/src/api.rs:1873";
     resident_coder_busy_refuses = "parity: diff, Go refuses busy single coder, Rust pool errors (crates/core/src/api.rs:1046)";
