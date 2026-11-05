@@ -429,7 +429,7 @@ impl App {
                 id,
                 model,
                 name,
-                task,
+                summary,
                 ..
             } => {
                 // Already finished by an interrupt (finish_foreground): drop the late duplicate.
@@ -437,7 +437,7 @@ impl App {
                     self.finished_fg.remove(pos);
                     self.agent_outcome.remove(&id);
                 } else {
-                    self.agent_done(&id, &model, &name, &task);
+                    self.agent_done(&id, &model, &name, &summary);
                 }
             }
             UiEvent::Status {
@@ -1329,12 +1329,13 @@ impl App {
         }
     }
 
-    // One agent's done notice (Go markDoneLocked, doneLine): model, name and task come from the AgentEnd.
-    fn agent_done(&mut self, id: &str, model: &str, name: &str, task: &str) {
+    // One agent's done notice (Go markDoneLocked, doneLine): model, name and what (the agent's last summary
+    // line, else its task) come from the AgentEnd.
+    fn agent_done(&mut self, id: &str, model: &str, name: &str, what: &str) {
         let failed = self.agent_outcome.remove(id);
         self.agents.retain(|(aid, _, _, _)| aid != id);
         self.bg_agents.retain(|aid| aid != id);
-        let notice = bar::done_line(failed, model, name, task);
+        let notice = bar::done_line(failed, model, name, what);
         self.note(&format!("{GREY_ON}{notice}{FG_OFF}"));
     }
 
@@ -4232,7 +4233,7 @@ mod tests {
             elapsed_ms: 1500,
             model: String::new(),
             name: "haiku-coder".to_string(),
-            task: "Scan repo".to_string(),
+            summary: "Scan repo".to_string(),
         });
         assert!(
             app.transcript
@@ -4268,7 +4269,7 @@ mod tests {
             elapsed_ms: 1000,
             model: "haiku".to_string(),
             name: "scan-1".to_string(),
-            task: "Scan repo".to_string(),
+            summary: "Scan repo".to_string(),
         });
         assert!(
             app.transcript
@@ -4302,7 +4303,7 @@ mod tests {
             elapsed_ms: 900,
             model: String::new(),
             name: "fg".into(),
-            task: "fg".into(),
+            summary: "fg".into(),
         });
         assert_eq!(app.transcript.len(), before);
         assert!(app.finished_fg.is_empty());
@@ -4344,7 +4345,7 @@ mod tests {
             elapsed_ms: 2000,
             model: String::new(),
             name: "b1".into(),
-            task: "Watch".into(),
+            summary: "Watch".into(),
         });
         assert!(app.agents.is_empty());
         assert!(app.bg_agents.is_empty());

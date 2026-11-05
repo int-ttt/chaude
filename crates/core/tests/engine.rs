@@ -3160,6 +3160,35 @@ fn opus_agent_emits_opus_busy_bracket_around_its_run() {
     h.shutdown();
 }
 
+// Go doneLine what: the subagent's last plain text line (Summary, else lastSummary(Log)); with no text line
+// the Task (description) is the fallback.
+#[test]
+fn agent_end_summary_is_last_subagent_text_else_task() {
+    let _g = lock();
+    let f = fake("agent_summary", &["agent_summary_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("scan");
+    let evs = until_idle(&rx);
+    let summary = evs.iter().find_map(|e| match e {
+        UiEvent::AgentEnd { summary, .. } => Some(summary.clone()),
+        _ => None,
+    });
+    assert_eq!(summary.as_deref(), Some("found 3 files"), "{evs:?}");
+    h.shutdown();
+
+    // The opus fixture's subagent has no text line (only a stream delta), so the done notice falls back to Task.
+    let f = fake("opus_summary", &["opus_agent_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("scan");
+    let evs = until_idle(&rx);
+    let summary = evs.iter().find_map(|e| match e {
+        UiEvent::AgentEnd { summary, .. } => Some(summary.clone()),
+        _ => None,
+    });
+    assert_eq!(summary.as_deref(), Some("scan repo"), "{evs:?}");
+    h.shutdown();
+}
+
 #[test]
 fn opus_prefixed_subagent_type_emits_opus_busy() {
     let _g = lock();

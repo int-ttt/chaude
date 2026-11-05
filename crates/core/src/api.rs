@@ -14,7 +14,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-use crate::agent_store::{AgentStore, STO_DONE, STO_RUNNING, SavedAgent, sub_event_lines};
+use crate::agent_store::{
+    AgentStore, STO_DONE, STO_RUNNING, SavedAgent, last_summary, sub_event_lines,
+};
 use crate::budget::{self, Budget};
 use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
@@ -110,8 +112,9 @@ pub enum UiEvent {
         model: String,
         // Go agentRec.Name for doneLine: the `name` input, else `subagent_type`.
         name: String,
-        // Go agentRec.Task for doneLine: the `description` input.
-        task: String,
+        // Go doneLine what: the agent's last plain text line (Summary, else lastSummary(Log)), else its Task
+        // (the `description` input).
+        summary: String,
     },
     // A background agent resumed by SendMessage runs again under its original tool id until its AgentEnd.
     AgentResumed {
@@ -928,6 +931,19 @@ struct AgentInfo {
     session_name: String,
     agent_id: String,
     started_at: u64,
+    // Go lastSummary over the agent's log: its last plain text line, kept as the done notice's what.
+    last_text: String,
+}
+
+impl AgentInfo {
+    // Go doneLine what: the last text line, else the Task.
+    fn done_what(&self) -> String {
+        if self.last_text.is_empty() {
+            self.task.clone()
+        } else {
+            self.last_text.clone()
+        }
+    }
 }
 
 fn actor(
@@ -2652,6 +2668,7 @@ impl State {
                         .to_string(),
                     agent_id: String::new(),
                     started_at,
+                    last_text: String::new(),
                 },
             );
             self.emit(UiEvent::AgentStart {
@@ -2783,7 +2800,7 @@ impl State {
     }
 
     // Go onSubEvent (repl.go:426, 686): a delegated agent's text and tool lines go to its agent-view log.
-    fn on_sub_agent_line(&self, raw: &Value) {
+    fn on_sub_agent_line(&mut self, raw: &Value) {
         let Some(p) = raw
             .get("parent_tool_use_id")
             .and_then(Value::as_str)
@@ -2791,16 +2808,22 @@ impl State {
         else {
             return;
         };
-        if !self.agent_info.contains_key(p) {
+        let Some(info) = self.agent_info.get_mut(p) else {
+            return;
+        };
+        let lines = sub_event_lines(raw);
+        if lines.is_empty() {
             return;
         }
-        let lines = sub_event_lines(raw);
-        if !lines.is_empty() {
-            self.emit(UiEvent::AgentLog {
-                id: p.to_string(),
-                lines,
-            });
+        // Go lastSummary: the newest plain text line of this batch, if any, is the agent's last text.
+        let last = last_summary(&lines);
+        if !last.is_empty() {
+            info.last_text = last;
         }
+        self.emit(UiEvent::AgentLog {
+            id: p.to_string(),
+            lines,
+        });
     }
 
     // Go agentTracker persist: writes one delegated agent to the agents file (no-op without one).
@@ -2864,12 +2887,12 @@ impl State {
                 .cloned()
                 .unwrap_or_else(|| "agent".to_string());
             self.stage(&agent_slot(&label), StagePhase::Done);
-            let (name, task, model) = self
+            let (name, summary, model) = self
                 .agent_info
                 .get_mut(&id)
                 .map(|i| {
                     i.done = true;
-                    (i.session_name.clone(), i.task.clone(), i.model.clone())
+                    (i.session_name.clone(), i.done_what(), i.model.clone())
                 })
                 .unwrap_or_default();
             self.persist_agent(&id, STO_DONE);
@@ -2878,7 +2901,7 @@ impl State {
                 elapsed_ms: t0.elapsed().as_millis() as u64,
                 model,
                 name,
-                task,
+                summary,
             });
             self.emit_agent_rows();
         }
@@ -3068,10 +3091,10 @@ impl State {
         for id in ids {
             self.opus_set(&id, false);
             if let Some(t0) = self.agents.remove(&id) {
-                let (model, name, task) = self
+                let (model, name, summary) = self
                     .agent_info
                     .get(&id)
-                    .map(|i| (i.model.clone(), i.session_name.clone(), i.task.clone()))
+                    .map(|i| (i.model.clone(), i.session_name.clone(), i.done_what()))
                     .unwrap_or_default();
                 self.persist_agent(&id, STO_DONE);
                 self.emit(UiEvent::AgentEnd {
@@ -3079,7 +3102,7 @@ impl State {
                     elapsed_ms: t0.elapsed().as_millis() as u64,
                     model,
                     name,
-                    task,
+                    summary,
                 });
             }
         }
