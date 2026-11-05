@@ -1250,6 +1250,14 @@ fn turn_is_logged_to_metrics_jsonl() {
     assert_eq!(rec["stage"], "turn", "{text}");
     assert!(rec["ts"].is_string(), "{text}");
     assert_eq!(rec["flags"]["context_window"], 200_000, "{text}");
+    // Go repl.go:1375-1377 flag keys.
+    assert_eq!(rec["flags"]["threshold"], 80_000, "{text}");
+    assert_eq!(rec["flags"]["handoff_validate"], true, "{text}");
+    assert_eq!(rec["flags"]["max_drain"], 3, "{text}");
+    assert_eq!(rec["flags"]["drain_timeout_s"], 3600, "{text}");
+    assert_eq!(rec["flags"]["compact_window"], 0, "{text}");
+    assert_eq!(rec["flags"]["delegation_rule"], true, "{text}");
+    assert_eq!(rec["flags"]["category_rotate"], true, "{text}");
     assert!(rec["duration_ms"].is_u64(), "{text}");
     assert!(rec["cost_turn_usd"].is_f64(), "{text}");
 }

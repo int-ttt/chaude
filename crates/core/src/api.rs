@@ -856,7 +856,18 @@ fn actor(
     let clients = cfg.clients_file.clone().map(ClientRegistry::new);
     let metrics = Arc::new(Metrics::new(
         cfg.metrics_dir.clone(),
-        json!({"compact_window": cfg.compact_window, "context_window": cfg.context_window, "cache_ttl": cfg.cache_ttl}),
+        // Go repl.go:1375-1377 newMetrics flags, same keys; the first three are Rust-only extras.
+        json!({
+            "compact_window": cfg.compact_window,
+            "context_window": cfg.context_window,
+            "cache_ttl": cfg.cache_ttl,
+            "threshold": cfg.rotate_threshold,
+            "handoff_validate": !cfg.no_handoff_validate,
+            "max_drain": cfg.max_drain,
+            "drain_timeout_s": cfg.drain_timeout.as_secs(),
+            "delegation_rule": !cfg.no_delegation_rule,
+            "category_rotate": !cfg.no_category_rotate,
+        }),
     ));
     let mut st = State {
         cfg,
