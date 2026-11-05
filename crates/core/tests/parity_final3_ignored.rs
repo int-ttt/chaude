@@ -26,14 +26,6 @@ fn go_idle_control_request_answered_rest() {
     panic!("not ported: idle control request remaining assertions");
 }
 
-// Go TestRotateKeepsPendingSnapshot (resumeshift_test.go). Rust keeps the pending snapshot on the
-// snapshot_kept path (api.rs start_handoff -> rotate_keep_snapshot), so this is a seam gap, not a design difference.
-#[test]
-#[ignore = "parity: Go resumeshift_test.go rotate with pending snapshot needs a fake newSessionFn seam; not pub in Rust"]
-fn go_rotate_keeps_pending_snapshot() {
-    panic!("not ported: rotate keeps pending import snapshot via Repl seam");
-}
-
 // Go TestInputWrapWide, cases beyond the wide-cell wrap (input_test.go:30-51)
 #[test]
 #[ignore = "parity: Go input_test.go:30-51 wide-cell input wrap cases; cli is bin-only (no lib target)"]
