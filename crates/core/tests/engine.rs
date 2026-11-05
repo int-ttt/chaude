@@ -2894,6 +2894,19 @@ fn opus_agent_emits_opus_busy_bracket_around_its_run() {
 }
 
 #[test]
+fn opus_prefixed_subagent_type_emits_opus_busy() {
+    let _g = lock();
+    let f = fake("opus_subagent_type", &["opus_subagent_type_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("scan");
+    let evs = until_idle(&rx);
+    // No model and no name: only subagent_type "opus-architect" marks the run as opus (Go Name fallback).
+    assert!(evs.contains(&UiEvent::OpusBusy(true)), "{evs:?}");
+    assert!(evs.contains(&UiEvent::OpusBusy(false)), "{evs:?}");
+    h.shutdown();
+}
+
+#[test]
 fn coder_task_emits_resident_busy_bracket_before_reply() {
     let _g = lock();
     let f = fake("coder_busy", &["text_turn.jsonl"]);

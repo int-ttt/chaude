@@ -929,13 +929,18 @@ impl App {
                 Action::Continue
             }
             KeyCode::Up => {
-                if !self.editor.move_row(-1) {
+                // The input width is the one input_rows wraps at, so Up moves the visual row shown on screen.
+                let inner = self.cols.saturating_sub(2).max(1);
+                let w = inner.saturating_sub(UnicodeWidthStr::width(PROMPT));
+                if !self.editor.move_row(-1, w) {
                     self.editor.history_prev();
                 }
                 Action::Continue
             }
             KeyCode::Down => {
-                if !self.editor.move_row(1) {
+                let inner = self.cols.saturating_sub(2).max(1);
+                let w = inner.saturating_sub(UnicodeWidthStr::width(PROMPT));
+                if !self.editor.move_row(1, w) {
                     self.editor.history_next();
                 }
                 Action::Continue

@@ -146,24 +146,20 @@ impl Editor {
         self.cursor = self.line_end(self.cursor);
     }
 
-    // Go inputBox.MoveRow over logical lines (this row does not soft-wrap): moves to the line above (-1)
-    // or below (+1) and keeps the cell column. Reports false when there is no such line.
-    pub fn move_row(&mut self, d: i32) -> bool {
-        let ls = self.line_start(self.cursor);
-        let col = cells(&self.buf[ls..self.cursor]);
-        let (start, end) = if d < 0 {
-            if ls == 0 {
-                return false;
-            }
-            let end = ls - 1;
-            (self.line_start(end), end)
-        } else {
-            let end = self.line_end(self.cursor);
-            if end == self.buf.len() {
-                return false;
-            }
-            (end + 1, self.line_end(end + 1))
-        };
+    // Go inputBox.MoveRow over visual rows (input.go:185): moves one visual row up (-1) or down (+1) at
+    // the given cell width and keeps the cell column. Reports false when there is no such row.
+    pub fn move_row(&mut self, d: i32, width: usize) -> bool {
+        let rows = self.visual_rows(width);
+        let row = rows
+            .iter()
+            .rposition(|&(start, _)| start <= self.cursor)
+            .unwrap_or(0);
+        let col = cells(&self.buf[rows[row].0..self.cursor]);
+        let t = row as i32 + d;
+        if t < 0 || t as usize >= rows.len() {
+            return false;
+        }
+        let (start, end) = rows[t as usize];
         let mut p = start;
         let mut c = 0;
         while p < end && c + cell_width(self.buf[p]) <= col {
@@ -172,6 +168,30 @@ impl Editor {
         }
         self.cursor = p;
         true
+    }
+
+    // Go inputBox.rows: visual rows as (start, end) buffer indexes, end exclusive and without the '\n'.
+    // A row breaks before a char that would pass the width, and a '\n' always ends a row.
+    fn visual_rows(&self, width: usize) -> Vec<(usize, usize)> {
+        let w = width.max(2);
+        let (mut rows, mut start, mut cur) = (Vec::new(), 0, 0);
+        for (i, &ch) in self.buf.iter().enumerate() {
+            if ch == '\n' {
+                rows.push((start, i));
+                start = i + 1;
+                cur = 0;
+                continue;
+            }
+            let cw = cell_width(ch);
+            if cur + cw > w && i > start {
+                rows.push((start, i));
+                start = i;
+                cur = 0;
+            }
+            cur += cw;
+        }
+        rows.push((start, self.buf.len()));
+        rows
     }
 
     fn line_start(&self, mut i: usize) -> usize {
@@ -558,26 +578,40 @@ mod tests {
 
     #[test]
     fn move_row_keeps_the_cell_column_across_logical_lines() {
-        // "ab\ncde", cursor after 'e' (cell column 3 on the second line)
+        // "ab\ncde", cursor after 'e' (cell column 3 on the second line); width 80 does not wrap
         let mut e = typed("ab\ncde");
-        assert!(e.move_row(-1));
+        assert!(e.move_row(-1, 80));
         assert_eq!(
             e.cursor, 2,
             "column 3 is past the end of 'ab', so the cursor lands at its end"
         );
-        assert!(e.move_row(1));
+        assert!(e.move_row(1, 80));
         assert_eq!(e.cursor, 5, "column 2 on 'cde' is after 'd'");
-        assert!(!e.move_row(1), "no line below");
+        assert!(!e.move_row(1, 80), "no line below");
     }
 
     #[test]
     fn move_row_reports_false_at_the_first_line() {
         // cursor lands after the wide char 가 (cell column 2), so 'b' at column 2 is not reached
         let mut e = typed("가b\nab");
-        assert!(e.move_row(-1));
+        assert!(e.move_row(-1, 80));
         assert_eq!(e.cursor, 1);
         let mut first = typed("ab");
-        assert!(!first.move_row(-1));
+        assert!(!first.move_row(-1, 80));
+    }
+
+    // Port of TestInputWrapWide (input_test.go:30-50): the wrap is at 6 cells, and Up moves a visual row
+    // (input.go:185) rather than a logical line, keeping the cell column 4.
+    #[test]
+    fn up_moves_a_visual_row_across_a_wide_wrap() {
+        let mut e = typed("가나다라마");
+        assert_eq!(e.visual_rows(6), vec![(0, 3), (3, 5)]);
+        assert_eq!(cells(&e.buf[3..e.cursor()]), 4, "cursor on row 1, column 4");
+        e.insert_str("x");
+        assert_eq!(e.visual_rows(6).len(), 2, "라마x is 5 cells and fits");
+        assert!(e.move_row(-1, 6), "there is a row above");
+        assert_eq!(e.cursor(), 2, "row 0 at cell column 4 is before 다");
+        assert_eq!(cells(&e.buf[..e.cursor()]), 4);
     }
 
     // Port of TestInputWidthMixed (input_test.go:9-29): cursor cell column, left moves, backspace over a wide char.

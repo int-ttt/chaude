@@ -2442,11 +2442,15 @@ impl State {
                 })
                 .map(|s| clip(s, 80))
                 .unwrap_or_default();
-            if input.get("model").and_then(Value::as_str) == Some("opus")
-                || input
-                    .get("name")
+            // Go drain.go opusRunning: Name is `name`, else `subagent_type`.
+            let agent_name = ["name", "subagent_type"].iter().find_map(|k| {
+                input
+                    .get(*k)
                     .and_then(Value::as_str)
-                    .is_some_and(|n| n.starts_with("opus-"))
+                    .filter(|s| !s.is_empty())
+            });
+            if input.get("model").and_then(Value::as_str) == Some("opus")
+                || agent_name.is_some_and(|n| n.starts_with("opus-"))
             {
                 self.opus_set(&id, true);
             }
