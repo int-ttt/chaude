@@ -375,6 +375,45 @@ fn set_rate_logs_on_five_hour_change() {
     }
 }
 
+// Go TestSetRateTopLevelFallback (ratestatus_test.go:60): with no unifiedWindows, the top-level
+// utilization counts for rateLimitType "five_hour"; rate_raw lists the two key names.
+#[test]
+fn set_rate_top_level_fallback() {
+    let dir = scratch("set-rate-fallback");
+    let metrics = chaude_core::metrics::Metrics::new(Some(dir.clone()), json!({}));
+    let mut log = chaude_core::metrics::RateLog::default();
+    log.set_rate(
+        &json!({"rateLimitType": "five_hour", "utilization": 0.42}),
+        &metrics,
+    );
+
+    let (mut rate, mut raw) = (Vec::new(), Vec::new());
+    for entry in fs::read_dir(&dir).unwrap() {
+        let text = fs::read_to_string(entry.unwrap().path()).unwrap();
+        for row in text
+            .lines()
+            .map(|l| serde_json::from_str::<Value>(l).expect("row json"))
+        {
+            match row["stage"].as_str() {
+                Some("rate") => rate.push(row),
+                Some("rate_raw") => raw.push(row),
+                _ => {}
+            }
+        }
+    }
+    assert_eq!(rate.len(), 1, "one rate row");
+    assert_eq!(
+        rate[0]["five_hour"], 0.42,
+        "five_hour from top-level utilization"
+    );
+    assert_eq!(raw.len(), 1, "one rate_raw row");
+    assert_eq!(
+        raw[0]["keys"].as_array().map(Vec::len),
+        Some(2),
+        "rate_raw key names"
+    );
+}
+
 // Stubs for rows that cannot be reached from crates/*/tests/ yet. Each panics when run with
 // --include-ignored, so a missing port cannot pass silently.
 parity_ignored! {
@@ -388,7 +427,6 @@ parity_ignored! {
     // p2 (missing rows)
     idle_tick_refreshes_when_background_finishes = "parity: Rust tick does not refresh agent rows; rows are pushed by UiEvent::AgentRows (crates/cli/src/tui/mod.rs:638 tick, panel_lines at mod.rs:1465)";
     user_event_notification_finishes_background = "parity: user-event path is private; idle_result at crates/core/src/api.rs:2755";
-    set_rate_top_level_fallback = "parity: setRate has no Rust counterpart (no set_rate in crates/core/src)";
     resident_running_list_shows_only_busy_sessions = "parity: residentRepl running list has no pub Rust seam; AgentTracker::running at crates/core/src/agent_store.rs:777";
     resident_coder_slot_reuse = "parity: coder slot reuse is private; coder_matches at crates/core/src/api.rs:1714";
     coder_permission_only_when_busy = "parity: coder permission path is private; coder_idle_left at crates/core/src/api.rs:1873";
