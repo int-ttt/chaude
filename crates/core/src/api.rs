@@ -124,10 +124,13 @@ pub enum UiEvent {
     Busy(bool),
     // True while a running Agent is on the opus model (Go opusRunning: name prefix "opus-" or model "opus").
     OpusBusy(bool),
-    // A resident role (coder, prompter, tui) has a command in flight (Go residentBusy).
+    // A resident role (coder, prompter, tui) has a command in flight (Go residentBusy). While busy, prompt is the
+    // first line of the command and started_at is Unix seconds (Go agentRec Prompt, Started); both are empty/0 when idle.
     ResidentBusy {
         role: String,
         busy: bool,
+        prompt: String,
+        started_at: u64,
     },
     Queued(usize),
     TurnEnd {
@@ -1487,10 +1490,20 @@ impl State {
         }
     }
 
-    fn resident_busy(&mut self, role: &str, busy: bool) {
+    fn resident_busy(&mut self, role: &str, busy: bool, prompt: &str) {
+        let (prompt, started_at) = if busy {
+            (
+                prompt.lines().next().unwrap_or_default().to_string(),
+                now_secs(),
+            )
+        } else {
+            (String::new(), 0)
+        };
         self.emit(UiEvent::ResidentBusy {
             role: role.to_string(),
             busy,
+            prompt,
+            started_at,
         });
     }
 
@@ -1513,7 +1526,7 @@ impl State {
         };
         self.stage("prompter", phase);
         self.prompter_deadline = Some(Instant::now() + self.cfg.prompter_timeout);
-        self.resident_busy("prompter", true);
+        self.resident_busy("prompter", true, &text);
         let wrote = match self.prompter_proc.as_mut() {
             Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
             None => Err("prompter not running".to_string()),
@@ -1583,7 +1596,7 @@ impl State {
     // Ends the prompter wait: its stage row, then the outcome goes to the main child as a turn.
     fn finish_prompter(&mut self, o: PrompterOutcome) {
         if self.prompter_deadline.take().is_some() {
-            self.resident_busy("prompter", false);
+            self.resident_busy("prompter", false, "");
         }
         match o.stage {
             Some(StagePhase::Failed(text)) => self.notice(text),
@@ -1603,7 +1616,7 @@ impl State {
         }
         self.stage("tui", StagePhase::Working);
         self.tui_deadline = Some(Instant::now() + self.cfg.tui_timeout);
-        self.resident_busy("tui", true);
+        self.resident_busy("tui", true, &reply);
         let wrote = match self.tui_proc.as_mut() {
             Some(p) => p.write_user(&tui_prompt(&reply)).map_err(|e| e.to_string()),
             None => Err("tui not running".to_string()),
@@ -1673,7 +1686,7 @@ impl State {
         }
         self.stage(&role, StagePhase::Working);
         self.coders[i].deadline = Some(Instant::now() + CODER_TIMEOUT);
-        self.resident_busy(&role, true);
+        self.resident_busy(&role, true, &task);
         self.coders[i].idle_since = None;
         self.coders[i].waiter = waiter;
         let text = format!("{task}{CODER_REPLY_FORMAT}");
@@ -1959,7 +1972,7 @@ impl State {
     // Ends a coder task: its stage row, then the reply (or the failure reason) goes to the UI.
     fn finish_coder(&mut self, i: usize, out: Result<String, String>) {
         if self.coders[i].deadline.take().is_some() {
-            self.resident_busy(&coder_role(i), false);
+            self.resident_busy(&coder_role(i), false, "");
         }
         self.coders[i].idle_since = Some(Instant::now());
         let waiter = self.coders[i].waiter.take();
@@ -2014,7 +2027,7 @@ impl State {
     // Ends the tui wait: the answer (or its failure row), then the turn is over.
     fn finish_tui(&mut self, out: Result<String, String>) {
         if self.tui_deadline.take().is_some() {
-            self.resident_busy("tui", false);
+            self.resident_busy("tui", false, "");
         }
         let raw = std::mem::take(&mut self.routed_text);
         match out {

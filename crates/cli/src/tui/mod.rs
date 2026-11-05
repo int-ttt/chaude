@@ -122,7 +122,8 @@ pub struct App {
     bg_agents: Vec<String>,
     // Go opusRunning / residentBusy: an opus Agent is running, and the resident roles with a command in flight.
     opus_busy: bool,
-    resident_busy: BTreeSet<String>,
+    // Busy resident sessions as running rows (Go residentBusy), oldest first; id and name are the role.
+    resident_busy: Vec<AgentRow>,
     // Go tracker, shared with the engine: the tick re-reads it into agent_rows. None without an engine.
     agent_src: Option<Arc<Mutex<Vec<AgentRow>>>>,
     // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
@@ -265,7 +266,7 @@ impl App {
             quiet_since: None,
             open_tools: HashSet::new(),
             opus_busy: false,
-            resident_busy: BTreeSet::new(),
+            resident_busy: Vec::new(),
             quiet_noted: false,
             mouse: true,
             ime_shift: 0,
@@ -608,11 +609,26 @@ impl App {
             UiEvent::QueueTexts(texts) => self.queue_texts = texts,
             // Go opusRunning / residentBusy: state only, read by the thinking row.
             UiEvent::OpusBusy(on) => self.opus_busy = on,
-            UiEvent::ResidentBusy { role, busy } => {
+            UiEvent::ResidentBusy {
+                role,
+                busy,
+                prompt,
+                started_at,
+            } => {
+                self.resident_busy.retain(|r| r.id != role);
                 if busy {
-                    self.resident_busy.insert(role);
-                } else {
-                    self.resident_busy.remove(&role);
+                    self.resident_busy.push(AgentRow {
+                        id: role.clone(),
+                        task: String::new(),
+                        prompt,
+                        name: role,
+                        model: String::new(),
+                        background: false,
+                        done: false,
+                        agent_id: String::new(),
+                        result_path: String::new(),
+                        started_at,
+                    });
                 }
             }
             // Variants added after the TUI wiring (non_exhaustive in core) render nothing yet.
@@ -1482,6 +1498,12 @@ impl App {
 
     // Go panelLines / bgLines: the foreground agent rows (below the input box) and the background rows under
     // them. Only running agents show; the panel above takes its rows out of the room the background panel gets.
+    // Go runningN (tui.go:1445): running agents plus busy resident sessions. Only the tests read it.
+    #[cfg(test)]
+    fn running_n(&self) -> usize {
+        self.agent_rows.iter().filter(|r| !r.done).count() + self.resident_busy.len()
+    }
+
     fn panel_lines(&self, w: usize, h: usize) -> (Vec<String>, Vec<String>) {
         let queue_h = self.queue_lines(w, h).len();
         let fg = self.agent_lines(false, w, h, queue_h, 0);
@@ -1500,11 +1522,12 @@ impl App {
         queue_h: usize,
         used: usize,
     ) -> (Vec<&AgentRow>, usize, usize) {
-        // Restored rows follow the running ones (Go panel: running, then sortedRestored).
+        // Go panel order: running agents, then busy residents (foreground only), then sortedRestored (Go rowsA).
         let list: Vec<&AgentRow> = self
             .agent_rows
             .iter()
             .filter(|r| r.background == bg && !r.done)
+            .chain(self.resident_busy.iter().filter(|_| !bg))
             .chain(self.restored_rows.iter().filter(|r| r.background == bg))
             .collect();
         if list.is_empty() || w < 10 {
@@ -4305,13 +4328,58 @@ mod tests {
         app.apply(UiEvent::ResidentBusy {
             role: "coder".into(),
             busy: true,
+            prompt: "rename the helper".into(),
+            started_at: 1,
         });
         assert!(thinking(&app), "resident busy keeps the row");
         app.apply(UiEvent::ResidentBusy {
             role: "coder".into(),
             busy: false,
+            prompt: String::new(),
+            started_at: 0,
         });
         assert!(!thinking(&app), "resident idle again: hidden");
+    }
+
+    // Go TestResidentRunningListShowsOnlyBusySessions (resident_busy_test.go:9-35): only a busy resident is a panel
+    // row (role and command text), the thinking row shows and runningN counts it; the row drops out when it ends.
+    #[test]
+    fn resident_running_list_shows_only_busy_sessions() {
+        let thinking = |app: &App| app.body(80).iter().any(|r| r.contains("생각중-"));
+        let mut app = App::new(80, 30);
+        assert!(app.panel_lines(80, 30).0.is_empty(), "idle: no row");
+        assert!(!thinking(&app), "idle: no 생각중 indicator");
+        assert_eq!(app.running_n(), 0);
+
+        app.apply(UiEvent::ResidentBusy {
+            role: "tui".into(),
+            busy: true,
+            prompt: "review the diff".into(),
+            started_at: 1,
+        });
+        let rows = app.panel_lines(80, 30).0;
+        assert!(
+            rows.len() == 1 && rows[0].contains("tui") && rows[0].contains("review the diff"),
+            "busy resident row: {rows:?}"
+        );
+        assert!(
+            thinking(&app),
+            "thinking indicator while a resident handles a command"
+        );
+        assert_eq!(app.running_n(), 1, "runningN counts the busy resident");
+
+        app.apply(UiEvent::ResidentBusy {
+            role: "tui".into(),
+            busy: false,
+            prompt: String::new(),
+            started_at: 0,
+        });
+        assert!(
+            app.panel_lines(80, 30).0.is_empty(),
+            "finished resident leaves the list"
+        );
+        assert!(!thinking(&app), "finished resident: no indicator");
+        assert_eq!(app.running_n(), 0, "runningN after finish");
     }
 
     #[test]

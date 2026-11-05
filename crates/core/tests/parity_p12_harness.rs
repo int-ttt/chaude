@@ -419,7 +419,4 @@ fn set_rate_top_level_fallback() {
 parity_ignored! {
     // p1 (missing rows)
     max_workers_cap_refuses = "parity: N-A in Go, checkWorkerCap (dispatch.go:35) has no production caller; only dispatch_test.go:87,91 call it. Production admit evicts (dispatch.go admit ~53, Rust child_set.rs:147). Refusal proxy: child_set.rs admit_refuses_when_nothing_evictable (child_set.rs:339)";
-
-    // p2 (missing rows)
-    resident_running_list_shows_only_busy_sessions = "parity: residentRepl running list has no pub Rust seam; AgentTracker::running at crates/core/src/agent_store.rs:777";
 }

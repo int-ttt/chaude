@@ -3091,18 +3091,12 @@ fn coder_task_emits_resident_busy_bracket_before_reply() {
     let (h, rx) = Engine::start(cfg);
     h.coder("rename the helper");
     let evs = until_coder_reply(&rx);
-    let on = evs.iter().position(|e| {
-        *e == UiEvent::ResidentBusy {
-            role: "coder".into(),
-            busy: true,
-        }
-    });
-    let off = evs.iter().position(|e| {
-        *e == UiEvent::ResidentBusy {
-            role: "coder".into(),
-            busy: false,
-        }
-    });
+    let on = evs.iter().position(
+        |e| matches!(e, UiEvent::ResidentBusy { role, busy: true, .. } if role == "coder"),
+    );
+    let off = evs.iter().position(
+        |e| matches!(e, UiEvent::ResidentBusy { role, busy: false, .. } if role == "coder"),
+    );
     let reply = evs
         .iter()
         .position(|e| matches!(e, UiEvent::CoderReply { .. }));
