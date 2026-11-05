@@ -52,3 +52,4 @@
 - [install] 2026-11-02 PR #1 closed by user; recorded via ours-merge 0ce88cf, only .gitattributes/.gitignore applied.
 - [deprecate] 261103 (main thread brief): deprecated/ (Go) kept through the 5 releases after 0.10.0; delete in the 6th release after 0.10.0. Go binary still shipped; Rust workspace at repo root in progress. Notice in README.md/README.ko.md, deprecated/README.md; open item in notes/OPEN.md.
 - [tidy] 261103: prototype/chaude-rs -> deprecated/prototype/chaude-rs (own [workspace], root exclude dropped); e2e/ -> tests/e2e; tools/job_monitor.py -> scripts/; .chaude/ gitignored. platform_setup/install.* kept (not duplicates of root install.*).
+- [disk] 2026-11-05 user: workspace disk cap 15GB (repo+target); ~69GB free after temp cleanup.
