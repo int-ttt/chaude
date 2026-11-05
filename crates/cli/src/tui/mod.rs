@@ -3189,6 +3189,58 @@ mod tests {
         assert_eq!(rows[more], "  … 1-3/5 (마우스 휠로 스크롤)");
     }
 
+    // Port of TestSessionPanelAndThinking (panel_test.go:17), panel part; the thinking row is covered in bar.rs.
+    #[test]
+    fn session_panel_lists_running_agents_and_clears_when_done() {
+        let mut app = App::new(60, 20);
+        assert_eq!(app.panel_lines(60, 20), (vec![], vec![]));
+        let mut row = agent_row("a1", false, false);
+        row.task = "fix bug".into();
+        row.prompt = "\nFirst line\nsecond".into();
+        app.apply(UiEvent::AgentRows {
+            rows: vec![row.clone()],
+        });
+        let (fg, _) = app.panel_lines(60, 20);
+        assert_eq!(fg.len(), 1, "{fg:?}");
+        assert!(
+            fg[0].contains("fix bug") && !fg[0].contains("second"),
+            "{fg:?}"
+        );
+        row.done = true;
+        app.apply(UiEvent::AgentRows { rows: vec![row] });
+        assert_eq!(app.panel_lines(60, 20), (vec![], vec![]));
+    }
+
+    // Port of TestAgentStatusFormat (panel_test.go:340), panel row part: a background row shows the status text.
+    #[test]
+    fn background_panel_row_shows_status_text() {
+        let mut app = App::new(120, 20);
+        let mut row = agent_row("a1", true, false);
+        row.task = "버그 수정".into();
+        row.name = "fixer".into();
+        row.model = "haiku".into();
+        app.apply(UiEvent::AgentRows { rows: vec![row] });
+        let (_, bg) = app.panel_lines(120, 20);
+        assert_eq!(bg.len(), 1, "{bg:?}");
+        assert!(bg[0].contains("●"), "{bg:?}");
+        assert!(
+            render::strip_sgr(&bg[0]).contains("실행 중-haiku-fixer(버그 수정)"),
+            "{bg:?}"
+        );
+    }
+
+    // Port of TestInputWrapWide (input_test.go:30), wide-cell wrap and cursor; the Up-key row move is not covered here.
+    #[test]
+    fn input_wraps_wide_cells_and_places_cursor() {
+        let mut app = App::new(60, 20);
+        app.editor.insert_str("가나다라마");
+        let (rows, r, c) = app.input_rows(6);
+        assert_eq!(rows, vec!["가나다".to_string(), "라마".to_string()]);
+        assert_eq!((r, c), (1, 4));
+        app.editor.insert_str("x");
+        assert_eq!(app.input_rows(6).0.len(), 2);
+    }
+
     #[test]
     fn click_on_a_panel_row_opens_that_agent() {
         let mut app = App::new(60, 20);
