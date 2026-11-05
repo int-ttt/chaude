@@ -4061,6 +4061,59 @@ mod tests {
         assert_eq!(rec.log, vec!["Looking around", "● Bash(ls)"]);
     }
 
+    // Go TestAgentViewClickReadOnlyClose (agentview_test.go:21-54): a left press on the "worker" panel row opens the
+    // view; typed text and Enter are dropped; esc closes; ctrl+t reopens; q closes without typing.
+    #[test]
+    fn agentview_click_read_only_close() {
+        let mut app = App::new(80, 30);
+        // AgentStart feeds the view record; AgentRows feeds the panel row (the engine sends both).
+        app.apply(UiEvent::AgentStart {
+            id: "w1".to_string(),
+            description: "worker".to_string(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentRows {
+            rows: vec![AgentRow {
+                name: "worker".to_string(),
+                ..agent_row("w1", false, false)
+            }],
+        });
+        app.apply(UiEvent::AgentLog {
+            id: "w1".to_string(),
+            lines: vec!["SUBLINE".to_string()],
+        });
+        // The panel row carries the "●" dot; the status bar also names the agent but has no dot.
+        let rows = plain_frame(&app, 80, 30);
+        let row = rows
+            .iter()
+            .position(|r| r.contains('●') && r.contains("worker"))
+            .expect("worker panel row");
+        assert!(app.panel_click(row as u16), "{rows:?}");
+        assert_eq!(app.av.as_ref().map(|v| v.id.as_str()), Some("w1"));
+        assert!(
+            plain_frame(&app, 80, 30)
+                .iter()
+                .any(|r| r.contains("SUBLINE")),
+            "view shows the agent log"
+        );
+        app.on_key(key(KeyCode::Char('h'), KeyModifiers::NONE));
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.editor.is_empty(), "typing is dropped");
+        assert!(app.queue_texts.is_empty(), "Enter queues nothing");
+        assert!(app.av.is_some(), "typing keeps the view open");
+        app.on_key(key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.av.is_none(), "esc closes");
+        app.on_key(key(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert_eq!(
+            app.av.as_ref().map(|v| v.id.as_str()),
+            Some("w1"),
+            "ctrl+t reopens"
+        );
+        app.on_key(key(KeyCode::Char('q'), KeyModifiers::NONE));
+        assert!(app.av.is_none(), "q closes");
+        assert!(app.editor.is_empty(), "q is not typed");
+    }
+
     #[test]
     fn agent_end_adds_the_done_line() {
         let mut app = App::new(80, 24);
