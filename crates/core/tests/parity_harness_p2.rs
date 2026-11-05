@@ -212,6 +212,9 @@ fn resident_coder_slot_reuse_spawns_no_extra() {
     let lines: Vec<&str> = pids.lines().collect();
     assert_eq!(lines.len(), 2, "{pids}");
     assert!(lines.iter().all(|l| l.ends_with(" base")), "{pids}");
+    // Reuse means the same base child served both tasks, not a respawned one.
+    let pid_of = |l: &str| l.split(' ').next().unwrap().to_string();
+    assert_eq!(pid_of(lines[0]), pid_of(lines[1]), "{pids}");
     assert!(!pids.contains(" extra"), "{pids}");
     h.shutdown();
 }
