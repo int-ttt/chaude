@@ -17,7 +17,7 @@ pub const CODER_REPLY_FORMAT: &str = "\n\n[reply] End with `status: done|partial
 pub const CODER_RULE: &str = "For important files (main code, user documents) call the resident_coder tool: one resident haiku-coder, same session, long context. For lookups and small edits use Task haiku-scout / haiku-batch-worker.";
 
 // Go residentSlots: the four always-on slots as (role, model). main runs on the active model, the rest on haiku.
-// Mirror table only: the engine still hardcodes these roles (api.rs prompter, tui, coder), so nothing reads it yet.
+// The engine builds its slot table from this (api.rs State::resident_slots) and spawns each role with its model.
 pub fn resident_slots(main_model: &str) -> Vec<(&'static str, String)> {
     vec![
         ("main", main_model.to_string()),

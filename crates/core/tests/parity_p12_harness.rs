@@ -10,7 +10,7 @@ use chaude_core::agent_store::AgentTracker;
 use chaude_core::clients::{ClientRec, ClientRegistry, EXPIRED, PARKED, now_stamp};
 use chaude_core::mcp;
 use chaude_core::record_folder;
-use chaude_core::resident::{self, agent_body};
+use chaude_core::resident::agent_body;
 use chaude_core::turn_spend::TurnSpend;
 use serde_json::{Value, json};
 use std::fs;
@@ -326,19 +326,6 @@ fn prune_record_files() {
         .unwrap();
     record_folder::prune_record_files(&root, 30, now).unwrap();
     assert!(!empty.exists(), "empty project folder kept");
-}
-
-// Go TestResidentSlotsFour (resident_test.go:44): four slots in order, main on the given model, the rest haiku.
-// Proxy: checks the resident::resident_slots mirror table, not the engine's live slots.
-#[test]
-fn resident_slots_fixed_four() {
-    let slots = resident::resident_slots("opus");
-    let roles: Vec<&str> = slots.iter().map(|(role, _)| *role).collect();
-    assert_eq!(roles, ["main", "prompter", "tui", "coder"]);
-    assert_eq!(slots[0].1, "opus", "main model");
-    for (role, model) in &slots[1..] {
-        assert_eq!(model, "haiku", "{role} model");
-    }
 }
 
 // Go TestSetRateLogsOnFiveHourChange (ratestatus_test.go:12): a "rate" row only when the five-hour

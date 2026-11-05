@@ -102,6 +102,7 @@ esac
 printf '%s\n' "$role" >> 'DIR/spawned.log'
 [ "$role" = prompter ] && [ -f 'DIR/prompter.idle' ] && cat 'DIR/prompter.idle'
 [ "$role" = main ] && printf '%s\n' "$*" >> 'DIR/args.log'
+printf '%s %s\n' "$role" "$(printf '%s' "$*" | tr '\n' ' ')" >> 'DIR/role_args.log'
 [ "$role" = main ] && printf '%s %s\n' "$$" "$*" >> 'DIR/main.pids'
 while IFS= read -r line; do
   if [ "$role" = coder ]; then
@@ -2092,6 +2093,44 @@ fn residents_spawn_eagerly_with_main_four_slots() {
     let mut roles: Vec<&str> = spawned.lines().collect();
     roles.sort_unstable();
     assert_eq!(roles, ["coder", "main", "prompter", "tui"], "{spawned}");
+    h.shutdown();
+}
+
+// Go TestResidentSlotsFour (resident_test.go:44), driven through the engine: four slots start, main on cfg.model,
+// prompter, tui and coder on haiku.
+#[test]
+fn resident_slots_fixed_four() {
+    let _g = lock();
+    let f = fake("slots_four", &["resume_agent_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.model = "opus".to_string();
+    cfg.cwd = Some(f.dir.clone());
+    let (h, _rx) = Engine::start(cfg);
+    let log = f.dir.join("role_args.log");
+    let t0 = Instant::now();
+    loop {
+        let n = fs::read_to_string(&log).unwrap_or_default().lines().count();
+        if n >= 4 || t0.elapsed() > Duration::from_secs(10) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    // A fifth spawn would show up within this grace; none may.
+    thread::sleep(Duration::from_millis(300));
+    let text = fs::read_to_string(&log).unwrap_or_default();
+    let mut roles: Vec<&str> = text.lines().filter_map(|l| l.split(' ').next()).collect();
+    roles.sort_unstable();
+    assert_eq!(roles, ["coder", "main", "prompter", "tui"], "{text}");
+    for line in text.lines() {
+        let (role, args) = line.split_once(' ').unwrap();
+        let want = if role == "main" { "opus" } else { "haiku" };
+        let toks: Vec<&str> = args.split_whitespace().collect();
+        assert!(
+            toks.windows(2).any(|w| w == ["--model", want]),
+            "{role} not on {want}: {args}"
+        );
+    }
     h.shutdown();
 }
 

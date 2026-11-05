@@ -36,7 +36,8 @@ use crate::record::{self, Stamp};
 use crate::record_turn::{self, RecordState};
 use crate::resident::{
     CODER_REPLY_FORMAT, CODER_RULE, CODER_TIMEOUT, PROMPTER_RULE, Prompter, PrompterOutcome,
-    StagePhase, agent_body, prompter_notice, summarize_reply, tui_notice, tui_prompt,
+    StagePhase, agent_body, prompter_notice, resident_slots, summarize_reply, tui_notice,
+    tui_prompt,
 };
 use crate::resume_group;
 use crate::rotate::{
@@ -676,6 +677,8 @@ struct State {
     owned: Vec<String>,
     // Last session id each resident role reported on a result line (Go resident_sessions). Live roles only.
     resident_sids: BTreeMap<String, String>,
+    // Go residentSlots: the slots this run starts (main, prompter, tui, coder); empty with residents off.
+    resident_slots: Vec<(&'static str, String)>,
     // Session a resident role starts with (`--resume`), decided at start by handoff::resume_mode; taken on spawn.
     resume_pending: BTreeMap<String, String>,
     // Last context tokens each resident role reported (Go per-role ctx), kept for the live handoff.
@@ -960,6 +963,12 @@ fn actor(
     if let Some(store) = &agent_store {
         store.interrupt_running(false);
     }
+    // Go repl.go:1354 residentSlots(a.Model): the table the resident spawns read. Empty when residents are off.
+    let slots = if cfg.residents {
+        resident_slots(&cfg.model)
+    } else {
+        Vec::new()
+    };
     let clients = wire_clients(&cfg);
     let metrics = Arc::new(Metrics::new(
         cfg.metrics_dir.clone(),
@@ -1017,6 +1026,7 @@ fn actor(
         sid: String::new(),
         owned: Vec::new(),
         resident_sids: BTreeMap::new(),
+        resident_slots: slots,
         resume_pending,
         role_ctx: BTreeMap::new(),
         mcp_cfg: None,
@@ -1543,7 +1553,7 @@ impl State {
     fn spawn_prompter(&mut self) -> Result<(), String> {
         self.resident_sids.remove("prompter");
         let opts = SpawnOpts {
-            model: "haiku".to_string(),
+            model: self.resident_model("prompter"),
             resume: self.resume_pending.remove("prompter"),
             max_budget_usd: 0.0,
             shape: Shape {
@@ -1633,7 +1643,7 @@ impl State {
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
         let rule = self.agent_rule(&cwd, "haiku-tui");
         let opts = SpawnOpts {
-            model: "haiku".to_string(),
+            model: self.resident_model("tui"),
             resume: self.resume_pending.remove("tui"),
             max_budget_usd: 0.0,
             shape: Shape {
@@ -1700,15 +1710,29 @@ impl State {
         }
     }
 
-    // Go spawnResident: after the main child starts, the prompter, tui and base coder start and stay parked.
-    // A failed spawn is left to its first use, which reports it.
+    // Go spawnResident: after the main child starts, the prompter, tui and base coder start and stay parked,
+    // in slot-table order (main is already up). A failed spawn is left to its first use, which reports it.
     fn spawn_residents(&mut self) {
         if self.coders.is_empty() {
             self.coders.resize_with(1, Coder::default);
         }
-        let _ = self.spawn_prompter();
-        let _ = self.spawn_tui();
-        let _ = self.spawn_coder(0);
+        let roles: Vec<&'static str> = self.resident_slots.iter().map(|(r, _)| *r).collect();
+        for role in roles {
+            let _ = match role {
+                "prompter" => self.spawn_prompter(),
+                "tui" => self.spawn_tui(),
+                "coder" => self.spawn_coder(0),
+                _ => Ok(()),
+            };
+        }
+    }
+
+    // Go residentSlots model of a role. A role outside the table (coder2..) is haiku, as Go coderSlot.
+    fn resident_model(&self, role: &str) -> String {
+        self.resident_slots
+            .iter()
+            .find(|(r, _)| *r == role)
+            .map_or_else(|| "haiku".to_string(), |(_, m)| m.clone())
     }
 
     // Go residentSlots coder: haiku with the haiku-coder agent body, the coder tools, strict MCP and no slash commands.
@@ -1717,7 +1741,7 @@ impl State {
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
         let rule = self.agent_rule(&cwd, "haiku-coder");
         let opts = SpawnOpts {
-            model: "haiku".to_string(),
+            model: self.resident_model(&coder_role(i)),
             resume: self.resume_pending.remove(&coder_role(i)),
             max_budget_usd: 0.0,
             shape: Shape {
