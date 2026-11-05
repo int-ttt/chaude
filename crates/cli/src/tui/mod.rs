@@ -2278,6 +2278,16 @@ fn ime_col_shift(ime: Option<String>, emulator: Option<String>) -> i32 {
     0
 }
 
+// Whether draw() hides the hardware cursor (it is still parked for IME). Default: hidden under JediTerm only.
+// CHAUDE_IME_HIDE=1 always hides, CHAUDE_IME_HIDE=0 never hides (shown cursor, for IME placement tests).
+fn hide_cursor_for(hide: Option<String>, emulator: Option<String>) -> bool {
+    match hide.as_deref().map(str::trim) {
+        Some("1") => true,
+        Some("0") => false,
+        _ => emulator.as_deref() == Some("JetBrains-JediTerm"),
+    }
+}
+
 // How far the body's rows moved since the last draw, so the terminal can scroll them instead of repainting:
 // k > 0 means the content moved up k rows (new lines at the tail), k < 0 means it moved down. 0 when no clean shift.
 fn body_shift(prev: &[String], rows: &[String], body_h: usize) -> isize {
@@ -2643,8 +2653,10 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         std::env::var("CHAUDE_IME_SHIFT").ok(),
         std::env::var("TERMINAL_EMULATOR").ok(),
     );
-    app.hide_cursor =
-        std::env::var("TERMINAL_EMULATOR").ok().as_deref() == Some("JetBrains-JediTerm");
+    app.hide_cursor = hide_cursor_for(
+        std::env::var("CHAUDE_IME_HIDE").ok(),
+        std::env::var("TERMINAL_EMULATOR").ok(),
+    );
     if let Some(imp) = startup {
         app.show_import(&imp);
         engine.install_import(imp);
@@ -3696,6 +3708,17 @@ mod tests {
             -1
         );
         assert_eq!(ime_col_shift(Some("x".into()), None), 0);
+    }
+
+    #[test]
+    fn hide_cursor_default_is_jediterm_only_and_env_overrides_it() {
+        let jediterm = Some("JetBrains-JediTerm".to_string());
+        assert!(!hide_cursor_for(None, None));
+        assert!(hide_cursor_for(None, jediterm.clone()));
+        assert!(!hide_cursor_for(Some("0".into()), jediterm.clone()));
+        assert!(hide_cursor_for(Some(" 1 ".into()), None));
+        assert!(!hide_cursor_for(Some("x".into()), None));
+        assert!(hide_cursor_for(Some("x".into()), jediterm));
     }
 
     #[test]
