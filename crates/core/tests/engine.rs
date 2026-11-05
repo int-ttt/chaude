@@ -13,6 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
+use chaude_core::clients::{ClientRegistry, PARKED};
 use chaude_core::handoff;
 use chaude_core::import_claude::ClaudeImport;
 use chaude_core::resident::StagePhase;
@@ -101,6 +102,7 @@ esac
 printf '%s\n' "$role" >> 'DIR/spawned.log'
 [ "$role" = prompter ] && [ -f 'DIR/prompter.idle' ] && cat 'DIR/prompter.idle'
 [ "$role" = main ] && printf '%s\n' "$*" >> 'DIR/args.log'
+[ "$role" = main ] && printf '%s %s\n' "$$" "$*" >> 'DIR/main.pids'
 while IFS= read -r line; do
   if [ "$role" = coder ]; then
     case "$line" in
@@ -280,6 +282,38 @@ fn live_streaming_multiple_deltas() {
     assert_eq!(deltas.len(), 30, "one TextDelta per streamed delta");
     let expected: String = (1..=30).map(|i| format!("{i} ")).collect();
     assert_eq!(deltas.concat(), expected, "streamed text in order");
+    h.shutdown();
+}
+
+// Go TestChildPIDRecordedOnPark (budget_test.go:145-160): parking the active child writes its pid into the registry row.
+// The engine starts the configured opus child; a tagged line switches to haiku, which parks the opus child.
+#[test]
+fn child_pid_recorded_on_park() {
+    let _g = lock();
+    let f = fake("park-pid", &["text_turn.jsonl"]);
+    // Mode f routes lines. The router reads CHAUDE_ORCH once, when the engine is built.
+    // SAFETY: set before Engine::start and removed after the run; other engine tests are serialized by lock().
+    unsafe { std::env::set_var("CHAUDE_ORCH", "f") };
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("[ws:a] first");
+    until_idle(&rx);
+    // SAFETY: see set_var above.
+    unsafe { std::env::remove_var("CHAUDE_ORCH") };
+    // Each main child logs "pid args"; the opus child is the one started with --model opus.
+    let log = wait_for(&f.dir.join("main.pids"), "--model opus");
+    let opus_pid: u32 = log
+        .lines()
+        .find(|l| l.contains("--model opus"))
+        .and_then(|l| l.split(' ').next())
+        .expect("opus child pid")
+        .parse()
+        .unwrap();
+    let rec = ClientRegistry::new(f.dir.join("clients.json"))
+        .get(".", "opus")
+        .expect("parked opus row");
+    assert_eq!(rec.state, PARKED, "{rec:?}");
+    assert_ne!(rec.child_pid, 0, "{rec:?}");
+    assert_eq!(rec.child_pid, opus_pid, "{rec:?}");
     h.shutdown();
 }
 
