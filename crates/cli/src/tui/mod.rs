@@ -128,6 +128,8 @@ pub struct App {
     agent_src: Option<Arc<Mutex<Vec<AgentRow>>>>,
     // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
     agent_rows: Vec<AgentRow>,
+    // Go lastRun: running count (running_n) at the last refresh; the idle tick skips when it is unchanged and not busy.
+    last_run: usize,
     // Agents an earlier harness left unfinished, listed after the running rows (UiEvent::AgentsRestored).
     restored_rows: Vec<AgentRow>,
     // Agent-view log by agent tool id (UiEvent::AgentLog; Go agentRec.log, newest MAX_AGENT_LOG lines).
@@ -246,6 +248,7 @@ impl App {
             agents: Vec::new(),
             bg_agents: Vec::new(),
             agent_rows: Vec::new(),
+            last_run: 0,
             agent_src: None,
             restored_rows: Vec::new(),
             agent_logs: HashMap::new(),
@@ -601,7 +604,10 @@ impl App {
                 self.transcript.push(format!("{GREY_ON}{notice}{FG_OFF}"));
             }
             // Go agentRows / m.queue: the panels and the queue are redrawn from these lists each frame.
-            UiEvent::AgentRows { rows } => self.agent_rows = rows,
+            UiEvent::AgentRows { rows } => {
+                self.agent_rows = rows;
+                self.last_run = self.running_n();
+            }
             UiEvent::AgentsRestored { rows } => self.restored_rows = rows,
             UiEvent::AgentLog { id, lines } => {
                 agentview::push_log(self.agent_logs.entry(id).or_default(), lines)
@@ -656,9 +662,15 @@ impl App {
     // Records the time for elapsed counters and the spinner (Go spinner: one frame per 125 ms).
     pub fn tick(&mut self, now: Instant) {
         self.clock = now;
-        // Go tick refresh: re-read the agent list and relayout. Rust lays out per frame, so the list is enough.
+        // Go tick gate (tui.go:454): re-read the agent list only while busy or when the running count moved since
+        // the last refresh. Rust lays out per frame, so the list is enough.
         if let Some(src) = &self.agent_src {
-            self.agent_rows = src.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let live = src.lock().unwrap_or_else(|e| e.into_inner());
+            let n = live.iter().filter(|r| !r.done).count() + self.resident_busy.len();
+            if self.busy || n != self.last_run {
+                self.agent_rows = live.clone();
+                self.last_run = n;
+            }
         }
         // Go quiet(): one notice after a quiet stretch with no open tool call (Agent/Task calls are waited for).
         let quiet_for = self.quiet_since.map(|since| now.duration_since(since));
@@ -1498,8 +1510,7 @@ impl App {
 
     // Go panelLines / bgLines: the foreground agent rows (below the input box) and the background rows under
     // them. Only running agents show; the panel above takes its rows out of the room the background panel gets.
-    // Go runningN (tui.go:1445): running agents plus busy resident sessions. Only the tests read it.
-    #[cfg(test)]
+    // Go runningN (tui.go:1445): running agents plus busy resident sessions.
     fn running_n(&self) -> usize {
         self.agent_rows.iter().filter(|r| !r.done).count() + self.resident_busy.len()
     }
@@ -3520,6 +3531,40 @@ mod tests {
             !after.iter().any(|r| r.contains("task b1")),
             "finished background row leaves the panel on idle tick: {after:?}"
         );
+    }
+
+    // Go tick gate (tui.go:454): the idle tick re-reads the list only while busy or when the running count moved
+    // since the last refresh (lastRun). Same-count edits are skipped when idle and shown when busy.
+    #[test]
+    fn idle_tick_gate_skips_unless_busy_or_count_moved() {
+        let list = Arc::new(Mutex::new(vec![agent_row("b1", true, false)]));
+        let mut app = App::new(80, 30);
+        app.set_agent_source(Arc::clone(&list));
+        app.tick(Instant::now());
+        assert_eq!(app.agent_rows[0].task, "task b1", "count 0 -> 1 fires");
+
+        list.lock().unwrap()[0].task = "edited".into();
+        app.tick(Instant::now());
+        assert_eq!(
+            app.agent_rows[0].task, "task b1",
+            "idle, count same: skipped"
+        );
+
+        app.apply(UiEvent::Busy(true));
+        app.tick(Instant::now());
+        assert_eq!(app.agent_rows[0].task, "edited", "busy: fires");
+
+        list.lock().unwrap()[0].task = "edited again".into();
+        app.apply(UiEvent::Busy(false));
+        app.tick(Instant::now());
+        assert_eq!(
+            app.agent_rows[0].task, "edited",
+            "idle again, count same: skipped"
+        );
+
+        list.lock().unwrap()[0].done = true;
+        app.tick(Instant::now());
+        assert!(app.agent_rows[0].done, "idle, count 1 -> 0: fires");
     }
 
     #[test]
