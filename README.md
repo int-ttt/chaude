@@ -68,7 +68,7 @@ Installs to `/usr/local/bin/chaude`. The directory is created if missing. `sudo`
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.1 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.2 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -205,7 +205,7 @@ The installers read these environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `CHAUDE_VERSION` | Version to install (default: latest), for example `v0.11.1` |
+| `CHAUDE_VERSION` | Version to install (default: latest), for example `v0.11.2` |
 | `CHAUDE_REPO` | GitHub repo to install from (default: `int-ttt/chaude`) |
 | `GH_TOKEN`, `GITHUB_TOKEN` | Optional token for rate limits or private forks. `gh auth token` is used when neither is set |
 

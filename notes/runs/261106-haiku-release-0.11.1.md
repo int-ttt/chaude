@@ -1,5 +1,5 @@
 task: release chaude 0.11.1 (same procedure as 0.11.0)
-status: in progress
+status: done
 checks:
 - cargo test --workspace: PASS (725 passed, 0 failed)
 - cargo clippy --all-targets: PASS (0 warnings)

@@ -68,7 +68,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.1 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.2 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -205,7 +205,7 @@ REPL 주요 플래그(`chaude repl`):
 
 | 변수 | 뜻 |
 |---|---|
-| `CHAUDE_VERSION` | 설치할 버전(기본값: 최신), 예: `v0.11.1` |
+| `CHAUDE_VERSION` | 설치할 버전(기본값: 최신), 예: `v0.11.2` |
 | `CHAUDE_REPO` | 설치할 GitHub 저장소(기본값: `int-ttt/chaude`) |
 | `GH_TOKEN`, `GITHUB_TOKEN` | 요청 제한이나 비공개 포크에 쓰는 선택 토큰. 둘 다 없으면 `gh auth token`을 씁니다 |
 

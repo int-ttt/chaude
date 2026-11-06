@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.11.2 - 2026-11-06
+- Docs: README effect analysis is updated (long vs short project), with the ping-pong ratio, and the line-3 wording is revised (EN and KO).
+  - 문서: README(EN/KO)의 사용 효과 분석을 갱신했습니다(긴 프로젝트 vs 짧은 프로젝트, 핑퐁 비율). 3번째 줄 문구도 다듬었습니다.
+- Agents: `sonnet-drafter` is added for story, game and important writing. `haiku-drafter` stays the default.
+  - 에이전트: 스토리·게임·중요 문서 작성용 `sonnet-drafter`를 추가했습니다. 기본값은 `haiku-drafter`입니다.
+- TUI: wrapped agent rows keep the `│` bar on every line, including the last one.
+  - TUI: 줄이 넘어간 에이전트 행은 마지막 줄을 포함해 모든 줄에 `│` 막대를 유지합니다.
+
 ## 0.11.1 - 2026-11-06
 - TUI: agents resumed with SendMessage are shown back in the agent list, and running rows are yellow.
   - TUI: SendMessage로 재개된 에이전트를 에이전트 목록에 다시 표시하고, 실행 중인 행은 노란색으로 표시합니다.
