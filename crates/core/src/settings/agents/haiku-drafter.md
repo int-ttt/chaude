@@ -1,6 +1,6 @@
 ---
 name: haiku-drafter
-description: Haiku. Writes and revises prose in place - documents, reports, essays, answers, READMEs, posts - in the user's voice, with exact length limits when given; applies changes to every version/copy and self-verifies. Continue the same instance per workstream.
+description: Haiku. Default prose writer: writes and revises documents, reports, answers, READMEs, posts in place, in the user's voice, with exact length limits when given; applies changes to every version/copy and self-verifies. Continue the same instance per workstream. Use sonnet-drafter only if the user names it or the context is story, game, or important writing.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: haiku
 effort: medium

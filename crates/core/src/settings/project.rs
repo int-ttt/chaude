@@ -79,6 +79,10 @@ pub const AGENTS: &[(&str, &[u8])] = &[
         "opus-architect.md",
         include_bytes!("agents/opus-architect.md"),
     ),
+    (
+        "sonnet-drafter.md",
+        include_bytes!("agents/sonnet-drafter.md"),
+    ),
 ];
 
 /// Package copies of the repo's .claude/hooks scripts. The binary carries them, so an installed chaude needs no

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse hook: the main (Opus) conversation only listens, decides, and delegates.
 Work tools are blocked unless the call comes from a subagent (agent_id present).
+Agent|Task from the main thread may only call haiku-* agents, opus-architect, claude-code-guide, or sonnet-drafter.
 Off in normal mode (type 일반모드, or start with CLAUDE_LEAN=0); CLAUDE_ALLOW_MAIN_TOOLS=1 still works."""
 import json, os, sys
 for _s in (sys.stdin, sys.stdout, sys.stderr):
@@ -15,6 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run 
 from _lean import lean_off
 
 WORK_TOOLS = {"Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Grep", "Glob", "WebSearch", "WebFetch"}
+AGENT_TOOLS = {"Agent", "Task"}
+MAIN_AGENTS = {"opus-architect", "claude-code-guide", "sonnet-drafter"}  # plus any haiku-* name
 
 try:
     data = json.load(sys.stdin)
@@ -25,6 +28,15 @@ if os.environ.get("CHAUDE_ORCH", "").strip().lower() == "e":
 if lean_off() or os.environ.get("CLAUDE_ALLOW_MAIN_TOOLS") == "1" or data.get("agent_id"):
     sys.exit(0)
 tool = data.get("tool_name", "")
+if tool in AGENT_TOOLS:
+    kind = str((data.get("tool_input") or {}).get("subagent_type") or "")
+    if not (kind.startswith("haiku-") or kind in MAIN_AGENTS):
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": f"Main session may only call haiku-* agents or opus-architect, not {kind or 'the default general-purpose agent'}. Delegate: search->haiku-scout, code->haiku-coder, writing->haiku-drafter, verify->haiku-checker, bulk->haiku-batch-worker. If the user wants you to work directly, tell them to type 일반모드."
+        }}, ensure_ascii=False))
+    sys.exit(0)
 if tool in WORK_TOOLS:
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",

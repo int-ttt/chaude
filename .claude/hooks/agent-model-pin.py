@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """PreToolUse hook (Agent|Task): every subagent runs on the model its name says.
 
-- haiku-* / opus-* agents: a `model` passed by the main thread is removed, so the agent file's
+- haiku-* / opus-* / sonnet-drafter agents: a `model` passed by the main thread is removed, so the agent file's
   `model:` line always wins (per-call model would otherwise override it).
 - Built-in general-purpose / Explore / Plan from the main thread: denied (they carry a large default prompt);
   the reason names the haiku-* agent to use. claude-code-guide is allowed and pinned to Haiku.
 - Called from inside a subagent (Opus handing work down): only haiku-* agents are allowed (v0.8.2).
   The opus caller check runs before lean_off(), so it also applies in default mode.
-- haiku-prompter (loop owner): main thread only; it may call opus-architect/haiku-*. (sonnet tier removed 2026-10-31.)
+- haiku-prompter (loop owner): main thread only; it may call opus-architect/haiku-*. (Sonnet: only sonnet-drafter, for story/game/important writing.)
 - Other agents (the user's own) are left alone. No-op in normal mode otherwise."""
 import json, os, re, sys
 for _s in (sys.stdin, sys.stdout, sys.stderr):
@@ -83,7 +83,7 @@ if kind in BLOCKED:
                                                   "design/judgment: decide in the main thread (Haiku main only: opus-architect)."}}))
     sys.exit(0)
 asked = inp.get("model")
-if kind.startswith(("haiku-", "opus-")):
+if kind.startswith(("haiku-", "opus-")) or kind == "sonnet-drafter":
     if not asked:
         sys.exit(0)
     del inp["model"]
