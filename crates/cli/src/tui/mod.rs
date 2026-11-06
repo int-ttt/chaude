@@ -2100,9 +2100,15 @@ fn hang_split(line: &str, linked: bool) -> (usize, usize) {
         i += n;
     }
     let leads: &[(&str, usize)] = if linked {
-        &[("● ", 2), ("> ", 2), ("  ⎿  ", 5), ("  ", 2)]
+        &[
+            ("● ", 2),
+            ("> ", 2),
+            ("  ⎿  ", 5),
+            (AGENT_PREFIX, 4),
+            ("  ", 2),
+        ]
     } else {
-        &[("● ", 2), ("  ⎿  ", 5)]
+        &[("● ", 2), ("  ⎿  ", 5), (AGENT_PREFIX, 4)]
     };
     for (lead, hang) in leads {
         if line[i..].starts_with(lead) {
@@ -2124,7 +2130,12 @@ fn wrap_row(line: &str, w: usize, linked: bool) -> Vec<String> {
     } else {
         render::wrap_cells(text, tw)
     };
-    let pad = " ".repeat(hang);
+    // An agent row's continuation rows repeat its "│" bar rather than blank padding.
+    let pad = if head == AGENT_PREFIX {
+        AGENT_PREFIX.to_string()
+    } else {
+        " ".repeat(hang)
+    };
     wrapped
         .split('\n')
         .enumerate()
@@ -4209,6 +4220,22 @@ mod tests {
         );
         // A pane too narrow for the lead plus two cells wraps without the hang.
         assert_eq!(plain(wrap_row("● ffff", 3, true)), vec!["● f", "fff"]);
+    }
+
+    // An agent row's wrapped rows all keep the "│" bar at column 0, the last row included (no corner glyph).
+    #[test]
+    fn agent_wrapped_rows_keep_bar() {
+        let plain = |rows: Vec<String>| -> Vec<String> {
+            rows.iter().map(|r| render::strip_sgr(r)).collect()
+        };
+        assert_eq!(
+            plain(wrap_row(&format!("{AGENT_PREFIX}aaaaaaaaaa"), 8, false)),
+            vec!["  │ aaaa", "  │ aaaa", "  │ aa"]
+        );
+        assert_eq!(
+            plain(wrap_row(&format!("{AGENT_PREFIX}bbbbbbbbbb"), 8, true)),
+            vec!["  │ bbbb", "  │ bbbb", "  │ bb"]
+        );
     }
 
     // The unfinished assistant line hangs like the finished ones: "● " first, "  " once the block has a line.
