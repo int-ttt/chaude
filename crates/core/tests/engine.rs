@@ -200,6 +200,30 @@ fn wait_for(path: &Path, needle: &str) -> String {
     }
 }
 
+// The pid of the main child started with --model opus. Each spawn writes its own role_args.<pid>.log, so the
+// name gives the pid without reading main.pids: two spawns appending long argv lines to that shared file can
+// interleave bytes and tear the line the opus pid is on.
+fn opus_child_pid(dir: &Path) -> u32 {
+    let t0 = Instant::now();
+    loop {
+        for e in fs::read_dir(dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Some(pid) = name
+                .strip_prefix("role_args.")
+                .and_then(|s| s.strip_suffix(".log"))
+            else {
+                continue;
+            };
+            let text = fs::read_to_string(e.path()).unwrap_or_default();
+            if text.starts_with("main ") && text.contains(" --model opus ") {
+                return pid.parse().expect("pid in role_args file name");
+            }
+        }
+        assert!(t0.elapsed() < WAIT, "no opus child in {}", dir.display());
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn control(evs: &[UiEvent]) -> Vec<UiEvent> {
     evs.iter()
         .filter(|e| {
@@ -300,17 +324,14 @@ fn child_pid_recorded_on_park() {
     until_idle(&rx);
     // SAFETY: see set_var above.
     unsafe { std::env::remove_var("CHAUDE_ORCH") };
-    // Each main child logs "pid args"; the opus child is the one started with --model opus.
-    let log = wait_for(&f.dir.join("main.pids"), "--model opus");
-    let opus_pid: u32 = log
-        .lines()
-        .find(|l| l.contains("--model opus"))
-        .and_then(|l| l.split(' ').next())
-        .expect("opus child pid")
-        .parse()
-        .unwrap();
+    let opus_pid = opus_child_pid(&f.dir);
+    // An engine without a cwd option keys its clients by the absolute process cwd (Go r.a.Cwd), not ".".
+    let cwd = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let rec = ClientRegistry::new(f.dir.join("clients.json"))
-        .get(".", "opus")
+        .get(&cwd, "opus")
         .expect("parked opus row");
     assert_eq!(rec.state, PARKED, "{rec:?}");
     assert_ne!(rec.child_pid, 0, "{rec:?}");
@@ -529,6 +550,7 @@ fn can_use_tool_in_default_mode_asks_ui_and_sends_answer() {
     let _g = lock();
     let f = fake("perm", &["permission_turn.jsonl"]);
     let (h, rx) = Engine::start(config(&f));
+    h.set_mode("default");
     h.submit("rm it");
     let evs = until_idle(&rx);
     assert!(
@@ -544,6 +566,24 @@ fn can_use_tool_in_default_mode_asks_ui_and_sends_answer() {
     assert!(log.contains(r#""request_id":"perm-1""#), "{log}");
     assert!(log.contains(r#""behavior":"allow""#), "{log}");
     assert!(log.contains("rm -rf x"), "{log}");
+    h.shutdown();
+}
+
+// Go repl.go start(): the harness starts in auto, so a can_use_tool request is allowed without a UI prompt.
+#[test]
+fn engine_starts_in_auto_mode_and_allows_without_prompt() {
+    let _g = lock();
+    let f = fake("perm-auto", &["permission_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("rm it");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::PermissionRequest { .. })),
+        "{evs:?}"
+    );
+    let log = wait_for(&f.dir.join("stdin.log"), "control_response");
+    assert!(log.contains(r#""behavior":"allow""#), "{log}");
     h.shutdown();
 }
 
@@ -1239,7 +1279,7 @@ fn mode_without_name_reports_current_mode() {
     assert_eq!(
         ev,
         UiEvent::ModeChanged {
-            mode: "default".into()
+            mode: "auto".into()
         }
     );
     h.shutdown();
@@ -1259,6 +1299,7 @@ fn plain_mode_denies_idle_permission_ask_with_notice() {
         ..config(&f)
     };
     let (h, rx) = Engine::start(cfg);
+    h.set_mode("default");
     h.submit("hi");
     let evs = until_idle(&rx);
     assert!(
@@ -1321,6 +1362,7 @@ fn pending_permission_is_dropped_when_turn_is_abandoned() {
         ..config(&f)
     };
     let (h, rx) = Engine::start(cfg);
+    h.set_mode("default");
     h.submit("rm it");
     let mut evs = Vec::new();
     loop {

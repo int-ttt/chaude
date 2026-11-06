@@ -1065,7 +1065,8 @@ fn actor(
         delegations: 0,
         result_usage: None,
         result_model_usage: None,
-        mode: PermMode::Default,
+        // Go repl.go start(): the harness starts in auto (same as claude --permission-mode auto).
+        mode: PermMode::Auto,
         pending_perm: HashMap::new(),
         budget,
         last_api: None,
@@ -3168,12 +3169,18 @@ impl State {
     // commands and empty replies are skipped by RecordState). A failed write is reported as an Error.
     // Go clearMark: a /clear splits /resume groups at this time, in the record dir of cwd.
     fn clear_mark(&self) {
-        let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
+        let cwd = self.engine_cwd();
         let root = self.record_root(&cwd);
         let cwd_text = cwd.to_string_lossy();
         if let Err(e) = resume_group::clear_mark_now(&root, &cwd_text) {
             self.emit(UiEvent::Error(format!("clear mark failed: {e}")));
         }
+    }
+
+    // Go recordProjectName: the cwd is absolute (os.Getwd when unset). A "." fallback would name the
+    // record folder "misc" and key /clear marks differently from the absolute cwd /resume reads.
+    fn engine_cwd(&self) -> PathBuf {
+        resolve_cwd(self.opts.cwd.clone())
     }
 
     // Record root: Config.record_dir when set (tests and the CLI override), else Go recordDir for cwd.
@@ -3197,7 +3204,7 @@ impl State {
         let Some(stamp) = local_stamp() else {
             return;
         };
-        let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
+        let cwd = self.engine_cwd();
         let root = self.record_root(&cwd);
         if let Err(e) = self.record.save(&root, &cwd, &self.turn_prompt, &stamp) {
             self.emit(UiEvent::Error(format!("record save failed: {e}")));
@@ -3911,12 +3918,9 @@ impl State {
         self.upsert_live(child_pid, String::new());
     }
 
-    // Go r.a.Cwd as text; "." when the engine has no cwd option.
+    // Go r.a.Cwd as text: the absolute engine cwd (current dir when the engine has no cwd option).
     fn client_cwd(&self) -> String {
-        self.opts
-            .cwd
-            .as_ref()
-            .map_or_else(|| ".".to_string(), |p| p.to_string_lossy().into_owned())
+        self.engine_cwd().to_string_lossy().into_owned()
     }
 
     fn emit_status(&self, cost_usd: f64) {
@@ -4234,10 +4238,28 @@ fn lexically_clean(p: &Path) -> PathBuf {
     out
 }
 
+// Go recordProjectName: an unset cwd resolves to the process cwd (os.Getwd), never ".".
+fn resolve_cwd(cwd: Option<PathBuf>) -> PathBuf {
+    cwd.or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::{TempDir, isolated};
+
+    // Unset cwd resolves to an absolute path (not "."), so the record folder is not "misc".
+    #[test]
+    fn unset_cwd_resolves_to_absolute_dir() {
+        let got = resolve_cwd(None);
+        assert!(got.is_absolute(), "cwd must be absolute: {got:?}");
+        assert_ne!(crate::record_folder::folder_name(&got), "misc");
+        assert_eq!(
+            resolve_cwd(Some(PathBuf::from("/src/app"))),
+            PathBuf::from("/src/app")
+        );
+    }
 
     // Go TestCoderPermissionOnlyWhenBusy: idle denied, busy allowed inside cwd, outside cwd denied, Bash idle denied.
     #[test]

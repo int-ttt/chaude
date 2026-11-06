@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.11.6 - 2026-11-06
+- Permissions: the harness starts in `auto` mode, as the Go harness did, so tool calls no longer prompt on start. The TUI bar shows the same mode the engine runs.
+  - 권한: 하네스가 Go 하네스와 같이 `auto` 모드로 시작하므로, 시작 직후 도구 호출에서 더 이상 권한 확인을 묻지 않습니다. TUI 막대는 엔진이 실제로 쓰는 모드를 표시합니다.
+- Resume: a session started from an unset cwd is saved under the project folder name, not `misc`, and `/clear` marks use the absolute cwd, so `/resume` finds them.
+  - 재개: cwd가 지정되지 않은 세션은 `misc`가 아니라 프로젝트 폴더 이름으로 저장되며, `/clear` 표시도 절대 cwd로 기록하므로 `/resume`이 찾을 수 있습니다.
+- Tests: the flaky `child_pid_recorded_on_park` test no longer reads a shared pid list that parallel fake spawns could interleave (test-only change).
+  - 테스트: 불안정하던 `child_pid_recorded_on_park` 테스트가 병렬 가짜 spawn이 섞을 수 있는 공유 pid 목록을 더 이상 읽지 않습니다 (테스트만 변경).
+
 ## 0.11.5 - 2026-11-06
 - Engine: on Windows, a running agent's pid is checked with `OpenProcess` and `GetExitCodeProcess`, so a live agent is no longer marked dead.
   - 엔진: Windows에서 실행 중인 에이전트의 pid를 `OpenProcess`와 `GetExitCodeProcess`로 확인하여, 살아 있는 에이전트를 죽은 것으로 표시하지 않습니다.

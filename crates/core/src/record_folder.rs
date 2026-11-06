@@ -256,6 +256,9 @@ mod tests {
         assert_eq!(project_name(Path::new("/src/My Project")), "My-Project");
         assert_eq!(project_name(Path::new("/src/.hidden")), "hidden");
         assert_eq!(project_name(Path::new("/src/...")), "misc");
+        // A "." cwd has no basename: it must not be used as the project folder of an unset cwd.
+        assert_eq!(project_name(Path::new(".")), "misc");
+        assert_eq!(project_name(Path::new("/src/app")), "app");
         assert_eq!(
             project_dir(Path::new("/r/record"), Path::new("/src/app")),
             PathBuf::from("/r/record/app")

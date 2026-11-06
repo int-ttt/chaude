@@ -533,6 +533,20 @@ mod tests {
         assert!(load_clear_marks(&d.path().join("none"), "/w/a").is_empty());
     }
 
+    // The save side (clear_mark_now) and the /resume read side must key marks by the same absolute cwd.
+    #[test]
+    fn clear_mark_saved_under_absolute_cwd_is_read_back() {
+        let d = TempDir::new("rg-mark-abs");
+        let cwd = std::env::current_dir()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        clear_mark_now(d.path(), &cwd).unwrap();
+        let marks = load_clear_marks(&clear_mark_path(d.path()), &cwd);
+        assert_eq!(marks.len(), 1, "one /clear mark for the absolute cwd");
+        assert!(load_clear_marks(&clear_mark_path(d.path()), ".").is_empty());
+    }
+
     #[test]
     fn group_list_reports_missing_sessions_and_no_match() {
         let t0 = t0();
