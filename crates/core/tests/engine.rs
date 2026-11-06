@@ -914,6 +914,30 @@ fn stored_running_agent_is_restored_at_startup_and_cleared_by_next_line() {
 }
 
 #[test]
+fn stored_agent_summary_is_its_restored_agent_view_body() {
+    let _g = lock();
+    let f = fake("agent-restore-summary", &["text_turn.jsonl"]);
+    // Go restore: an interrupted agent keeps its saved summary as the "(restored)" log line.
+    // owner_pid 4000000 is no live process, so startup marks the stored running agent interrupted.
+    fs::write(
+        f.dir.join("agents.json"),
+        r#"[{"id":"toolu_pre2","status":"running","task":"scan repo","summary":"found 3 files","background":true,"owner_pid":4000000,"started":"1970-01-01T00:00:00.000Z","updated":"1970-01-01T00:00:00.000Z"}]"#,
+    )
+    .unwrap();
+    let (h, rx) = Engine::start(config(&f));
+    let mut log = None;
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::AgentLog { id, lines } if id == "toolu_pre2" => log = Some(lines),
+            UiEvent::AgentsRestored { .. } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(log, Some(vec!["(restored) found 3 files".to_string()]));
+    h.shutdown();
+}
+
+#[test]
 fn silent_turn_emits_still_running_notice_and_never_interrupts() {
     let _g = lock();
     // No output for 2.5 s with no open tool_use: the 1 s timer fires, notices, and leaves the turn alone.

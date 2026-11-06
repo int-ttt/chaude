@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 use crate::agent_store::{
-    AgentStore, STO_DONE, STO_RUNNING, SavedAgent, last_summary, sub_event_lines,
+    AgentStore, STO_DONE, STO_INTERRUPTED, STO_RUNNING, SavedAgent, last_summary, sub_event_lines,
 };
 use crate::budget::{self, Budget};
 use crate::cache_ttl::observed_ttl;
@@ -2814,16 +2814,23 @@ impl State {
     // Go restoreAgents (repl.go:1205, agentstore.go:221): recent interrupted agents of earlier runs are listed
     // below the running rows until the next user line.
     fn restore_agents_at_start(&mut self) {
-        let rows: Vec<AgentRow> = self
+        let saved = self
             .agent_store
             .as_ref()
             .map(|s| s.load(""))
-            .unwrap_or_default()
-            .iter()
-            .map(restored_row)
-            .collect();
+            .unwrap_or_default();
+        let rows: Vec<AgentRow> = saved.iter().map(restored_row).collect();
         if rows.is_empty() {
             return;
+        }
+        // Go restore (agentview): an interrupted agent's saved summary is its agent-view body, marked "(restored)".
+        for s in saved.iter().filter(|s| {
+            (s.status == STO_INTERRUPTED || s.status == STO_RUNNING) && !s.summary.is_empty()
+        }) {
+            self.emit(UiEvent::AgentLog {
+                id: s.id.clone(),
+                lines: vec![format!("(restored) {}", s.summary)],
+            });
         }
         self.restored_rows = rows.clone();
         self.emit(UiEvent::AgentsRestored { rows });
@@ -2870,6 +2877,8 @@ impl State {
         s.name = info.session_name.clone();
         s.task = info.task.clone();
         s.prompt = info.prompt.clone();
+        // Go persistLocked: the last text line is kept as the summary the restored agent view shows.
+        s.summary = info.last_text.clone();
         s.background = info.background;
         s.agent_id = info.agent_id.clone();
         store.put(&[s]);

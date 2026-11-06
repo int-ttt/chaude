@@ -98,8 +98,40 @@ fn alive_after_kill(ok: bool, errno: Option<i32>) -> bool {
     ok || errno != Some(ESRCH)
 }
 
+// Windows: OpenProcess with query-only access, then GetExitCodeProcess reports STILL_ACTIVE while the process runs.
+// A failed open reads as dead unless it is ERROR_ACCESS_DENIED (the pid exists under another user).
+#[cfg(windows)]
+mod win {
+    use std::ffi::c_void;
+
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const ERROR_ACCESS_DENIED: u32 = 5;
+    const STILL_ACTIVE: u32 = 259;
+
+    unsafe extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+        fn GetExitCodeProcess(process: *mut c_void, code: *mut u32) -> i32;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+        fn GetLastError() -> u32;
+    }
+
+    pub fn pid_alive(pid: u32) -> bool {
+        // SAFETY: OpenProcess takes no pointers; a non-null handle is closed below.
+        let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if h.is_null() {
+            return unsafe { GetLastError() } == ERROR_ACCESS_DENIED;
+        }
+        let mut code = 0u32;
+        // SAFETY: h is a live handle and code is a valid out pointer.
+        let ok = unsafe { GetExitCodeProcess(h, &mut code) } != 0;
+        // SAFETY: h came from OpenProcess and is closed exactly once.
+        unsafe { CloseHandle(h) };
+        // When the query fails, keep the pid as alive: only a confirmed exit reads as dead.
+        !ok || code == STILL_ACTIVE
+    }
+}
+
 // Go pidAlive. kill(pid, 0) sends no signal: only ESRCH reads as dead, EPERM reads as alive (not ours).
-// Windows always reports not-alive (there is no kill -0 there, so the check is skipped).
 pub fn pid_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
@@ -114,7 +146,11 @@ pub fn pid_alive(pid: u32) -> bool {
         let ok = unsafe { kill(pid, 0) } == 0;
         alive_after_kill(ok, io::Error::last_os_error().raw_os_error())
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        win::pid_alive(pid)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = pid;
         false
@@ -520,6 +556,13 @@ mod tests {
             "EPERM: exists, owned by another user"
         );
         assert!(!alive_after_kill(false, Some(ESRCH)));
+    }
+
+    #[test]
+    fn pid_alive_own_pid_portable() {
+        assert!(pid_alive(std::process::id()));
+        assert!(!pid_alive(0));
+        assert!(!pid_alive(u32::MAX));
     }
 
     #[cfg(unix)]

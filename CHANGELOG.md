@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Engine: on Windows, a running agent's pid is checked with `OpenProcess` and `GetExitCodeProcess`, so a live agent is no longer marked dead.
+  - 엔진: Windows에서 실행 중인 에이전트의 pid를 `OpenProcess`와 `GetExitCodeProcess`로 확인하여, 살아 있는 에이전트를 죽은 것으로 표시하지 않습니다.
+- Agents: a finished agent keeps its last text as its summary, and the restored agent view shows it as `(restored)` after a restart.
+  - 에이전트: 끝난 에이전트는 마지막 텍스트를 요약으로 보관하며, 재시작 후 복원된 에이전트 화면에 `(restored)`로 표시합니다.
 
 ## 0.11.4 - 2026-11-06
 - Hooks: new `bash-py-guard.py` (Bash matcher) denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `os.replace`, `shutil.copy`, `fs.writeFile*`). Read-only Python and `python3 -m pytest` stay allowed. Fresh projects and existing `settings.json` get it too.
