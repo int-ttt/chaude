@@ -20,6 +20,16 @@ pub const SESS_ROWS: usize = 5;
 // Go ownSessionList: shown when this process has no Claude Code session yet.
 pub const NO_OWN: &str = "no Claude Code sessions from this chaude session yet";
 
+// A sub-agent's place in its session's tree (its transcript sits in <session>/subagents/).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AgentRef {
+    // The Agent tool's subagent_type, e.g. "haiku-coder"; empty when neither the launch nor the meta names it.
+    pub kind: String,
+    pub description: String,
+    // 1 for a sub-agent the session spawned, 2 for one a sub-agent spawned, and so on.
+    pub depth: usize,
+}
+
 // One Claude Code transcript (Go sessionInfo; the fields /view and the list need).
 #[derive(Clone, Debug)]
 pub struct SessionInfo {
@@ -31,12 +41,20 @@ pub struct SessionInfo {
     pub last: String,
     // The model of the session's assistant turns (the first one), e.g. "claude-haiku-5-5"; empty if none.
     pub model: String,
+    // None for a session file; Some for a sub-agent transcript listed under its parent.
+    pub agent: Option<AgentRef>,
 }
 
-// Go readClaudeTranscript, user prompts only. A user text event that is not meta or sidechain starts a
-// turn; a plain string starts a new turn unless it begins with "<", and array text fills the turn only
-// while it is still empty. Assistant events and the rest of the transcript are not needed here.
+// Go readClaudeTranscript, user prompts only (sub-agent transcripts are all sidechain; see parse_turns).
 pub fn parse_prompts(content: &str) -> Vec<String> {
+    parse_turns(content, false)
+}
+
+// The user prompts of a transcript. With sidechain false, sidechain events are skipped (a session file);
+// with true they count (a sub-agent file, whose only events are sidechain). A user text event that is not
+// meta starts a turn; a plain string starts a new turn unless it begins with "<", and array text fills the
+// turn only while it is still empty. Assistant events and the rest of the transcript are not needed here.
+fn parse_turns(content: &str, sidechain: bool) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     for line in content.lines() {
@@ -47,7 +65,7 @@ pub fn parse_prompts(content: &str) -> Vec<String> {
             continue;
         };
         if ev["type"] != "user"
-            || ev["isSidechain"].as_bool() == Some(true)
+            || (!sidechain && ev["isSidechain"].as_bool() == Some(true))
             || ev["isMeta"].as_bool() == Some(true)
         {
             continue;
@@ -88,8 +106,12 @@ fn flush(out: &mut Vec<String>, cur: &mut String) {
 
 // Go readClaudeTranscript errors: an unreadable file, or no turns at all.
 pub fn read_prompts(path: &Path) -> Result<Vec<String>, String> {
+    read_turns(path, false)
+}
+
+fn read_turns(path: &Path, sidechain: bool) -> Result<Vec<String>, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    let prompts = parse_prompts(&String::from_utf8_lossy(&bytes));
+    let prompts = parse_turns(&String::from_utf8_lossy(&bytes), sidechain);
     if prompts.is_empty() {
         return Err(format!("no user/assistant turns in {}", path.display()));
     }
@@ -132,6 +154,7 @@ pub fn list_sessions(dir: &Path) -> Vec<SessionInfo> {
             first: one_line(&prompts[0]),
             last: one_line(prompts.last().map_or("", String::as_str)),
             model: parse_model(&content),
+            agent: None,
         });
     }
     out.sort_by_key(|s| std::cmp::Reverse(s.modified));
@@ -171,8 +194,8 @@ pub fn home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-// Go sessionList: the sessions of cwd's Claude Code project dir. Empty cwd means the process cwd.
-pub fn session_list(cwd: &str) -> Result<Vec<SessionInfo>, String> {
+// The Claude Code project dir of cwd. Empty cwd means the process cwd.
+pub fn session_dir(cwd: &str) -> Result<PathBuf, String> {
     let home = home_dir().ok_or_else(|| "$HOME is not defined".to_string())?;
     let cwd = if cwd.is_empty() {
         std::env::current_dir()
@@ -181,7 +204,12 @@ pub fn session_list(cwd: &str) -> Result<Vec<SessionInfo>, String> {
     } else {
         cwd.to_string()
     };
-    let dir = project_dir(&home, &cwd);
+    Ok(project_dir(&home, &cwd))
+}
+
+// Go sessionList: the sessions of cwd's Claude Code project dir.
+pub fn session_list(cwd: &str) -> Result<Vec<SessionInfo>, String> {
+    let dir = session_dir(cwd)?;
     let l = list_sessions(&dir);
     if l.is_empty() {
         return Err(format!("no Claude Code sessions in {}", dir.display()));
@@ -200,6 +228,217 @@ pub fn own_sessions(
         return Err(NO_OWN.to_string());
     }
     Ok(out)
+}
+
+// Session rows with each session's sub-agents right below it (subagent_list). `project` is the project dir.
+pub fn with_subagents(list: Vec<SessionInfo>, project: &Path) -> Vec<SessionInfo> {
+    let mut out = Vec::with_capacity(list.len());
+    for s in list {
+        let agents = subagent_list(project, &s);
+        out.push(s);
+        out.extend(agents);
+    }
+    out
+}
+
+// The sub-agents of one session: <project>/<session>/subagents/agent-<id>.jsonl, depth first under the agent
+// that spawned them, oldest first. The parent is the transcript holding the Agent call whose tool_result names
+// the agent; meta.json (parentAgentId, agentType, description) fills in what no launch gives. Agents without
+// prompts are not listed.
+pub fn subagent_list(project: &Path, session: &SessionInfo) -> Vec<SessionInfo> {
+    let Ok(entries) = std::fs::read_dir(project.join(&session.id).join("subagents")) else {
+        return Vec::new();
+    };
+    let mut files: Vec<(String, SystemTime, PathBuf, String)> = Vec::new();
+    for e in entries.flatten() {
+        let path = e.path();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let Some(id) = name
+            .strip_prefix("agent-")
+            .and_then(|n| n.strip_suffix(".jsonl"))
+        else {
+            continue;
+        };
+        let Ok(modified) = e.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let content = String::from_utf8_lossy(&bytes).into_owned();
+        files.push((id.to_string(), modified, path, content));
+    }
+    // Who launched whom: child agent id -> (parent transcript id, subagent_type, description).
+    let mut launched: HashMap<String, (String, String, String)> = HashMap::new();
+    let session_text = std::fs::read(&session.path)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
+    let transcripts = std::iter::once((session.id.as_str(), session_text.as_str())).chain(
+        files
+            .iter()
+            .map(|(id, _, _, text)| (id.as_str(), text.as_str())),
+    );
+    for (parent, text) in transcripts {
+        for (child, (kind, desc)) in launches(text) {
+            launched
+                .entry(child)
+                .or_insert((parent.to_string(), kind, desc));
+        }
+    }
+    let meta = |id: &str| -> serde_json::Value {
+        std::fs::read(
+            project
+                .join(&session.id)
+                .join("subagents")
+                .join(format!("agent-{id}.meta.json")),
+        )
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+    };
+    let mut found: Vec<(String, SessionInfo)> = Vec::new();
+    for (id, modified, path, content) in files {
+        let prompts = parse_turns(&content, true);
+        if prompts.is_empty() {
+            continue;
+        }
+        let m = meta(&id);
+        let (parent, kind, description) = launched.get(&id).cloned().unwrap_or_default();
+        let text_of = |key: &str| m[key].as_str().unwrap_or_default().to_string();
+        let parent = if parent.is_empty() {
+            m["parentAgentId"]
+                .as_str()
+                .unwrap_or(&session.id)
+                .to_string()
+        } else {
+            parent
+        };
+        let kind = if kind.is_empty() {
+            text_of("agentType")
+        } else {
+            kind
+        };
+        let description = if description.is_empty() {
+            text_of("description")
+        } else {
+            description
+        };
+        found.push((
+            parent,
+            SessionInfo {
+                id: id.clone(),
+                path,
+                modified,
+                turns: prompts.len(),
+                first: one_line(&prompts[0]),
+                last: one_line(prompts.last().map_or("", String::as_str)),
+                model: parse_model(&content),
+                agent: Some(AgentRef {
+                    kind,
+                    description,
+                    depth: 0,
+                }),
+            },
+        ));
+    }
+    // An agent whose parent is not listed (no prompts, or an unknown id) hangs under the session.
+    let ids: HashSet<String> = found.iter().map(|(_, s)| s.id.clone()).collect();
+    for (parent, _) in found.iter_mut() {
+        if *parent != session.id && !ids.contains(parent.as_str()) {
+            *parent = session.id.clone();
+        }
+    }
+    found.sort_by_key(|(_, s)| s.modified);
+    let mut kids: HashMap<String, Vec<SessionInfo>> = HashMap::new();
+    for (parent, s) in found {
+        kids.entry(parent).or_default().push(s);
+    }
+    let mut out = Vec::new();
+    push_tree(&session.id, 1, &mut kids, &mut out);
+    out
+}
+
+// Depth-first: each agent of `parent` (at `depth`), then the agents it spawned. Each agent is taken out of
+// `kids` once, so a parent cycle cannot recurse forever.
+fn push_tree(
+    parent: &str,
+    depth: usize,
+    kids: &mut HashMap<String, Vec<SessionInfo>>,
+    out: &mut Vec<SessionInfo>,
+) {
+    for mut s in kids.remove(parent).unwrap_or_default() {
+        let id = s.id.clone();
+        if let Some(a) = s.agent.as_mut() {
+            a.depth = depth;
+        }
+        out.push(s);
+        push_tree(&id, depth + 1, kids, out);
+    }
+}
+
+// The Agent calls of one transcript, keyed by the agent id their tool_result names:
+// agent id -> (subagent_type, description). The result text holds "agentId: <id>".
+fn launches(content: &str) -> HashMap<String, (String, String)> {
+    let mut by_tool: HashMap<String, (String, String)> = HashMap::new();
+    let mut out = HashMap::new();
+    for ev in content
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+    {
+        let Some(blocks) = ev["message"]["content"].as_array() else {
+            continue;
+        };
+        for b in blocks {
+            if b["type"] == "tool_use" && b["name"] == "Agent" {
+                let input = &b["input"];
+                let kind = input["subagent_type"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                let desc = input["description"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                if let Some(id) = b["id"].as_str() {
+                    by_tool.insert(id.to_string(), (kind, desc));
+                }
+            } else if b["type"] == "tool_result" {
+                let Some(agent) = agent_id_in(&block_text(&b["content"])) else {
+                    continue;
+                };
+                if let Some(launch) = b["tool_use_id"].as_str().and_then(|t| by_tool.get(t)) {
+                    out.insert(agent, launch.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+// The text of a tool_result content: a string, or the text blocks of an array.
+fn block_text(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(a) => a
+            .iter()
+            .filter_map(|b| b["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+// The agent id after "agentId: " in a tool_result text (ids are alphanumeric).
+fn agent_id_in(text: &str) -> Option<String> {
+    let rest = text.split("agentId: ").nth(1)?;
+    let id: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric())
+        .collect();
+    (!id.is_empty()).then_some(id)
 }
 
 // Go shortID: the first 8 characters of a session id.
@@ -300,7 +539,7 @@ impl SessView {
     // Go openSessPrompts: loads the prompts of list[i] and moves to level 2.
     pub fn open_prompts(&mut self, i: usize) -> Result<(), String> {
         let s = &self.list[i];
-        let prompts = read_prompts(&s.path).map_err(|e| format!("view: {e}"))?;
+        let prompts = read_turns(&s.path, s.agent.is_some()).map_err(|e| format!("view: {e}"))?;
         if prompts.is_empty() {
             return Err(format!("no prompts in session {}", short_id(&s.id)));
         }
@@ -327,11 +566,21 @@ impl SessView {
     }
 
     // Display name of a session: "<model>-<purpose>(<first prompt, 40 chars>)", e.g. "haiku-coder(Fix the build)".
+    // A sub-agent is "<subagent_type>(<description, 40 chars>)", e.g. "haiku-coder(Round 3 ...)".
     // Falls back to the 8-character id when the purpose or the model is unknown.
     pub fn name_of(&self, id: &str) -> String {
-        let s = self.list.iter().find(|s| s.id == id);
-        match (s, self.purposes.get(id)) {
-            (Some(s), Some(purpose)) if !s.model.is_empty() => {
+        let Some(s) = self.list.iter().find(|s| s.id == id) else {
+            return short_id(id);
+        };
+        if let Some(agent) = &s.agent {
+            return match (agent.kind.as_str(), agent.description.as_str()) {
+                ("", _) => short_id(id),
+                (kind, "") => kind.to_string(),
+                (kind, desc) => format!("{kind}({})", trunc_chars(desc, 40)),
+            };
+        }
+        match self.purposes.get(id) {
+            Some(purpose) if !s.model.is_empty() => {
                 let family = s
                     .model
                     .trim_start_matches("claude-")
@@ -444,7 +693,14 @@ impl SessView {
                 Err(_) => true,
             };
             let mark = if active { "● " } else { "  " };
-            let t = format!("{mark}{}  {}", self.name_of(&s.id), s.label());
+            // Go: a sub-agent sits two cells in per level of nesting under its parent.
+            let depth = s.agent.as_ref().map_or(0, |a| a.depth);
+            let t = format!(
+                "{mark}{}{}  {}",
+                "  ".repeat(depth),
+                self.name_of(&s.id),
+                s.label()
+            );
             out.push(if i == self.sel {
                 format!("{ORANGE_ON}{}{FG_OFF}", clip(&format!("> {t}"), width))
             } else {
@@ -834,6 +1090,7 @@ mod tests {
             first: first.into(),
             last: first.into(),
             model: model.into(),
+            agent: None,
         };
         let mut v = SessView {
             list: vec![
@@ -872,6 +1129,111 @@ mod tests {
             !rows.contains("sessaaa1"),
             "list shows the name, not the id: {rows}"
         );
+        // A sub-agent with neither launch nor meta (no subagent_type) keeps its 8-char id.
+        let agent = SessionInfo {
+            agent: Some(AgentRef {
+                kind: String::new(),
+                description: "no launch".into(),
+                depth: 1,
+            }),
+            ..info("agentzz9", "", "no launch")
+        };
+        v.list.push(agent);
+        assert_eq!(v.name_of("agentzz9"), "agentzz9");
+    }
+
+    // Real session cut from ~/.claude/projects (testdata/view_subagents): the Agent call and its tool_result
+    // name each agent, and the nested haiku-coder (spawned inside haiku-prompter's transcript) sits one level
+    // deeper. Its prompts open from its own transcript.
+    #[test]
+    fn subagents_are_named_from_the_launch_and_nest_under_their_parent() {
+        let root = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tui/testdata/view_subagents"
+        ));
+        let sessions = list_sessions(root);
+        assert_eq!(sessions.len(), 1, "one top-level session");
+        let list = with_subagents(sessions, root);
+        let ids: Vec<&str> = list.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                "9bbfbca7-3109-47f2-84f4-d6c4e268fa2a",
+                "a03d20cc60ceb17ef",
+                "a34c0230cc855700d"
+            ]
+        );
+        let mut v = SessView::open(list, "").unwrap();
+        assert_eq!(
+            v.name_of("a03d20cc60ceb17ef"),
+            "haiku-prompter(Loop: drain sink + idle gate, checker)"
+        );
+        assert_eq!(
+            v.name_of("a34c0230cc855700d"),
+            "haiku-coder(Round 3: verify loop4 R5 item2 role case)"
+        );
+        assert_eq!(v.list[1].agent.as_ref().unwrap().depth, 1);
+        assert_eq!(v.list[2].agent.as_ref().unwrap().depth, 2);
+        // Far-future now: every row is inactive, so the mark is blank and the indent is the only difference.
+        let later = SystemTime::now() + Duration::from_secs(365 * 24 * 3600);
+        let rows = v.list_lines(120, later).join("\n");
+        // Row = 2-cell gutter + 2-cell blank mark + 2 cells per level.
+        assert!(
+            rows.contains("      haiku-prompter(") && !rows.contains("        haiku-prompter("),
+            "depth 1 is indented two cells: {rows}"
+        );
+        assert!(
+            rows.contains("        haiku-coder(") && !rows.contains("          haiku-coder("),
+            "depth 2 is indented four cells: {rows}"
+        );
+        v.open_prompts(2).unwrap();
+        assert!(
+            v.turns.as_ref().unwrap()[0].starts_with("task: (a) commit"),
+            "the nested agent's prompt reads from its own transcript"
+        );
+    }
+
+    // Without the launch (its tool_use and tool_result are cut from the parent), meta.json still names the agent.
+    #[test]
+    fn meta_names_an_agent_whose_launch_is_missing() {
+        let src = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/tui/testdata/view_subagents"
+        ));
+        let sid = "9bbfbca7-3109-47f2-84f4-d6c4e268fa2a";
+        let dir = std::env::temp_dir().join(format!("chaude-view-meta-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let subs = dir.join(sid).join("subagents");
+        std::fs::create_dir_all(&subs).unwrap();
+        let session = std::fs::read_to_string(src.join(format!("{sid}.jsonl"))).unwrap();
+        let cut: String = session
+            .lines()
+            .filter(|l| !l.contains("toolu_01JggA5W2dudwT3XFPNPDCBt"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        std::fs::write(dir.join(format!("{sid}.jsonl")), cut).unwrap();
+        for f in [
+            "agent-a03d20cc60ceb17ef.jsonl",
+            "agent-a03d20cc60ceb17ef.meta.json",
+            "agent-a34c0230cc855700d.jsonl",
+            "agent-a34c0230cc855700d.meta.json",
+        ] {
+            std::fs::copy(src.join(sid).join("subagents").join(f), subs.join(f)).unwrap();
+        }
+        let sessions = list_sessions(&dir);
+        assert_eq!(sessions.len(), 1, "the cut session keeps its prompt");
+        let v = SessView::open(with_subagents(sessions, &dir), "").unwrap();
+        assert_eq!(
+            v.name_of("a03d20cc60ceb17ef"),
+            "haiku-prompter(Loop: drain sink + idle gate, checker)",
+            "from meta.json"
+        );
+        assert_eq!(
+            v.list[1].agent.as_ref().unwrap().depth,
+            1,
+            "no parentAgentId: under the session"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

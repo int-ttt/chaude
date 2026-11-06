@@ -2709,9 +2709,14 @@ impl State {
                     })
             });
         // agent_info stays after the agent ends, so a resume uses its start label, then the agent id.
-        let known = resume.and_then(|aid| {
-            let tool = self.agent_ids.get(&aid).cloned()?;
-            Some((tool, aid))
+        // An agent launched outside this process (earlier run or a sub-agent) has no launch id here: its resumed id keys the row.
+        let known = resume.map(|aid| {
+            let tool = self
+                .agent_ids
+                .get(&aid)
+                .cloned()
+                .unwrap_or_else(|| aid.clone());
+            (tool, aid)
         });
         if let Some((tool, aid)) = known {
             let description = self
@@ -2744,14 +2749,17 @@ impl State {
             id: id.clone(),
             ok: !is_error,
         });
+        // A handback launch result has "agentId: <id>" without the async mark: map it too, so a later SendMessage resolves to this row.
+        let launched_aid =
+            after_marker(&text, "agentId: ").filter(|_| self.agent_info.contains_key(&id));
+        if let Some(aid) = launched_aid {
+            self.agent_ids.insert(aid.clone(), id.clone());
+            if let Some(info) = self.agent_info.get_mut(&id) {
+                info.agent_id = aid;
+            }
+        }
         // A background agent keeps running after its launch result; it ends later, which E1 does not track.
         if text.contains(ASYNC_AGENT_MARK) {
-            if let Some(aid) = after_marker(&text, "agentId: ") {
-                self.agent_ids.insert(aid.clone(), id.clone());
-                if let Some(info) = self.agent_info.get_mut(&id) {
-                    info.agent_id = aid;
-                }
-            }
             if let Some(info) = self.agent_info.get_mut(&id) {
                 info.background = true;
             }

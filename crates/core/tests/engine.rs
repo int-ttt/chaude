@@ -2285,6 +2285,31 @@ fn resumed_background_agent_is_active_again_until_task_notification() {
 }
 
 #[test]
+fn handback_launch_agentid_lets_sendmessage_resume_show_a_panel_row() {
+    // Real a493e252 lines 50, 55, 72, 73, 88: the handback launch result has "agentId:" but no async mark.
+    let _g = lock();
+    let f = fake(
+        "handback_sm",
+        &["resume_handback_agentid_sendmessage.jsonl"],
+    );
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let launch = "toolu_01NkA89CjWG7xL4D21B2xLoj";
+    let resumed = evs.iter().position(|e| {
+        matches!(e, UiEvent::AgentResumed { id, send_id, .. }
+            if id == launch && send_id == "toolu_01ExYmkwiS5pQLaiwyAWHeY9")
+    });
+    assert!(resumed.is_some(), "{evs:?}");
+    let panel = evs[resumed.unwrap()..].iter().find_map(|e| match e {
+        UiEvent::AgentRows { rows } => Some(rows.iter().any(|r| r.id == launch)),
+        _ => None,
+    });
+    assert_eq!(panel, Some(true), "no panel row for resumed agent: {evs:?}");
+    h.shutdown();
+}
+
+#[test]
 fn resumed_agent_ends_by_notice_naming_its_sendmessage_id() {
     // The real resume's task-notification names the SendMessage tool id, not the Agent tool id.
     let _g = lock();
@@ -2324,6 +2349,34 @@ fn queued_send_opens_a_row_until_the_agent_notifies() {
         .iter()
         .any(|e| matches!(e, UiEvent::AgentResumed { send_id, .. } if send_id == "toolu_qsm"));
     assert!(names_send, "{evs:?}");
+    h.shutdown();
+}
+
+// Real resume of an agent launched outside this process (no launch in this run): the resumed id keys the row,
+// so the SendMessage call opens it and the agent's notice closes it.
+#[test]
+fn resume_of_an_agent_launched_elsewhere_still_opens_a_row() {
+    let _g = lock();
+    let f = fake(
+        "resume_unknown",
+        &["resume_unknown_launch_sendmessage.jsonl"],
+    );
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let ab = "ab5377649aa7c5a8f";
+    let resumed = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentResumed { id, send_id, .. } if id == ab && send_id == "toolu_sm"));
+    assert!(resumed, "{evs:?}");
+    let ended = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == ab));
+    assert!(ended, "{evs:?}");
+    let send_ends = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::ToolEnd { id, .. } if id == "toolu_sm"));
+    assert!(!send_ends, "{evs:?}");
     h.shutdown();
 }
 

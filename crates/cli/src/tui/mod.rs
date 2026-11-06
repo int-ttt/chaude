@@ -67,6 +67,8 @@ const MIN_VIEW_ROWS: usize = 3;
 // Reverse-video cell for the cursor (tui.go View, cursor style).
 const REV_ON: &str = "\x1b[7m";
 const WHEEL_LINES: isize = 3;
+// Drag edge auto-scroll step interval (crossterm reports drags only on movement, so a held edge needs a tick).
+const EDGE_TICK: Duration = Duration::from_millis(50);
 // Go copyNote lifetime (selection.go copyNoteMsg, 2s).
 const COPY_NOTE_TTL: Duration = Duration::from_secs(2);
 // Go defaultIdleNotice (repl.go:620): quiet time with no open tool call before the "still waiting" notice.
@@ -155,6 +157,8 @@ pub struct App {
     restored_rows: Vec<AgentRow>,
     // Agent-view log by agent tool id (UiEvent::AgentLog; Go agentRec.log, newest MAX_AGENT_LOG lines).
     agent_logs: HashMap<String, Vec<String>>,
+    // Finished agents of this run by id (Go tracker keeps them): the agent view lists them as 완료/실패 with their log.
+    finished_agents: HashMap<String, agentview::AgentRec>,
     // First agent row shown in the panels (Go panOff), moved by the wheel over them.
     pan_off: usize,
     // Last tool call of the running turn, cut to 40 runes (Go lastTool); the busy row shows it.
@@ -209,6 +213,8 @@ pub struct App {
     // Drag selection in body coordinates (wrapped body row as `line`, cell column as `col`); the Go textSel model.
     sel: render::TextSel,
     dragging: bool,
+    // Drag held on the body's top or bottom row (or below it): the view keeps scrolling every EDGE_TICK.
+    edge: Option<EdgeScroll>,
     // "복사됨 (N자)" or the copy error, shown on the status row for 2s (Go copyNote); the Instant is when it was set.
     copy_note: Option<(String, Instant)>,
     // Which mode the previous session loads with (session_mode_note), shown at start and by /view.
@@ -279,6 +285,7 @@ impl App {
             agent_src: None,
             restored_rows: Vec::new(),
             agent_logs: HashMap::new(),
+            finished_agents: HashMap::new(),
             pan_off: 0,
             last_tool: String::new(),
             queue_texts: Vec::new(),
@@ -317,6 +324,7 @@ impl App {
             perm: None,
             sel: render::TextSel::default(),
             dragging: false,
+            edge: None,
             copy_note: None,
             session_mode: None,
             this_run: BTreeSet::new(),
@@ -1242,6 +1250,10 @@ impl App {
         owned.extend(self.this_run.iter().cloned());
         let result = sessview::session_list(&self.welcome.cwd)
             .and_then(|all| sessview::own_sessions(all, &owned))
+            .and_then(|list| {
+                let project = sessview::session_dir(&self.welcome.cwd)?;
+                Ok(sessview::with_subagents(list, &project))
+            })
             .and_then(|list| sessview::SessView::open(list, arg));
         match result {
             Ok(mut sv) => {
@@ -1375,6 +1387,16 @@ impl App {
                     ..Default::default()
                 }),
         );
+        // Finished agents of this run stay listed as done, with their log (Go sortedAll keeps them).
+        recs.extend(
+            self.finished_agents
+                .values()
+                .filter(|r| self.agents.iter().all(|(id, _, _, _)| *id != r.id))
+                .map(|r| agentview::AgentRec {
+                    log: self.agent_logs.get(&r.id).cloned().unwrap_or_default(),
+                    ..r.clone()
+                }),
+        );
         agentview::sort_all(&mut recs);
         recs
     }
@@ -1474,6 +1496,22 @@ impl App {
     // line, else its task) come from the AgentEnd.
     fn agent_done(&mut self, id: &str, model: &str, name: &str, what: &str) {
         let failed = self.agent_outcome.remove(id);
+        // Keep the finished agent for the agent view (Go tracker keeps done agents; sortedAll lists them).
+        if let Some((_, desc, _, started_at)) = self.agents.iter().find(|(aid, _, _, _)| aid == id)
+        {
+            let rec = agentview::AgentRec {
+                id: id.to_string(),
+                task: desc.clone(),
+                name: desc.clone(),
+                model: model.to_string(),
+                failed,
+                done: true,
+                started: true,
+                started_at: *started_at,
+                ..Default::default()
+            };
+            self.finished_agents.insert(id.to_string(), rec);
+        }
         self.agents.retain(|(aid, _, _, _)| aid != id);
         self.bg_agents.retain(|aid| aid != id);
         // A resumed agent's timed row gets its end time and elapsed, like the other timed rows.
@@ -1805,6 +1843,7 @@ impl App {
 
     // Left press in the transcript starts a selection (Go selectMouse). Usage and the permission prompt keep the mouse.
     fn select_press(&mut self, x: u16, y: u16) {
+        self.edge = None;
         if self.usage.is_open() || self.perm.is_some() {
             return;
         }
@@ -1825,6 +1864,52 @@ impl App {
         if let Some(p) = self.body_at(x, y, true) {
             self.sel.head = p;
         }
+        let body_h = self.body_h(self.cols, self.rows);
+        // A repeat drag on the same edge keeps its schedule, so frequent movement does not speed the scroll up.
+        self.edge = edge_delta(y as usize, body_h).map(|delta| EdgeScroll {
+            delta,
+            x,
+            y,
+            next: match self.edge {
+                Some(e) if e.delta == delta => e.next,
+                _ => self.clock,
+            },
+        });
+    }
+
+    // One auto-scroll step when the edge timer is due. Stops at the content top (scrolling up) or the tail
+    // (scrolling down), when the pointer leaves the edge, and on release. The head follows the edge line.
+    fn edge_tick(&mut self, now: Instant) {
+        let Some(e) = self.edge else {
+            return;
+        };
+        if !self.dragging {
+            self.edge = None;
+            return;
+        }
+        if now < e.next {
+            return;
+        }
+        let view = self.rows.saturating_sub(self.chrome_len());
+        let start = self.start_row(self.total_rows(self.cols), view);
+        let at_end = if e.delta < 0 { start == 0 } else { self.follow };
+        if at_end {
+            self.edge = None;
+            return;
+        }
+        self.scroll(e.delta);
+        if let Some(p) = self.body_at(e.x, e.y, true) {
+            self.sel.head = p;
+        }
+        self.edge = Some(EdgeScroll {
+            next: now + EDGE_TICK,
+            ..e
+        });
+    }
+
+    // Time left until the next edge step, for the loop's wait timeout.
+    fn edge_wait(&self, now: Instant) -> Option<Duration> {
+        self.edge.map(|e| e.next.saturating_duration_since(now))
     }
 
     // Left release ends the drag. A drag over text returns that text to copy; a plain click returns None.
@@ -1834,6 +1919,7 @@ impl App {
         }
         self.select_drag(x, y);
         self.dragging = false;
+        self.edge = None;
         let text = self.selected_text();
         (!text.is_empty()).then_some(text)
     }
@@ -2728,6 +2814,7 @@ enum Wake {
     // Result of an off-thread job (/update), shown as a note.
     Note(String),
     // SIGINT or SIGTERM (see forward_signals): interrupts a running turn, ignored when idle (Go repl.go).
+    #[cfg(unix)]
     Signal,
     Closed,
 }
@@ -2789,6 +2876,36 @@ fn forward_signals(tx: mpsc::Sender<Wake>) -> io::Result<()> {
 #[cfg(not(unix))]
 fn forward_signals(_tx: mpsc::Sender<Wake>) -> io::Result<()> {
     Ok(())
+}
+
+// A drag held on the body's edge row keeps scrolling the view. Not in Go (Go clamps the head into the viewport).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EdgeScroll {
+    // Rows per step: negative scrolls up.
+    delta: isize,
+    // Last drag pointer, so the head follows the edge line as the view moves.
+    x: u16,
+    y: u16,
+    // When the next step is due.
+    next: Instant,
+}
+
+// Rows to scroll per step for a drag at screen row `y` of a `body_h`-row body: None inside the body.
+// The top row scrolls up 1 row per step; the bottom row scrolls down 1; rows below the body scroll down 3
+// (WHEEL_LINES). With a one-row body, row 0 counts as the top edge.
+fn edge_delta(y: usize, body_h: usize) -> Option<isize> {
+    if body_h == 0 {
+        return None;
+    }
+    if y == 0 {
+        Some(-1)
+    } else if y + 1 == body_h {
+        Some(1)
+    } else if y >= body_h {
+        Some(WHEEL_LINES)
+    } else {
+        None
+    }
 }
 
 // Blocks until a wake arrives (or `timeout` passes), then takes every queued wake too.
@@ -2928,6 +3045,11 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         } else {
             app.animating().then_some(TICK)
         };
+        // A drag held on the edge also wakes for its next auto-scroll step.
+        let timeout = match (timeout, app.edge_wait(Instant::now())) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
         let Some(batch) = wait_batch(&wakes, timeout) else {
             break;
         };
@@ -2937,6 +3059,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
             match wake {
                 Wake::Engine(ev) => app.apply(ev),
                 Wake::Note(text) => app.note(&text),
+                #[cfg(unix)]
                 Wake::Signal => {
                     if app.busy {
                         engine.interrupt(InterruptSource::Signal);
@@ -3006,6 +3129,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         }
         let now = Instant::now();
         app.tick(now);
+        app.edge_tick(now);
         if app.mouse != captured {
             if app.mouse {
                 execute!(out, MouseCellMotion(true))?;
@@ -3640,6 +3764,93 @@ mod tests {
         let recs = app.agent_recs();
         let rec = recs.iter().find(|r| r.id == "r").expect("restored agent");
         assert_eq!(rec.started_at, 1_700_000_000_000, "{rec:?}");
+    }
+
+    // Go tracker keeps a finished agent: it stays in the agent view as 완료 with its log.
+    #[test]
+    fn finished_agent_stays_in_the_agent_view_as_done() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "f1".into(),
+            description: "Scan repo".into(),
+            started_at: 1_700_000_000,
+        });
+        app.apply(UiEvent::AgentLog {
+            id: "f1".into(),
+            lines: vec!["step one".into()],
+        });
+        app.apply(UiEvent::AgentEnd {
+            id: "f1".into(),
+            elapsed_ms: 1000,
+            model: "haiku".into(),
+            name: "Scan repo".into(),
+            summary: "done".into(),
+        });
+        assert!(app.agents.iter().all(|(id, _, _, _)| id != "f1"));
+        let recs = app.agent_recs();
+        let rec = recs
+            .iter()
+            .find(|r| r.id == "f1")
+            .expect("finished agent kept");
+        assert!(rec.done && !rec.failed, "{rec:?}");
+        assert_eq!(rec.state(), bar::AgentState::Done, "{rec:?}");
+        assert_eq!(rec.log, vec!["step one".to_string()], "{rec:?}");
+        let av = agentview::AgentView::open_first(&recs).expect("finished agent opens");
+        assert_eq!(av.id, "f1");
+    }
+
+    // Real SendMessage resume of an agent launched outside this run (fixture resume_unknown_launch_sendmessage.jsonl):
+    // the engine names the row by the resumed id and the fallback label. The call's row and the agent's panel row show.
+    #[test]
+    fn resume_of_an_agent_launched_elsewhere_shows_a_row() {
+        let mut app = App::new(80, 24);
+        let (agent, send) = ("ab5377649aa7c5a8f", "toolu_sm");
+        let label = "agent ab537764";
+        app.apply(UiEvent::ToolStart {
+            id: send.into(),
+            name: "SendMessage".into(),
+            summary: agent.into(),
+        });
+        app.apply(UiEvent::AgentResumed {
+            id: agent.into(),
+            description: label.into(),
+            started_at: 0,
+            send_id: send.into(),
+        });
+        app.apply(UiEvent::AgentRows {
+            rows: vec![AgentRow {
+                task: label.into(),
+                name: label.into(),
+                background: true,
+                ..agent_row(agent, true, false)
+            }],
+        });
+        assert!(app.resume_rows.contains_key(agent), "resume row opens");
+        let rows = plain_frame(&app, 80, 24);
+        assert!(
+            rows.iter()
+                .any(|r| r.contains("SendMessage(ab5377649aa7c5a8f)")),
+            "{rows:?}"
+        );
+        assert!(
+            rows.iter().any(|r| r.contains(label)),
+            "panel row: {rows:?}"
+        );
+        let recs = app.agent_recs();
+        assert!(recs.iter().any(|r| r.id == agent && !r.done), "{recs:?}");
+        app.apply(UiEvent::AgentEnd {
+            id: agent.into(),
+            elapsed_ms: 1000,
+            model: "haiku".into(),
+            name: label.into(),
+            summary: "done".into(),
+        });
+        let rec = app
+            .agent_recs()
+            .into_iter()
+            .find(|r| r.id == agent)
+            .expect("ended agent kept");
+        assert!(rec.done, "{rec:?}");
     }
 
     #[test]
@@ -4558,6 +4769,7 @@ mod tests {
                 first: "Fix the build".into(),
                 last: "Fix the build".into(),
                 model: "claude-haiku-5-5".into(),
+                agent: None,
             }],
             purposes: HashMap::from([("sessaaa1".to_string(), "coder".to_string())]),
             id: "sessaaa1".into(),
@@ -5443,6 +5655,132 @@ mod tests {
     }
 
     #[test]
+    fn edge_delta_scrolls_on_the_edge_rows_and_three_rows_beyond() {
+        assert_eq!(edge_delta(0, 6), Some(-1));
+        assert_eq!(edge_delta(5, 6), Some(1));
+        assert_eq!(edge_delta(6, 6), Some(WHEEL_LINES));
+        assert_eq!(edge_delta(40, 6), Some(WHEEL_LINES));
+        assert_eq!(edge_delta(2, 6), None);
+        assert_eq!(edge_delta(0, 0), None);
+        // A one-row body: the row is both edges, and the top wins.
+        assert_eq!(edge_delta(0, 1), Some(-1));
+    }
+
+    // 20 lines in a 30x10 screen: a 6-row body (rows 0..=5 are edges), so row 2 is inside.
+    fn tall_app() -> App {
+        let mut app = App::new(30, 10);
+        for i in 0..20 {
+            app.transcript.push(format!("line {i}"));
+        }
+        assert_eq!(app.body_h(30, 10), 6);
+        app
+    }
+
+    #[test]
+    fn drag_on_the_top_row_scrolls_up_each_tick_and_extends_the_selection() {
+        let mut app = tall_app();
+        app.scroll_to(10);
+        let t0 = app.clock;
+        app.select_press(0, 3);
+        app.select_drag(0, 0);
+        // The drag itself is due at once: one row up, and the head is the new top row (content line 9).
+        app.edge_tick(t0);
+        assert_eq!(app.top, 9);
+        assert_eq!(app.sel.head.line, 9);
+        assert!(app.edge.is_some());
+        // Nothing happens before the next EDGE_TICK.
+        app.edge_tick(t0 + Duration::from_millis(49));
+        assert_eq!(app.top, 9);
+        app.edge_tick(t0 + EDGE_TICK);
+        assert_eq!(app.top, 8);
+        assert_eq!(app.sel.head.line, 8);
+    }
+
+    #[test]
+    fn drag_below_the_body_scrolls_down_three_rows_and_stops_at_the_tail() {
+        let mut app = tall_app();
+        let max = app.total_rows(30) - 6;
+        app.scroll_to(max - 2);
+        let t0 = app.clock;
+        app.select_press(0, 1);
+        app.select_drag(0, 8); // below the 6-row body
+        // Three rows down from max - 2 passes the last page: the view clamps to max and follows the tail.
+        app.edge_tick(t0);
+        assert_eq!(app.top, max);
+        assert!(app.follow);
+        assert_eq!(
+            app.sel.head.line,
+            max + 5,
+            "head is the last visible content row"
+        );
+        app.edge_tick(t0 + EDGE_TICK);
+        assert!(app.edge.is_none(), "the tail stops the scroll");
+        assert_eq!(app.top, max, "never past the last page");
+    }
+
+    #[test]
+    fn drag_on_the_bottom_row_scrolls_one_row_and_stops_at_the_top() {
+        let mut app = tall_app();
+        app.scroll_to(2);
+        let t0 = app.clock;
+        app.select_press(0, 4);
+        app.select_drag(0, 5);
+        app.edge_tick(t0);
+        assert_eq!(app.top, 3);
+        app.edge_tick(t0 + EDGE_TICK);
+        assert_eq!(app.top, 4);
+        // Now drag up to the top row and run out of content above.
+        app.select_drag(0, 0);
+        app.scroll_to(1);
+        app.edge_tick(t0 + 2 * EDGE_TICK);
+        assert_eq!(app.top, 0);
+        app.edge_tick(t0 + 3 * EDGE_TICK);
+        assert!(app.edge.is_none(), "the content top stops the scroll");
+        assert_eq!(app.top, 0);
+    }
+
+    #[test]
+    fn moving_back_inside_or_releasing_stops_the_edge_scroll() {
+        let mut app = tall_app();
+        app.scroll_to(10);
+        let t0 = app.clock;
+        app.select_press(0, 3);
+        app.select_drag(0, 5);
+        assert!(app.edge.is_some());
+        app.select_drag(0, 2); // back inside the body
+        assert!(app.edge.is_none());
+        app.edge_tick(t0 + EDGE_TICK);
+        assert_eq!(app.top, 10, "no scroll once the pointer is inside");
+
+        app.select_drag(0, 0);
+        assert!(app.edge.is_some());
+        let copied = app.select_release(0, 0);
+        assert!(copied.is_some(), "release copies the selection");
+        assert!(app.edge.is_none(), "release ends the edge scroll");
+        app.edge_tick(t0 + 2 * EDGE_TICK);
+        assert_eq!(app.top, 10, "no scroll after release");
+    }
+
+    #[test]
+    fn repeated_drags_on_the_same_edge_keep_the_step_schedule() {
+        let mut app = tall_app();
+        app.scroll_to(10);
+        let t0 = app.clock;
+        app.select_press(0, 3);
+        app.select_drag(0, 0);
+        app.edge_tick(t0);
+        assert_eq!(app.top, 9);
+        // Movement events on the same edge arrive faster than the tick: they must not add steps.
+        app.select_drag(1, 0);
+        app.edge_tick(t0 + Duration::from_millis(10));
+        assert_eq!(app.top, 9);
+        assert_eq!(
+            app.edge_wait(t0 + Duration::from_millis(10)),
+            Some(Duration::from_millis(40))
+        );
+    }
+
+    #[test]
     fn copy_note_shows_the_result_on_the_status_row_for_two_seconds() {
         let mut app = app_with_lines(3);
         app.copy_done(5, Ok(()));
@@ -5687,6 +6025,7 @@ mod tests {
                 first: korean.clone(),
                 last: "second".into(),
                 model: "claude-haiku-5-5".into(),
+                agent: None,
             };
             let list = vec![info("sessaaa1"), info("sessbbb2")];
             if level2 {

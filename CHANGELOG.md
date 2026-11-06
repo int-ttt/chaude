@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.11.4 - 2026-11-06
+- Hooks: new `bash-py-guard.py` (Bash matcher) denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `os.replace`, `shutil.copy`, `fs.writeFile*`). Read-only Python and `python3 -m pytest` stay allowed. Fresh projects and existing `settings.json` get it too.
+  - 훅: 새 `bash-py-guard.py`(Bash 매처)가 인라인 Python이나 node로 하는 파일 편집(`open(..., 'w')`, `write_text`, `os.replace`, `shutil.copy`, `fs.writeFile*`)을 거부합니다. 읽기 전용 Python과 `python3 -m pytest`는 그대로 허용합니다. 새 프로젝트와 기존 `settings.json` 모두 이 훅을 받습니다.
+- Agents: `sonnet-drafter` is renamed to `sonnet-writer` (agent file, hooks, CLAUDE.md, docs). Released sections keep the old name.
+  - 에이전트: `sonnet-drafter`의 이름을 `sonnet-writer`로 바꿨습니다(에이전트 파일, 훅, CLAUDE.md, 문서). 릴리스된 섹션은 이전 이름을 그대로 둡니다.
+- TUI: dragging the mouse past the top or bottom row of the transcript keeps scrolling and extends the selection (1 row per 50 ms at the edge, 3 rows past the pane). It stops at the content top or tail, when the pointer moves back inside, and on release.
+
 ## 0.11.3 - 2026-11-06
 - Release: the Go implementation under `deprecated/` is deleted, as planned (6th release after 0.10.0). Its CI jobs and release job are removed, and `platform_setup/install.sh` now builds the Rust `chaude`. The Go source stays in git history at tag `v0.11.2`.
   - 릴리스: 계획대로 `deprecated/` 아래의 Go 구현을 삭제했습니다(0.10.0 이후 6번째 릴리스). Go용 CI 작업과 릴리스 작업을 제거했고, `platform_setup/install.sh`는 이제 Rust `chaude`를 빌드합니다. Go 소스는 태그 `v0.11.2`의 git 이력에 남아 있습니다.

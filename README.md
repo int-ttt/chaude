@@ -23,6 +23,7 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 - Prompt history per project, saved in `.chaude/history.jsonl`. Search it with `chaude search-history`.
 - Import Claude Code sessions with `/import`, `/resume claude`, or `chaude --from-claude`.
 - Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing (0.9.14).
+- The Bash hook `bash-py-guard.py` denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `fs.writeFile*`). Read-only code and `python3 -m pytest` stay allowed (0.11.4).
 
 ## How it works
 
@@ -34,7 +35,8 @@ Opus is the main session. It reads your request, decides the plan, and writes th
 | `haiku-scout` | Haiku | Finding files and past conversations |
 | `haiku-researcher` | Haiku | Web research with sources |
 | `haiku-extractor` | Haiku | Facts, decisions, and open items from long conversations |
-| `haiku-drafter` | Haiku | Writing or editing text |
+| `haiku-drafter` | Haiku | Writing or editing text (default) |
+| `sonnet-writer` | Sonnet | Story, game, and important writing |
 | `haiku-batch-worker` | Haiku | Format conversion, bulk replace, splitting and merging |
 | `haiku-coder` | Haiku | Small, scoped code and bug fixes |
 | `haiku-checker` | Haiku | Read-only checks of the changes |
@@ -68,7 +70,7 @@ Installs to `/usr/local/bin/chaude`. The directory is created if missing. `sudo`
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.3 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.4 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -125,7 +127,7 @@ Type a question or task in the input box at the bottom and press `Enter`. The de
 | `home` / `end` | Top or bottom (when the input is empty) |
 | `y` or `Enter` / `n` or `esc` | Allow or deny a tool permission prompt |
 
-Mouse wheel scrolling is on by default. Use `/mouse` to turn it off, so you can select text in the terminal.
+Mouse wheel scrolling is on by default. Use `/mouse` to turn it off, so you can select text in the terminal. Dragging past the top or bottom row of the transcript keeps scrolling and extends the selection (0.11.4).
 
 ### Permission modes
 
@@ -151,7 +153,7 @@ Mouse wheel scrolling is on by default. Use `/mouse` to turn it off, so you can 
 | `/settings` | Open the settings screen. Values are saved on `esc` and apply at the next session start |
 | `/resume [n or slug]` | List record topics, or show one. `/resume claude [query]` lists Claude Code sessions |
 | `/import [ID or latest]` | Import a Claude Code session |
-| `/view [ID prefix]` | Browse Claude Code sessions (`esc` goes back) |
+| `/view [ID prefix]` | Browse Claude Code sessions, with sub-agent names and SendMessage rows (`esc` goes back) |
 | `/usage` | Show plan usage and limits |
 | `/cost`, `/context`, `/compact`, `/config`, `/mcp`, `/agents` | Ask `claude` and show its output |
 | `/init`, `/review`, `/doctor` | Run one turn (suggest CLAUDE.md, review changes, check the install) |

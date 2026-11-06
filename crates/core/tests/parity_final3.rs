@@ -6,18 +6,24 @@
 // parity_final3_ignored.rs.
 
 use std::fs;
+#[cfg(unix)]
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process;
+#[cfg(unix)]
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use chaude_core::agent_store::AgentTracker;
 use chaude_core::import_claude::read_claude_transcript;
+#[cfg(unix)]
 use chaude_core::mcp::{self, CoderFn};
 use chaude_core::proc::{Shape, build_args};
+#[cfg(unix)]
 use chaude_core::resident::summarize_reply;
 use chaude_core::turn_spend::TurnSpend;
 use serde_json::{Value, json};
@@ -30,6 +36,7 @@ fn fresh_dir(tag: &str) -> PathBuf {
     dir
 }
 
+#[cfg(unix)]
 // Fake resident coder: the raw reply is cut to its status/changed lines, as the coder path does.
 fn fake_coder() -> Arc<CoderFn> {
     Arc::new(|task: &str| {
@@ -335,6 +342,7 @@ fn agent_tracker_tracks_and_finishes() {
 }
 
 // One JSON-RPC line out, one line back. Requests with no id get no reply, so callers never read for them.
+#[cfg(unix)]
 fn rpc(wr: &mut UnixStream, rd: &mut BufReader<UnixStream>, req: &str) -> Value {
     writeln!(wr, "{req}").expect("write request");
     let mut line = String::new();

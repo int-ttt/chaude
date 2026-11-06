@@ -9,7 +9,7 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 
 # watched agents (plan:174; manage the list here only)
-TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "sonnet-drafter", "opus-architect", "haiku-tui", "haiku-prompter"}  # S4: extend here only
+TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "sonnet-writer", "opus-architect", "haiku-tui", "haiku-prompter"}  # S4: extend here only
 REQUIRED = {                                    # 3.2~3.4 keys (status header 3.6 is checked for every fmt)
     "R-read": ["claim", "searched", "not_found", "not_checked", "truncated"],
     "R-write": ["changed", "diffstat", "check", "ws"],

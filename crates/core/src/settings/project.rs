@@ -24,6 +24,16 @@ const GUARD_HOOKS: &str = r#"{
         ]
       },
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/bash-py-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Agent|Task",
         "hooks": [
           {
@@ -38,11 +48,11 @@ const GUARD_HOOKS: &str = r#"{
 }
 "#;
 
-/// Hook scripts the guard needs (main-thread-guard.py imports _lean.py).
-const GUARD_FILES: &[&str] = &["main-thread-guard.py", "_lean.py"];
+/// Hook scripts the guard needs (main-thread-guard.py imports _lean.py; bash-py-guard.py is standalone).
+const GUARD_FILES: &[&str] = &["main-thread-guard.py", "bash-py-guard.py", "_lean.py"];
 
-/// Script the merge looks for to tell that a PreToolUse group already runs the guard.
-const GUARD_SCRIPT: &str = "main-thread-guard.py";
+/// Scripts the merge looks for to tell that a PreToolUse group already runs a guard.
+const GUARD_SCRIPTS: &[&str] = &["main-thread-guard.py", "bash-py-guard.py"];
 
 /// Package copies of the repo's .claude/agents definitions (haiku-*.md and opus-architect.md). A first-opened
 /// folder gets them, so the main model can delegate to named agents. embedded_agents_match_repo keeps them equal.
@@ -80,8 +90,8 @@ pub const AGENTS: &[(&str, &[u8])] = &[
         include_bytes!("agents/opus-architect.md"),
     ),
     (
-        "sonnet-drafter.md",
-        include_bytes!("agents/sonnet-drafter.md"),
+        "sonnet-writer.md",
+        include_bytes!("agents/sonnet-writer.md"),
     ),
 ];
 
@@ -97,6 +107,7 @@ pub const HOOKS: &[(&str, &[u8])] = &[
         "caveman-format.py",
         include_bytes!("hooks/caveman-format.py"),
     ),
+    ("bash-py-guard.py", include_bytes!("hooks/bash-py-guard.py")),
     ("context-alert.py", include_bytes!("hooks/context-alert.py")),
     (
         "correction-guard.py",
@@ -217,7 +228,8 @@ fn merge_guard(old: &[u8], guard: &str) -> Result<Option<String>, String> {
         .flatten()
     {
         let matcher = group["matcher"].as_str().unwrap_or_default();
-        if pre.iter().any(|g| runs_guard(g, matcher)) {
+        let script = guard_script(group);
+        if pre.iter().any(|g| runs_guard(g, matcher, script)) {
             continue;
         }
         pre.push(group.clone());
@@ -231,12 +243,27 @@ fn merge_guard(old: &[u8], guard: &str) -> Result<Option<String>, String> {
     Ok(Some(text))
 }
 
+/// The guard script a generated PreToolUse group runs (main-thread-guard.py when none is named).
+fn guard_script(group: &Value) -> &'static str {
+    let text: String = group["hooks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(hook_text)
+        .collect();
+    GUARD_SCRIPTS
+        .iter()
+        .copied()
+        .find(|s| text.contains(s))
+        .unwrap_or(GUARD_SCRIPTS[0])
+}
+
 /// True when a PreToolUse group with this matcher already runs the guard script.
-fn runs_guard(group: &Value, matcher: &str) -> bool {
+fn runs_guard(group: &Value, matcher: &str, script: &str) -> bool {
     group["matcher"].as_str() == Some(matcher)
         && group["hooks"]
             .as_array()
-            .is_some_and(|hs| hs.iter().any(|h| hook_text(h).contains(GUARD_SCRIPT)))
+            .is_some_and(|hs| hs.iter().any(|h| hook_text(h).contains(script)))
 }
 
 /// Command line of a hook entry: the command, plus the args of the windows exec form.
@@ -456,6 +483,68 @@ mod tests {
             }
             let dirs = [root.path().to_path_buf()];
             assert_eq!(hook_python_in(&dirs), want, "have {have:?}");
+        }
+    }
+
+    /// Runs the embedded bash-py-guard.py on one Bash command; true when it denies.
+    fn bash_guard_denies(hook: &Path, command: &str) -> bool {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let input = serde_json::json!({"tool_name": "Bash", "tool_input": {"command": command}})
+            .to_string();
+        let mut child = Command::new("python3")
+            .arg("-I")
+            .arg(hook)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("python3 runs");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(input.as_bytes())
+            .expect("write stdin");
+        let out = child.wait_with_output().expect("hook exits");
+        assert!(out.status.success(), "hook failed on {command:?}");
+        let text = String::from_utf8_lossy(&out.stdout);
+        if text.trim().is_empty() {
+            return false;
+        }
+        assert!(
+            text.contains(r#""permissionDecision": "deny""#)
+                && text.contains("Edit files with the Edit/Write tools, not Python."),
+            "unexpected hook output for {command:?}: {text}"
+        );
+        true
+    }
+
+    #[test]
+    fn bash_py_guard_samples() {
+        let root = TempDir::new("bash-py-guard");
+        let hook = root.path().join("bash-py-guard.py");
+        fs::write(&hook, embedded_hook("bash-py-guard.py").expect("embedded")).expect("write hook");
+        let deny = [
+            "python3 -I - <<'EOF'\nimport json\np = 'a.md'\ns = open(p).read()\nopen(p, 'w').write(s.replace('a', 'b'))\nEOF",
+            "python3 -c \"from pathlib import Path; Path('a.md').write_text('x')\"",
+            "python3 -c \"import os; os.replace('a.tmp', 'a.md')\"",
+            "node -e \"const fs = require('fs'); fs.writeFileSync('a.md', 'x')\"",
+            "cat <<'EOF' | python3 -\nopen('a.md', 'w').write('x')\nEOF",
+        ];
+        let allow = [
+            "python3 -c \"print(1)\"",
+            "python3 -m pytest -q tests/",
+            "python3 -I - <<'EOF'\nprint(open('a.json').read())\nEOF",
+            "node -e \"console.log(1)\"",
+            // heredoc bodies of other commands are data, not code
+            "cat <<'EOF' > notes/draft.md\nopen('a.md', 'w').write('x')\nEOF\npython3 -c \"print(1)\"",
+            "cat <<EOF > a.md\nPath(p).write_text('x')\nEOF",
+        ];
+        for cmd in deny {
+            assert!(bash_guard_denies(&hook, cmd), "should deny: {cmd:?}");
+        }
+        for cmd in allow {
+            assert!(!bash_guard_denies(&hook, cmd), "should allow: {cmd:?}");
         }
     }
 }

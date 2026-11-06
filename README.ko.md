@@ -23,6 +23,7 @@ Claude Code를 채팅 형식의 프롬프트로 쓸 수 있고, 반복 작업은
 - 프로젝트별 입력 기록을 `.chaude/history.jsonl`에 저장합니다. `chaude search-history`로 찾을 수 있습니다.
 - `/import`, `/resume claude`, `chaude --from-claude`로 Claude Code 세션을 가져옵니다.
 - 세션을 시작하면 `.claude/settings.json`이 없을 때 가드 훅이 들어간 파일을 만듭니다 (0.9.14).
+- Bash 훅 `bash-py-guard.py`는 인라인 Python이나 node로 하는 파일 편집(`open(..., 'w')`, `write_text`, `fs.writeFile*`)을 거부합니다. 읽기 전용 코드와 `python3 -m pytest`는 그대로 허용합니다 (0.11.4).
 
 ## 작동 방식
 
@@ -34,7 +35,8 @@ Opus가 메인 세션입니다. 요청을 읽고, 계획을 정하고, 최종 �
 | `haiku-scout` | Haiku | 파일과 예전 대화 찾기 |
 | `haiku-researcher` | Haiku | 출처를 붙인 웹 조사 |
 | `haiku-extractor` | Haiku | 긴 대화에서 사실, 결정, 미결 사항 뽑기 |
-| `haiku-drafter` | Haiku | 글 쓰기 또는 고치기 |
+| `haiku-drafter` | Haiku | 글 쓰기 또는 고치기 (기본값) |
+| `sonnet-writer` | Sonnet | 이야기, 게임, 중요한 글 쓰기 |
 | `haiku-batch-worker` | Haiku | 형식 변환, 일괄 치환, 나누기와 합치기 |
 | `haiku-coder` | Haiku | 범위가 좁은 코드 수정과 버그 수정 |
 | `haiku-checker` | Haiku | 바뀐 내용을 읽기 전용으로 검증 |
@@ -68,7 +70,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.3 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.4 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -125,7 +127,7 @@ chaude
 | `home` / `end` | 맨 위 또는 맨 아래 (입력이 비었을 때) |
 | `y` 또는 `Enter` / `n` 또는 `esc` | 도구 권한 요청 허용 또는 거부 |
 
-마우스 휠 스크롤은 기본으로 켜져 있습니다. 터미널에서 글자를 드래그해 선택하려면 `/mouse`로 끄세요.
+마우스 휠 스크롤은 기본으로 켜져 있습니다. 터미널에서 글자를 드래그해 선택하려면 `/mouse`로 끄세요. 대화 영역의 맨 위나 맨 아래 줄을 넘어 드래그하면 계속 스크롤되며 선택 범위도 넓어집니다 (0.11.4).
 
 ### 권한 모드
 
@@ -151,7 +153,7 @@ chaude
 | `/settings` | 설정 화면 열기. `esc`로 나가면 저장되고, 다음 세션 시작 때 적용됩니다 |
 | `/resume [번호 또는 슬러그]` | 기록 주제 목록을 보거나 하나를 엽니다. `/resume claude [검색어]`는 Claude Code 세션을 보여 줍니다 |
 | `/import [ID 또는 latest]` | Claude Code 세션 가져오기 |
-| `/view [ID 앞부분]` | Claude Code 세션 보기 (`esc`로 돌아갑니다) |
+| `/view [ID 앞부분]` | Claude Code 세션 보기. 하위 에이전트 이름과 SendMessage 행을 함께 보여 줍니다 (`esc`로 돌아갑니다) |
 | `/usage` | 요금제 사용량과 한도 보기 |
 | `/cost`, `/context`, `/compact`, `/config`, `/mcp`, `/agents` | `claude`에 물어보고 결과를 보여 줍니다 |
 | `/init`, `/review`, `/doctor` | 한 턴을 실행합니다 (CLAUDE.md 제안, 변경 검토, 설치 점검) |

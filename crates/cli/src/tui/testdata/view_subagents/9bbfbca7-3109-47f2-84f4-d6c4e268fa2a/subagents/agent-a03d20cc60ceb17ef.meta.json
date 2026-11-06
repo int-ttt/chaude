@@ -1,0 +1,1 @@
+{"agentType":"haiku-prompter","isBuiltIn":false,"description":"Loop: drain sink + idle gate, checker","toolUseId":"toolu_01JggA5W2dudwT3XFPNPDCBt","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":true,"pickedEffortModel":"claude-opus-5-5","finished":true}

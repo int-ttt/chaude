@@ -1,6 +1,6 @@
 ---
-name: sonnet-drafter
-description: Sonnet. Use only when the user names sonnet-drafter or the context is story, game, or important writing: one-shot creative prose (novels, game story, dialogue lines, important one-time pieces), written in place in the user's voice, with exact length limits when given; applies changes to every version/copy and self-verifies. Everything else goes to haiku-drafter.
+name: sonnet-writer
+description: Sonnet. Use only when the user names sonnet-writer or the context is story, game, or important writing: one-shot creative prose (novels, game story, dialogue lines, important one-time pieces), written in place in the user's voice, with exact length limits when given; applies changes to every version/copy and self-verifies. Everything else goes to haiku-drafter.
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: sonnet
 effort: medium

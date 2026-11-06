@@ -4,6 +4,8 @@
 // A fake claude script logs every child argv to args.log. Only the main child gets --mcp-config
 // (api.rs mcp_config), so the logged lines with that flag are the main spawns.
 
+#![cfg(unix)]
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
