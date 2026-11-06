@@ -99,7 +99,8 @@ esac
 printf '%s\n' "$role" >> 'DIR/spawned.log'
 [ "$role" = prompter ] && [ -f 'DIR/prompter.idle' ] && cat 'DIR/prompter.idle'
 [ "$role" = main ] && printf '%s\n' "$*" >> 'DIR/args.log'
-printf '%s %s\n' "$role" "$(printf '%s' "$*" | tr '\n' ' ')" >> 'DIR/role_args.log'
+# One file per process: the spawns run at once, and a long argv can split across writes to a shared log.
+printf '%s %s\n' "$role" "$(printf '%s' "$*" | tr '\n' ' ')" > "DIR/role_args.$$.log"
 [ "$role" = main ] && printf '%s %s\n' "$$" "$*" >> 'DIR/main.pids'
 while IFS= read -r line; do
   if [ "$role" = coder ]; then
@@ -2193,10 +2194,25 @@ fn resident_slots_fixed_four() {
     cfg.model = "opus".to_string();
     cfg.cwd = Some(f.dir.clone());
     let (h, _rx) = Engine::start(cfg);
-    let log = f.dir.join("role_args.log");
+    // Each spawn writes its own role_args.<pid>.log; the lines are joined here.
+    let role_args = |dir: &Path| -> String {
+        let mut files: Vec<PathBuf> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("role_args."))
+            })
+            .collect();
+        files.sort();
+        files
+            .iter()
+            .map(|p| fs::read_to_string(p).unwrap_or_default())
+            .collect()
+    };
     let t0 = Instant::now();
     loop {
-        let n = fs::read_to_string(&log).unwrap_or_default().lines().count();
+        let n = role_args(&f.dir).lines().count();
         if n >= 4 || t0.elapsed() > Duration::from_secs(10) {
             break;
         }
@@ -2204,7 +2220,7 @@ fn resident_slots_fixed_four() {
     }
     // A fifth spawn would show up within this grace; none may.
     thread::sleep(Duration::from_millis(300));
-    let text = fs::read_to_string(&log).unwrap_or_default();
+    let text = role_args(&f.dir);
     let mut roles: Vec<&str> = text.lines().filter_map(|l| l.split(' ').next()).collect();
     roles.sort_unstable();
     assert_eq!(roles, ["coder", "main", "prompter", "tui"], "{text}");

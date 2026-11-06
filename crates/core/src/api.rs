@@ -139,6 +139,8 @@ pub enum UiEvent {
     ResidentBusy {
         role: String,
         busy: bool,
+        // The role's slot model (Go residentSlots: haiku for every resident but main). Empty when idle.
+        model: String,
         prompt: String,
         started_at: u64,
     },
@@ -1556,9 +1558,15 @@ impl State {
         } else {
             (String::new(), 0)
         };
+        let model = if busy {
+            self.resident_model(role)
+        } else {
+            String::new()
+        };
         self.emit(UiEvent::ResidentBusy {
             role: role.to_string(),
             busy,
+            model,
             prompt,
             started_at,
         });

@@ -1,10 +1,18 @@
 # Changelog
 
 ## Unreleased
+
+## 0.11.5 - 2026-11-06
 - Engine: on Windows, a running agent's pid is checked with `OpenProcess` and `GetExitCodeProcess`, so a live agent is no longer marked dead.
   - 엔진: Windows에서 실행 중인 에이전트의 pid를 `OpenProcess`와 `GetExitCodeProcess`로 확인하여, 살아 있는 에이전트를 죽은 것으로 표시하지 않습니다.
 - Agents: a finished agent keeps its last text as its summary, and the restored agent view shows it as `(restored)` after a restart.
   - 에이전트: 끝난 에이전트는 마지막 텍스트를 요약으로 보관하며, 재시작 후 복원된 에이전트 화면에 `(restored)`로 표시합니다.
+- Windows: test fixtures are checked out with LF line endings (`.gitattributes`), and three unix-only tests are gated with `cfg(unix)`, so Windows clippy and tests pass.
+  - Windows: 테스트 픽스처를 LF 줄바꿈으로 체크아웃하도록 `.gitattributes`를 두고, Unix 전용 테스트 3개를 `cfg(unix)`로 제한했습니다. 그래서 Windows clippy와 테스트가 통과합니다.
+- Tests: the engine test fakes write one `role_args.<pid>.log` per process, so parallel fake spawns no longer race on a shared log (test-only change).
+  - 테스트: 엔진 테스트의 가짜 프로세스가 프로세스마다 `role_args.<pid>.log`를 씁니다. 그래서 동시에 뜬 가짜 spawn이 공유 로그에서 경쟁하지 않습니다 (테스트만 변경).
+- TUI: a busy resident (prompter, tui, coder) row shows its own model (`haiku`) instead of the main session model (`opus`); a row without a model falls back to `haiku`, never the main model.
+  - TUI: 사용 중인 상주 역할(prompter, tui, coder) 행은 메인 세션 모델(`opus`) 대신 자기 모델(`haiku`)을 표시합니다. 모델이 없는 행은 메인 모델이 아니라 `haiku`로 대체합니다.
 
 ## 0.11.4 - 2026-11-06
 - Hooks: new `bash-py-guard.py` (Bash matcher) denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `os.replace`, `shutil.copy`, `fs.writeFile*`). Read-only Python and `python3 -m pytest` stay allowed. Fresh projects and existing `settings.json` get it too.

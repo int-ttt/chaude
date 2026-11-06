@@ -740,6 +740,7 @@ impl App {
             UiEvent::ResidentBusy {
                 role,
                 busy,
+                model,
                 prompt,
                 started_at,
             } => {
@@ -750,7 +751,12 @@ impl App {
                         task: String::new(),
                         prompt,
                         name: role,
-                        model: String::new(),
+                        // A resident row never falls back to the session (main) model; residents default to haiku.
+                        model: if model.is_empty() {
+                            "haiku".to_string()
+                        } else {
+                            model
+                        },
                         background: false,
                         done: false,
                         agent_id: String::new(),
@@ -5370,6 +5376,7 @@ mod tests {
         app.apply(UiEvent::ResidentBusy {
             role: "coder".into(),
             busy: true,
+            model: "haiku".into(),
             prompt: "rename the helper".into(),
             started_at: 1,
         });
@@ -5377,6 +5384,7 @@ mod tests {
         app.apply(UiEvent::ResidentBusy {
             role: "coder".into(),
             busy: false,
+            model: String::new(),
             prompt: String::new(),
             started_at: 0,
         });
@@ -5396,6 +5404,7 @@ mod tests {
         app.apply(UiEvent::ResidentBusy {
             role: "tui".into(),
             busy: true,
+            model: "haiku".into(),
             prompt: "review the diff".into(),
             started_at: 1,
         });
@@ -5413,6 +5422,7 @@ mod tests {
         app.apply(UiEvent::ResidentBusy {
             role: "tui".into(),
             busy: false,
+            model: String::new(),
             prompt: String::new(),
             started_at: 0,
         });
@@ -5422,6 +5432,49 @@ mod tests {
         );
         assert!(!thinking(&app), "finished resident: no indicator");
         assert_eq!(app.running_n(), 0, "runningN after finish");
+    }
+
+    // Regression: a resident row showed the session (main, opus) model because the event carried no model.
+    // The row must carry the resident's own model, and an empty model must fall back to haiku, never the main model.
+    #[test]
+    fn resident_busy_row_shows_resident_model_not_main() {
+        let mut app = App::new(80, 30);
+        app.apply(UiEvent::Status {
+            model: "claude-opus-5-5".into(),
+            tokens: 0,
+            cost_usd: 0.0,
+            context_pct: 0,
+        });
+        app.apply(UiEvent::ResidentBusy {
+            role: "prompter".into(),
+            busy: true,
+            model: "haiku".into(),
+            prompt: "summarize".into(),
+            started_at: 1,
+        });
+        let row = app.panel_lines(80, 30).0.join("\n");
+        assert!(row.contains("-haiku-prompter("), "resident label: {row}");
+        assert!(
+            !row.contains("opus"),
+            "resident row shows main model: {row}"
+        );
+
+        app.apply(UiEvent::ResidentBusy {
+            role: "tui".into(),
+            busy: true,
+            model: String::new(),
+            prompt: "translate".into(),
+            started_at: 1,
+        });
+        let row = app.panel_lines(80, 30).0.join("\n");
+        assert!(
+            row.contains("-haiku-tui("),
+            "empty model falls back to haiku: {row}"
+        );
+        assert!(
+            !row.contains("opus"),
+            "fallback never shows main model: {row}"
+        );
     }
 
     #[test]
