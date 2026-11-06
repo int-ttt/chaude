@@ -1,6 +1,6 @@
 # chaude
 
-A chat-style terminal for Claude Code that hands the routine work to Haiku agents.
+A way to use Claude Code through a chat-format prompt that hands the routine work to Haiku agents.
 
 [![Latest release](https://img.shields.io/github/v/release/int-ttt/chaude)](https://github.com/int-ttt/chaude/releases/latest)
 [![Rust stable](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)](rust-toolchain.toml)
@@ -211,21 +211,22 @@ The installers read these environment variables:
 
 ## Effect analysis
 
-### Rust port usage
+### Long project: cost savings (Rust port usage)
 
-Measured from 2026-10-28 (the first commit on the rust-port branch) to 2026-11-05 14:00 UTC on the maintainer's machine: 229 main sessions, 2,039 subagent runs, 22,754 API requests (18,698 Haiku, 2,137 Sonnet, 1,919 Opus). Method: [scripts/rust_port_usage.py](scripts/rust_port_usage.py) reads the Claude Code transcripts (main and subagent), drops duplicate requests, and prices each request at its model's list price. The all-Opus column prices the same token counts at Opus rates. It is a conservative lower bound: one long Opus session would carry a larger context on each turn, so its real cost would be higher.
+Real use of a long-running project during the Rust port: measured 2026-10-28 to 2026-11-05 14:00 UTC on the maintainer's machine: 229 main sessions, 2,039 subagent runs, 22,754 API requests. [scripts/rust_port_usage.py](scripts/rust_port_usage.py) reads the Claude Code transcripts, drops duplicate requests, and prices each request at its model's list price.
 
-| | Measured (Opus main + Sonnet and Haiku agents) | All-Opus lower bound | Saved |
+| | Actual (Opus, Sonnet, Haiku) | Est. Opus-only | Saved |
 |---|---|---|---|
-| API requests | 22,754 | 22,754 | - |
-| Total tokens (input, cache write, cache read, output) | 771.8M | 771.8M | - |
-| Approx. cost (USD) | 177.60 | 1,021.83 | 82.6% |
+| Total tokens (input, cache write, cache read, output) | 771.8M | 446.0M | - |
+| Approx. cost (USD) | 177.60 | 590.51 | 69.9% |
 
-These numbers are approximate. Prices are the list prices in notes/FACTS.md (confirmed 2026-10-29). The all-Opus column is a conservative lower bound estimate, not a measured Opus session.
+- Method: Opus-only tokens = actual tokens / R, where R = 1.73 is the ping-pong ratio (Opus + Haiku 1,362,928 / Opus-only 787,628 tokens, 2026-11-01). Cost = list-price cost of the same tokens at Opus rates (1,021.83) / R.
+- Range: the 2026-11-02 effort re-runs give R from 1.37 to 1.62, so the saving would be 71.9% to 76.2%.
+- Assumes the Opus-only run has the same input, cache, and output mix as the measured run. The ping-pong sample is small (2 runs per method).
 
-### Older benchmark
+### Short project: cost savings (ping-pong benchmark)
 
-In a ping-pong game benchmark (3 prompts), chaude was compared with plain Opus:
+One small build (a ping-pong game in 3 prompts), chaude compared with plain Opus:
 
 - **Cost: -42.7%** vs plain Opus (USD, mean of 2 runs, 2026-11-01).
 - **Cost range: -37.5% to -50.0%** across effort settings (unset, low, medium; re-run 2026-11-02).

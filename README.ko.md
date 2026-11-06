@@ -1,6 +1,6 @@
 # chaude
 
-Claude Code를 채팅 스타일 터미널에서 쓰고, 반복 작업은 Haiku 에이전트에게 맡기는 도구입니다.
+Claude Code를 채팅 형식의 프롬프트로 쓸 수 있고, 반복 작업은 Haiku 에이전트에게 맡기는 도구입니다.
 
 [![Latest release](https://img.shields.io/github/v/release/int-ttt/chaude)](https://github.com/int-ttt/chaude/releases/latest)
 [![Rust stable](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)](rust-toolchain.toml)
@@ -211,21 +211,22 @@ REPL 주요 플래그(`chaude repl`):
 
 ## 효과 분석
 
-### Rust 포트 사용량
+### 장기 프로젝트: 비용 절감 (Rust 포트 사용량)
 
-메인테이너 기기에서 2026-10-28(rust-port 브랜치의 첫 커밋)부터 2026-11-05 14:00 UTC까지 측정했습니다. 메인 세션 229개, 하위 에이전트 실행 2,039회, API 요청 22,754건(Haiku 18,698건, Sonnet 2,137건, Opus 1,919건)입니다. 방법: [scripts/rust_port_usage.py](scripts/rust_port_usage.py)가 Claude Code 기록(메인과 하위 에이전트)을 읽고, 중복 요청을 뺀 뒤 요청마다 모델의 정가로 계산합니다. 모두 Opus 열은 같은 토큰 수를 Opus 가격으로 계산한 값입니다. 이는 보수적인 최소 추정치입니다. 긴 Opus 세션 하나는 턴마다 문맥이 더 크기 때문에 실제 비용은 더 높았을 것입니다.
+Rust 포트 기간 동안 장기 프로젝트를 실제로 쓴 양입니다. 메인테이너 기기에서 2026-10-28부터 2026-11-05 14:00 UTC까지 측정했습니다. 메인 세션 229개, 하위 에이전트 실행 2,039회, API 요청 22,754건입니다. [scripts/rust_port_usage.py](scripts/rust_port_usage.py)가 Claude Code 기록을 읽고, 중복 요청을 뺀 뒤 요청마다 모델의 정가로 계산합니다.
 
-| | 측정값 (Opus 메인 + Sonnet·Haiku 에이전트) | 모두 Opus 최소 추정 | 절감 |
+| | 실제 (Opus, Sonnet, Haiku) | 추정 Opus만 | 절감 |
 |---|---|---|---|
-| API 요청 | 22,754 | 22,754 | - |
-| 총 토큰 (입력, 캐시 쓰기, 캐시 읽기, 출력) | 771.8M | 771.8M | - |
-| 대략적 비용 (USD) | 177.60 | 1,021.83 | 82.6% |
+| 총 토큰 (입력, 캐시 쓰기, 캐시 읽기, 출력) | 771.8M | 446.0M | - |
+| 대략적 비용 (USD) | 177.60 | 590.51 | 69.9% |
 
-이 수치는 대략적인 값입니다. 가격은 notes/FACTS.md의 정가(2026-10-29 확인)를 따랐습니다. 모두 Opus 열은 보수적인 최소 추정치이며, 측정한 Opus 세션이 아닙니다.
+- 방법: Opus만 쓴 토큰 = 실제 토큰 / R. R = 1.73은 핑퐁 게임 비율입니다(Opus + Haiku 1,362,928 / Opus만 787,628 토큰, 2026-11-01). 비용 = 같은 토큰을 Opus 정가로 계산한 값(1,021.83) / R.
+- 범위: 2026-11-02 effort 재측정에서 R은 1.37~1.62였습니다. 이때 절감률은 71.9%~76.2%입니다.
+- Opus만 쓴 경우도 입력, 캐시, 출력 비율이 실제와 같다고 가정합니다. 핑퐁 표본이 작습니다(방식당 2회).
 
-### 이전 벤치마크
+### 단기 프로젝트: 비용 절감 (핑퐁 벤치마크)
 
-핑퐁 게임 벤치마크(프롬프트 3개)에서 chaude와 일반 Opus를 비교했습니다:
+작은 빌드 한 번(핑퐁 게임, 프롬프트 3개)에서 chaude와 일반 Opus를 비교했습니다:
 
 - **비용: -42.7%** (일반 Opus 대비, USD, 2회 평균, 2026-11-01).
 - **비용 범위: -37.5% ~ -50.0%** (effort 설정별 unset, low, medium; 2026-11-02 재측정).
