@@ -78,8 +78,6 @@ const AGENT_PREFIX: &str = "  │ ";
 // Go tui.go render(): orange "● " opens an assistant block, green "● " opens a tool block.
 const ASST_FIRST: &str = "\x1b[38;2;217;119;87m● \x1b[39m";
 const TOOL_ON: &str = "\x1b[38;2;95;175;135m";
-// Running agent panel rows: yellow, the same 220 as their dot (Go running colour).
-const RUNNING_ON: &str = "\x1b[38;5;220m";
 
 // What the event loop must do after a key press.
 #[derive(Debug, PartialEq)]
@@ -217,6 +215,8 @@ pub struct App {
     session_mode: Option<String>,
     // Session ids of this run (UiEvent::SessionIds: main, residents, owned). /view lists them with the previous run's.
     this_run: BTreeSet<String>,
+    // Purpose by session id for the /view names: "main" or the resident role (UiEvent::SessionIds).
+    session_purpose: HashMap<String, String>,
     // Session id the next rotation replaces (UiEvent::RotatedFrom), read by the Rotated notice.
     rot_from: String,
     // Current main session id (UiEvent::SessionIds main; empty after a rotation until the new one). /status shows it.
@@ -320,6 +320,7 @@ impl App {
             copy_note: None,
             session_mode: None,
             this_run: BTreeSet::new(),
+            session_purpose: HashMap::new(),
             rot_from: String::new(),
             tool_rows: HashMap::new(),
             stage_rows: HashMap::new(),
@@ -460,7 +461,10 @@ impl App {
                 id,
                 description,
                 started_at,
+                send_id,
             } => {
+                // The SendMessage call's own timed row is the resumed agent's row: it stays open until AgentEnd.
+                self.open_tools.remove(&send_id);
                 if !self.agents.iter().any(|(aid, _, _, _)| *aid == id) {
                     self.agents.push((
                         id.clone(),
@@ -472,9 +476,19 @@ impl App {
                 if !self.bg_agents.contains(&id) {
                     self.bg_agents.push(id.clone());
                 }
-                // The SendMessage resume opens a timed row, "resume(type)" with the agent type when known.
                 // A resume while its row is still open adds none; the AgentEnd closes and removes the row.
-                if !self.resume_rows.contains_key(&id) {
+                // The SendMessage row (ToolStart..) moves to resume_rows, so the call and the agent share one row.
+                if self.resume_rows.contains_key(&id) {
+                    if let Some(mut r) = self.tool_rows.remove(&send_id) {
+                        r.end = Some((unix_now(), r.at.elapsed().as_secs()));
+                        if let Some(line) = self.transcript.get_mut(r.row) {
+                            *line = tool_line(&r);
+                        }
+                    }
+                } else if let Some(row) = self.tool_rows.remove(&send_id) {
+                    self.resume_rows.insert(id, row);
+                } else {
+                    // No SendMessage row (its ToolStart was not seen): open the resume row as before.
                     self.end_main_block();
                     let head = if description.is_empty() {
                         "resume".to_string()
@@ -549,6 +563,15 @@ impl App {
                 owned,
             } => {
                 self.session_id = main.clone();
+                if !main.is_empty() {
+                    self.session_purpose
+                        .insert(main.clone(), "main".to_string());
+                }
+                for (role, id) in &residents {
+                    if !id.is_empty() {
+                        self.session_purpose.insert(id.clone(), role.clone());
+                    }
+                }
                 self.this_run = std::iter::once(main)
                     .chain(residents.into_values())
                     .chain(owned)
@@ -1221,7 +1244,10 @@ impl App {
             .and_then(|all| sessview::own_sessions(all, &owned))
             .and_then(|list| sessview::SessView::open(list, arg));
         match result {
-            Ok(sv) => self.sess = Some(sv),
+            Ok(mut sv) => {
+                sv.purposes = self.session_purpose.clone();
+                self.sess = Some(sv);
+            }
             // Go prints the note grey and resets the colour on its own row after the text.
             Err(msg) => {
                 self.note_wide(&format!("{GREY_ON}{msg}"));
@@ -1594,13 +1620,14 @@ impl App {
         let (fg, bg) = self.panel_lines(w, h);
         let mut chrome = Vec::with_capacity(CHROME + 1);
         if self.shows_bar() {
-            chrome.push(bar::clip(&top, width));
+            chrome.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&top, width)));
         }
         chrome.extend(self.queue_lines(w, h));
         chrome.extend(self.input_box(w));
         chrome.extend(fg);
         chrome.extend(bg);
         chrome.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&status, width)));
+        // The top bar is Go's dim status text too; without its own colour it inherited an open SGR from the body.
         chrome
     }
 
@@ -2359,14 +2386,17 @@ fn agent_row_line(r: &AgentRow, session_model: &str, width: usize) -> String {
         bar::AgentState::Running
     };
     let text = bar::agent_status_text(state, &r.model, session_model, &r.name, summary);
-    // The running text is yellow (the dot's Go running colour, 220); finished rows keep the grey.
-    let text_on = match state {
-        bar::AgentState::Running => RUNNING_ON,
-        _ => GREY_ON,
+    // Go tui.go:1494: only the dot is coloured (agentDot: running 220, interrupted 208); the text is dimSt grey.
+    let dot_on = match state {
+        bar::AgentState::Running => 220,
+        bar::AgentState::Done => 42,
+        bar::AgentState::Failed => 196,
+        bar::AgentState::Queued => 245,
+        bar::AgentState::Interrupted => 208,
     };
-    let dot = "\x1b[38;5;220m●\x1b[39m";
+    let dot = format!("\x1b[38;5;{dot_on}m●\x1b[39m");
     format!(
-        "  {dot}{text_on} {}{FG_OFF}",
+        "  {dot}{GREY_ON} {}{FG_OFF}",
         bar::clip(&text, width.saturating_sub(4))
     )
 }
@@ -2507,7 +2537,8 @@ pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Resu
     for (i, row) in rows.iter().enumerate() {
         if old.get(i) != Some(row) {
             queue!(out, MoveTo(0, i as u16), Clear(ClearType::CurrentLine))?;
-            write!(out, "{row}")?;
+            // Reset after each row: an SGR left open by one row would colour the next row's text.
+            write!(out, "{row}{RESET}")?;
         }
     }
     // Go syncCursor (tui.go:1009): under a permission prompt the cursor is not parked on the input row.
@@ -4499,6 +4530,68 @@ mod tests {
         );
     }
 
+    // /view level 2 through the App: PageDown, End, Home, PageUp, the wheel and Esc reach the session window,
+    // and the window header shows the name. SessionIds maps main and residents to their purposes.
+    #[test]
+    fn view_prompt_scrolls_through_app_keys_and_wheel() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::SessionIds {
+            main: "m1".to_string(),
+            residents: std::collections::BTreeMap::from([("coder".to_string(), "c1".to_string())]),
+            owned: vec![],
+        });
+        assert_eq!(
+            app.session_purpose.get("m1").map(String::as_str),
+            Some("main")
+        );
+        assert_eq!(
+            app.session_purpose.get("c1").map(String::as_str),
+            Some("coder")
+        );
+        let long: String = (0..60).map(|i| format!("l{i}\n")).collect();
+        app.sess = Some(sessview::SessView {
+            list: vec![sessview::SessionInfo {
+                id: "sessaaa1".into(),
+                path: std::path::PathBuf::from("sessaaa1.jsonl"),
+                modified: std::time::SystemTime::now(),
+                turns: 1,
+                first: "Fix the build".into(),
+                last: "Fix the build".into(),
+                model: "claude-haiku-5-5".into(),
+            }],
+            purposes: HashMap::from([("sessaaa1".to_string(), "coder".to_string())]),
+            id: "sessaaa1".into(),
+            turns: Some(vec![long.trim_end().to_string()]),
+            ..Default::default()
+        });
+        let (sw, sh) = (text_width(app.cols), app.body_h(app.cols, app.rows));
+        let head = |app: &App| app.overlay_lines(sw, sh).unwrap()[0].clone();
+        let off = |app: &App| app.sess.as_ref().unwrap().off;
+        let head0 = head(&app);
+        assert!(head0.contains("haiku-coder(Fix the build)"), "{head0}");
+        assert!(head0.contains("lines 1-"), "{head0}");
+        app.on_key(key(KeyCode::PageDown, KeyModifiers::NONE));
+        assert!(off(&app) > 0, "page down moves the window");
+        app.on_key(key(KeyCode::End, KeyModifiers::NONE));
+        let at_end = off(&app);
+        assert!(head(&app).contains("-60/60"), "{}", head(&app));
+        app.overlay_wheel(false, 0);
+        assert_eq!(off(&app), at_end, "wheel down stops at the bottom");
+        app.overlay_wheel(true, 0);
+        assert_eq!(off(&app), at_end - 3, "wheel up scrolls three lines");
+        app.on_key(key(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(off(&app), 0);
+        app.on_key(key(KeyCode::PageUp, KeyModifiers::NONE));
+        assert_eq!(off(&app), 0, "page up saturates at the top");
+        app.on_key(key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(
+            app.sess.as_ref().unwrap().turns.is_none(),
+            "esc goes back to the list"
+        );
+        app.on_key(key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.sess.is_none(), "esc on the list closes /view");
+    }
+
     #[test]
     fn role_context_fills_the_bar_and_session_ids_join_this_run() {
         let mut app = App::new(80, 24);
@@ -4624,35 +4717,35 @@ mod tests {
             name: "SendMessage".into(),
             summary: "ab5377649aa7c5a8f".into(),
         });
-        app.apply(UiEvent::ToolEnd {
-            id: send.into(),
-            ok: true,
-        });
+        // Core sends no ToolEnd for a resuming SendMessage; AgentResumed names it and its row becomes the resume row.
         app.apply(UiEvent::AgentResumed {
             id: agent.into(),
             description: "haiku-drafter".into(),
             started_at: 0,
+            send_id: send.into(),
         });
         let row = app.resume_rows.get(agent).expect("resume row opens").row;
         let line = &app.transcript[row];
         let plain = render::strip_sgr(line);
         assert!(line.starts_with(TOOL_ON), "{line:?}");
         assert!(
-            plain.starts_with("● ") && plain.ends_with(" resume(haiku-drafter)"),
+            plain.starts_with("● ") && plain.ends_with(" SendMessage(ab5377649aa7c5a8f)"),
             "{plain:?}"
         );
         assert!(!plain.contains(" → "), "open row has no end: {plain:?}");
+        assert!(!app.open_tools.contains(send), "the SendMessage call is no longer open");
 
         // A resume while the row is open adds no second row.
         app.apply(UiEvent::AgentResumed {
             id: agent.into(),
             description: "haiku-drafter".into(),
             started_at: 0,
+            send_id: send.into(),
         });
         let resumes = app
             .transcript
             .iter()
-            .filter(|r| render::strip_sgr(r).contains("resume("))
+            .filter(|r| render::strip_sgr(r).contains("SendMessage("))
             .count();
         assert_eq!(resumes, 1, "{:?}", app.transcript);
 
@@ -4668,15 +4761,15 @@ mod tests {
         let plain = render::strip_sgr(&app.transcript[row]);
         assert!(
             plain.starts_with("● ")
-                && plain.contains(" resume(haiku-drafter) → ")
+                && plain.contains(" SendMessage(ab5377649aa7c5a8f) → ")
                 && plain.ends_with(')'),
             "{plain:?}"
         );
     }
 
-    // Running panel rows are yellow (the Go running colour 220); finished rows keep the grey text.
+    // Go tui.go:1494,1527-1530: a running panel row is a 220 dot with dim grey text; the text is not yellow.
     #[test]
-    fn running_panel_text_is_yellow_and_finished_rows_stay_grey() {
+    fn running_panel_dot_is_yellow_and_text_stays_grey() {
         let mut app = App::new(120, 20);
         let mut running = agent_row("a1", true, false);
         running.task = "버그 수정".into();
@@ -4693,12 +4786,12 @@ mod tests {
             .collect();
         assert_eq!(run.len(), 1, "{fg:?} {bg:?}");
         assert!(
-            run[0].contains(&format!("{RUNNING_ON} 실행 중-haiku-fixer")),
+            run[0].starts_with("  \x1b[38;5;220m●\x1b[39m"),
             "{:?}",
             run[0]
         );
         assert!(
-            !run[0].contains(&format!("{GREY_ON} 실행 중")),
+            run[0].contains(&format!("{GREY_ON} 실행 중-haiku-fixer")),
             "{:?}",
             run[0]
         );
@@ -4721,7 +4814,7 @@ mod tests {
             done[0]
         );
         assert!(
-            !done[0].contains(&format!("{RUNNING_ON} 중단")),
+            done[0].starts_with("  \x1b[38;5;208m●\x1b[39m"),
             "{:?}",
             done[0]
         );
@@ -5590,6 +5683,7 @@ mod tests {
                 turns: 2,
                 first: korean.clone(),
                 last: "second".into(),
+                model: "claude-haiku-5-5".into(),
             };
             let list = vec![info("sessaaa1"), info("sessbbb2")];
             if level2 {
@@ -5652,6 +5746,26 @@ mod tests {
         assert!(session_mode_note(Some(&path), "haiku", 80_000, true).is_none());
         assert!(session_mode_note(None, "haiku", 80_000, false).is_none());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn top_bar_is_grey_and_each_drawn_row_resets_sgr() {
+        let mut app = App::new(60, 8);
+        // The top bar shows only with an agent or unseen output (shows_bar); unseen is the cheap trigger here.
+        app.unseen = true;
+        // An SGR left open by a transcript row (no reset) must not colour the status rows drawn after it.
+        app.transcript.push("\x1b[38;5;220mopen yellow".to_string());
+        let rows = app.chrome(60, 8);
+        let top = rows
+            .iter()
+            .find(|r| render::strip_sgr(r).starts_with("idle"))
+            .expect("idle top bar");
+        assert!(top.starts_with(GREY_ON) && top.ends_with(FG_OFF), "{top:?}");
+        let mut prev = Vec::new();
+        let mut buf: Vec<u8> = Vec::new();
+        draw(&mut buf, &app, &mut prev).unwrap();
+        let text = String::from_utf8_lossy(&buf);
+        assert!(text.contains(&format!("{top}{RESET}")), "{text:?}");
     }
 
     #[test]

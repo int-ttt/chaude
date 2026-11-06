@@ -117,10 +117,12 @@ pub enum UiEvent {
         summary: String,
     },
     // A background agent resumed by SendMessage runs again under its original tool id until its AgentEnd.
+    // send_id is the SendMessage call (queued or resumed); its row stays open until that agent ends.
     AgentResumed {
         id: String,
         description: String,
         started_at: u64,
+        send_id: String,
     },
     // tokens = tokens in the context window (last assistant usage); context_pct = tokens * 100 / context_window.
     Status {
@@ -640,6 +642,8 @@ struct State {
     agent_store: Option<AgentStore>,
     // agentId from an async launch result -> tool_use id, so a SendMessage resume finds the agent.
     agent_ids: HashMap<String, String>,
+    // SendMessage tool_use id of a resume -> the resumed agent's tool id. Its task-notification names the SendMessage id.
+    resume_ids: HashMap<String, String>,
     // Start label by tool_use id. Kept after the agent ends, so a later SendMessage resume still shows it.
     agent_labels: HashMap<String, String>,
     // Go subagentLabel by tool_use id (subagent_type, else "agent"): the stage row's agent name.
@@ -1046,6 +1050,7 @@ fn actor(
         restored_rows: Vec::new(),
         agent_store,
         agent_ids: HashMap::new(),
+        resume_ids: HashMap::new(),
         agent_labels: HashMap::new(),
         agent_types: HashMap::new(),
         open_tools: HashSet::new(),
@@ -2365,7 +2370,8 @@ impl State {
                             text
                         };
                         // With residents the pane shows only the tui answer (Go runTurn routed): hold main text back.
-                        if self.cfg.residents && matches!(role, Role::Main) {
+                        // An idle reply (agent handback) has no tui wait to drain it, so it shows at once (Go idleText).
+                        if self.cfg.residents && self.busy && matches!(role, Role::Main) {
                             self.routed_text.push_str(&shown);
                         } else if self.handoff.is_none() && !shown.is_empty() {
                             self.emit(UiEvent::TextDelta { role, text: shown });
@@ -2374,7 +2380,7 @@ impl State {
                     StreamInner::MessageStop if self.handoff.is_none() => {
                         if matches!(role, Role::Main) {
                             let rest = self.mark.flush();
-                            if self.cfg.residents {
+                            if self.cfg.residents && self.busy {
                                 self.routed_text.push_str(&rest);
                             } else if !rest.is_empty() {
                                 self.emit(UiEvent::TextDelta {
@@ -2683,17 +2689,25 @@ impl State {
 
     fn on_tool_result(&mut self, id: String, content: Option<Value>, is_error: bool) {
         self.open_tools.remove(&id);
-        self.emit(UiEvent::ToolEnd {
-            id: id.clone(),
-            ok: !is_error,
-        });
         let text = result_text(content.as_ref());
         // SendMessage to a background agent resumes it: it runs again under its original tool id.
         // The SendMessage result is JSON: {"success":true,"message":"Resuming agent <short>","resumedAgentId":"<full>"}.
+        // A queued message ("Message queued for delivery to <id>", no resumedAgentId) opens the same row:
+        // the agent is still running and its next notice closes it.
         let resume = serde_json::from_str::<Value>(&text)
             .ok()
             .filter(|v| v["success"] != false)
-            .and_then(|v| v["resumedAgentId"].as_str().map(str::to_string));
+            .and_then(|v| {
+                v["resumedAgentId"]
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| {
+                        v["message"]
+                            .as_str()
+                            .filter(|m| m.starts_with("Message queued for delivery to"))
+                            .and_then(|_| v["pin"]["id"].as_str().map(str::to_string))
+                    })
+            });
         // agent_info stays after the agent ends, so a resume uses its start label, then the agent id.
         let known = resume.and_then(|aid| {
             let tool = self.agent_ids.get(&aid).cloned()?;
@@ -2707,21 +2721,29 @@ impl State {
                 .or_else(|| self.agent_labels.get(&tool).cloned())
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| format!("agent {}", aid.chars().take(8).collect::<String>()));
-            self.agents.insert(tool.clone(), Instant::now());
+            // A queued message to a still-running agent keeps its running start time.
+            self.agents.entry(tool.clone()).or_insert_with(Instant::now);
+            self.resume_ids.insert(id.clone(), tool.clone());
             if let Some(info) = self.agent_info.get_mut(&tool) {
                 info.background = true;
                 info.done = false;
             }
             self.persist_agent(&tool, STO_RUNNING);
-            self.emit_tool_result(id, text);
+            self.emit_tool_result(id.clone(), text);
+            // The SendMessage call's row stays open as the resumed agent's row: no ToolEnd for it here.
             self.emit(UiEvent::AgentResumed {
                 id: tool,
                 description,
                 started_at: now_secs(),
+                send_id: id,
             });
             self.emit_agent_rows();
             return;
         }
+        self.emit(UiEvent::ToolEnd {
+            id: id.clone(),
+            ok: !is_error,
+        });
         // A background agent keeps running after its launch result; it ends later, which E1 does not track.
         if text.contains(ASYNC_AGENT_MARK) {
             if let Some(aid) = after_marker(&text, "agentId: ") {
@@ -2924,6 +2946,7 @@ impl State {
     fn on_task_notification(&mut self, text: &str) -> bool {
         let mut found = false;
         for id in task_notification_ids(text) {
+            let id = self.resume_ids.get(&id).cloned().unwrap_or(id);
             if self.agent_info.contains_key(&id) {
                 found = true;
             }

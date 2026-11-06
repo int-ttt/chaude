@@ -3,7 +3,7 @@
 //! Level 2: the user prompts of one session, one at a time. Esc goes back one level.
 //! The readers here take paths and file text; the overlay returns Actions and the caller owns the transcript.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -29,6 +29,8 @@ pub struct SessionInfo {
     pub turns: usize,
     pub first: String,
     pub last: String,
+    // The model of the session's assistant turns (the first one), e.g. "claude-haiku-5-5"; empty if none.
+    pub model: String,
 }
 
 // Go readClaudeTranscript, user prompts only. A user text event that is not meta or sidechain starts a
@@ -69,6 +71,15 @@ pub fn parse_prompts(content: &str) -> Vec<String> {
     out
 }
 
+// The model named by the first assistant event that has one (the "model" field of its message).
+pub fn parse_model(content: &str) -> String {
+    content
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find_map(|ev| ev["message"]["model"].as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
 fn flush(out: &mut Vec<String>, cur: &mut String) {
     if !cur.is_empty() {
         out.push(std::mem::take(cur));
@@ -100,9 +111,15 @@ pub fn list_sessions(dir: &Path) -> Vec<SessionInfo> {
         let Ok(modified) = e.metadata().and_then(|m| m.modified()) else {
             continue;
         };
-        let Ok(prompts) = read_prompts(&path) else {
+        // One read gives the prompts (Go readClaudeTranscript) and the model; unreadable or empty files are skipped.
+        let Ok(content) = std::fs::read(&path).map(|b| String::from_utf8_lossy(&b).into_owned())
+        else {
             continue;
         };
+        let prompts = parse_prompts(&content);
+        if prompts.is_empty() {
+            continue;
+        }
         let id = path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -114,6 +131,7 @@ pub fn list_sessions(dir: &Path) -> Vec<SessionInfo> {
             turns: prompts.len(),
             first: one_line(&prompts[0]),
             last: one_line(prompts.last().map_or("", String::as_str)),
+            model: parse_model(&content),
         });
     }
     out.sort_by_key(|s| std::cmp::Reverse(s.modified));
@@ -242,6 +260,8 @@ pub enum Action {
 #[derive(Debug, Default)]
 pub struct SessView {
     pub list: Vec<SessionInfo>,
+    // Purpose by session id (App: "main", or the resident role), for the names "<model>-<purpose>(<first prompt>)".
+    pub purposes: HashMap<String, String>,
     pub sel: usize,
     pub id: String,
     pub turns: Option<Vec<String>>,
@@ -304,6 +324,24 @@ impl SessView {
             self.off + 3
         };
         self.scroll(width, vp_h, top);
+    }
+
+    // Display name of a session: "<model>-<purpose>(<first prompt, 40 chars>)", e.g. "haiku-coder(Fix the build)".
+    // Falls back to the 8-character id when the purpose or the model is unknown.
+    pub fn name_of(&self, id: &str) -> String {
+        let s = self.list.iter().find(|s| s.id == id);
+        match (s, self.purposes.get(id)) {
+            (Some(s), Some(purpose)) if !s.model.is_empty() => {
+                let family = s
+                    .model
+                    .trim_start_matches("claude-")
+                    .split('-')
+                    .next()
+                    .unwrap_or("");
+                format!("{family}-{purpose}({})", trunc_chars(&s.first, 40))
+            }
+            _ => short_id(id),
+        }
     }
 
     // Go svBody: the shown prompt wrapped to the overlay width (at least 10 cells). Empty at level 1.
@@ -406,7 +444,7 @@ impl SessView {
                 Err(_) => true,
             };
             let mark = if active { "● " } else { "  " };
-            let t = format!("{mark}{}  {}", short_id(&s.id), s.label());
+            let t = format!("{mark}{}  {}", self.name_of(&s.id), s.label());
             out.push(if i == self.sel {
                 format!("{ORANGE_ON}{}{FG_OFF}", clip(&format!("> {t}"), width))
             } else {
@@ -432,7 +470,7 @@ impl SessView {
         let end = body.len().min(off + room);
         let head_plain = format!(
             "{}  prompt {}/{}",
-            short_id(&self.id),
+            self.name_of(&self.id),
             self.cur + 1,
             turns.len()
         );
@@ -783,6 +821,64 @@ mod tests {
         assert_eq!(v.off, 3, "wheel down scrolls three lines");
         v.wheel(true, w, h);
         assert_eq!(v.off, 0, "wheel up returns to the top");
+    }
+
+    // Names: "<model>-<purpose>(<first prompt, 40 chars>)"; the 8-char id stays when the purpose or the model is unknown.
+    #[test]
+    fn session_names_are_model_purpose_and_fall_back_to_the_id() {
+        let info = |id: &str, model: &str, first: &str| SessionInfo {
+            id: id.into(),
+            path: PathBuf::from(format!("{id}.jsonl")),
+            modified: SystemTime::now(),
+            turns: 1,
+            first: first.into(),
+            last: first.into(),
+            model: model.into(),
+        };
+        let mut v = SessView {
+            list: vec![
+                info("sessaaa1", "claude-haiku-5-5", "Fix the build"),
+                info("sessbbb2", "claude-opus-5-5", &"가".repeat(50)),
+                info("sessccc3", "", "no model"),
+            ],
+            purposes: HashMap::from([
+                ("sessaaa1".to_string(), "coder".to_string()),
+                ("sessbbb2".to_string(), "main".to_string()),
+                ("sessccc3".to_string(), "main".to_string()),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(v.name_of("sessaaa1"), "haiku-coder(Fix the build)");
+        assert_eq!(
+            v.name_of("sessbbb2"),
+            format!("opus-main({})", "가".repeat(40))
+        );
+        assert_eq!(v.name_of("sessccc3"), "sessccc3", "no model: the 8-char id");
+        assert_eq!(
+            v.name_of("unknown99"),
+            "unknown9",
+            "not listed: the 8-char id"
+        );
+        v.purposes.remove("sessaaa1");
+        assert_eq!(
+            v.name_of("sessaaa1"),
+            "sessaaa1",
+            "no purpose: the 8-char id"
+        );
+        v.purposes.insert("sessaaa1".into(), "coder".into());
+        let rows = v.list_lines(120, SystemTime::now()).join("\n");
+        assert!(rows.contains("haiku-coder(Fix the build)"), "{rows}");
+        assert!(
+            !rows.contains("sessaaa1"),
+            "list shows the name, not the id: {rows}"
+        );
+    }
+
+    #[test]
+    fn parse_model_reads_the_first_assistant_model() {
+        let content = "{\"type\":\"user\",\"message\":{\"content\":\"hi\"}}\nnot json\n{\"type\":\"assistant\",\"message\":{\"model\":\"claude-haiku-5-5\"}}\n";
+        assert_eq!(parse_model(content), "claude-haiku-5-5");
+        assert_eq!(parse_model("{}\n"), "");
     }
 
     #[test]

@@ -2285,6 +2285,98 @@ fn resumed_background_agent_is_active_again_until_task_notification() {
 }
 
 #[test]
+fn resumed_agent_ends_by_notice_naming_its_sendmessage_id() {
+    // The real resume's task-notification names the SendMessage tool id, not the Agent tool id.
+    let _g = lock();
+    let f = fake("resume_sm", &["resume_notice_names_sendmessage.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let ended = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1"));
+    assert!(ended, "{evs:?}");
+    h.shutdown();
+}
+
+// Trimmed from a real queued SendMessage ("Message queued for delivery", no resumedAgentId): the row opens at once
+// and closes on the agent's notification, which names the launch tool id.
+#[test]
+fn queued_send_opens_a_row_until_the_agent_notifies() {
+    let _g = lock();
+    let f = fake("queued_sm", &["queued_send_closes_on_notice.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let resumed = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentResumed { id, .. } if id == "toolu_q1"));
+    let ended = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_q1"));
+    assert!(resumed && ended, "{evs:?}");
+    // The SendMessage call (toolu_qsm) has no ToolEnd of its own: AgentResumed names it as the row that stays open.
+    let send_ends = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::ToolEnd { id, .. } if id == "toolu_qsm"));
+    assert!(!send_ends, "{evs:?}");
+    let names_send = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentResumed { send_id, .. } if send_id == "toolu_qsm"));
+    assert!(names_send, "{evs:?}");
+    h.shutdown();
+}
+
+// Real resume (success, resumedAgentId): the SendMessage call's ToolEnd is not sent; AgentResumed carries its id.
+#[test]
+fn resuming_send_names_its_call_in_agent_resumed_instead_of_tool_end() {
+    let _g = lock();
+    let f = fake("resume_sm_row", &["resume_notice_names_sendmessage.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let names_send = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentResumed { id, send_id, .. } if id == "toolu_bg1" && send_id == "toolu_sm"));
+    assert!(names_send, "{evs:?}");
+    let send_ends = evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::ToolEnd { id, .. } if id == "toolu_sm"));
+    assert!(!send_ends, "{evs:?}");
+    h.shutdown();
+}
+
+// Trimmed from a real SendMessage handback: the agent's <task-notification> arrives while the turn is idle,
+// then main speaks on its own. With residents on, that idle reply must still reach the screen (Go idleText).
+#[test]
+fn idle_handback_reply_is_shown_with_residents_on() {
+    let _g = lock();
+    let f = fake("idle_handback", &["idle_handback_main_reply.jsonl"]);
+    let cfg = Config {
+        residents: true,
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    let mut evs = until_idle(&rx);
+    let shown = |evs: &[UiEvent]| {
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::MessageDone { role: Role::Main }))
+    };
+    while !shown(&evs) {
+        evs.push(rx.recv_timeout(WAIT).expect("engine went silent"));
+    }
+    assert!(
+        evs.iter().any(|e| matches!(
+            e,
+            UiEvent::TextDelta { role: Role::Main, text } if text == "Agent reported back"
+        )),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
 fn idle_reply_without_notice_finishes_oldest_background_agent() {
     let _g = lock();
     let f = fake("bg_idle", &["bg_idle_reply_turn.jsonl"]);
@@ -2380,16 +2472,8 @@ fn resume_after_agent_ended_keeps_start_label() {
         "{evs:?}"
     );
     assert!(
-        evs.contains(&UiEvent::AgentResumed {
-            id: "toolu_bg2".into(),
-            description: "scan".into(),
-            started_at: evs
-                .iter()
-                .find_map(|e| match e {
-                    UiEvent::AgentResumed { started_at, .. } => Some(*started_at),
-                    _ => None,
-                })
-                .unwrap_or_else(|| panic!("{evs:?}")),
+        evs.iter().any(|e| {
+            matches!(e, UiEvent::AgentResumed { id, description, .. } if id == "toolu_bg2" && description == "scan")
         }),
         "{evs:?}"
     );
