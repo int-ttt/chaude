@@ -17,11 +17,6 @@ jobs:
         with:
           node-version: "24"
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: deprecated/src/main/intt/go.mod
-          cache-dependency-path: deprecated/src/main/intt/go.sum
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

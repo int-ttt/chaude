@@ -1,8 +1,7 @@
 #!/bin/sh
 # Bump the release version in place (no commit, no tag).
 # Usage: scripts/bump-version.sh <X.Y.Z>
-# Updates: deprecated/src/main/intt/cmd/chaude/main.go (version var), version in Cargo.toml [workspace.package]
-# (and Cargo.lock refresh), CHAUDE_VERSION=vX.Y.Z in README.md + README.ko.md,
+# Updates: version in Cargo.toml [workspace.package] (and Cargo.lock refresh), CHAUDE_VERSION=vX.Y.Z in README.md + README.ko.md,
 # **버전 X.Y.Z** in docs/claude-lean/README.md, and CHANGELOG.md ("## Unreleased" -> "## X.Y.Z - DATE" + fresh "## Unreleased").
 set -eu
 VERSION="${1:?usage: bump-version.sh <X.Y.Z>}"
@@ -19,14 +18,13 @@ cd "$ROOT"
 grep -q '^## Unreleased$' CHANGELOG.md || { echo "bump-version: CHANGELOG.md has no '## Unreleased' line" >&2; exit 1; }
 
 # sed -i.bak works on both GNU and BSD sed; the backups are removed right away.
-sed -i.bak "s/^var version = \"[^\"]*\"/var version = \"$VERSION\"/" deprecated/src/main/intt/cmd/chaude/main.go
 # Rust workspace version: only the [workspace.package] table, not dependency versions.
 sed -i.bak '/^\[workspace.package\]/,/^\[/ s/^version = "[^"]*"/version = "'"$VERSION"'"/' Cargo.toml
 command -v cargo >/dev/null 2>&1 || { echo "bump-version: cargo not found, cannot refresh Cargo.lock" >&2; exit 1; }
 cargo update --workspace || { echo "bump-version: cargo update -w failed, refresh Cargo.lock by hand" >&2; exit 1; }
 sed -i.bak "s/CHAUDE_VERSION=v[0-9][0-9.]*/CHAUDE_VERSION=v$VERSION/g" README.md README.ko.md
 sed -i.bak "s/\*\*버전 [0-9][0-9.]*\*\*/**버전 $VERSION**/" docs/claude-lean/README.md
-rm -f deprecated/src/main/intt/cmd/chaude/main.go.bak Cargo.toml.bak README.md.bak README.ko.md.bak docs/claude-lean/README.md.bak
+rm -f Cargo.toml.bak README.md.bak README.ko.md.bak docs/claude-lean/README.md.bak
 
 # Turn the Unreleased section into the new version and open a fresh empty Unreleased above it.
 tmp="$(mktemp)"
@@ -38,7 +36,6 @@ cat "$tmp" > CHANGELOG.md   # keep file mode
 rm -f "$tmp"
 
 # Verify every target now carries the new version.
-grep -q "^var version = \"$VERSION\"\$" deprecated/src/main/intt/cmd/chaude/main.go
 grep -q "^version = \"$VERSION\"\$" Cargo.toml
 # Cargo.lock: every workspace crate (chaude-*) must carry the new version.
 lock_total="$(grep -c '^name = "chaude-' Cargo.lock)"

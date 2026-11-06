@@ -68,7 +68,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.2 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.3 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -250,7 +250,8 @@ Rust 포트 기간 동안 장기 프로젝트를 실제로 쓴 양입니다. 메
 
 ## Go 버전에서 업그레이드
 
-> **지원 중단 안내:** `deprecated/` 아래의 Go 구현은 지원이 중단되었습니다. Rust 전환 이후부터 릴리스 아카이브는 저장소 루트의 Rust 워크스페이스(`crates/cli`, 바이너리 `chaude`)에서 빌드하며, 에셋 이름은 같습니다. Go 빌드는 0.10.0 이후 5개 릴리스까지 유지하고, 0.10.0 이후 6번째 릴리스에서 삭제합니다. Rust 버전은 아직 Go의 모든 기능을 다루지 않습니다. `plan/rust-port.md`를 보세요.
+> **Go 빌드 삭제:** `deprecated/` 아래의 Go 구현은 0.10.0 이후 6번째 릴리스인 0.11.3에서 삭제했습니다. 0.11.0부터 릴리스 아카이브는 저장소 루트의 Rust 워크스페이스(`crates/cli`, 바이너리 `chaude`)에서 빌드하며, 에셋 이름은 같습니다. Go 소스는 태그 `v0.11.2`의 git 이력에 있습니다. Rust 버전은 아직 Go의 모든 기능을 다루지 않습니다. `plan/rust-port.md`를 보세요.
+
 
 업그레이드하려면 설치 스크립트를 다시 실행하거나 `chaude update`를 실행하세요. 설치 스크립트는 예전 `~/.local/bin` 설치본과 그 `PATH` 줄을 지웁니다.
 
@@ -263,7 +264,7 @@ cargo build --release -p chaude-cli   # binary: target/release/chaude
 cargo test
 ```
 
-Go 구현은 참고용으로 `deprecated/src/main/intt`(Go 1.22 이상)에 남아 있습니다.
+Go 구현은 0.11.3에서 삭제했습니다. 소스는 태그 `v0.11.2`의 git 이력에 있습니다.
 
 이슈: 버그 제보와 기능 제안은 [GitHub Issues](https://github.com/int-ttt/chaude/issues)에 남겨 주세요.
 

@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-// The prompter's system prompt: the Go resident-prompter rules, copied so the engine does not depend on deprecated/.
+// The prompter's system prompt: the Go resident-prompter rules, copied so the engine does not depend on the removed Go tree.
 pub const PROMPTER_RULE: &str = include_str!("rules/resident-prompter.md");
 
 // How long one coder task may run (Go residentCoderTimeout). On timeout the coder child is replaced.

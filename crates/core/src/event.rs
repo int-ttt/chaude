@@ -1,5 +1,5 @@
 // Stream-json events emitted by `claude -p --output-format stream-json`.
-// Mirrors the event types handled by deprecated/src/main/intt/internal/harness (core.go, repl.go, livechild.go).
+// Mirrors the event types handled by Go tree (v0.11.2) internal/harness (core.go, repl.go, livechild.go).
 // Owned types only: no lifetimes. Unknown top-level types map to `Unknown`.
 
 use serde::{Deserialize, Serialize};
@@ -236,7 +236,7 @@ mod tests {
         }
     }
 
-    // From deprecated/src/main/intt/internal/harness (repl tests): assistant text + Bash tool_use.
+    // From Go tree (v0.11.2) internal/harness (repl tests): assistant text + Bash tool_use.
     #[test]
     fn assistant_text_and_tool_use() {
         let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"plan first"},{"type":"text","text":"Checking."},{"type":"tool_use","id":"toolu_bash","name":"Bash","input":{"command":"ls"}}]}}"#;

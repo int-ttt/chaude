@@ -54,3 +54,4 @@
 - [tidy] 261103: prototype/chaude-rs -> deprecated/prototype/chaude-rs (own [workspace], root exclude dropped); e2e/ -> tests/e2e; tools/job_monitor.py -> scripts/; .chaude/ gitignored. platform_setup/install.* kept (not duplicates of root install.*).
 - [disk] 2026-11-05 user: workspace disk cap 15GB (repo+target); ~69GB free after temp cleanup.
 - [release] 261105 user: "맥 배포는 일단 빌드를 맥버전만" -> for now "Mac deploy" = build only the macOS version (darwin_arm64). release.yml unchanged. memory feedback_release_deploy.md updated (old body archived at notes/archive/feedback_release_deploy.20261105.md).
+- [deprecate] 261106 release 0.11.3: deprecated/ (Go) deleted, the 6th release after 0.10.0. Removed: Go CI (test.yml), release.yml go-release job, release-dispatch Go vet/test, e2e Go setup, scripts/build-release.sh, scripts/tui-diff.sh, .gitignore entries. install.sh builds Rust. Go source: git tag v0.11.2.

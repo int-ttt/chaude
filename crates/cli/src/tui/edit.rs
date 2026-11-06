@@ -1,6 +1,6 @@
 // Single input line for the inline TUI. The buffer is a Vec<char>, so the cursor moves by whole characters:
 // a Korean syllable is one char but two columns, and the cursor column is the sum of display widths.
-// Editing rules follow the Go inputBox (deprecated/src/main/intt/internal/harness/input.go); prompt history
+// Editing rules follow the Go inputBox (Go tree (v0.11.2) internal/harness/input.go); prompt history
 // follows history.go (cap, consecutive-duplicate rule, <cwd>/.chaude/history.jsonl).
 
 // This is a binary crate, and mod.rs does not call every method here yet (delete_word, kill_to_start,

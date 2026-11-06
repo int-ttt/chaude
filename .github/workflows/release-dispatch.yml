@@ -44,16 +44,9 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: sh scripts/bump-version.sh "$VERSION"
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: deprecated/src/main/intt/go.mod
-          cache-dependency-path: deprecated/src/main/intt/go.sum
-      - name: Vet
-        working-directory: deprecated/src/main/intt
-        run: go vet ./...
+      - uses: dtolnay/rust-toolchain@stable
       - name: Test
-        working-directory: deprecated/src/main/intt
-        run: go test ./... -count=1
+        run: cargo test --workspace --locked
       - name: Commit, tag and push
         env:
           VERSION: ${{ inputs.version }}

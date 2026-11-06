@@ -1,6 +1,6 @@
 // Slash commands for the inline TUI: parsing, suggestions, help text, and dispatch to an enum of actions.
 // Nothing here runs an engine effect. Each side effect comes back as a Dispatch variant for the caller to
-// execute. Ported from deprecated/src/main/intt/internal/harness/tui.go (slashCmds, busyOK, suggestions,
+// execute. Ported from Go tree (v0.11.2) internal/harness/tui.go (slashCmds, busyOK, suggestions,
 // runSlash) and mode.go. Plain functions, unit-tested without a terminal.
 
 // tui.go:192-230 (slashCmds). Order and text are the Go source's.

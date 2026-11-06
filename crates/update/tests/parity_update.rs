@@ -1,4 +1,4 @@
-//! Parity with Go update tests (deprecated/src/main/intt/internal/update/update_test.go and install_path_test.go).
+//! Parity with Go update tests (Go tree (v0.11.2) internal/update/update_test.go and install_path_test.go).
 //! Offline only: every HTTP call goes through an injected `Fetch`, and archives are built in memory.
 
 use std::cell::RefCell;

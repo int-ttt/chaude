@@ -23,8 +23,6 @@ tests/e2e-rebuild/
 *.key
 .DS_Store
 **/.DS_Store
-deprecated/chaude
-/deprecated/src/main/intt/chaude
 .claude/lean-off
 tests/e2e/results/
 .chaude/

@@ -68,7 +68,7 @@ Installs to `/usr/local/bin/chaude`. The directory is created if missing. `sudo`
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.2 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.3 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -250,7 +250,8 @@ The user guide is written in Korean.
 
 ## Upgrading from Go
 
-> **Deprecation notice:** The Go implementation under `deprecated/` is deprecated. Release archives are built from the Rust workspace at the repo root (`crates/cli`, binary `chaude`) from the Rust switch on, with the same asset names. The Go build is kept through the 5 releases after 0.10.0 and deleted in the 6th release after 0.10.0. The Rust version does not yet cover every Go feature; see `plan/rust-port.md`.
+> **Go build removed:** The Go implementation under `deprecated/` was deleted in 0.11.3, the 6th release after 0.10.0. Release archives are built from the Rust workspace at the repo root (`crates/cli`, binary `chaude`) since 0.11.0, with the same asset names. The Go source is in git history at tag `v0.11.2`. The Rust version does not yet cover every Go feature; see `plan/rust-port.md`.
+
 
 To upgrade, run the installer again or run `chaude update`. The installers remove an old `~/.local/bin` install and its `PATH` line.
 
@@ -263,7 +264,7 @@ cargo build --release -p chaude-cli   # binary: target/release/chaude
 cargo test
 ```
 
-The Go implementation is kept for reference under `deprecated/src/main/intt` (Go 1.22 or later).
+The Go implementation was removed in 0.11.3. Its source is in git history at tag `v0.11.2`.
 
 Issues: report bugs and request features on [GitHub Issues](https://github.com/int-ttt/chaude/issues).
 

@@ -4733,7 +4733,10 @@ mod tests {
             "{plain:?}"
         );
         assert!(!plain.contains(" → "), "open row has no end: {plain:?}");
-        assert!(!app.open_tools.contains(send), "the SendMessage call is no longer open");
+        assert!(
+            !app.open_tools.contains(send),
+            "the SendMessage call is no longer open"
+        );
 
         // A resume while the row is open adds no second row.
         app.apply(UiEvent::AgentResumed {

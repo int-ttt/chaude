@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.11.3 - 2026-11-06
+- Release: the Go implementation under `deprecated/` is deleted, as planned (6th release after 0.10.0). Its CI jobs and release job are removed, and `platform_setup/install.sh` now builds the Rust `chaude`. The Go source stays in git history at tag `v0.11.2`.
+  - 릴리스: 계획대로 `deprecated/` 아래의 Go 구현을 삭제했습니다(0.10.0 이후 6번째 릴리스). Go용 CI 작업과 릴리스 작업을 제거했고, `platform_setup/install.sh`는 이제 Rust `chaude`를 빌드합니다. Go 소스는 태그 `v0.11.2`의 git 이력에 남아 있습니다.
+- TUI: a SendMessage row stays open until the resumed agent ends. A queued message opens the same row, and the row colours are fixed.
+  - TUI: SendMessage 행은 재개된 에이전트가 끝날 때까지 열려 있습니다. 대기 중인 메시지도 같은 행을 열며, 행 색상을 고쳤습니다.
+- TUI: `/view` scrolls correctly and shows the agent names.
+  - TUI: `/view`가 올바르게 스크롤되고 에이전트 이름을 표시합니다.
+- Engine: a reply from an idle agent (handback) is shown at once instead of waiting for a turn.
+  - 엔진: 유휴 상태 에이전트의 응답(핸드백)을 턴을 기다리지 않고 바로 표시합니다.
+
 ## 0.11.2 - 2026-11-06
 - Docs: README effect analysis is updated (long vs short project), with the ping-pong ratio, and the line-3 wording is revised (EN and KO).
   - 문서: README(EN/KO)의 사용 효과 분석을 갱신했습니다(긴 프로젝트 vs 짧은 프로젝트, 핑퐁 비율). 3번째 줄 문구도 다듬었습니다.
