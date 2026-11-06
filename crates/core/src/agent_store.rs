@@ -931,6 +931,7 @@ mod tests {
     }
 
     // Go TestAgentStoreCrashRecoveryAndOwners
+    #[cfg(unix)]
     #[test]
     fn agent_store_crash_recovery_and_owners() {
         let dir = TempDir::new("agent-store-owners");

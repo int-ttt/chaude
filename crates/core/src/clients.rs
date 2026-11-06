@@ -572,6 +572,7 @@ mod tests {
     }
 
     // Go TestReconcileKilledOwner
+    #[cfg(unix)]
     #[test]
     fn reconcile_marks_dead_owner_rows() {
         let dir = TempDir::new("clients-reconcile");

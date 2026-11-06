@@ -2,3 +2,5 @@ testdata/smoke/** -text
 # shell launchers and hooks must stay LF even on a Windows checkout (a CRLF shebang breaks Git Bash)
 *.sh text eol=lf
 *.py text eol=lf
+# Go-written fixtures are compared byte for byte; keep them LF on a Windows checkout
+crates/core/tests/fixtures/*.json text eol=lf

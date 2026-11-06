@@ -136,6 +136,7 @@ mod tests {
 
     // Go TestPickChild: owned by another live process (Go uses the parent pid; pid 1 is always alive
     // and is not this process, which keeps the case without FFI)
+    #[cfg(unix)]
     #[test]
     fn pick_child_refuses_row_owned_by_other_live_pid() {
         let now = SystemTime::now();
