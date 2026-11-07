@@ -787,6 +787,11 @@ impl App {
         self.agent_src = Some(src);
     }
 
+    // The status bar shows the engine's start mode (Config.perm_mode), then follows UiEvent::ModeChanged.
+    pub fn set_start_mode(&mut self, mode: chaude_core::mode::PermMode) {
+        self.bar.mode = mode.as_str().to_string();
+    }
+
     // Records the time for elapsed counters and the spinner (Go spinner: one frame per 125 ms).
     pub fn tick(&mut self, now: Instant) {
         self.clock = now;
@@ -2983,10 +2988,12 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         cfg.rotate_threshold,
         cfg.resume.is_some(),
     );
+    let start_mode = cfg.perm_mode;
     let (engine, rx) = Engine::try_start(cfg).unwrap_or_else(|e| start_failed(&e));
     let _guard = TermGuard::enter()?;
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
     let mut app = App::new(cols as usize, rows as usize);
+    app.set_start_mode(start_mode);
     app.set_agent_source(engine.agent_rows());
     app.ime_shift = ime_col_shift(
         std::env::var("CHAUDE_IME_SHIFT").ok(),
@@ -3165,6 +3172,7 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     let model = cfg.model.clone();
     let threshold = cfg.rotate_threshold;
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    let start_mode = commands::parse_mode(cfg.perm_mode.as_str()).unwrap_or(PermMode::Default);
     let (engine, rx) = Engine::try_start(cfg).unwrap_or_else(|e| start_failed(&e));
     let mut app = App::new(80, 24);
     app.set_agent_source(engine.agent_rows());
@@ -3191,7 +3199,7 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
             threshold,
             rotations: 0,
             session_id: None,
-            mode: PermMode::Default,
+            mode: start_mode,
             chaude_version: env!("CARGO_PKG_VERSION"),
             busy: false,
         };
@@ -4669,6 +4677,16 @@ mod tests {
             app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
             Action::Quit
         );
+    }
+
+    // A session started in plan mode shows plan on the status bar, not the auto default.
+    #[test]
+    fn status_bar_starts_on_the_engine_start_mode() {
+        let mut app = App::new(80, 24);
+        app.set_start_mode(chaude_core::mode::PermMode::Plan);
+        let rows = app.chrome(80, 24);
+        assert!(rows.iter().any(|r| r.contains("· mode plan")), "{rows:?}");
+        assert!(!rows.iter().any(|r| r.contains("mode auto")), "{rows:?}");
     }
 
     #[test]

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.11.7 - 2026-11-07
+- Permissions: the engine and the status bar start in the configured start mode (`perm_mode`, default `auto`), and non-TUI runs use it too. Default behavior is unchanged.
+  - 권한: 엔진과 상태 막대는 설정된 시작 모드(`perm_mode`, 기본값 `auto`)로 시작하며, TUI가 아닌 실행에도 같은 모드를 씁니다. 기본 동작은 그대로입니다.
+- Resume: the `/resume` picker no longer caps the list at 30 groups, so older sessions (including Go-era ones) are reachable by scrolling.
+  - 재개: `/resume` 선택 목록이 30개 그룹으로 잘리지 않으므로, 오래된 세션(Go 시절 세션 포함)도 스크롤로 찾을 수 있습니다.
+- Windows: the guard hooks run `py -3` (or `python`) instead of `python3`. The Microsoft Store `python3` stub exits without running the hook, which made the main-thread guard fail open. Re-apply: an existing Windows `.claude/settings.json` still has `python3`; replace it with `py -3` or `python`, or regenerate it with `chaude gen-settings windows --out .claude/settings.json`.
+  - Windows: 가드 훅이 `python3` 대신 `py -3`(또는 `python`)으로 실행됩니다. Microsoft Store의 `python3` 스텁은 훅을 실행하지 않고 끝나서, 메인 스레드 가드가 열린 상태(fail open)가 되었습니다. 재적용: 기존 Windows `.claude/settings.json`에는 아직 `python3`이 남아 있으므로, `py -3` 또는 `python`으로 바꾸거나 `chaude gen-settings windows --out .claude/settings.json`으로 다시 만드세요.
+
 ## 0.11.6 - 2026-11-06
 - Permissions: the harness starts in `auto` mode, as the Go harness did, so tool calls no longer prompt on start. The TUI bar shows the same mode the engine runs.
   - 권한: 하네스가 Go 하네스와 같이 `auto` 모드로 시작하므로, 시작 직후 도구 호출에서 더 이상 권한 확인을 묻지 않습니다. TUI 막대는 엔진이 실제로 쓰는 모드를 표시합니다.

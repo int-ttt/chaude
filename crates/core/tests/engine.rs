@@ -1285,6 +1285,27 @@ fn mode_without_name_reports_current_mode() {
     h.shutdown();
 }
 
+// Config.perm_mode seeds the engine's start mode; the start state is not announced, so /mode with no name reports it.
+#[test]
+fn configured_start_mode_is_the_engine_mode() {
+    let _g = lock();
+    let f = fake("mode-start", &["text_turn.jsonl"]);
+    let cfg = Config {
+        perm_mode: chaude_core::mode::PermMode::Plan,
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.set_mode("");
+    let ev = rx.recv_timeout(WAIT).expect("mode report");
+    assert_eq!(
+        ev,
+        UiEvent::ModeChanged {
+            mode: "plan".into()
+        }
+    );
+    h.shutdown();
+}
+
 // Go askPerm with r.ui == nil: an ask that arrives between turns is denied with the Go note, not queued for a UI.
 #[test]
 fn plain_mode_denies_idle_permission_ask_with_notice() {

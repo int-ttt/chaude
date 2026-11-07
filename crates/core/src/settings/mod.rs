@@ -361,4 +361,17 @@ mod tests {
             "PowerShell(bin/chaude.exe metrics)".to_string()
         )));
     }
+
+    #[test]
+    fn windows_repo_settings_have_no_python3() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.claude/settings.json");
+        let Ok(src) = fs::read(&repo) else {
+            eprintln!("skip: repo .claude/settings.json not reachable from here");
+            return;
+        };
+        for py in ["py -3", "python"] {
+            let out = windows(&src, py).expect("convert");
+            assert!(!out.contains("python3"), "python3 left ({py}):\n{out}");
+        }
+    }
 }

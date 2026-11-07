@@ -183,18 +183,16 @@ pub fn ensure_project_settings(cwd: &Path, home: Option<&Path>) -> io::Result<bo
     }
 }
 
-/// Hook interpreter for the windows guard command: the first of python3, python, py found on PATH, else "python".
+/// Hook interpreter for the windows guard command: the py launcher (`py -3`) when on PATH, else `python`.
+/// python3 is never used: on windows the python3 PATH entry is the Microsoft Store alias stub, which exits without
+/// running the hook, so the guard fails open.
 pub fn hook_python() -> &'static str {
     hook_python_in(&osenv::path_dirs())
 }
 
 /// `hook_python` over the given PATH directories.
 pub fn hook_python_in(dirs: &[PathBuf]) -> &'static str {
-    for (exe, cmd) in [
-        ("python3", "python3"),
-        ("python", "python"),
-        ("py", "py -3"),
-    ] {
+    for (exe, cmd) in [("py", "py -3"), ("python", "python")] {
         if osenv::find_on_path(exe, dirs).is_some() {
             return cmd;
         }
@@ -464,9 +462,10 @@ mod tests {
 
     #[test]
     fn hook_python_order() {
-        let cases: [(&[&str], &str); 4] = [
-            (&["python3", "python", "py"], "python3"),
-            (&["python", "py"], "python"),
+        let cases: [(&[&str], &str); 5] = [
+            (&["python3", "python", "py"], "py -3"),
+            (&["python3", "python"], "python"),
+            (&["python3"], "python"),
             (&["py"], "py -3"),
             (&[], "python"),
         ];
@@ -484,6 +483,23 @@ mod tests {
             let dirs = [root.path().to_path_buf()];
             assert_eq!(hook_python_in(&dirs), want, "have {have:?}");
         }
+    }
+
+    #[test]
+    fn windows_guard_has_no_python3() {
+        let root = TempDir::new("win-guard");
+        let stub = root.path().join("python3");
+        fs::write(&stub, "").expect("write python3 stub");
+        let dirs = [root.path().to_path_buf()];
+        let py = hook_python_in(&dirs);
+        let text = windows(GUARD_HOOKS.as_bytes(), py).expect("convert");
+        assert!(
+            !text.contains("python3"),
+            "python3 left in windows guard:\n{text}"
+        );
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        let h = &v["hooks"]["PreToolUse"][0]["hooks"][0];
+        assert_eq!(h["command"], "python", "only the python3 stub is on PATH");
     }
 
     /// Runs the embedded bash-py-guard.py on one Bash command; true when it denies.
@@ -546,5 +562,62 @@ mod tests {
         for cmd in allow {
             assert!(!bash_guard_denies(&hook, cmd), "should allow: {cmd:?}");
         }
+    }
+
+    /// Runs the embedded main-thread-guard.py on one tool call (JSON text) and returns its stdout.
+    fn main_guard_output(root: &Path, payload: &str) -> String {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let hooks = root.join(".claude").join("hooks");
+        fs::create_dir_all(&hooks).expect("mkdir hooks");
+        for name in ["main-thread-guard.py", "_lean.py"] {
+            fs::write(hooks.join(name), embedded_hook(name).expect("embedded"))
+                .expect("write hook");
+        }
+        let mut child = Command::new("python3")
+            .arg("-I")
+            .arg(hooks.join("main-thread-guard.py"))
+            .env("CLAUDE_PROJECT_DIR", root)
+            .env_remove("CLAUDE_LEAN")
+            .env_remove("CLAUDE_ALLOW_MAIN_TOOLS")
+            .env_remove("CHAUDE_ORCH")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("python3 runs");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(payload.as_bytes())
+            .expect("write stdin");
+        let out = child.wait_with_output().expect("hook exits");
+        assert!(out.status.success(), "hook failed on {payload}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[test]
+    fn main_guard_powershell_main_denied_subagent_allowed() {
+        let root = TempDir::new("main-guard-powershell");
+        let main = serde_json::json!({"tool_name": "PowerShell", "tool_input": {"command": "Get-ChildItem"}})
+            .to_string();
+        let out = main_guard_output(root.path(), &main);
+        assert!(
+            out.contains(r#""permissionDecision": "deny""#)
+                && out.contains("Main session does not use PowerShell"),
+            "main PowerShell not denied: {out}"
+        );
+        let sub = serde_json::json!({
+            "tool_name": "PowerShell",
+            "tool_input": {"command": "Get-ChildItem"},
+            "agent_id": "a1",
+            "agent_type": "haiku-coder"
+        })
+        .to_string();
+        let out = main_guard_output(root.path(), &sub);
+        assert!(
+            out.trim().is_empty(),
+            "subagent PowerShell not allowed: {out}"
+        );
     }
 }

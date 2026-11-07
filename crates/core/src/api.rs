@@ -328,6 +328,8 @@ pub struct Config {
     // Go --idle-rotate: a handoff and fresh child once the child has no API response for this long, capped at the
     // cache TTL (see idle_deadline). Zero = off.
     pub idle_rotate: Duration,
+    // Harness permission mode the engine starts in. The TUI status bar starts on the same value (Config is its source).
+    pub perm_mode: PermMode,
     // Resident slots are running (Go len(resident) > 0): the engine emits UiEvent::Stage rows for the main turn
     // and each agent call. Off = no stage rows.
     pub residents: bool,
@@ -432,6 +434,7 @@ impl Default for Config {
             rotate_threshold: HAIKU_THRESHOLD,
             rotate_defer_timeout: Duration::from_secs(600),
             idle_rotate: Duration::from_secs(3599),
+            perm_mode: PermMode::Auto,
             residents: true,
             extra_coders: 4,
             coder_idle_ttl: Duration::from_secs(270),
@@ -1005,6 +1008,7 @@ fn actor(
     };
     let model = cfg.model.clone();
     let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));
+    let perm_mode = cfg.perm_mode;
     // Go repl.go start(): agents a crashed harness left running are marked interrupted (before the reconcile).
     let agent_store = cfg.agents_file.as_deref().map(AgentStore::new);
     if let Some(store) = &agent_store {
@@ -1065,8 +1069,8 @@ fn actor(
         delegations: 0,
         result_usage: None,
         result_model_usage: None,
-        // Go repl.go start(): the harness starts in auto (same as claude --permission-mode auto).
-        mode: PermMode::Auto,
+        // Go repl.go start(): the harness starts in Config.perm_mode (default auto, same as claude --permission-mode auto).
+        mode: perm_mode,
         pending_perm: HashMap::new(),
         budget,
         last_api: None,

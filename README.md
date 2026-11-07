@@ -24,6 +24,7 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 - Import Claude Code sessions with `/import`, `/resume claude`, or `chaude --from-claude`.
 - Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing (0.9.14).
 - The Bash hook `bash-py-guard.py` denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `fs.writeFile*`). Read-only code and `python3 -m pytest` stay allowed (0.11.4).
+- On Windows the guard hooks run `py -3` (or `python`), not `python3`, because the Microsoft Store `python3` stub made the guard fail open (0.11.7). Re-apply on an existing project: replace `python3` in `.claude/settings.json` with `py -3` or `python`, or regenerate it with `chaude gen-settings windows --out .claude/settings.json`.
 
 ## How it works
 
@@ -70,7 +71,7 @@ Installs to `/usr/local/bin/chaude`. The directory is created if missing. `sudo`
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.6 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.7 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.

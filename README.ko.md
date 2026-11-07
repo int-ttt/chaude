@@ -24,6 +24,7 @@ Claude Code를 채팅 형식의 프롬프트로 쓸 수 있고, 반복 작업은
 - `/import`, `/resume claude`, `chaude --from-claude`로 Claude Code 세션을 가져옵니다.
 - 세션을 시작하면 `.claude/settings.json`이 없을 때 가드 훅이 들어간 파일을 만듭니다 (0.9.14).
 - Bash 훅 `bash-py-guard.py`는 인라인 Python이나 node로 하는 파일 편집(`open(..., 'w')`, `write_text`, `fs.writeFile*`)을 거부합니다. 읽기 전용 코드와 `python3 -m pytest`는 그대로 허용합니다 (0.11.4).
+- Windows에서는 가드 훅이 `python3`이 아니라 `py -3`(또는 `python`)으로 실행됩니다. Microsoft Store의 `python3` 스텁 때문에 가드가 열린 상태(fail open)가 되었기 때문입니다 (0.11.7). 기존 프로젝트에는 다시 적용하세요. `.claude/settings.json`의 `python3`을 `py -3` 또는 `python`으로 바꾸거나, `chaude gen-settings windows --out .claude/settings.json`으로 다시 만드세요.
 
 ## 작동 방식
 
@@ -70,7 +71,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.6 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.7 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.

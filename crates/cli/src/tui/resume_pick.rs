@@ -14,8 +14,6 @@ use super::render::{FG_OFF, GREY_ON, ORANGE_ON};
 use super::sessview::{home_dir, project_dir, stamp, wheel_sel};
 
 const TITLE: &str = "Resume a session  (↑/↓ wheel or 1-9 select · enter resume · esc cancel)";
-// Go /resume shows at most this many groups.
-const MAX_ROWS: usize = 30;
 
 // Go groupList: the groups of cwd's Claude Code project dir matching terms. Err is the status line.
 pub fn groups(cwd: &str, terms: &[String]) -> Result<Vec<SessionGroup>, String> {
@@ -43,8 +41,9 @@ pub struct GroupPicker {
 }
 
 impl GroupPicker {
-    pub fn new(mut groups: Vec<SessionGroup>) -> Self {
-        groups.truncate(MAX_ROWS);
+    // All matching groups stay: lines() draws a window around sel, so older groups are reachable by wheel.
+    // A 30-row cap hid every group older than the newest 30 (project with 120 groups, Go-era ones last).
+    pub fn new(groups: Vec<SessionGroup>) -> Self {
         GroupPicker { groups, sel: 0 }
     }
 
@@ -149,6 +148,23 @@ mod tests {
         g.files.push(group("old").files.remove(0));
         let mut p = GroupPicker::new(vec![g]);
         assert_eq!(p.key(press(KeyCode::Enter)), Action::Pick("old,new".into()));
+    }
+
+    #[test]
+    fn groups_beyond_thirty_stay_reachable() {
+        let mut p = GroupPicker::new((0..45).map(|i| group(&i.to_string())).collect());
+        assert_eq!(p.groups.len(), 45, "no row cap");
+        p.wheel(true);
+        assert_eq!(
+            p.sel, 44,
+            "wheel up from the first row reaches the oldest group"
+        );
+        assert_eq!(p.key(press(KeyCode::Enter)), Action::Pick("44".into()));
+        let l = p.lines(120, 8);
+        assert!(
+            l.iter().any(|r| r.contains("> 45)")),
+            "selected old row is drawn"
+        );
     }
 
     #[test]
