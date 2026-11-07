@@ -8,7 +8,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
@@ -171,7 +171,8 @@ pub fn one_shot_usage(claude_bin: &str) -> Result<String, String> {
 
 pub struct ClaudeProc {
     child: Child,
-    stdin: ChildStdin,
+    // None once finish() has closed the child's stdin.
+    stdin: Option<ChildStdin>,
 }
 
 // Spawns claude and a thread that forwards each stdout line as wrap(ProcMsg::Line), then wrap(ProcMsg::Eof).
@@ -213,7 +214,10 @@ pub fn spawn<T: Send + 'static>(
         }
         let _ = tx.send(wrap(ProcMsg::Eof));
     });
-    Ok(ClaudeProc { child, stdin })
+    Ok(ClaudeProc {
+        child,
+        stdin: Some(stdin),
+    })
 }
 
 impl ClaudeProc {
@@ -263,6 +267,20 @@ impl ClaudeProc {
         self.child.id()
     }
 
+    // Quit path: closes stdin (EOF lets claude flush its transcript), waits up to `wait` for a clean exit,
+    // then kills and reaps the child.
+    pub fn finish(&mut self, wait: Duration) {
+        self.stdin = None;
+        let deadline = Instant::now() + wait;
+        while Instant::now() < deadline {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        self.kill();
+    }
+
     // Kills the child and reaps it. Errors are ignored: the child may already have exited.
     pub fn kill(&mut self) {
         let _ = self.child.kill();
@@ -272,8 +290,12 @@ impl ClaudeProc {
     fn write_frame(&mut self, v: &Value) -> io::Result<()> {
         let mut s = serde_json::to_string(v).map_err(io::Error::other)?;
         s.push('\n');
-        self.stdin.write_all(s.as_bytes())?;
-        self.stdin.flush()
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| io::Error::other("claude stdin closed"))?;
+        stdin.write_all(s.as_bytes())?;
+        stdin.flush()
     }
 }
 
@@ -453,7 +475,10 @@ mod tests {
             .unwrap();
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
-        let mut p = ClaudeProc { child, stdin };
+        let mut p = ClaudeProc {
+            child,
+            stdin: Some(stdin),
+        };
         p.write_permission("r1", false, Value::Null, "denied: session is draining")
             .unwrap();
         let mut line = String::new();
@@ -467,6 +492,34 @@ mod tests {
             "denied: session is draining"
         );
         p.kill();
+    }
+
+    // Quit path: finish() closes stdin so a child that flushes on EOF writes its transcript before it is killed.
+    // Fake child: `cat` drains stdin until EOF, then the shell appends one line to the file passed as $1.
+    #[cfg(unix)]
+    #[test]
+    fn finish_lets_child_flush_on_stdin_eof() {
+        let dir = std::env::temp_dir().join(format!("chaude-finish-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("transcript.jsonl");
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("cat > /dev/null; echo flushed >> \"$1\"")
+            .arg("sh")
+            .arg(&out)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let mut p = ClaudeProc {
+            child,
+            stdin: Some(stdin),
+        };
+        p.finish(Duration::from_secs(10));
+        let body = std::fs::read_to_string(&out).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(body.trim(), "flushed");
     }
 
     // Parity with Go harness cleanenv_test.go: TestCleanEnvDropsAPIKey. Checks the recorded env delta, not the

@@ -33,8 +33,8 @@ use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::resident::StagePhase;
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
-    KeyModifiers, MouseButton, MouseEventKind,
+    self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::terminal::{
     self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, ScrollDown, ScrollUp,
@@ -128,6 +128,9 @@ pub struct App {
     ime_shift: i32,
     // Keep the hardware cursor hidden (parked for IME only). Under JediTerm the drawn block is the one cursor; CHAUDE_IME_HIDE=0/1 overrides.
     hide_cursor: bool,
+    // Terminal window focus (crossterm FocusGained/FocusLost). Without it, or without the input box as the focused
+    // pane (input_active), the input cursor is drawn hollow and the hardware cursor is hidden.
+    focused: bool,
     // /import or --from-claude: the loaded transcript, taken by the event loop and installed into the engine.
     import_install: Option<ClaudeImport>,
     editor: Editor,
@@ -308,6 +311,7 @@ impl App {
             mouse: true,
             ime_shift: 0,
             hide_cursor: false,
+            focused: true,
             sugg_sel: 0,
             usage: usage::Usage::default(),
             settings: None,
@@ -473,7 +477,10 @@ impl App {
             } => {
                 // The SendMessage call's own timed row is the resumed agent's row: it stays open until AgentEnd.
                 self.open_tools.remove(&send_id);
+                // A finished agent that runs again (SendMessage) reappears as running: its pane shows only the new turn.
                 if !self.agents.iter().any(|(aid, _, _, _)| *aid == id) {
+                    self.finished_agents.remove(&id);
+                    self.agent_logs.remove(&id);
                     self.agents.push((
                         id.clone(),
                         description.clone(),
@@ -926,11 +933,18 @@ impl App {
         if self.av.is_some() {
             let recs = self.agent_recs();
             let vp_h = self.body_h(self.cols, self.rows);
-            if let Some(av) = self.av.as_mut()
-                && av.key(key, &recs, vp_h) == agentview::Action::Close
-            {
-                self.av = None;
-                self.follow_tail();
+            let Some(av) = self.av.as_mut() else {
+                return Action::Continue;
+            };
+            match av.key(key, &recs, vp_h) {
+                agentview::Action::Close => {
+                    self.av = None;
+                    self.clear_selection();
+                    self.follow_tail();
+                }
+                // Same clamped path as the wheel and the edge scroll.
+                agentview::Action::Scroll(delta) if self.av_shown() => self.scroll(delta),
+                agentview::Action::Scroll(_) | agentview::Action::None => {}
             }
             return Action::Continue;
         }
@@ -943,7 +957,10 @@ impl App {
             KeyCode::Char('t') if ctrl => {
                 let recs = self.agent_recs();
                 match agentview::AgentView::open_first(&recs) {
-                    Some(av) => self.av = Some(av),
+                    Some(av) => {
+                        self.av = Some(av);
+                        self.clear_selection();
+                    }
                     None => self.note(agentview::NO_AGENTS),
                 }
                 Action::Continue
@@ -1398,18 +1415,22 @@ impl App {
                     ..Default::default()
                 }),
         );
-        // Finished agents of this run stay listed as done, with their log (Go sortedAll keeps them).
-        recs.extend(
-            self.finished_agents
-                .values()
-                .filter(|r| self.agents.iter().all(|(id, _, _, _)| *id != r.id))
-                .map(|r| agentview::AgentRec {
-                    log: self.agent_logs.get(&r.id).cloned().unwrap_or_default(),
-                    ..r.clone()
-                }),
-        );
+        // A finished agent leaves the list (it returns only through a SendMessage resume).
         agentview::sort_all(&mut recs);
         recs
+    }
+
+    // The record the open agent view shows: a listed agent, else a finished one kept open (its pane stays open).
+    fn view_rec(&self, id: &str) -> Option<agentview::AgentRec> {
+        self.agent_recs()
+            .into_iter()
+            .find(|r| r.id == id)
+            .or_else(|| {
+                self.finished_agents.get(id).map(|r| agentview::AgentRec {
+                    log: self.agent_logs.get(id).cloned().unwrap_or_default(),
+                    ..r.clone()
+                })
+            })
     }
 
     fn overlay_lines(&self, width: usize, h: usize) -> Option<Vec<String>> {
@@ -1422,13 +1443,14 @@ impl App {
             return Some(self.rw.lines(&refs, width, h));
         }
         if let Some(av) = &self.av {
-            let recs = self.agent_recs();
-            let rec = recs
-                .iter()
-                .find(|r| r.id == av.id)
-                .cloned()
-                .unwrap_or_default();
-            return Some(av.clone().lines(&rec, &self.bar.model, width, h));
+            let rec = self.view_rec(&av.id).unwrap_or_default();
+            let mut lines = av.clone().lines(&rec, &self.bar.model, width, h);
+            // Window rows take the selection by the same absolute row index as the main body.
+            let start = self.start_row(self.body(width).len(), h);
+            for (i, row) in lines.iter_mut().skip(agentview::HEAD_ROWS).enumerate() {
+                *row = self.selected_row(start + i, row.clone());
+            }
+            return Some(lines);
         }
         if let Some(p) = &self.settings {
             return Some(p.lines(width, h));
@@ -1508,21 +1530,24 @@ impl App {
     fn agent_done(&mut self, id: &str, model: &str, name: &str, what: &str) {
         let failed = self.agent_outcome.remove(id);
         // Keep the finished agent for the agent view (Go tracker keeps done agents; sortedAll lists them).
-        if let Some((_, desc, _, started_at)) = self.agents.iter().find(|(aid, _, _, _)| aid == id)
-        {
-            let rec = agentview::AgentRec {
-                id: id.to_string(),
-                task: desc.clone(),
-                name: desc.clone(),
-                model: model.to_string(),
-                failed,
-                done: true,
-                started: true,
-                started_at: *started_at,
-                ..Default::default()
-            };
-            self.finished_agents.insert(id.to_string(), rec);
-        }
+        // Without a local start row (no AgentStart seen here) the AgentEnd name labels the done record.
+        let start = self.agents.iter().find(|(aid, _, _, _)| aid == id);
+        let desc = start
+            .map(|(_, desc, _, _)| desc.clone())
+            .unwrap_or_else(|| name.to_string());
+        let started_at = start.map_or(0, |(_, _, _, started_at)| *started_at);
+        let rec = agentview::AgentRec {
+            id: id.to_string(),
+            task: desc.clone(),
+            name: desc,
+            model: model.to_string(),
+            failed,
+            done: true,
+            started: true,
+            started_at,
+            ..Default::default()
+        };
+        self.finished_agents.insert(id.to_string(), rec);
         self.agents.retain(|(aid, _, _, _)| aid != id);
         self.bg_agents.retain(|aid| aid != id);
         // A resumed agent's timed row gets its end time and elapsed, like the other timed rows.
@@ -1588,6 +1613,11 @@ impl App {
 
     // Lines in the viewport: transcript, then the unfinished text of each role, wrapped to `width`.
     fn body(&self, width: usize) -> Vec<String> {
+        // The agent pane's wrapped log is the body it selects and scrolls (same rows the window draws).
+        if let Some(av) = self.av.as_ref().filter(|_| self.av_shown()) {
+            let rec = self.view_rec(&av.id).unwrap_or_default();
+            return agentview::body_rows(&rec, width);
+        }
         let agent = format!("{AGENT_PREFIX}{}", self.pending_agent);
         let status_row = self.busy_row(false);
         let esc_row = self.busy_row(true);
@@ -1819,6 +1849,7 @@ impl App {
         match self.panel_agent_at(row as usize) {
             Some(id) => {
                 self.av = Some(agentview::AgentView::open(&id));
+                self.clear_selection();
                 true
             }
             None => false,
@@ -1841,13 +1872,15 @@ impl App {
     // Body cell under screen cell (x, y). A drag clamps into the viewport; a press outside it gives None.
     fn body_at(&self, x: u16, y: u16, clamp: bool) -> Option<render::TextPos> {
         let body_h = self.body_h(self.cols, self.rows);
-        let y = y as usize;
-        if body_h == 0 || (y >= body_h && !clamp) {
+        let top = self.view_top();
+        let vh = body_h.saturating_sub(top);
+        let raw = y as usize;
+        if vh == 0 || (!clamp && (raw < top || raw - top >= vh)) {
             return None;
         }
         let start = self.start_row(self.total_rows(self.cols), body_h);
         Some(render::TextPos {
-            line: start + y.min(body_h - 1),
+            line: start + raw.saturating_sub(top).min(vh - 1),
             col: x as usize,
         })
     }
@@ -1876,8 +1909,11 @@ impl App {
             self.sel.head = p;
         }
         let body_h = self.body_h(self.cols, self.rows);
+        let top = self.view_top();
+        // The edge rows are the first and last rows of the viewport, below the agent pane's head rows.
+        let edge = edge_delta((y as usize).saturating_sub(top), body_h.saturating_sub(top));
         // A repeat drag on the same edge keeps its schedule, so frequent movement does not speed the scroll up.
-        self.edge = edge_delta(y as usize, body_h).map(|delta| EdgeScroll {
+        self.edge = edge.map(|delta| EdgeScroll {
             delta,
             x,
             y,
@@ -1903,7 +1939,11 @@ impl App {
         }
         let view = self.rows.saturating_sub(self.chrome_len());
         let start = self.start_row(self.total_rows(self.cols), view);
-        let at_end = if e.delta < 0 { start == 0 } else { self.follow };
+        let at_end = if e.delta < 0 {
+            start == 0
+        } else {
+            self.at_tail()
+        };
         if at_end {
             self.edge = None;
             return;
@@ -1969,8 +2009,44 @@ impl App {
 
     // First visible row for a body of `total` rows shown in `body_h` rows.
     fn start_row(&self, total: usize, body_h: usize) -> usize {
+        // The log window ends `off` rows above the tail, as AgentView::lines draws it.
+        if let Some(av) = self.av.as_ref().filter(|_| self.av_shown()) {
+            return total
+                .saturating_sub(av.off)
+                .saturating_sub(agentview::window_rows(body_h));
+        }
         let max = total.saturating_sub(body_h);
         if self.follow { max } else { self.top.min(max) }
+    }
+
+    // The agent pane replaces the body while it is open (overlay_lines draws it after the rw overlay).
+    fn av_shown(&self) -> bool {
+        self.av.is_some() && !self.rw.is_open() && !self.usage.is_open()
+    }
+
+    // Screen rows above the body viewport: the agent pane's head, else none.
+    fn view_top(&self) -> usize {
+        if self.av_shown() {
+            agentview::HEAD_ROWS
+        } else {
+            0
+        }
+    }
+
+    // Whether the view shows the newest rows: the agent pane at offset 0, else the main transcript's follow.
+    fn at_tail(&self) -> bool {
+        if self.av_shown() {
+            self.av.as_ref().is_some_and(|av| av.off == 0)
+        } else {
+            self.follow
+        }
+    }
+
+    // Opening or closing the agent pane changes the rows under a selection, so the selection and edge scroll end.
+    fn clear_selection(&mut self) {
+        self.sel.set = false;
+        self.dragging = false;
+        self.edge = None;
     }
 
     // Go tui.go MouseMsg order: the open settings picker, /resume pickers and /view list take the wheel as
@@ -1995,6 +2071,11 @@ impl App {
         }
         // Go panelWheel: only with no agent view and no permission prompt open, and only over the panels.
         if self.av.is_none() && self.perm.is_none() && self.panel_wheel(up, row) {
+            return true;
+        }
+        // A shown agent pane scrolls through the main pane's scroll, which clamps to the oldest line and the tail.
+        if self.av_shown() {
+            self.scroll(if up { -WHEEL_LINES } else { WHEEL_LINES });
             return true;
         }
         if let Some(av) = self.av.as_mut() {
@@ -2024,6 +2105,16 @@ impl App {
         if self.usage.is_open() {
             let (w, h) = self.usage_geom();
             self.usage.scroll_by(delta, w, h);
+            return;
+        }
+        if self.av_shown() {
+            // A positive delta moves toward the tail, so the pane's offset (rows above the tail) shrinks.
+            let max = self
+                .total_rows(self.cols)
+                .saturating_sub(agentview::window_rows(self.body_h(self.cols, self.rows)));
+            if let Some(av) = self.av.as_mut() {
+                av.off = (av.off as isize - delta).clamp(0, max as isize) as usize;
+            }
             return;
         }
         let total = self.total_rows(self.cols);
@@ -2168,6 +2259,19 @@ impl App {
         rows
     }
 
+    // The input box has the keyboard: the window is focused and no prompt, picker, agent view or overlay takes the keys.
+    fn input_active(&self) -> bool {
+        self.focused
+            && self.perm.is_none()
+            && self.av.is_none()
+            && self.settings.is_none()
+            && self.pick.is_none()
+            && self.recs.is_none()
+            && self.sess.is_none()
+            && !self.rw.is_open()
+            && !self.usage.is_open()
+    }
+
     // Go View() input box (tui.go:1222-1340): rounded grey border, the prompt, a reversed cursor cell and,
     // while the input is empty, the placeholder (tui.go:879). `w` is the full terminal width.
     fn input_box(&self, w: usize) -> Vec<String> {
@@ -2180,13 +2284,16 @@ impl App {
                 " ".repeat(pad)
             )
         };
+        // Without the keyboard the cursor cell is hollow: no reverse video, so it shows as a blank cell.
+        let active = self.input_active();
         let mut out = vec![edge("╭", "╮")];
         if self.editor.is_empty() {
             let ph = render::input_placeholder(self.busy);
             // The cursor cell takes one column after the prompt, so the placeholder gets the rest.
             let ph = bar::clip(ph, inner.saturating_sub(PROMPT.len() + 1));
+            let cell = if active { REV_ON } else { "" };
             out.push(side(&format!(
-                "{PROMPT}{REV_ON} {RESET}{GREY_ON}{ph}{FG_OFF}"
+                "{PROMPT}{cell} {RESET}{GREY_ON}{ph}{FG_OFF}"
             )));
         } else {
             let pw = UnicodeWidthStr::width(PROMPT);
@@ -2195,7 +2302,7 @@ impl App {
             for (i, row) in rows.iter().enumerate().skip(top).take(shown) {
                 let pre = if i == 0 { PROMPT } else { "  " };
                 // Go input.go View: reverse-video cursor cell (I33 input_view_row), byte index from the cell column.
-                let cursor = (i == cur_row).then(|| split_cells(row, cur_col).0.len());
+                let cursor = (active && i == cur_row).then(|| split_cells(row, cur_col).0.len());
                 out.push(side(&format!(
                     "{pre}{}",
                     render::input_view_row(row, cursor)
@@ -2643,9 +2750,14 @@ pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Resu
         let (x, y) = cursor(app, app.cols, app.rows);
         queue!(out, MoveTo(x, y))?;
     }
-    // Hidden is set once in tui() before the first frame, so frames never toggle visibility.
+    // Hidden is set once in tui() before the first frame when hide_cursor is on, so frames never toggle visibility
+    // then. Otherwise the hardware cursor shows only while the input box has the keyboard (else the hollow cell).
     if !app.hide_cursor {
-        queue!(out, Show)?;
+        if app.input_active() {
+            queue!(out, Show)?;
+        } else {
+            queue!(out, Hide)?;
+        }
     }
     *prev = rows;
     out.flush()
@@ -2709,6 +2821,7 @@ fn restore_terminal() {
         MouseCellMotion(false),
         DisableBracketedPaste,
         LeaveAlternateScreen,
+        DisableFocusChange,
         CursorShape(false),
         Show
     );
@@ -2763,6 +2876,7 @@ impl TermGuard {
             Clear(ClearType::All),
             EnableBracketedPaste,
             MouseCellMotion(true),
+            EnableFocusChange,
             CursorShape(true)
         )?;
         // The default hook prints while the alternate screen is still up, so restore before it runs.
@@ -3137,6 +3251,9 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                     queue!(out, Clear(ClearType::All))?;
                     prev.clear();
                 }
+                // Focus change only moves the input cursor between solid and hollow; the frame below redraws it.
+                Wake::Term(Event::FocusGained) => app.focused = true,
+                Wake::Term(Event::FocusLost) => app.focused = false,
                 Wake::Term(_) | Wake::Closed => {}
             }
         }
@@ -3602,6 +3719,76 @@ mod tests {
         );
     }
 
+    // Hollow input cursor: no reverse cell on the input row and the hardware cursor hidden while the window has no
+    // focus or a prompt takes the keys. Focus back (or the prompt answered) gives the solid cell and the shown cursor.
+    #[test]
+    fn input_cursor_is_hollow_without_focus_or_input_pane_and_solid_again_after() {
+        let mut app = App::new(30, 10);
+        type_str(&mut app, "ab");
+        let input_row = |app: &App| {
+            let y = cursor(app, 30, 10).1 as usize;
+            frame(app, 30, 10)[y].clone()
+        };
+        // Last cursor visibility command of a frame: true = shown (?25h), false = hidden (?25l).
+        let shown = |app: &App| {
+            let mut buf = Vec::new();
+            draw(&mut buf, app, &mut Vec::new()).unwrap();
+            let s = String::from_utf8_lossy(&buf).into_owned();
+            if s.ends_with("\x1b[?25h") {
+                true
+            } else {
+                assert!(s.ends_with("\x1b[?25l"), "{s:?}");
+                false
+            }
+        };
+        assert!(input_row(&app).contains("\x1b[7m"));
+        assert!(shown(&app));
+
+        app.focused = false;
+        assert!(
+            !input_row(&app).contains("\x1b[7m"),
+            "{:?}",
+            input_row(&app)
+        );
+        assert!(!shown(&app));
+
+        app.focused = true;
+        assert!(input_row(&app).contains("\x1b[7m"));
+        assert!(shown(&app));
+
+        // Agent pane and picker take the keys: the input cell is hollow and the hardware cursor hidden.
+        app.av = Some(agentview::AgentView::open("a1"));
+        assert!(!input_row(&app).contains("\x1b[7m"));
+        assert!(!shown(&app));
+        app.av = None;
+        app.pick = Some(resume_pick::GroupPicker::new(Vec::new()));
+        assert!(!input_row(&app).contains("\x1b[7m"));
+        assert!(!shown(&app));
+        app.pick = None;
+        assert!(input_row(&app).contains("\x1b[7m"));
+        assert!(shown(&app));
+
+        app.perm = Some("p1".into());
+        assert!(
+            !input_row(&app).contains("\x1b[7m"),
+            "{:?}",
+            input_row(&app)
+        );
+        assert!(!shown(&app));
+        app.perm = None;
+        assert!(input_row(&app).contains("\x1b[7m"));
+        assert!(shown(&app));
+
+        // Empty input: the placeholder row's cell is blank too when the input is not active.
+        let mut idle = App::new(30, 10);
+        idle.focused = false;
+        assert!(
+            !input_row(&idle).contains("\x1b[7m"),
+            "{:?}",
+            input_row(&idle)
+        );
+    }
+
     fn agent_row(id: &str, background: bool, done: bool) -> AgentRow {
         AgentRow {
             id: id.into(),
@@ -3780,9 +3967,9 @@ mod tests {
         assert_eq!(rec.started_at, 1_700_000_000_000, "{rec:?}");
     }
 
-    // Go tracker keeps a finished agent: it stays in the agent view as 완료 with its log.
+    // Finished agents leave the list; an agent view opened on one stays open and keeps its log.
     #[test]
-    fn finished_agent_stays_in_the_agent_view_as_done() {
+    fn finished_agent_is_hidden_and_its_open_pane_stays() {
         let mut app = App::new(80, 24);
         app.apply(UiEvent::AgentStart {
             id: "f1".into(),
@@ -3801,16 +3988,97 @@ mod tests {
             summary: "done".into(),
         });
         assert!(app.agents.iter().all(|(id, _, _, _)| id != "f1"));
-        let recs = app.agent_recs();
-        let rec = recs
-            .iter()
-            .find(|r| r.id == "f1")
-            .expect("finished agent kept");
+        // (a) done: removed from the agent list.
+        assert!(app.agent_recs().iter().all(|r| r.id != "f1"));
+        // (c) the pane opened before the finish stays open, with its done record and log.
+        app.av = Some(agentview::AgentView::open("f1"));
+        app.apply(UiEvent::AgentEnd {
+            id: "f1".into(),
+            elapsed_ms: 1000,
+            model: "haiku".into(),
+            name: "Scan repo".into(),
+            summary: "done".into(),
+        });
+        let rec = app.view_rec("f1").expect("finished agent viewable");
         assert!(rec.done && !rec.failed, "{rec:?}");
         assert_eq!(rec.state(), bar::AgentState::Done, "{rec:?}");
         assert_eq!(rec.log, vec!["step one".to_string()], "{rec:?}");
-        let av = agentview::AgentView::open_first(&recs).expect("finished agent opens");
-        assert_eq!(av.id, "f1");
+        assert_eq!(app.av.as_ref().map(|v| v.id.as_str()), Some("f1"));
+        let lines = app.overlay_lines(80, 24).expect("pane open");
+        assert!(lines.iter().any(|l| l.contains("step one")), "{lines:?}");
+    }
+
+    // (b) SendMessage resume: the agent reappears as running; its next finish hides it again.
+    #[test]
+    fn resumed_agent_reappears_running_then_hidden_after_done() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "r1".into(),
+            description: "worker".into(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentEnd {
+            id: "r1".into(),
+            elapsed_ms: 5,
+            model: "haiku".into(),
+            name: "worker".into(),
+            summary: "first".into(),
+        });
+        assert!(app.agent_recs().iter().all(|r| r.id != "r1"));
+        app.apply(UiEvent::AgentResumed {
+            id: "r1".into(),
+            description: "worker".into(),
+            started_at: 0,
+            send_id: "s1".into(),
+        });
+        let running = app.agent_recs();
+        assert!(
+            running.iter().any(|r| r.id == "r1" && !r.done),
+            "{running:?}"
+        );
+        app.apply(UiEvent::AgentEnd {
+            id: "r1".into(),
+            elapsed_ms: 5,
+            model: "haiku".into(),
+            name: "worker".into(),
+            summary: "second".into(),
+        });
+        assert!(app.agent_recs().iter().all(|r| r.id != "r1"));
+    }
+
+    // (d) a resumed agent's open pane shows only the new turn; the earlier turn is dropped.
+    #[test]
+    fn resumed_agent_pane_shows_only_the_new_turn() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "t1".into(),
+            description: "worker".into(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentLog {
+            id: "t1".into(),
+            lines: vec!["turn one".into()],
+        });
+        app.apply(UiEvent::AgentEnd {
+            id: "t1".into(),
+            elapsed_ms: 5,
+            model: "haiku".into(),
+            name: "worker".into(),
+            summary: "one".into(),
+        });
+        app.av = Some(agentview::AgentView::open("t1"));
+        app.apply(UiEvent::AgentResumed {
+            id: "t1".into(),
+            description: "worker".into(),
+            started_at: 0,
+            send_id: "s2".into(),
+        });
+        app.apply(UiEvent::AgentLog {
+            id: "t1".into(),
+            lines: vec!["turn two".into()],
+        });
+        let rec = app.view_rec("t1").expect("resumed agent viewable");
+        assert_eq!(rec.log, vec!["turn two".to_string()], "{rec:?}");
     }
 
     // Real SendMessage resume of an agent launched outside this run (fixture resume_unknown_launch_sendmessage.jsonl):
@@ -3859,11 +4127,9 @@ mod tests {
             name: label.into(),
             summary: "done".into(),
         });
-        let rec = app
-            .agent_recs()
-            .into_iter()
-            .find(|r| r.id == agent)
-            .expect("ended agent kept");
+        // Ended: out of the list; its done record stays for an open view.
+        assert!(app.agent_recs().iter().all(|r| r.id != agent));
+        let rec = app.view_rec(agent).expect("ended agent kept for view");
         assert!(rec.done, "{rec:?}");
     }
 
@@ -5059,6 +5325,23 @@ mod tests {
         );
     }
 
+    // An AgentEnd for an agent this run has no start row for (synthetic fixture): not in the list, but its
+    // done record is kept for an open view.
+    #[test]
+    fn agent_end_without_local_start_is_hidden_but_viewable() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentEnd {
+            id: "x9".to_string(),
+            elapsed_ms: 10,
+            model: "haiku".to_string(),
+            name: "scanner".to_string(),
+            summary: "scanned".to_string(),
+        });
+        assert!(app.agent_recs().iter().all(|r| r.id != "x9"));
+        let rec = app.view_rec("x9").expect("finished record kept");
+        assert!(rec.done, "{rec:?}");
+    }
+
     // Go onSubEvent: AgentLog lines land in the running agent's view log, capped, and add no transcript row.
     #[test]
     fn agent_log_feeds_the_running_agent_view() {
@@ -5909,6 +6192,173 @@ mod tests {
             0,
         );
         assert_eq!(copied, ["beta"], "plain click copied");
+    }
+
+    // Agent pane (Ctrl+T view) on a 40x14 screen: the 2 head rows sit above the log window.
+    fn agent_pane(lines: usize) -> App {
+        let mut app = App::new(40, 14);
+        app.apply(UiEvent::AgentStart {
+            id: "w1".into(),
+            description: "worker".into(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentLog {
+            id: "w1".into(),
+            lines: (0..lines).map(|i| format!("line {i}")).collect(),
+        });
+        app.av = Some(agentview::AgentView::open("w1"));
+        app
+    }
+
+    #[test]
+    fn agent_pane_drag_selects_copies_and_highlights_its_log() {
+        let mut app = agent_pane(20);
+        let (w, h) = (40, 14);
+        let room = app.body_h(w, h) - agentview::HEAD_ROWS;
+        let start = 20 - room;
+        assert_eq!(screen(&app, w, h)[2], format!("line {start}"));
+        // The head rows are not part of the selection.
+        app.select_press(0, 0);
+        assert!(!app.sel.set);
+        app.select_press(0, 2);
+        app.select_drag(3, 3);
+        assert!(frame(&app, w, h)[2].contains("\x1b[7m"));
+        let mut copied: Vec<String> = Vec::new();
+        let mut osc: Vec<u8> = Vec::new();
+        release_copy(
+            &mut app,
+            &mut osc,
+            |s| {
+                copied.push(s.to_string());
+                Ok(())
+            },
+            3,
+            3,
+        );
+        assert_eq!(copied, [format!("line {start}\nlin")]);
+    }
+
+    #[test]
+    fn agent_pane_drag_on_its_top_row_scrolls_to_older_lines_and_stops_at_the_oldest() {
+        let mut app = agent_pane(20);
+        let (w, h) = (40, 14);
+        let tail = 20 - (app.body_h(w, h) - agentview::HEAD_ROWS);
+        app.select_press(0, 4);
+        app.select_drag(0, 2); // the top window row is the top edge
+        let t0 = app.clock;
+        app.edge_tick(t0);
+        assert_eq!(app.av.as_ref().map(|v| v.off), Some(1));
+        assert_eq!(app.sel.head.line, tail - 1, "head follows the edge line");
+        assert_eq!(screen(&app, w, h)[2], format!("line {}", tail - 1));
+        for k in 1..=(tail as u32 + 2) {
+            app.edge_tick(t0 + EDGE_TICK * k);
+        }
+        assert!(app.edge.is_none(), "the oldest line stops the scroll");
+        assert_eq!(app.av.as_ref().map(|v| v.off), Some(tail));
+        assert_eq!(app.sel.head.line, 0);
+    }
+
+    #[test]
+    fn agent_pane_drag_on_its_bottom_row_scrolls_to_newer_lines_and_stops_at_the_tail() {
+        let mut app = agent_pane(20);
+        let (w, h) = (40, 14);
+        let body = app.body_h(w, h);
+        let room = body - agentview::HEAD_ROWS;
+        let tail = 20 - room;
+        app.av.as_mut().expect("pane open").off = tail;
+        let t0 = app.clock;
+        app.select_press(0, 3);
+        app.select_drag(0, body as u16 - 1); // the last window row is the bottom edge
+        app.edge_tick(t0);
+        assert_eq!(app.av.as_ref().map(|v| v.off), Some(tail - 1));
+        assert_eq!(screen(&app, w, h)[2], "line 1");
+        for k in 1..=(tail as u32 + 2) {
+            app.edge_tick(t0 + EDGE_TICK * k);
+        }
+        assert!(app.edge.is_none(), "the tail stops the scroll");
+        assert_eq!(app.av.as_ref().map(|v| v.off), Some(0));
+        assert_eq!(screen(&app, w, h)[2 + room - 1], "line 19");
+    }
+
+    #[test]
+    fn agent_pane_wheel_scrolls_its_log_by_three() {
+        let mut app = agent_pane(20);
+        let (w, h) = (40, 14);
+        let start = 20 - (app.body_h(w, h) - agentview::HEAD_ROWS);
+        assert!(app.overlay_wheel(true, 5));
+        assert_eq!(screen(&app, w, h)[2], format!("line {}", start - 3));
+        assert!(app.overlay_wheel(false, 5));
+        assert_eq!(screen(&app, w, h)[2], format!("line {start}"));
+    }
+
+    #[test]
+    fn agent_pane_wheel_stops_at_the_oldest_line_and_answers_at_once() {
+        let mut app = agent_pane(20);
+        let (w, h) = (40, 14);
+        let room = app.body_h(w, h) - agentview::HEAD_ROWS;
+        let oldest = 20 - room;
+        for _ in 0..50 {
+            app.overlay_wheel(true, 5);
+        }
+        assert_eq!(
+            app.av.as_ref().map(|v| v.off),
+            Some(oldest),
+            "wheel past the top is clamped"
+        );
+        assert!(app.overlay_wheel(false, 5));
+        assert_eq!(app.av.as_ref().map(|v| v.off), Some(oldest - 3));
+        assert_eq!(screen(&app, w, h)[2], "line 3");
+    }
+
+    #[test]
+    fn agent_pane_keys_stop_at_the_oldest_line_and_answer_at_once() {
+        let mut app = agent_pane(20);
+        let (w, h) = (40, 14);
+        let room = app.body_h(w, h) - agentview::HEAD_ROWS;
+        let oldest = 20 - room;
+        for _ in 0..50 {
+            app.on_key(key(KeyCode::Up, KeyModifiers::NONE));
+        }
+        assert_eq!(
+            app.av.as_ref().map(|v| v.off),
+            Some(oldest),
+            "Up past the top is clamped"
+        );
+        app.on_key(key(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(
+            screen(&app, w, h)[2],
+            "line 1",
+            "one Down step answers at once"
+        );
+        app.on_key(key(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(screen(&app, w, h)[2], "line 0", "Home is the oldest line");
+        for _ in 0..50 {
+            app.on_key(key(KeyCode::PageDown, KeyModifiers::NONE));
+        }
+        assert_eq!(
+            app.av.as_ref().map(|v| v.off),
+            Some(0),
+            "PageDown past the tail is clamped"
+        );
+        app.on_key(key(KeyCode::Up, KeyModifiers::NONE));
+        app.on_key(key(KeyCode::End, KeyModifiers::NONE));
+        assert_eq!(app.av.as_ref().map(|v| v.off), Some(0), "End is the tail");
+    }
+
+    #[test]
+    fn opening_the_agent_pane_drops_the_main_selection() {
+        let mut app = tall_app();
+        app.apply(UiEvent::AgentStart {
+            id: "w1".into(),
+            description: "worker".into(),
+            started_at: 0,
+        });
+        app.select_press(0, 1);
+        app.select_drag(3, 1);
+        assert!(app.sel.set && app.dragging);
+        app.on_key(key(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert!(app.av.is_some());
+        assert!(!app.sel.set && !app.dragging && app.edge.is_none());
     }
 
     #[test]

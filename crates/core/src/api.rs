@@ -288,6 +288,8 @@ const RESIDENT_MAX_WORKERS: usize = 8;
 const DEFER_POLL: Duration = Duration::from_secs(1);
 // Go switchchild.go neverCold: the warm deadline when the idle rotate is disabled.
 const NEVER_COLD: Duration = Duration::from_secs(24 * 365 * 3600);
+// How long an idle resident child gets to exit after its stdin closes, before ClaudeProc::finish kills it.
+const CODER_EXIT_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -338,6 +340,9 @@ pub struct Config {
     pub extra_coders: usize,
     // Go extraCoderTTL: an idle extra coder (coder2 and up) is ended after this long. The base coder stays.
     pub coder_idle_ttl: Duration,
+    // Idle time after a resident agent's turn ends, then its child exits on its own (ClaudeProc::finish). A later
+    // task or SendMessage respawns it with --resume on the same session id. Zero = never exit.
+    pub agent_idle_exit_secs: u64,
     // Go tuiTimeout: how long the resident tui may take to translate the main reply. On timeout the main reply stays.
     pub tui_timeout: Duration,
     // Go prompterTimeout: how long the resident prompter may take to summarize. On timeout the input goes unchanged.
@@ -438,6 +443,7 @@ impl Default for Config {
             residents: true,
             extra_coders: 4,
             coder_idle_ttl: Duration::from_secs(270),
+            agent_idle_exit_secs: 600,
             tui_timeout: Duration::from_secs(120),
             prompter_timeout: Duration::from_secs(60),
             handoff_path: None,
@@ -1204,18 +1210,20 @@ fn actor(
     if let Some(store) = &st.agent_store {
         store.interrupt_running(true);
     }
+    // Quit path: children get stdin EOF and a bounded grace period to flush their transcripts before the kill.
+    let grace = Duration::from_secs(3);
     if let Some(mut p) = st.proc.take() {
-        p.kill();
+        p.finish(grace);
     }
     if let Some(mut p) = st.prompter_proc.take() {
-        p.kill();
+        p.finish(grace);
     }
     if let Some(mut p) = st.tui_proc.take() {
-        p.kill();
+        p.finish(grace);
     }
     for c in &mut st.coders {
         if let Some(mut p) = c.proc.take() {
-            p.kill();
+            p.finish(grace);
         }
     }
     // Go closeDrains on exit: draining children are closed.
@@ -2000,6 +2008,32 @@ impl State {
         Some(self.cfg.coder_idle_ttl.saturating_sub(since.elapsed()))
     }
 
+    // Time left before an idle resident child exits on its own (agent_idle_exit_secs). None when disabled,
+    // busy or empty; applies to every coder slot, the base one included.
+    fn agent_idle_exit_left(&self, i: usize) -> Option<Duration> {
+        let c = self.coders.get(i)?;
+        if self.cfg.agent_idle_exit_secs == 0 || c.deadline.is_some() || c.proc.is_none() {
+            return None;
+        }
+        let since = c.idle_since?;
+        Some(Duration::from_secs(self.cfg.agent_idle_exit_secs).saturating_sub(since.elapsed()))
+    }
+
+    // Ends an idle resident child with ClaudeProc::finish. Its session id stays in resume_pending, so the next
+    // task respawns it with --resume on the same session.
+    fn exit_idle_coder(&mut self, i: usize) {
+        if let Some(mut p) = self.coders[i].proc.take() {
+            p.finish(CODER_EXIT_WAIT);
+        }
+        let role = coder_role(i);
+        if let Some(sid) = self.resident_sids.get(&role).cloned() {
+            self.resume_pending.insert(role, sid);
+        }
+        self.coder_epoch += 1;
+        self.coders[i].epoch = self.coder_epoch;
+        self.coders[i].idle_since = None;
+    }
+
     // The coder's result line is its reply. An empty reply is a failure, as for the tui.
     fn on_coder_line(&mut self, i: usize, line: &str) {
         if let Ok(Event::ControlRequest(c)) = parse_line(line)
@@ -2068,12 +2102,19 @@ impl State {
         let waiter = self.coders[i].waiter.take();
         let role = coder_role(i);
         answer(waiter, out.clone());
+        // Every turn end is a handback: a failed task still sends its reason as the reply, so main never sees silence.
         match out {
             Ok(text) => {
                 self.stage(&role, StagePhase::Done);
                 self.emit(UiEvent::CoderReply { role, text });
             }
-            Err(reason) => self.stage(&role, StagePhase::Failed(reason)),
+            Err(reason) => {
+                self.emit(UiEvent::CoderReply {
+                    role: role.clone(),
+                    text: format!("오류: {reason}"),
+                });
+                self.stage(&role, StagePhase::Failed(reason));
+            }
         }
     }
 
@@ -3030,7 +3071,10 @@ impl State {
             .enumerate()
             .filter_map(|(i, c)| match c.deadline {
                 Some(t) => Some(t.saturating_duration_since(Instant::now())),
-                None => self.coder_idle_left(i),
+                None => [self.coder_idle_left(i), self.agent_idle_exit_left(i)]
+                    .into_iter()
+                    .flatten()
+                    .min(),
             })
             .min();
         // A draining child wakes at its drain timeout.
@@ -3097,6 +3141,9 @@ impl State {
             }
             if self.coder_idle_left(i).is_some_and(|d| d.is_zero()) {
                 self.drop_coder(i);
+            }
+            if self.agent_idle_exit_left(i).is_some_and(|d| d.is_zero()) {
+                self.exit_idle_coder(i);
             }
         }
         // A running tui wait is not an inactivity case: the main child is idle.

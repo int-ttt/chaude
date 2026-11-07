@@ -2886,6 +2886,74 @@ fn clean_exit_above_threshold_starts_fresh() {
 }
 
 #[test]
+fn failed_coder_task_still_hands_back_a_reply() {
+    let _g = lock();
+    let f = fake("coder_fail", &["text_turn.jsonl"]);
+    // An empty result is a failed task ("coder empty reply"); main must still get it as a reply.
+    fs::write(
+        f.dir.join("coder.jsonl"),
+        "{\"type\":\"result\",\"result\":\"\",\"session_id\":\"c1\"}\n",
+    )
+    .unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.coder("task");
+    let evs = until_coder_reply(&rx);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::CoderReply { text, .. } if text.starts_with("오류:"))),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
+#[test]
+fn idle_resident_exits_then_resumes_the_same_session() {
+    let _g = lock();
+    let f = fake("coder_exit", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    cfg.agent_idle_exit_secs = 1;
+    let (h, rx) = Engine::start(cfg);
+    h.coder("first");
+    until_coder_reply(&rx);
+    let pids_file = f.dir.join("coder.pids");
+    let log = wait_for(&pids_file, " base");
+    let pid = log
+        .lines()
+        .find_map(|l| l.strip_suffix(" base"))
+        .unwrap()
+        .trim()
+        .to_string();
+    let alive = |pid: &str| {
+        process::Command::new("kill")
+            .args(["-0", pid])
+            .status()
+            .unwrap()
+            .success()
+    };
+    let t0 = Instant::now();
+    while alive(&pid) && t0.elapsed() < Duration::from_secs(10) {
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!alive(&pid), "idle resident child was not exited");
+    // The next task respawns the slot with --resume on the session the first reply carried (c1).
+    h.coder("first");
+    until_coder_reply(&rx);
+    let pids = fs::read_to_string(&pids_file).unwrap();
+    assert_eq!(pids.matches(" base").count(), 2, "{pids}");
+    let resumed = fs::read_dir(&f.dir).unwrap().any(|e| {
+        fs::read_to_string(e.unwrap().path())
+            .is_ok_and(|s| s.starts_with("coder ") && s.contains("--resume c1"))
+    });
+    assert!(resumed, "respawn did not resume session c1");
+    h.shutdown();
+}
+
+#[test]
 fn exit_handoff_lists_resident_coder_and_owned_sessions() {
     let _g = lock();
     let f = fake("handoff_res", &["text_turn.jsonl"]);

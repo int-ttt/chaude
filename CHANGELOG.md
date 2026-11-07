@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.11.8 - 2026-11-07
+- Agents: a finished agent is hidden from the agent list, and it comes back when `SendMessage` resumes it.
+  - 에이전트: 끝난 에이전트는 에이전트 목록에서 숨기며, `SendMessage`로 재개하면 다시 나타납니다.
+- Handback: every turn end sends a reply to main. A failed coder turn sends its reason as `오류: ...` instead of silence.
+  - 핸드백: 턴이 끝날 때마다 메인에 응답을 보냅니다. 실패한 coder 턴은 침묵 대신 이유를 `오류: ...`로 보냅니다.
+- Idle agents: a resident agent that stays idle for `agent_idle_exit_secs` (default 600 seconds) exits on its own. The next task or `SendMessage` resumes it on the same session.
+  - 유휴 에이전트: 상주 에이전트가 `agent_idle_exit_secs`(기본값 600초) 동안 쉬면 스스로 종료합니다. 다음 작업이나 `SendMessage`가 같은 세션으로 다시 이어 갑니다.
+- Quit: children get 3 seconds to flush their transcripts before they are killed.
+  - 종료: 자식 프로세스는 강제 종료 전에 대화 기록을 저장할 수 있도록 3초를 받습니다.
+- Hooks: the guard hooks are regenerated when the chaude version changes, so an upgrade does not need a manual re-apply.
+  - 훅: chaude 버전이 바뀌면 가드 훅을 다시 만들므로, 업그레이드 후 수동으로 다시 적용할 필요가 없습니다.
+- TUI: the input cursor is hidden unless the input pane has focus.
+  - TUI: 입력 창에 포커스가 없으면 입력 커서를 숨깁니다.
+- TUI: the agent pane clamps scrolling for the mouse wheel and keys, so it stops at the top and bottom of the content.
+  - TUI: 에이전트 화면은 마우스 휠과 키 스크롤을 범위 안으로 제한하여, 내용의 맨 위와 맨 아래에서 멈춥니다.
+- Docs: the README "Releasing" section is removed. Release steps are not part of the public README.
+  - 문서: README의 "Releasing"(릴리스) 섹션을 삭제했습니다. 릴리스 절차는 공개 README에 두지 않습니다.
+
 ## 0.11.7 - 2026-11-07
 - Permissions: the engine and the status bar start in the configured start mode (`perm_mode`, default `auto`), and non-TUI runs use it too. Default behavior is unchanged.
   - 권한: 엔진과 상태 막대는 설정된 시작 모드(`perm_mode`, 기본값 `auto`)로 시작하며, TUI가 아닌 실행에도 같은 모드를 씁니다. 기본 동작은 그대로입니다.

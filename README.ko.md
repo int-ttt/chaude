@@ -25,6 +25,7 @@ Claude Code를 채팅 형식의 프롬프트로 쓸 수 있고, 반복 작업은
 - 세션을 시작하면 `.claude/settings.json`이 없을 때 가드 훅이 들어간 파일을 만듭니다 (0.9.14).
 - Bash 훅 `bash-py-guard.py`는 인라인 Python이나 node로 하는 파일 편집(`open(..., 'w')`, `write_text`, `fs.writeFile*`)을 거부합니다. 읽기 전용 코드와 `python3 -m pytest`는 그대로 허용합니다 (0.11.4).
 - Windows에서는 가드 훅이 `python3`이 아니라 `py -3`(또는 `python`)으로 실행됩니다. Microsoft Store의 `python3` 스텁 때문에 가드가 열린 상태(fail open)가 되었기 때문입니다 (0.11.7). 기존 프로젝트에는 다시 적용하세요. `.claude/settings.json`의 `python3`을 `py -3` 또는 `python`으로 바꾸거나, `chaude gen-settings windows --out .claude/settings.json`으로 다시 만드세요.
+- 에이전트가 10분 동안 쉬면 스스로 종료합니다. 다음 작업이나 `SendMessage`가 같은 세션으로 다시 이어 갑니다 (0.11.8).
 
 ## 작동 방식
 
@@ -71,7 +72,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.7 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.8 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -272,16 +273,6 @@ Go 구현은 0.11.3에서 삭제했습니다. 소스는 태그 `v0.11.2`의 git 
 이슈: 버그 제보와 기능 제안은 [GitHub Issues](https://github.com/int-ttt/chaude/issues)에 남겨 주세요.
 
 기여 가이드라인: 아직 공개되지 않았습니다.
-
-### 릴리스
-
-**release-dispatch** 워크플로를 `master`에서 실행하세요 (Actions → release-dispatch → Run workflow, `v` 없이 `X.Y.Z`를 입력합니다). 또는 셸에서 실행하세요:
-
-```sh
-gh workflow run release-dispatch.yml -f version=X.Y.Z
-```
-
-워크플로가 코드와 문서의 버전을 올리고, `CHANGELOG.md`의 `## Unreleased`를 `## X.Y.Z - DATE`로 옮긴 뒤, `release: X.Y.Z` 커밋을 만듭니다. 이어서 `vX.Y.Z` 태그를 푸시하고, `release.yml`로 `checksums.txt`와 릴리스 아카이브 4개를 배포합니다. 실행하기 전에 `CHANGELOG.md`의 `## Unreleased`에 항목을 추가하세요.
 
 ## 라이선스
 

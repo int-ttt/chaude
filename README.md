@@ -25,6 +25,7 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 - Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing (0.9.14).
 - The Bash hook `bash-py-guard.py` denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `fs.writeFile*`). Read-only code and `python3 -m pytest` stay allowed (0.11.4).
 - On Windows the guard hooks run `py -3` (or `python`), not `python3`, because the Microsoft Store `python3` stub made the guard fail open (0.11.7). Re-apply on an existing project: replace `python3` in `.claude/settings.json` with `py -3` or `python`, or regenerate it with `chaude gen-settings windows --out .claude/settings.json`.
+- An agent that stays idle for 10 minutes exits on its own. Its next task or `SendMessage` resumes the same session (0.11.8).
 
 ## How it works
 
@@ -71,7 +72,7 @@ Installs to `/usr/local/bin/chaude`. The directory is created if missing. `sudo`
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.7 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.8 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -272,16 +273,6 @@ The Go implementation was removed in 0.11.3. Its source is in git history at tag
 Issues: report bugs and request features on [GitHub Issues](https://github.com/int-ttt/chaude/issues).
 
 Contribution guidelines: not published yet.
-
-### Releasing
-
-Run the **release-dispatch** workflow on `master` (Actions → release-dispatch → Run workflow, enter `X.Y.Z` without the `v`), or from a shell:
-
-```sh
-gh workflow run release-dispatch.yml -f version=X.Y.Z
-```
-
-It bumps the version in the code and docs, moves `CHANGELOG.md` `## Unreleased` to `## X.Y.Z - DATE`, commits `release: X.Y.Z`, pushes the `vX.Y.Z` tag, and publishes the four release archives with `checksums.txt` (via `release.yml`). Add the entries to `## Unreleased` in `CHANGELOG.md` before you run it.
 
 ## License
 

@@ -188,6 +188,8 @@ pub struct AgentView {
 pub enum Action {
     None,
     Close,
+    // Rows to scroll, positive toward the tail (the caller clamps them like the main pane's scroll).
+    Scroll(isize),
 }
 
 impl AgentView {
@@ -227,7 +229,7 @@ impl AgentView {
     // Go avKey: read-only. Only close, switch and scroll keys act; everything else is dropped.
     // `recs` is the sorted list; `vp_h` is the transcript height (page size is max(1, vp_h - 2)).
     pub fn key(&mut self, key: KeyEvent, recs: &[AgentRec], vp_h: usize) -> Action {
-        let page = vp_h.saturating_sub(2).max(1);
+        let page = vp_h.saturating_sub(2).max(1) as isize;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         match key.code {
@@ -236,12 +238,13 @@ impl AgentView {
             KeyCode::Tab if shift => self.cycle(recs, -1),
             KeyCode::Tab | KeyCode::Right => self.cycle(recs, 1),
             KeyCode::BackTab | KeyCode::Left => self.cycle(recs, -1),
-            KeyCode::Up | KeyCode::Char('k') => self.off += 1,
-            KeyCode::Down | KeyCode::Char('j') => self.off = self.off.saturating_sub(1),
-            KeyCode::PageUp => self.off += page,
-            KeyCode::PageDown => self.off = self.off.saturating_sub(page),
-            KeyCode::Home => self.off = MAX_AGENT_LOG + 1000,
-            KeyCode::End => self.off = 0,
+            // The caller clamps the scroll to the oldest line and the tail (the main pane's scroll path).
+            KeyCode::Up | KeyCode::Char('k') => return Action::Scroll(-1),
+            KeyCode::Down | KeyCode::Char('j') => return Action::Scroll(1),
+            KeyCode::PageUp => return Action::Scroll(-page),
+            KeyCode::PageDown => return Action::Scroll(page),
+            KeyCode::Home => return Action::Scroll(isize::MIN / 2),
+            KeyCode::End => return Action::Scroll(isize::MAX / 2),
             _ => {}
         }
         Action::None
@@ -270,19 +273,9 @@ impl AgentView {
         );
         let title = format!("  {dot}{DIM_ON}{status}{RESET}");
 
-        let cw = 10.max(width.saturating_sub(2));
-        let mut body: Vec<String> = Vec::new();
-        for l in &rec.log {
-            body.extend(wrap(l, cw));
-        }
-        if rec.log.is_empty() {
-            body.push(format!("{DIM_ON}{NO_OUTPUT}{RESET}"));
-            if !rec.prompt.is_empty() {
-                body.push(format!("{DIM_ON}task: {}{RESET}", rec.prompt));
-            }
-        }
+        let body = body_rows(rec, width);
 
-        let room = hh.saturating_sub(2).max(1);
+        let room = window_rows(hh);
         self.off = self.off.min(body.len().saturating_sub(room));
         let end = body.len() - self.off;
         let from = end.saturating_sub(room);
@@ -293,6 +286,30 @@ impl AgentView {
         out.truncate(hh);
         out
     }
+}
+
+// Rows above the log window: the head and the title.
+pub const HEAD_ROWS: usize = 2;
+
+// Log rows shown in a view `hh` rows tall (at least one).
+pub fn window_rows(hh: usize) -> usize {
+    hh.saturating_sub(HEAD_ROWS).max(1)
+}
+
+// The wrapped log of `rec`, one entry per screen row: the rows the window shows and the agent pane selects.
+pub fn body_rows(rec: &AgentRec, width: usize) -> Vec<String> {
+    let cw = 10.max(width.saturating_sub(2));
+    let mut body: Vec<String> = Vec::new();
+    for l in &rec.log {
+        body.extend(wrap(l, cw));
+    }
+    if rec.log.is_empty() {
+        body.push(format!("{DIM_ON}{NO_OUTPUT}{RESET}"));
+        if !rec.prompt.is_empty() {
+            body.push(format!("{DIM_ON}task: {}{RESET}", rec.prompt));
+        }
+    }
+    body
 }
 
 // lipgloss Width(cw) stand-in: hard-wraps one log line by display column (no word wrap). An empty line
@@ -382,24 +399,41 @@ mod tests {
     fn scroll_keys_follow_go() {
         let recs = vec![rec("a", 1, false)];
         let mut v = AgentView::open("a");
-        v.key(press(KeyCode::Char('k')), &recs, 12);
-        v.key(press(KeyCode::Up), &recs, 12);
-        assert_eq!(v.off, 2);
-        v.key(press(KeyCode::Down), &recs, 12);
-        assert_eq!(v.off, 1);
-        v.key(press(KeyCode::Char('j')), &recs, 12);
-        v.key(press(KeyCode::Char('j')), &recs, 12);
-        assert_eq!(v.off, 0, "floored at the tail");
-        v.key(press(KeyCode::PageUp), &recs, 12);
-        assert_eq!(v.off, 10);
-        v.key(press(KeyCode::PageDown), &recs, 12);
-        assert_eq!(v.off, 0);
-        v.key(press(KeyCode::PageUp), &recs, 1);
-        assert_eq!(v.off, 1, "page size is at least 1");
-        v.key(press(KeyCode::Home), &recs, 12);
-        assert_eq!(v.off, MAX_AGENT_LOG + 1000);
-        v.key(press(KeyCode::End), &recs, 12);
-        assert_eq!(v.off, 0);
+        assert_eq!(
+            v.key(press(KeyCode::Char('k')), &recs, 12),
+            Action::Scroll(-1)
+        );
+        assert_eq!(v.key(press(KeyCode::Up), &recs, 12), Action::Scroll(-1));
+        assert_eq!(v.key(press(KeyCode::Down), &recs, 12), Action::Scroll(1));
+        assert_eq!(
+            v.key(press(KeyCode::Char('j')), &recs, 12),
+            Action::Scroll(1)
+        );
+        assert_eq!(
+            v.key(press(KeyCode::PageUp), &recs, 12),
+            Action::Scroll(-10)
+        );
+        assert_eq!(
+            v.key(press(KeyCode::PageDown), &recs, 12),
+            Action::Scroll(10)
+        );
+        assert_eq!(
+            v.key(press(KeyCode::PageUp), &recs, 1),
+            Action::Scroll(-1),
+            "page size is at least 1"
+        );
+        assert_eq!(
+            v.key(press(KeyCode::Home), &recs, 12),
+            Action::Scroll(isize::MIN / 2)
+        );
+        assert_eq!(
+            v.key(press(KeyCode::End), &recs, 12),
+            Action::Scroll(isize::MAX / 2)
+        );
+        assert_eq!(
+            v.off, 0,
+            "keys no longer move the offset; the caller clamps it"
+        );
     }
 
     #[test]

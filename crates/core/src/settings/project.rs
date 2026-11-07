@@ -162,11 +162,7 @@ pub fn ensure_project_settings(cwd: &Path, home: Option<&Path>) -> io::Result<bo
             .ok_or_else(|| io::Error::other(format!("chaude: embedded hook missing: {name}")))?;
         copy_new(body, &claude.join("hooks").join(name))?;
     }
-    let text = if osenv::is_windows() {
-        windows(GUARD_HOOKS.as_bytes(), hook_python()).map_err(io::Error::other)?
-    } else {
-        GUARD_HOOKS.to_string()
-    };
+    let text = guard_settings_text()?;
     let dst = claude.join("settings.json");
     match fs::read(&dst) {
         Ok(old) => {
@@ -181,6 +177,105 @@ pub fn ensure_project_settings(cwd: &Path, home: Option<&Path>) -> io::Result<bo
         }
         Err(e) => Err(e),
     }
+}
+
+/// Name of the version record in chaude's state dir: the version the last startup ran with.
+const VERSION_FILE: &str = "version";
+
+/// The guard settings text for this platform: the posix form, or the windows form with `hook_python`.
+pub fn guard_settings_text() -> io::Result<String> {
+    if osenv::is_windows() {
+        windows(GUARD_HOOKS.as_bytes(), hook_python()).map_err(io::Error::other)
+    } else {
+        Ok(GUARD_HOOKS.to_string())
+    }
+}
+
+/// Startup version check. When the record in `state` is not `current` (or there is none), the chaude guard groups in
+/// `<cwd>/.claude/settings.json` are replaced with `guard` (see `reset_guard_settings`) and `current` is recorded.
+/// The record is written only after a successful reset, so a failed reset runs again on the next start. cwd == home
+/// is not reset (that is the user-global .claude), but the version is still recorded. Returns true when a reset ran.
+/// Update state: none is persisted (the update check always fetches live), so there is nothing to clear.
+pub fn refresh_on_version_change(
+    state: &Path,
+    cwd: &Path,
+    home: Option<&Path>,
+    current: &str,
+    guard: &str,
+) -> io::Result<bool> {
+    let record = state.join(VERSION_FILE);
+    if fs::read_to_string(&record).is_ok_and(|v| v.trim() == current) {
+        return Ok(false);
+    }
+    let project = !cwd.as_os_str().is_empty() && !home.is_some_and(|h| same_dir(cwd, h));
+    if project {
+        reset_guard_settings(&cwd.join(".claude").join("settings.json"), guard)?;
+    }
+    fs::create_dir_all(state)?;
+    fs::write(&record, format!("{current}\n"))?;
+    Ok(project)
+}
+
+/// Replaces the chaude guard groups in the settings file `dst` with those of `guard`. A group is chaude's when a hook
+/// in it runs a GUARD_SCRIPTS script (any matcher). The old ones are removed and the fresh ones go where the first
+/// old one was (or at the end). Every other key and group is kept. A missing file is written as `guard`. Returns true
+/// when the file changed.
+fn reset_guard_settings(dst: &Path, guard: &str) -> io::Result<bool> {
+    let old = match fs::read(dst) {
+        Ok(old) => old,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(dst, guard)?;
+            return Ok(true);
+        }
+        Err(e) => return Err(e),
+    };
+    let mut cfg: Value = serde_json::from_slice(&old).map_err(io::Error::other)?;
+    let guard_cfg: Value = serde_json::from_str(guard).map_err(io::Error::other)?;
+    let before = cfg.clone();
+    let obj = cfg
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("settings.json: top level is not an object"))?;
+    let hooks = obj
+        .entry("hooks")
+        .or_insert_with(|| Value::Object(Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| io::Error::other("settings.json: hooks is not an object"))?;
+    let pre = hooks
+        .entry("PreToolUse")
+        .or_insert_with(|| Value::Array(Vec::new()))
+        .as_array_mut()
+        .ok_or_else(|| io::Error::other("settings.json: hooks.PreToolUse is not an array"))?;
+    let at = pre.iter().position(is_guard_group).unwrap_or(pre.len());
+    pre.retain(|g| !is_guard_group(g));
+    for (i, group) in guard_cfg["hooks"]["PreToolUse"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        pre.insert(at + i, group.clone());
+    }
+    if cfg == before {
+        return Ok(false);
+    }
+    let mut text = serde_json::to_string_pretty(&cfg).map_err(io::Error::other)?;
+    text.push('\n');
+    fs::write(dst, text)?;
+    Ok(true)
+}
+
+/// True when a PreToolUse group runs one of the chaude guard scripts, whatever its matcher.
+fn is_guard_group(group: &Value) -> bool {
+    let text: String = group["hooks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(hook_text)
+        .collect();
+    GUARD_SCRIPTS.iter().any(|s| text.contains(s))
 }
 
 /// Hook interpreter for the windows guard command: the py launcher (`py -3`) when on PATH, else `python`.
@@ -458,6 +553,137 @@ mod tests {
         fs::create_dir_all(&home).expect("mkdir home");
         assert!(!ensure_project_settings(&home, Some(&home)).expect("ensure"));
         assert!(!home.join(".claude").exists(), "home was written");
+    }
+
+    // Guard groups of a settings text, in order (any group that runs a chaude guard script).
+    fn guard_groups(text: &str) -> Vec<Value> {
+        let cfg: Value = serde_json::from_str(text).expect("json");
+        cfg["hooks"]["PreToolUse"]
+            .as_array()
+            .expect("PreToolUse")
+            .iter()
+            .filter(|g| is_guard_group(g))
+            .cloned()
+            .collect()
+    }
+
+    // User-owned keys and groups plus stale chaude guard groups (an old matcher and an old command).
+    const STALE_USER: &str = r#"{
+  "model": "sonnet",
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo mine"}]},
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/bash-py-guard.py\" --old"}]},
+      {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/main-thread-guard.py\" --old"}]}
+    ]
+  }
+}"#;
+
+    #[test]
+    fn same_version_changes_nothing() {
+        let root = TempDir::new("reset-same");
+        let cwd = root.path().join("cwd");
+        let state = root.path().join("state");
+        let settings = cwd.join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().expect("parent")).expect("mkdir");
+        fs::create_dir_all(&state).expect("mkdir state");
+        fs::write(&settings, STALE_USER).expect("write");
+        fs::write(state.join(VERSION_FILE), "0.11.7\n").expect("record");
+
+        assert!(
+            !refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
+        );
+        assert_eq!(fs::read_to_string(&settings).expect("read"), STALE_USER);
+    }
+
+    #[test]
+    fn new_version_replaces_guard_and_keeps_user() {
+        let root = TempDir::new("reset-new");
+        let cwd = root.path().join("cwd");
+        let state = root.path().join("state");
+        let settings = cwd.join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().expect("parent")).expect("mkdir");
+        fs::create_dir_all(&state).expect("mkdir state");
+        fs::write(&settings, STALE_USER).expect("write");
+        fs::write(state.join(VERSION_FILE), "0.11.6\n").expect("record");
+
+        assert!(
+            refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
+        );
+        let text = fs::read_to_string(&settings).expect("read");
+        let cfg: Value = serde_json::from_str(&text).expect("json");
+        assert_eq!(cfg["model"], "sonnet", "user key lost:\n{text}");
+        assert!(text.contains("echo mine"), "user hook lost:\n{text}");
+        assert!(!text.contains("--old"), "stale guard kept:\n{text}");
+        assert_eq!(
+            guard_groups(&text),
+            guard_groups(GUARD_HOOKS),
+            "guard not regenerated:\n{text}"
+        );
+        let pre = cfg["hooks"]["PreToolUse"].as_array().expect("PreToolUse");
+        assert_eq!(
+            pre[0]["hooks"][0]["command"], "echo mine",
+            "user group moved:\n{text}"
+        );
+        assert_eq!(
+            fs::read_to_string(state.join(VERSION_FILE))
+                .expect("record")
+                .trim(),
+            "0.11.7"
+        );
+    }
+
+    #[test]
+    fn no_record_counts_as_changed() {
+        let root = TempDir::new("reset-none");
+        let cwd = root.path().join("cwd");
+        let state = root.path().join("state");
+        let settings = cwd.join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().expect("parent")).expect("mkdir");
+        fs::write(&settings, STALE_USER).expect("write");
+
+        assert!(
+            refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
+        );
+        let text = fs::read_to_string(&settings).expect("read");
+        assert!(!text.contains("--old"), "stale guard kept:\n{text}");
+        assert_eq!(guard_groups(&text), guard_groups(GUARD_HOOKS));
+        assert!(state.join(VERSION_FILE).is_file(), "version not recorded");
+    }
+
+    #[test]
+    fn windows_python_pick_is_regenerated() {
+        let root = TempDir::new("reset-win");
+        let cwd = root.path().join("cwd");
+        let state = root.path().join("state");
+        let settings = cwd.join(".claude").join("settings.json");
+        fs::create_dir_all(settings.parent().expect("parent")).expect("mkdir");
+        fs::write(&settings, STALE_USER).expect("write");
+        let win = windows(GUARD_HOOKS.as_bytes(), "py -3").expect("convert");
+
+        assert!(refresh_on_version_change(&state, &cwd, None, "0.11.7", &win).expect("refresh"));
+        let text = fs::read_to_string(&settings).expect("read");
+        assert_eq!(
+            guard_groups(&text),
+            guard_groups(&win),
+            "windows guard not written:\n{text}"
+        );
+        assert!(text.contains("\"-3\""), "py -3 pick missing:\n{text}");
+    }
+
+    #[test]
+    fn home_is_recorded_but_not_reset() {
+        let root = TempDir::new("reset-home");
+        let home = root.path().join("home");
+        let state = root.path().join("state");
+        fs::create_dir_all(&home).expect("mkdir home");
+
+        assert!(
+            !refresh_on_version_change(&state, &home, Some(&home), "0.11.7", GUARD_HOOKS)
+                .expect("refresh")
+        );
+        assert!(!home.join(".claude").exists(), "home was reset");
+        assert!(state.join(VERSION_FILE).is_file(), "version not recorded");
     }
 
     #[test]
