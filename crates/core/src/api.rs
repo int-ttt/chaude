@@ -336,13 +336,16 @@ pub struct Config {
     // and each agent call. Off = no stage rows.
     pub residents: bool,
     // Go extra_coders (.chaude/settings.json): coders coder2..coder(1+n) beyond the always-on coder, 0-8.
-    // Extra coders start on demand and expire after 270 s idle (N14 idle sweep).
+    // Extra coders start on demand and expire after 290 s idle (N14 idle sweep).
     pub extra_coders: usize,
     // Go extraCoderTTL: an idle extra coder (coder2 and up) is ended after this long. The base coder stays.
     pub coder_idle_ttl: Duration,
-    // Idle time after a resident agent's turn ends, then its child exits on its own (ClaudeProc::finish). A later
-    // task or SendMessage respawns it with --resume on the same session id. Zero = never exit.
+    // Idle time after a resident agent's turn ends, then its child exits on its own (ClaudeProc::finish). Applies to
+    // extra coders and agents (5m = 290 s). A later task or SendMessage respawns it with --resume on the same
+    // session id. Zero = never exit.
     pub agent_idle_exit_secs: u64,
+    // Idle time of the base coder before it exits on its own (1 h = 3599 s), counted from its spawn. Zero = never exit.
+    pub base_idle_exit_secs: u64,
     // Go tuiTimeout: how long the resident tui may take to translate the main reply. On timeout the main reply stays.
     pub tui_timeout: Duration,
     // Go prompterTimeout: how long the resident prompter may take to summarize. On timeout the input goes unchanged.
@@ -442,8 +445,9 @@ impl Default for Config {
             perm_mode: PermMode::Auto,
             residents: true,
             extra_coders: 4,
-            coder_idle_ttl: Duration::from_secs(270),
-            agent_idle_exit_secs: 600,
+            coder_idle_ttl: Duration::from_secs(290),
+            agent_idle_exit_secs: 290,
+            base_idle_exit_secs: 3599,
             tui_timeout: Duration::from_secs(120),
             prompter_timeout: Duration::from_secs(60),
             handoff_path: None,
@@ -1836,6 +1840,8 @@ impl State {
         })
         .map_err(|e| e.to_string())?;
         self.coders[i].proc = Some(p);
+        // The idle timers run from spawn: the base coder starts at boot, before any task.
+        self.coders[i].idle_since = Some(Instant::now());
         Ok(())
     }
 
@@ -2008,15 +2014,20 @@ impl State {
         Some(self.cfg.coder_idle_ttl.saturating_sub(since.elapsed()))
     }
 
-    // Time left before an idle resident child exits on its own (agent_idle_exit_secs). None when disabled,
-    // busy or empty; applies to every coder slot, the base one included.
+    // Time left before an idle resident child exits on its own. The base coder uses base_idle_exit_secs (1 h),
+    // extra coders and agents use agent_idle_exit_secs (5 m). None when disabled, busy or empty.
     fn agent_idle_exit_left(&self, i: usize) -> Option<Duration> {
         let c = self.coders.get(i)?;
-        if self.cfg.agent_idle_exit_secs == 0 || c.deadline.is_some() || c.proc.is_none() {
+        let secs = if i == 0 {
+            self.cfg.base_idle_exit_secs
+        } else {
+            self.cfg.agent_idle_exit_secs
+        };
+        if secs == 0 || c.deadline.is_some() || c.proc.is_none() {
             return None;
         }
         let since = c.idle_since?;
-        Some(Duration::from_secs(self.cfg.agent_idle_exit_secs).saturating_sub(since.elapsed()))
+        Some(Duration::from_secs(secs).saturating_sub(since.elapsed()))
     }
 
     // Ends an idle resident child with ClaudeProc::finish. Its session id stays in resume_pending, so the next
@@ -3454,8 +3465,8 @@ impl State {
         }
     }
 
-    // Go idleDeadline: the idle rotation waits this long, capped at 290 s for the 5m cache (1 h for the 1h
-    // cache, no cap when idle_rotate is shorter). Zero = off.
+    // Go idleDeadline: the idle rotation waits this long. 290 s only when the cache is known to be 5m; 1 h
+    // (idle_rotate, 3599 s) for the 1h cache and for an unobserved auto. Zero = off.
     fn idle_deadline(&self) -> Duration {
         idle_deadline(
             self.cfg.idle_rotate,
@@ -4524,10 +4535,11 @@ mod tests {
 
     #[test]
     fn idle_deadline_matches_go_cases() {
-        let h = Duration::from_secs(3600);
+        let h = Duration::from_secs(3599);
         assert_eq!(idle_deadline(h, "1h"), h);
         assert_eq!(idle_deadline(h, "5m"), Duration::from_secs(290));
-        assert_eq!(idle_deadline(h, "auto"), Duration::from_secs(290));
+        // Unobserved auto keeps the base 1 h; only an observed 5m cache shortens it.
+        assert_eq!(idle_deadline(h, "auto"), h);
         assert_eq!(
             idle_deadline(Duration::from_secs(100), "auto"),
             Duration::from_secs(100)

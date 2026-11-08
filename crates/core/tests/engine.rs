@@ -97,6 +97,8 @@ case "$*" in
   *) role=main ;;
 esac
 printf '%s\n' "$role" >> 'DIR/spawned.log'
+# Every coder child records its pid at spawn, before any task: the base coder is the one spawned at boot.
+[ "$role" = coder ] && printf '%s boot\n' "$$" >> 'DIR/coder.boot.pids'
 [ "$role" = prompter ] && [ -f 'DIR/prompter.idle' ] && cat 'DIR/prompter.idle'
 [ "$role" = main ] && printf '%s\n' "$*" >> 'DIR/args.log'
 # One file per process: the spawns run at once, and a long argv can split across writes to a shared log.
@@ -2916,6 +2918,8 @@ fn idle_resident_exits_then_resumes_the_same_session() {
     let mut cfg = config(&f);
     cfg.residents = true;
     cfg.cwd = Some(f.dir.clone());
+    // The base coder has its own 1 h limit (base_idle_exit_secs); shorten it so the test exits quickly.
+    cfg.base_idle_exit_secs = 1;
     cfg.agent_idle_exit_secs = 1;
     let (h, rx) = Engine::start(cfg);
     h.coder("first");
@@ -2950,6 +2954,38 @@ fn idle_resident_exits_then_resumes_the_same_session() {
             .is_ok_and(|s| s.starts_with("coder ") && s.contains("--resume c1"))
     });
     assert!(resumed, "respawn did not resume session c1");
+    h.shutdown();
+}
+
+// The base coder spawns at boot and its idle timer starts there, so it exits with no task ever sent.
+#[test]
+fn base_coder_idle_timer_starts_at_spawn() {
+    let _g = lock();
+    let f = fake("coder_boot_idle", &["text_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    cfg.base_idle_exit_secs = 1;
+    let (h, _rx) = Engine::start(cfg);
+    let log = wait_for(&f.dir.join("coder.boot.pids"), " boot");
+    let pid = log
+        .lines()
+        .find_map(|l| l.strip_suffix(" boot"))
+        .expect("boot coder pid")
+        .trim()
+        .to_string();
+    let alive = |pid: &str| {
+        process::Command::new("kill")
+            .args(["-0", pid])
+            .status()
+            .unwrap()
+            .success()
+    };
+    let t0 = Instant::now();
+    while alive(&pid) && t0.elapsed() < Duration::from_secs(10) {
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!alive(&pid), "boot base coder was not exited while idle");
     h.shutdown();
 }
 

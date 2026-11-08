@@ -192,10 +192,11 @@ pub fn guard_settings_text() -> io::Result<String> {
 }
 
 /// Startup version check. When the record in `state` is not `current` (or there is none), the chaude guard groups in
-/// `<cwd>/.claude/settings.json` are replaced with `guard` (see `reset_guard_settings`) and `current` is recorded.
-/// The record is written only after a successful reset, so a failed reset runs again on the next start. cwd == home
-/// is not reset (that is the user-global .claude), but the version is still recorded. Returns true when a reset ran.
-/// Update state: none is persisted (the update check always fetches live), so there is nothing to clear.
+/// `<cwd>/.claude/settings.json` are replaced with `guard` (see `reset_guard_settings`), the shipped agent and hook
+/// files are overwritten with their embedded copies where they differ (see `overwrite_shipped`), and `current` is
+/// recorded. The record is written only after a successful reset, so a failed reset runs again on the next start.
+/// cwd == home is not reset (that is the user-global .claude), but the version is still recorded. Returns true when a
+/// reset ran. Update state: none is persisted (the update check always fetches live), so there is nothing to clear.
 pub fn refresh_on_version_change(
     state: &Path,
     cwd: &Path,
@@ -209,11 +210,38 @@ pub fn refresh_on_version_change(
     }
     let project = !cwd.as_os_str().is_empty() && !home.is_some_and(|h| same_dir(cwd, h));
     if project {
-        reset_guard_settings(&cwd.join(".claude").join("settings.json"), guard)?;
+        let claude = cwd.join(".claude");
+        reset_guard_settings(&claude.join("settings.json"), guard)?;
+        overwrite_shipped(&claude)?;
     }
     fs::create_dir_all(state)?;
     fs::write(&record, format!("{current}\n"))?;
     Ok(project)
+}
+
+/// Overwrites each shipped file under `claude` (the AGENTS and GUARD_FILES set that `ensure_project_settings` copies)
+/// whose content differs from the embedded copy. Files outside that set are never touched.
+fn overwrite_shipped(claude: &Path) -> io::Result<()> {
+    for (name, body) in AGENTS {
+        overwrite_if_differs(body, &claude.join("agents").join(name))?;
+    }
+    for name in GUARD_FILES {
+        let body = embedded_hook(name)
+            .ok_or_else(|| io::Error::other(format!("chaude: embedded hook missing: {name}")))?;
+        overwrite_if_differs(body, &claude.join("hooks").join(name))?;
+    }
+    Ok(())
+}
+
+/// Writes `body` to `dst` (creating its folder) unless `dst` already holds exactly `body`.
+fn overwrite_if_differs(body: &[u8], dst: &Path) -> io::Result<()> {
+    if fs::read(dst).is_ok_and(|old| old == body) {
+        return Ok(());
+    }
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(dst, body)
 }
 
 /// Replaces the chaude guard groups in the settings file `dst` with those of `guard`. A group is chaude's when a hook
@@ -684,6 +712,97 @@ mod tests {
         );
         assert!(!home.join(".claude").exists(), "home was reset");
         assert!(state.join(VERSION_FILE).is_file(), "version not recorded");
+    }
+
+    #[test]
+    fn stale_shipped_files_overwritten_on_version_change() {
+        let root = TempDir::new("refresh-files");
+        let cwd = root.path().join("cwd");
+        let state = root.path().join("state");
+        let claude = cwd.join(".claude");
+        fs::create_dir_all(claude.join("hooks")).expect("mkdir hooks");
+        fs::create_dir_all(claude.join("agents")).expect("mkdir agents");
+        fs::create_dir_all(&state).expect("mkdir state");
+        fs::write(
+            claude.join("hooks").join("main-thread-guard.py"),
+            "old hook",
+        )
+        .expect("write");
+        fs::write(claude.join("agents").join("haiku-coder.md"), "old agent").expect("write");
+        fs::write(state.join(VERSION_FILE), "0.11.6\n").expect("record");
+
+        assert!(
+            refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
+        );
+        assert_eq!(
+            fs::read(claude.join("hooks").join("main-thread-guard.py")).expect("read"),
+            embedded_hook("main-thread-guard.py").expect("embedded"),
+            "stale hook not overwritten"
+        );
+        let (_, agent) = AGENTS
+            .iter()
+            .find(|(n, _)| *n == "haiku-coder.md")
+            .expect("haiku-coder embedded");
+        assert_eq!(
+            fs::read(claude.join("agents").join("haiku-coder.md")).expect("read"),
+            *agent,
+            "stale agent not overwritten"
+        );
+    }
+
+    #[test]
+    fn user_extra_files_kept_on_version_change() {
+        let root = TempDir::new("refresh-extra");
+        let cwd = root.path().join("cwd");
+        let state = root.path().join("state");
+        let claude = cwd.join(".claude");
+        fs::create_dir_all(claude.join("hooks")).expect("mkdir hooks");
+        fs::create_dir_all(claude.join("agents")).expect("mkdir agents");
+        fs::create_dir_all(&state).expect("mkdir state");
+        let my_hook = claude.join("hooks").join("my-hook.py");
+        let my_agent = claude.join("agents").join("mine.md");
+        fs::write(&my_hook, "mine").expect("write");
+        fs::write(&my_agent, "mine").expect("write");
+        fs::write(state.join(VERSION_FILE), "0.11.6\n").expect("record");
+
+        assert!(
+            refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
+        );
+        assert_eq!(fs::read_to_string(&my_hook).expect("read"), "mine");
+        assert_eq!(fs::read_to_string(&my_agent).expect("read"), "mine");
+    }
+
+    #[test]
+    fn same_version_keeps_modified_shipped_file() {
+        let root = TempDir::new("refresh-same");
+        let cwd = root.path().join("cwd");
+        let state = root.path().join("state");
+        let agent = cwd.join(".claude").join("agents").join("haiku-coder.md");
+        fs::create_dir_all(agent.parent().expect("parent")).expect("mkdir");
+        fs::create_dir_all(&state).expect("mkdir state");
+        fs::write(&agent, "edited").expect("write");
+        fs::write(state.join(VERSION_FILE), "0.11.7\n").expect("record");
+
+        assert!(
+            !refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
+        );
+        assert_eq!(fs::read_to_string(&agent).expect("read"), "edited");
+    }
+
+    #[test]
+    fn home_shipped_files_not_refreshed() {
+        let root = TempDir::new("refresh-home-files");
+        let home = root.path().join("home");
+        let state = root.path().join("state");
+        let agent = home.join(".claude").join("agents").join("haiku-coder.md");
+        fs::create_dir_all(agent.parent().expect("parent")).expect("mkdir");
+
+        fs::write(&agent, "old agent").expect("write");
+        assert!(
+            !refresh_on_version_change(&state, &home, Some(&home), "0.11.7", GUARD_HOOKS)
+                .expect("refresh")
+        );
+        assert_eq!(fs::read_to_string(&agent).expect("read"), "old agent");
     }
 
     #[test]

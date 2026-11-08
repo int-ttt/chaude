@@ -136,7 +136,8 @@ fn run_tui(args: &[String]) -> i32 {
     if let Err(e) = settings::project::ensure_project_settings(Path::new(&cwd), home.as_deref()) {
         eprintln!("project settings: {e}");
     }
-    // A new chaude version (or no version record yet) regenerates the chaude guard entries once and records itself.
+    // A new chaude version (or no version record yet) regenerates the chaude guard entries and overwrites the shipped
+    // hook and agent files once, then records itself.
     let refreshed = settings::project::guard_settings_text().and_then(|guard| {
         settings::project::refresh_on_version_change(
             &osenv::state_dir(),
@@ -147,7 +148,9 @@ fn run_tui(args: &[String]) -> i32 {
         )
     });
     match refreshed {
-        Ok(true) => eprintln!("chaude {VERSION}: project guard settings refreshed"),
+        Ok(true) => {
+            eprintln!("chaude {VERSION}: project guard settings and shipped files refreshed")
+        }
         Ok(false) => {}
         Err(e) => eprintln!("project settings refresh: {e}"),
     }

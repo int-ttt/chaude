@@ -18,8 +18,18 @@ fn default_extra_pool_and_idle_ttl_match_go() {
     };
     assert!(cfg.residents);
     assert_eq!(cfg.extra_coders, 4);
-    assert_eq!(cfg.coder_idle_ttl, Duration::from_secs(270));
+    assert_eq!(cfg.coder_idle_ttl, Duration::from_secs(290));
     assert_eq!(cfg.interrupt_grace, Duration::from_secs(20));
     assert_eq!(cfg.inactivity_timeout, Duration::from_secs(300));
     assert_eq!(cfg.rotate_defer_timeout, Duration::from_secs(600));
+}
+
+// User rule: the 4 base sessions idle out after 1 h (3599 s); extra coders and agents after 5 m (290 s).
+#[test]
+fn idle_defaults_base_1h_extra_and_agents_5m() {
+    let cfg = Config::default();
+    assert_eq!(cfg.idle_rotate, Duration::from_secs(3599));
+    assert_eq!(cfg.base_idle_exit_secs, 3599);
+    assert_eq!(cfg.coder_idle_ttl, Duration::from_secs(290));
+    assert_eq!(cfg.agent_idle_exit_secs, 290);
 }

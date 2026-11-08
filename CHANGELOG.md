@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.11.9 - 2026-11-08
+- Idle timeouts: base sessions (main, prompter, TUI, base coder) expire after 1 hour idle. Extra coders and agents expire after 290 seconds, matching the 5-minute prompt cache.
+  - 유휴 시간 제한: 기본 세션(메인, prompter, TUI, 기본 coder)은 1시간 동안 쉬면 만료됩니다. 추가 coder와 에이전트는 5분 프롬프트 캐시에 맞춰 290초 후 만료됩니다.
+- Hooks and agents: shipped hook and agent files are rewritten when the chaude version changes, so stale copies are replaced. Same-version edits are kept.
+  - 훅과 에이전트: chaude 버전이 바뀌면 기본 제공 훅과 에이전트 파일을 다시 씁니다. 같은 버전에서 바꾼 내용은 유지됩니다.
+- Windows: a finished agent's state write retries the rename briefly when the target file is busy, so the done record is not lost.
+  - Windows: 대상 파일이 사용 중이면 상태 파일 이름 바꾸기를 잠시 재시도하여, 완료 기록이 사라지지 않게 합니다.
+
 ## 0.11.8 - 2026-11-07
 - Agents: a finished agent is hidden from the agent list, and it comes back when `SendMessage` resumes it.
   - 에이전트: 끝난 에이전트는 에이전트 목록에서 숨기며, `SendMessage`로 재개하면 다시 나타납니다.

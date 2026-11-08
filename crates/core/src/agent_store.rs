@@ -10,6 +10,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,8 @@ const MAX_STORED_AGENTS: usize = 200;
 const STORE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
 /// Startup restore window for interrupted agents.
 const RESTORE_MAX_AGE: Duration = Duration::from_secs(24 * 3600);
+const RENAME_RETRIES: usize = 10;
+const RENAME_RETRY_WAIT: Duration = Duration::from_millis(20);
 
 /// On-disk form of one tracked sub-agent (Go savedAgent). Zero-valued optional fields are omitted.
 /// A zero `updated` time (UNIX_EPOCH here) means "not set yet" and is stamped on first put.
@@ -303,7 +306,7 @@ impl AgentStore {
         let mut tmp = self.path.clone().into_os_string();
         tmp.push(".tmp");
         let tmp = PathBuf::from(tmp);
-        if write_private(&tmp, text.as_bytes()).is_ok() && fs::rename(&tmp, &self.path).is_ok() {
+        if write_private(&tmp, text.as_bytes()).is_ok() && replace_file(&tmp, &self.path).is_ok() {
             g.last = text;
         }
     }
@@ -328,6 +331,21 @@ fn merge_disk(path: &Path, m: &mut HashMap<String, SavedAgent>) {
             m.insert(a.id.clone(), a);
         }
     }
+}
+
+/// Renames `tmp` over `path`. Windows refuses while another process holds `path` open (a concurrent
+/// merge_disk read), which is transient; a failed write is not retried by the flush that made it, so
+/// a finished agent's done record could stay unwritten. A few short retries cover that.
+fn replace_file(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    let mut res = fs::rename(tmp, path);
+    for _ in 0..RENAME_RETRIES {
+        if res.is_ok() {
+            break;
+        }
+        thread::sleep(RENAME_RETRY_WAIT);
+        res = fs::rename(tmp, path);
+    }
+    res
 }
 
 /// Writes `data` with owner-only permissions on unix, as Go's 0600 file mode.
@@ -824,6 +842,25 @@ mod tests {
     use super::*;
     use crate::testutil::TempDir;
     use serde_json::json;
+
+    // A rename blocked for a while (Windows: the target is open in another process) is retried, so the
+    // write lands once the target is free. A directory at the target stands in for the busy file.
+    #[test]
+    fn agent_store_replace_retries_busy_target() {
+        let dir = TempDir::new("agent-store-replace");
+        let path = dir.path().join("agents.json");
+        let tmp = dir.path().join("agents.json.tmp");
+        fs::write(&tmp, b"[]").unwrap();
+        fs::create_dir(&path).unwrap();
+        let busy = path.clone();
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(50));
+            fs::remove_dir(&busy).unwrap();
+        });
+        replace_file(&tmp, &path).expect("rename after the target is released");
+        release.join().unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"[]");
+    }
 
     // Go TestAgentStorePersistsEveryChange
     #[test]

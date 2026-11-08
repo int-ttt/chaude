@@ -365,16 +365,17 @@ pub fn is_warm(rec: &ClientRec, limit: i64, now: Stamp, deadline: Duration) -> b
     recent(now, rec.last_api, deadline) && rec.last_ctx < limit
 }
 
-/// How long a client may sit idle before its prompt cache is assumed cold. ttl "1h" gives idle_rotate;
-/// "5m" and an unobserved "auto" give 290s, capped by idle_rotate. idle_rotate zero disables it (returns zero).
+/// How long a client may sit idle before its prompt cache is assumed cold. "5m" gives 290s, capped by
+/// idle_rotate. "1h" and an unobserved "auto" give idle_rotate (1 h by default). idle_rotate zero disables it
+/// (returns zero).
 pub fn idle_deadline(idle_rotate: Duration, ttl: &str) -> Duration {
     if idle_rotate.is_zero() {
         return Duration::ZERO;
     }
-    if ttl == "1h" {
-        return idle_rotate;
+    if ttl == "5m" {
+        return idle_rotate.min(Duration::from_secs(290));
     }
-    idle_rotate.min(Duration::from_secs(290))
+    idle_rotate
 }
 
 /// Whether a deadline can expire at all. Zero means never. (Go also has negative durations, which
@@ -618,12 +619,12 @@ mod tests {
     // Go TestIdleDeadline
     #[test]
     fn idle_deadline_by_ttl_and_cap() {
-        let h = Duration::from_secs(3600);
+        let h = Duration::from_secs(3599);
         let s290 = Duration::from_secs(290);
         let cases = [
             (h, "1h", h),
             (h, "5m", s290),
-            (h, "auto", s290),
+            (h, "auto", h),
             (Duration::from_secs(100), "auto", Duration::from_secs(100)),
             (Duration::ZERO, "1h", Duration::ZERO),
             (Duration::ZERO, "5m", Duration::ZERO),
