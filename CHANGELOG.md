@@ -4,12 +4,19 @@
 
 ## 0.11.10 - 2026-11-09
 - Agents: each finished agent is announced once, with its own result path. A resumed agent is announced again on its next finish. A glob pattern in a prompt (`notes/runs/x-*.md`) is no longer taken as the result path.
+  - 에이전트: 끝난 에이전트마다 자기 결과 경로와 함께 한 번만 알립니다. 다시 이어 받은 에이전트는 다음에 끝날 때 다시 알립니다. 프롬프트의 glob 패턴(`notes/runs/x-*.md`)은 더 이상 결과 경로로 쓰지 않습니다.
 - Agent list: a running agent with no output or tool activity for 10 minutes shows "possibly stalled" with its silent minutes. This is a display mark only.
+  - 에이전트 목록: 실행 중인 에이전트가 10분 동안 출력이나 도구 활동이 없으면 조용했던 분 수와 함께 "멈췄을 수 있음"으로 표시합니다. 표시일 뿐입니다.
 - Agent list: a child session picked with pick_child shows as a row while it runs, and as done when idle.
+  - 에이전트 목록: `pick_child`로 고른 자식 세션은 실행 중에는 행으로 보이고, 유휴 상태일 때는 완료로 보입니다.
 - Idle: every session (main, prompter, TUI, base coder, extra coders) idles out after 3570 seconds. An observed 5-minute cache no longer shortens the main session's idle rotation. Extra coders used 290 seconds before.
+  - 유휴 시간: 모든 세션(메인, prompter, TUI, 기본 coder, 추가 coder)은 3570초 동안 쉬면 만료됩니다. 관찰된 5분 캐시는 더 이상 메인 세션의 유휴 교체를 앞당기지 않습니다. 추가 coder는 전에는 290초였습니다.
 - Settings: the extra coder idle label is read from the same constant as the idle timeout.
+  - 설정: 추가 coder 유휴 표시 문구는 유휴 시간 제한과 같은 상수에서 읽습니다.
 - `resident_coder`: a blocked, partial, or failed reply keeps its `reason:` line in the MCP text.
+  - `resident_coder`: 차단됨, 부분 완료, 실패한 응답은 MCP 텍스트에 `reason:` 줄을 그대로 남깁니다.
 - Hooks: the Bash guard denies an unbounded `until`/`while` wait loop with no alarm, timeout, or counter bound. The shipped hook file is updated.
+  - 훅: Bash 가드는 알람, 시간 제한, 카운터 한도 없이 끝나지 않는 `until`/`while` 대기 루프를 거부합니다. 기본 제공 훅 파일도 갱신했습니다.
 
 ## 0.11.9 - 2026-11-08
 - Idle timeouts: base sessions (main, prompter, TUI, base coder) expire after 1 hour idle. Extra coders and agents expire after 290 seconds, matching the 5-minute prompt cache.
