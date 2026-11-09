@@ -37,7 +37,7 @@ const RULE_D: &str = "[orch D] Write one task brief, then issue ALL Haiku calls 
 
 const RULE_E: &str = "[orch E] Haiku main does all work itself; no Opus agents except escalation after 2 Haiku failures (put ESCALATE in that brief). Spawning a reader is allowed only if the brief names absolute file paths and declares 'RETURN: <=N chars' with N <= 0.25 x total bytes of those files; otherwise the hook blocks it and you do the work inline with your own tools.";
 
-const RULE_F: &str = "[orch F] Turns prefixed [ws:<id>] belong to one workstream; the harness routes them to the same live Haiku child, rotating at 40k tokens, 20 turns or idle >290s with a <=1500-char handoff. Keep one workstream id per task.";
+const RULE_F: &str = "[orch F] Turns prefixed [ws:<id>] belong to one workstream; the harness routes them to the same live Haiku child, rotating at 40k tokens, 20 turns or idle >3570s with a <=1500-char handoff. Keep one workstream id per task.";
 
 // Go orchRule: the system-prompt rule for a mode. Empty for m0 and unknown modes. C extends B.
 pub fn rule(mode: &str) -> String {
@@ -51,10 +51,10 @@ pub fn rule(mode: &str) -> String {
     }
 }
 
-// Go wsRe limits: a workspace id is 1-32 of [A-Za-z0-9_-]; a session rotates at 20 turns, 40k context or 290s idle.
+// Go wsRe limits: a workspace id is 1-32 of [A-Za-z0-9_-]; a session rotates at 20 turns, 40k context or 3570s idle.
 pub const WS_MAX_TURNS: u32 = 20;
 pub const WS_MAX_CTX: u64 = 40_000;
-pub const WS_MAX_IDLE: Duration = Duration::from_secs(290);
+pub const WS_MAX_IDLE: Duration = Duration::from_secs(3570);
 pub const WS_HANDOFF_MAX: usize = 1500;
 
 // Go parseWS: a leading "[ws:<id>]" tag. Returns the id and the rest of the line after the tag and its
@@ -314,9 +314,9 @@ mod tests {
         st.ctx = 40_000;
         assert!(needs_rotate(Some(&st), now));
         st.ctx = 0;
-        assert!(!needs_rotate(Some(&st), now + Duration::from_secs(290)));
-        assert!(needs_rotate(Some(&st), now + Duration::from_secs(291)));
-        assert_eq!(WS_MAX_IDLE, Duration::from_secs(290));
+        assert!(!needs_rotate(Some(&st), now + Duration::from_secs(3570)));
+        assert!(needs_rotate(Some(&st), now + Duration::from_secs(3571)));
+        assert_eq!(WS_MAX_IDLE, Duration::from_secs(3570));
     }
 
     #[test]
@@ -395,8 +395,8 @@ mod tests {
         assert_eq!(r.ws["w1"].session_id, "sess-1");
         assert_eq!(r.ws["w1"].turns, 2);
 
-        // idle past 290s: rotate, carrying the last reply as handoff
-        let got = r.route("[ws:w1] third", "opus", t0 + Duration::from_secs(300));
+        // idle past 3570s: rotate, carrying the last reply as handoff
+        let got = r.route("[ws:w1] third", "opus", t0 + Duration::from_secs(3600));
         assert_eq!(got.target, Target::Fresh { id: "w1".into() });
         assert_eq!(got.text, "[ws:w1 handoff] reply two\n\nthird");
         assert!(r.ws["w1"].session_id.is_empty());

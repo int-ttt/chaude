@@ -30,7 +30,7 @@ pub const ROWS: usize = 3;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub session_retention_days: i64, // 0 = keep forever
-    pub extra_coders: i64,           // extra haiku coders (coder2...) on a 290s idle TTL, 0-8
+    pub extra_coders: i64,           // extra haiku coders (coder2...) on a 3570s idle TTL, 0-8
     pub main_model: String,          // opus | sonnet | fable
 }
 
@@ -250,8 +250,9 @@ impl Picker {
                 self.s.session_retention_days
             ),
             format!(
-                "extra_coders            {} (추가 coder (290초) 수, 0-8)",
-                self.s.extra_coders
+                "extra_coders            {} (추가 coder ({}초) 수, 0-8)",
+                self.s.extra_coders,
+                chaude_core::api::CODER_IDLE_TTL_SECS
             ),
             format!("main_model              {}", self.s.main_model),
         ];

@@ -82,23 +82,23 @@ pub fn running_count(agents: &[BgAgent]) -> usize {
     agents.iter().filter(|a| a.background && !a.done).count()
 }
 
-// Go bgHandoffLines: background agents with a result file, running or finished-with-result, oldest first.
-// Each line names the agent, its state, and its result file path.
+// Agents still running (foreground too: a rotation must not lose them), plus finished agents that name a
+// result file, oldest first. Finished agents without a result file settle with their own "[agent done]" notice.
 pub fn bg_handoff_lines(agents: &[BgAgent]) -> Vec<String> {
     let mut listed: Vec<&BgAgent> = agents
         .iter()
-        .filter(|a| a.background && !a.result_path.is_empty() && (!a.done || a.result_done))
+        .filter(|a| !a.done || !a.result_path.is_empty())
         .collect();
     listed.sort_by(|a, b| a.started.cmp(&b.started).then_with(|| a.id.cmp(b.id)));
     listed
         .into_iter()
         .map(|a| {
-            let state = if a.done { "done" } else { "running" };
             let name = if a.name.is_empty() { a.task } else { a.name };
-            format!(
-                "- {name} ({}): {state}, result file: {}",
-                a.id, a.result_path
-            )
+            if a.done {
+                format!("- {name} ({}): done, result {}", a.id, a.result_path)
+            } else {
+                format!("- {name} ({}): running", a.id)
+            }
         })
         .collect()
 }
@@ -192,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn handoff_lines_list_running_and_finished_with_result() {
+    fn handoff_lines_keep_running_and_named_results() {
         let t0 = Instant::now();
         let t1 = t0 + Duration::from_secs(5);
         let bg1 = BgAgent {
@@ -202,29 +202,31 @@ mod tests {
         };
         let bg2 = BgAgent {
             name: "",
-            result_path: "notes/runs/261101-agent-bg2.md",
             ..agent("bg2", t1)
         };
+        // Foreground and still running: must survive a rotation (item 2).
         let fg = BgAgent {
             background: false,
             ..agent("fg", t0)
         };
-        let no_file = BgAgent {
+        let bg3 = BgAgent {
             result_path: "",
-            ..agent("nofile", t0)
-        };
-        let finished_unwritten = BgAgent {
-            done: true,
-            result_done: false,
             ..agent("bg3", t0)
         };
-        let lines = bg_handoff_lines(&[bg2, fg, bg1, no_file, finished_unwritten]);
+        // Finished without a named result file: settles with its own notice, not listed.
+        let done_bare = BgAgent {
+            done: true,
+            result_path: "",
+            ..agent("done0", t0)
+        };
+        let lines = bg_handoff_lines(&[bg2, fg, bg1, bg3, done_bare]);
         assert_eq!(
             lines,
             vec![
-                "- haiku-coder (bg1): done, result file: notes/runs/261101-agent-x.md".to_string(),
-                "- write notes (bg2): running, result file: notes/runs/261101-agent-bg2.md"
-                    .to_string(),
+                "- haiku-coder (bg1): done, result notes/runs/261101-agent-x.md".to_string(),
+                "- haiku-coder (bg3): running".to_string(),
+                "- haiku-coder (fg): running".to_string(),
+                "- write notes (bg2): running".to_string(),
             ]
         );
     }

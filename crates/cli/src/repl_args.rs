@@ -184,7 +184,7 @@ impl Parsed {
             Some(v) => v.parse::<f64>().map_err(|_| bad("task-budget-usd", v))?,
             None => 0.0,
         };
-        cfg.idle_rotate = self.dur("idle-rotate", Duration::from_secs(3599))?;
+        cfg.idle_rotate = self.dur("idle-rotate", Duration::from_secs(3570))?;
         cfg.inactivity_timeout = self.dur("idle-notice", GO_IDLE_NOTICE)?;
         cfg.clients_file = self.path_or("clients-file", Some(state.join("clients.json")));
 
@@ -319,7 +319,7 @@ mod tests {
         assert!(!cfg.no_category_rotate && !cfg.no_delegation_rule);
         assert_eq!(cfg.cache_ttl, "1h");
         assert_eq!(cfg.task_budget_usd, 0.0);
-        assert_eq!(cfg.idle_rotate, Duration::from_secs(3599));
+        assert_eq!(cfg.idle_rotate, Duration::from_secs(3570));
         assert_eq!(cfg.inactivity_timeout, Duration::from_secs(1800));
         assert!(
             cfg.transcript.is_some() && cfg.agents_file.is_some() && cfg.clients_file.is_some()

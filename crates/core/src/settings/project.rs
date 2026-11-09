@@ -874,7 +874,8 @@ mod tests {
         }
         assert!(
             text.contains(r#""permissionDecision": "deny""#)
-                && text.contains("Edit files with the Edit/Write tools, not Python."),
+                && (text.contains("Edit files with the Edit/Write tools, not Python.")
+                    || text.contains("Unbounded wait loop denied")),
             "unexpected hook output for {command:?}: {text}"
         );
         true
@@ -891,6 +892,8 @@ mod tests {
             "python3 -c \"import os; os.replace('a.tmp', 'a.md')\"",
             "node -e \"const fs = require('fs'); fs.writeFileSync('a.md', 'x')\"",
             "cat <<'EOF' | python3 -\nopen('a.md', 'w').write('x')\nEOF",
+            "until [ -s /tmp/x ]; do sleep 1; done",
+            "while true; do sleep 1; done",
         ];
         let allow = [
             "python3 -c \"print(1)\"",
@@ -900,6 +903,10 @@ mod tests {
             // heredoc bodies of other commands are data, not code
             "cat <<'EOF' > notes/draft.md\nopen('a.md', 'w').write('x')\nEOF\npython3 -c \"print(1)\"",
             "cat <<EOF > a.md\nPath(p).write_text('x')\nEOF",
+            "perl -e 'alarm shift; exec @ARGV' 60 sh -c 'until [ -s /tmp/x ]; do sleep 1; done'",
+            "for f in *.md; do echo $f; done",
+            "while read l; do echo $l; done < file",
+            "i=0; while [ $i -lt 10 ]; do i=$((i+1)); done",
         ];
         for cmd in deny {
             assert!(bash_guard_denies(&hook, cmd), "should deny: {cmd:?}");

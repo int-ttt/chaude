@@ -766,6 +766,7 @@ impl App {
                         },
                         background: false,
                         done: false,
+                        last_active: 0,
                         agent_id: String::new(),
                         result_path: String::new(),
                         started_at,
@@ -1557,8 +1558,12 @@ impl App {
                 *line = tool_line(&r);
             }
         }
+        // The done line starts with the local HH:MM:SS of its arrival; the wording after it is unchanged.
         let notice = bar::done_line(failed, model, name, what);
-        self.note(&format!("{GREY_ON}{notice}{FG_OFF}"));
+        self.note(&format!(
+            "{GREY_ON}{} {notice}{FG_OFF}",
+            clock_hhmmss(unix_now())
+        ));
     }
 
     // Go tui.go render(): the user block is grey, "> " on its first row, and is followed by a blank row.
@@ -2574,6 +2579,9 @@ fn text_width(w: usize) -> usize {
     w.saturating_sub(1).max(1)
 }
 
+// Silence after which a running agent row says it may be stalled (10 minutes).
+const STALL_SECS: u64 = 600;
+
 // One agent panel row (Go rowsA): "  ● 상태-모델-이름(작업)" with the dot in Go's running colour (220). Only running
 // agents reach the panel, so the state is always 실행 중. The model falls back to the session model; the summary is
 // the task, else the first prompt line.
@@ -2589,7 +2597,14 @@ fn agent_row_line(r: &AgentRow, session_model: &str, width: usize) -> String {
     } else {
         bar::AgentState::Running
     };
-    let text = bar::agent_status_text(state, &r.model, session_model, &r.name, summary);
+    let mut text = bar::agent_status_text(state, &r.model, session_model, &r.name, summary);
+    // Display only: a running agent with no output or tool activity for STALL_SECS is flagged with its silence.
+    if matches!(state, bar::AgentState::Running) && r.last_active > 0 {
+        let silent = (unix_now() as u64).saturating_sub(r.last_active);
+        if silent >= STALL_SECS {
+            text.push_str(&format!(" · 멈췄을 수 있음 {}분 무응답", silent / 60));
+        }
+    }
     // Go tui.go:1494: only the dot is coloured (agentDot: running 220, interrupted 208); the text is dimSt grey.
     let dot_on = match state {
         bar::AgentState::Running => 220,
@@ -3801,6 +3816,7 @@ mod tests {
             agent_id: String::new(),
             result_path: String::new(),
             started_at: 0,
+            last_active: 0,
         }
     }
 
@@ -3965,6 +3981,22 @@ mod tests {
         let recs = app.agent_recs();
         let rec = recs.iter().find(|r| r.id == "r").expect("restored agent");
         assert_eq!(rec.started_at, 1_700_000_000_000, "{rec:?}");
+    }
+
+    // A running agent silent for 10 minutes (no output or tool activity) is flagged as possibly stalled. Display only.
+    #[test]
+    fn stalled_running_agent_row_shows_elapsed_silence() {
+        let now = unix_now() as u64;
+        let mut row = AgentRow {
+            started_at: now - 2000,
+            last_active: now - 700,
+            ..agent_row("st", false, false)
+        };
+        let line = agent_row_line(&row, "sonnet", 200);
+        assert!(line.contains("멈췄을 수 있음 11분 무응답"), "{line}");
+        row.last_active = now - 60;
+        let line = agent_row_line(&row, "sonnet", 200);
+        assert!(!line.contains("멈췄을 수 있음"), "{line}");
     }
 
     // Finished agents leave the list; an agent view opened on one stays open and keeps its log.
@@ -5480,6 +5512,40 @@ mod tests {
         );
         // Go prints no "◆ agent started" or "◆ agent done in" rows.
         assert!(app.transcript.iter().all(|r| !r.contains("◆")));
+    }
+
+    // The agent done line carries its local HH:MM:SS first; the notice text after it is unchanged.
+    #[test]
+    fn agent_done_line_starts_with_hhmmss() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "a1".to_string(),
+            description: "Scan repo".to_string(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentEnd {
+            id: "a1".to_string(),
+            elapsed_ms: 1500,
+            model: String::new(),
+            name: "haiku-coder".to_string(),
+            summary: "Scan repo".to_string(),
+        });
+        let plain: Vec<String> = app
+            .transcript
+            .iter()
+            .map(|r| render::strip_sgr(r))
+            .collect();
+        let row = plain
+            .iter()
+            .find(|r| r.contains("[agent 완료] 상속 haiku-coder · Scan repo"))
+            .expect("done line");
+        let b = row.as_bytes();
+        assert!(
+            b.len() > 9 && b[2] == b':' && b[5] == b':' && b[8] == b' ',
+            "{row:?}"
+        );
+        assert!(row[..8].bytes().all(|c| c == b':' || c.is_ascii_digit()));
+        assert_eq!(&row[9..], "[agent 완료] 상속 haiku-coder · Scan repo");
     }
 
     // Go repl.go stage() + tui.go note block: each stage row is grey and followed by one blank row.

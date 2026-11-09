@@ -21,14 +21,14 @@ use crate::budget::{self, Budget};
 use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
 use crate::child_set::{ChildSet, Close, Parked, child_key};
-use crate::clients::{ClientRec, ClientRegistry, LIVE, PARKED, idle_deadline, now_stamp};
+use crate::clients::{ClientRec, ClientRegistry, LIVE, PARKED, now_stamp};
 use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
 use crate::forward::forward_rule_for;
 use crate::haiku_pool::WorkerPool;
 use crate::handoff::{self, ExitHandoff};
 use crate::import_claude::{ClaudeImport, import_note};
 use crate::mcp;
-use crate::metrics::{Metrics, RateLog, usage_fields, yymmdd_today};
+use crate::metrics::{Metrics, RateLog, usage_fields};
 use crate::mode::{self, PermMode, Verdict};
 use crate::orch;
 use crate::osenv::resolve_bin;
@@ -291,6 +291,9 @@ const NEVER_COLD: Duration = Duration::from_secs(24 * 365 * 3600);
 // How long an idle resident child gets to exit after its stdin closes, before ClaudeProc::finish kills it.
 const CODER_EXIT_WAIT: Duration = Duration::from_secs(5);
 
+// Idle limit of an extra coder and of the base coder (Go extraCoderTTL). The settings screen shows it.
+pub const CODER_IDLE_TTL_SECS: u64 = 3570;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     // Name or path of the claude binary; resolved on PATH like osenv::resolve_bin. Tests point this at a fake.
@@ -327,8 +330,8 @@ pub struct Config {
     // Go --rotate-defer-timeout: how long a due rotation waits for background agents before it runs anyway.
     // Zero = rotate at once.
     pub rotate_defer_timeout: Duration,
-    // Go --idle-rotate: a handoff and fresh child once the child has no API response for this long, capped at the
-    // cache TTL (see idle_deadline). Zero = off.
+    // Go --idle-rotate: a handoff and fresh child once the main child has no API response for this long (3570 s by
+    // default, not shortened by an observed 5m cache). Zero = off.
     pub idle_rotate: Duration,
     // Harness permission mode the engine starts in. The TUI status bar starts on the same value (Config is its source).
     pub perm_mode: PermMode,
@@ -336,15 +339,11 @@ pub struct Config {
     // and each agent call. Off = no stage rows.
     pub residents: bool,
     // Go extra_coders (.chaude/settings.json): coders coder2..coder(1+n) beyond the always-on coder, 0-8.
-    // Extra coders start on demand and expire after 290 s idle (N14 idle sweep).
+    // Extra coders start on demand and expire after 3570 s idle (N14 idle sweep).
     pub extra_coders: usize,
-    // Go extraCoderTTL: an idle extra coder (coder2 and up) is ended after this long. The base coder stays.
+    // Go extraCoderTTL: an idle extra coder (coder2 and up) is ended after this long (3570 s). The base coder stays.
     pub coder_idle_ttl: Duration,
-    // Idle time after a resident agent's turn ends, then its child exits on its own (ClaudeProc::finish). Applies to
-    // extra coders and agents (5m = 290 s). A later task or SendMessage respawns it with --resume on the same
-    // session id. Zero = never exit.
-    pub agent_idle_exit_secs: u64,
-    // Idle time of the base coder before it exits on its own (1 h = 3599 s), counted from its spawn. Zero = never exit.
+    // Idle time of the base coder before it exits on its own (3570 s), counted from its spawn. Zero = never exit.
     pub base_idle_exit_secs: u64,
     // Go tuiTimeout: how long the resident tui may take to translate the main reply. On timeout the main reply stays.
     pub tui_timeout: Duration,
@@ -441,13 +440,12 @@ impl Default for Config {
             record_dir: None,
             rotate_threshold: HAIKU_THRESHOLD,
             rotate_defer_timeout: Duration::from_secs(600),
-            idle_rotate: Duration::from_secs(3599),
+            idle_rotate: Duration::from_secs(3570),
             perm_mode: PermMode::Auto,
             residents: true,
             extra_coders: 4,
-            coder_idle_ttl: Duration::from_secs(290),
-            agent_idle_exit_secs: 290,
-            base_idle_exit_secs: 3599,
+            coder_idle_ttl: Duration::from_secs(CODER_IDLE_TTL_SECS),
+            base_idle_exit_secs: CODER_IDLE_TTL_SECS,
             tui_timeout: Duration::from_secs(120),
             prompter_timeout: Duration::from_secs(60),
             handoff_path: None,
@@ -653,6 +651,8 @@ struct State {
     agent_info: HashMap<String, AgentInfo>,
     // Restored agents still shown (UiEvent::AgentsRestored); the next user line clears them.
     restored_rows: Vec<AgentRow>,
+    // The pick_child session orch_child resumed: one panel row, running while a turn runs, done when idle.
+    picked_row: Option<AgentRow>,
     // Go agentStore: this session's delegated agents are written here on every change (None = off).
     agent_store: Option<AgentStore>,
     // agentId from an async launch result -> tool_use id, so a SendMessage resume finds the agent.
@@ -750,6 +750,8 @@ struct State {
     pending_snapshot: String,
     // Go repl.go notices: "[agent done]" lines of drained agents, sent in front of the next user message.
     notices: Vec<String>,
+    // Agents whose "[agent done]" notice is already queued or sent. Cleared when the agent is resumed.
+    announced: HashSet<String>,
     // Set while a hidden handoff turn runs; its text is not shown.
     handoff: Option<Handoff>,
     // Model switch waiting for its handoff turn (Go switchChild): target model and the held prompt.
@@ -826,6 +828,36 @@ pub struct AgentRow {
     pub result_path: String,
     // Unix seconds, as AgentStart.started_at.
     pub started_at: u64,
+    // Unix seconds of the agent's last output or tool activity (its start until then). 0: unknown.
+    pub last_active: u64,
+}
+
+// The pick_child session row: its id is the session id, its name and model the child's model.
+fn picked_agent_row(session_id: &str, model: &str, started_at: u64) -> AgentRow {
+    AgentRow {
+        id: format!("pick:{session_id}"),
+        task: "pick_child".to_string(),
+        prompt: String::new(),
+        name: model.to_string(),
+        model: model.to_string(),
+        background: false,
+        done: false,
+        agent_id: session_id.to_string(),
+        result_path: String::new(),
+        started_at,
+        last_active: started_at,
+    }
+}
+
+// Panel rows with the picked child's row appended last: running (done = false) while busy, done when idle.
+fn with_picked(mut rows: Vec<AgentRow>, picked: Option<&AgentRow>, busy: bool) -> Vec<AgentRow> {
+    if let Some(p) = picked {
+        rows.push(AgentRow {
+            done: !busy,
+            ..p.clone()
+        });
+    }
+    rows
 }
 
 // A stored agent as a panel row. Restored agents are finished (done) and were interrupted.
@@ -844,6 +876,7 @@ fn restored_row(s: &SavedAgent) -> AgentRow {
             .started
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs()),
+        last_active: 0,
     }
 }
 
@@ -922,6 +955,11 @@ fn task_notification_ids(text: &str) -> Vec<String> {
 const DRAIN_DENY: &str = "denied: session is draining";
 
 // request_id of a can_use_tool control_request line (Go drain.consume denies it); None for other lines.
+// True when the agent's "[agent done]" notice is not queued yet for this run of the agent (once per agent).
+fn announce_once(announced: &mut HashSet<String>, id: &str) -> bool {
+    announced.insert(id.to_string())
+}
+
 fn drain_permission_id(line: &str) -> Option<String> {
     let raw = serde_json::from_str::<Value>(line).ok()?;
     if raw["type"] != "control_request" || raw["request"]["subtype"] != "can_use_tool" {
@@ -950,6 +988,8 @@ struct AgentInfo {
     session_name: String,
     agent_id: String,
     started_at: u64,
+    // Unix seconds of the agent's last output or tool activity (AgentRow.last_active).
+    last_active: u64,
     // Go lastSummary over the agent's log: its last plain text line, kept as the done notice's what.
     last_text: String,
 }
@@ -1064,6 +1104,7 @@ fn actor(
         rotate_deferred: rotate_defer::Deferral::default(),
         agent_info: HashMap::new(),
         restored_rows: Vec::new(),
+        picked_row: None,
         agent_store,
         agent_ids: HashMap::new(),
         resume_ids: HashMap::new(),
@@ -1115,6 +1156,7 @@ fn actor(
         ttl_seen: String::new(),
         pending_snapshot: String::new(),
         notices: Vec::new(),
+        announced: HashSet::new(),
         handoff: None,
         switch_to: None,
         prompter: Prompter::new(),
@@ -1137,7 +1179,8 @@ fn actor(
     }
     // Go repl.go reconcileStart: repair rows a killed harness left open; show, never kill, orphaned children.
     if let Some(reg) = &st.clients {
-        let idle = idle_deadline(st.cfg.idle_rotate, &st.cfg.cache_ttl);
+        // Startup repair parks a killed session only while inside its idle limit (3570 s), not the cache window.
+        let idle = st.cfg.idle_rotate;
         let deadline = if idle.is_zero() { NEVER_COLD } else { idle };
         for row in reg.reconcile(now_stamp(), deadline) {
             st.emit(UiEvent::OrphanNotice {
@@ -1244,7 +1287,15 @@ fn usage_poll_due(last: Option<Instant>, now: Instant, polling: bool) -> bool {
 
 impl State {
     fn emit(&self, ev: UiEvent) {
+        // The picked child's row follows the busy state, so the list updates on every Busy event.
+        let busy = match &ev {
+            UiEvent::Busy(b) if self.picked_row.is_some() => Some(*b),
+            _ => None,
+        };
         let _ = self.ui.send(ev);
+        if let Some(b) = busy {
+            self.emit_agent_rows_at(b);
+        }
     }
 
     // Runs the one-shot on its own thread so the actor keeps streaming a busy turn.
@@ -1381,6 +1432,10 @@ impl State {
         }
         self.model = model.clone();
         self.opts.model = model.clone();
+        // The previous pick_child row belongs to the child that is now parked or replaced.
+        if self.picked_row.take().is_some() {
+            self.emit_agent_rows();
+        }
         if let Some(sid) = resume {
             self.resume_session(&sid);
             return;
@@ -1392,6 +1447,8 @@ impl State {
             ChildAction::Resume => {
                 if let Some(r) = self.child_row(&cwd, &model) {
                     self.resume_session(&r.session_id);
+                    self.picked_row = Some(picked_agent_row(&r.session_id, &model, now_secs()));
+                    self.emit_agent_rows();
                 }
                 return;
             }
@@ -1432,7 +1489,7 @@ impl State {
             row.as_ref(),
             limit,
             SystemTime::now(),
-            warm_deadline(self.idle_deadline()),
+            pick_warm_window(&self.cfg),
         )
     }
 
@@ -2014,15 +2071,14 @@ impl State {
         Some(self.cfg.coder_idle_ttl.saturating_sub(since.elapsed()))
     }
 
-    // Time left before an idle resident child exits on its own. The base coder uses base_idle_exit_secs (1 h),
-    // extra coders and agents use agent_idle_exit_secs (5 m). None when disabled, busy or empty.
-    fn agent_idle_exit_left(&self, i: usize) -> Option<Duration> {
+    // Time left before an idle base coder exits on its own (base_idle_exit_secs, 3570 s). Extra coders are
+    // handled by coder_idle_left. None when disabled, busy or empty.
+    fn base_idle_exit_left(&self, i: usize) -> Option<Duration> {
         let c = self.coders.get(i)?;
-        let secs = if i == 0 {
-            self.cfg.base_idle_exit_secs
-        } else {
-            self.cfg.agent_idle_exit_secs
-        };
+        if i != 0 {
+            return None; // extra coders expire through coder_idle_left
+        }
+        let secs = self.cfg.base_idle_exit_secs;
         if secs == 0 || c.deadline.is_some() || c.proc.is_none() {
             return None;
         }
@@ -2460,8 +2516,9 @@ impl State {
                 }
             }
             Event::Assistant(env) => {
-                // Subagent messages are not surfaced beyond their text in E1.
-                if env.parent_tool_use_id.is_some() {
+                // Subagent messages are not surfaced beyond their text in E1; they only refresh their agent's activity.
+                if let Some(pid) = &env.parent_tool_use_id {
+                    self.note_agent_activity(pid);
                     return;
                 }
                 if !self.busy {
@@ -2483,7 +2540,8 @@ impl State {
                 }
             }
             Event::User(env) => {
-                if env.parent_tool_use_id.is_some() {
+                if let Some(pid) = &env.parent_tool_use_id {
+                    self.note_agent_activity(pid);
                     return;
                 }
                 if let Some(Content::Text(text)) = &env.message.content {
@@ -2701,7 +2759,8 @@ impl State {
                 id.clone(),
                 AgentInfo {
                     name: description.clone(),
-                    result_path: format!("notes/runs/{}-agent-{}.md", yymmdd_today(), id),
+                    // No result file is written for an agent, so none is advertised.
+                    result_path: String::new(),
                     background: false,
                     started: Instant::now(),
                     done: false,
@@ -2739,6 +2798,7 @@ impl State {
                         .to_string(),
                     agent_id: String::new(),
                     started_at,
+                    last_active: started_at,
                     last_text: String::new(),
                 },
             );
@@ -2794,6 +2854,13 @@ impl State {
             // A queued message to a still-running agent keeps its running start time.
             self.agents.entry(tool.clone()).or_insert_with(Instant::now);
             self.resume_ids.insert(id.clone(), tool.clone());
+            // The resumed agent runs in the current child now. An older drain must not settle it when it closes
+            // (that wrote a 타임아웃 notice and ended the live agent while it kept working).
+            for d in self.drains.iter_mut() {
+                d.started.retain(|s| s != &tool);
+            }
+            // A resumed agent's next finish is announced again.
+            self.announced.remove(&tool);
             if let Some(info) = self.agent_info.get_mut(&tool) {
                 info.background = true;
                 info.done = false;
@@ -2848,7 +2915,26 @@ impl State {
 
     // Ends a delegated agent: AgentEnd, and the deferred rotation runs if this was the last agent.
     // Go agentTracker rows: every delegated agent in start order, for the panel and background lines.
+    // Output or tool activity from a delegated agent's own messages refreshes its last_active in place. The panel
+    // re-reads the shared rows on its tick, so no event is sent per message.
+    fn note_agent_activity(&mut self, id: &str) {
+        let now = now_secs();
+        let Some(info) = self.agent_info.get_mut(id) else {
+            return;
+        };
+        info.last_active = now;
+        let mut rows = self.agent_rows.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(row) = rows.iter_mut().find(|r| r.id == id) {
+            row.last_active = now;
+        }
+    }
+
     fn emit_agent_rows(&self) {
+        self.emit_agent_rows_at(self.busy);
+    }
+
+    // busy: the state the picked child's row shows (running while busy, done otherwise).
+    fn emit_agent_rows_at(&self, busy: bool) {
         let mut rows: Vec<(Instant, AgentRow)> = self
             .agent_info
             .iter()
@@ -2866,12 +2952,14 @@ impl State {
                         agent_id: i.agent_id.clone(),
                         result_path: i.result_path.clone(),
                         started_at: i.started_at,
+                        last_active: i.last_active,
                     },
                 )
             })
             .collect();
         rows.sort_by_key(|(started, _)| *started);
         let rows: Vec<AgentRow> = rows.into_iter().map(|(_, r)| r).collect();
+        let rows = with_picked(rows, self.picked_row.as_ref(), busy);
         *self.agent_rows.lock().unwrap_or_else(|e| e.into_inner()) = rows.clone();
         self.emit(UiEvent::AgentRows { rows });
     }
@@ -3082,7 +3170,7 @@ impl State {
             .enumerate()
             .filter_map(|(i, c)| match c.deadline {
                 Some(t) => Some(t.saturating_duration_since(Instant::now())),
-                None => [self.coder_idle_left(i), self.agent_idle_exit_left(i)]
+                None => [self.coder_idle_left(i), self.base_idle_exit_left(i)]
                     .into_iter()
                     .flatten()
                     .min(),
@@ -3153,7 +3241,7 @@ impl State {
             if self.coder_idle_left(i).is_some_and(|d| d.is_zero()) {
                 self.drop_coder(i);
             }
-            if self.agent_idle_exit_left(i).is_some_and(|d| d.is_zero()) {
+            if self.base_idle_exit_left(i).is_some_and(|d| d.is_zero()) {
                 self.exit_idle_coder(i);
             }
         }
@@ -3465,13 +3553,10 @@ impl State {
         }
     }
 
-    // Go idleDeadline: the idle rotation waits this long. 290 s only when the cache is known to be 5m; 1 h
-    // (idle_rotate, 3599 s) for the 1h cache and for an unobserved auto. Zero = off.
+    // Go idleDeadline: the main session's idle rotation waits idle_rotate (3570 s by default) whatever TTL the
+    // cache showed. The 290 s cache window is for warm checks only (see pick_child). Zero = off.
     fn idle_deadline(&self) -> Duration {
-        idle_deadline(
-            self.cfg.idle_rotate,
-            effective_ttl(&self.ttl_seen, &self.cfg.cache_ttl),
-        )
+        main_idle_rotation(&self.cfg)
     }
 
     // Time left before the idle rotation fires. None when it cannot fire now: off, no child, no API response
@@ -3610,12 +3695,17 @@ impl State {
                 background: i.background,
                 done: i.done,
                 result_done: i.result_done,
-                result_path: &i.result_path,
+                // result_path is never set at launch; out_path is the file the prompt asked for.
+                result_path: if i.result_path.is_empty() {
+                    &i.out_path
+                } else {
+                    &i.result_path
+                },
             })
             .collect();
         let lines = rotate_defer::bg_handoff_lines(&bg);
         if !lines.is_empty() {
-            parts.push("## Background agents (results in notes/runs/)".to_string());
+            parts.push("## Background agents (running)".to_string());
             parts.push(lines.join("\n"));
         }
         if !self.files.is_empty() {
@@ -3657,6 +3747,17 @@ impl State {
                 drained = true;
             } else {
                 p.kill();
+                // The killed child took its running agents with it: they settle now (타임아웃), so the notice
+                // queues for the new child and the tracker does not keep them forever.
+                let ids: Vec<String> = self
+                    .agents
+                    .keys()
+                    .filter(|id| !self.drains.iter().any(|d| d.started.contains(id)))
+                    .cloned()
+                    .collect();
+                for id in ids {
+                    self.settle_drained(&id, false);
+                }
             }
         }
         self.next_epoch();
@@ -3686,8 +3787,9 @@ impl State {
             started,
         });
         while self.drains.len() > self.cfg.max_drain {
-            let mut oldest = self.drains.remove(0);
-            oldest.proc.kill();
+            let oldest = self.drains.remove(0);
+            // Evicted before it finished: its agents are closed as timed out, same as a drain that ran out.
+            self.close_drain(oldest, true);
         }
     }
 
@@ -3695,17 +3797,37 @@ impl State {
     // (Go pollDrains). timed_out marks every agent 타임아웃, as Go does.
     fn end_drain(&mut self, epoch: u64, timed_out: bool) {
         if let Some(i) = self.drains.iter().position(|d| d.epoch == epoch) {
-            let mut d = self.drains.remove(i);
-            for id in &d.started {
-                let done = !timed_out && !self.agents.contains_key(id);
-                let (task, out) = self
-                    .agent_info
-                    .get(id)
-                    .map(|i| (i.task.clone(), i.out_path.clone()))
-                    .unwrap_or_default();
-                self.notices.push(drain_done_notice(id, &task, &out, done));
-            }
-            d.proc.kill();
+            let d = self.drains.remove(i);
+            self.close_drain(d, timed_out);
+        }
+    }
+
+    // The one finish path for a drain that is closed (end or eviction): its child is killed and each agent it
+    // started settles once through settle_drained.
+    fn close_drain(&mut self, mut d: Drain, timed_out: bool) {
+        d.proc.kill();
+        for id in &d.started {
+            let done = !timed_out && !self.agents.contains_key(id);
+            self.settle_drained(id, done);
+        }
+    }
+
+    // Settles one drained or killed agent exactly once: it leaves every drain's started list, its "[agent done]"
+    // notice is queued (done or 타임아웃), and it leaves the tracker so its status is terminal.
+    fn settle_drained(&mut self, id: &str, done: bool) {
+        for d in self.drains.iter_mut() {
+            d.started.retain(|s| s != id);
+        }
+        let (task, out) = self
+            .agent_info
+            .get(id)
+            .map(|i| (i.task.clone(), i.out_path.clone()))
+            .unwrap_or_default();
+        if announce_once(&mut self.announced, id) {
+            self.notices.push(drain_done_notice(id, &task, &out, done));
+        }
+        if self.agents.contains_key(id) {
+            self.finish_agent(id.to_string());
         }
     }
 
@@ -3734,6 +3856,23 @@ impl State {
             .unwrap_or_default();
         let session = self.drains[i].session.clone();
         self.log_transcript(kind, json!({"type": ty, "session": session}));
+        self.drain_completed(epoch, &line);
+    }
+
+    // A drained agent's <task-notification> ends it at once: the agent leaves the tracker (terminal, AgentEnd) and its
+    // "[agent done]" notice is queued now, once. end_drain then skips it. The notice goes out with the next user prompt
+    // to the current main, so a rotation in between does not lose it.
+    fn drain_completed(&mut self, epoch: u64, line: &str) {
+        for id in task_notification_ids(line) {
+            let id = self.resume_ids.get(&id).cloned().unwrap_or(id);
+            let Some(d) = self.drains.iter().find(|d| d.epoch == epoch) else {
+                return;
+            };
+            if !d.started.contains(&id) || !self.agents.contains_key(&id) {
+                continue;
+            }
+            self.settle_drained(&id, true);
+        }
     }
 
     // Go pollDrains: finished drains are closed (done when the shared tracker is empty, timed out at drain_timeout).
@@ -4162,19 +4301,39 @@ fn clip(s: &str, max: usize) -> String {
 }
 
 // Go outPathRe `notes/runs/[^\s"'`)]+\.md`: the longest such run, ending at its last ".md".
+// The result path is the notes/runs file the prompt asks the agent to write: the first path on a line that names
+// an output action. A path the prompt only reads or cites is not the result (it was taken for one before).
 fn out_path_in(prompt: &str) -> String {
-    let Some(start) = prompt.find("notes/runs/") else {
-        return String::new();
-    };
-    let rest = &prompt[start..];
-    let end = rest
-        .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ')'))
-        .unwrap_or(rest.len());
-    let run = &rest[..end];
-    match run.rfind(".md") {
-        Some(i) if i > "notes/runs/".len() => run[..i + 3].to_string(),
-        _ => String::new(),
+    const OUTPUT_WORDS: [&str; 7] = ["write", "save", "output", "result", "작성", "저장", "기록"];
+    prompt
+        .lines()
+        .filter(|l| {
+            let lower = l.to_lowercase();
+            OUTPUT_WORDS.iter().any(|w| lower.contains(w))
+        })
+        .find_map(first_run_path)
+        .unwrap_or_default()
+}
+
+// The first notes/runs/ .md path in text that is a file, not a glob pattern (a glob names many files, never one result).
+fn first_run_path(text: &str) -> Option<String> {
+    let mut from = 0;
+    while let Some(off) = text[from..].find("notes/runs/") {
+        let start = from + off;
+        let rest = &text[start..];
+        let end = rest
+            .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ')'))
+            .unwrap_or(rest.len());
+        let run = &rest[..end];
+        if let Some(i) = run.rfind(".md") {
+            let path = &run[..i + 3];
+            if i > "notes/runs/".len() && !path.contains(['*', '?', '[', '{']) {
+                return Some(path.to_string());
+            }
+        }
+        from = start + "notes/runs/".len();
     }
+    None
 }
 
 fn elapsed_ms(since: Option<Instant>) -> u64 {
@@ -4228,9 +4387,22 @@ fn observe_ttl(line: &str, seen: &str) -> Option<String> {
 
 // Go switchChild: the handoff turn runs only for a switch that starts a fresh child, with no pending snapshot
 // (a kept import snapshot wins), turns to hand off, a running session, and no handoff already in flight.
-// Go warmDeadline (switchchild.go:26-31): idle_deadline when set, else NEVER_COLD. Used by pickChild.
+// Go warmDeadline (switchchild.go:26-31): the cache window (clients::idle_deadline) when set, else NEVER_COLD.
+// Used by pickChild.
 fn warm_deadline(idle: Duration) -> Duration {
     if idle.is_zero() { NEVER_COLD } else { idle }
+}
+
+// pickChild warm window: idle_rotate (3570 s) whatever TTL the cache showed. An observed 5m cache does not
+// shorten it (user rule 261109). estimate_next keeps its own 290 s cache window.
+fn pick_warm_window(cfg: &Config) -> Duration {
+    warm_deadline(cfg.idle_rotate)
+}
+
+// Main session idle rotation: idle_rotate only. An observed 5m cache does not shorten it (user rule: base
+// sessions idle out after 3570 s). Extra coders use coder_idle_ttl instead.
+fn main_idle_rotation(cfg: &Config) -> Duration {
+    cfg.idle_rotate
 }
 
 fn switch_needs_handoff(
@@ -4309,6 +4481,7 @@ fn resolve_cwd(cwd: Option<PathBuf>) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clients::idle_deadline;
     use crate::testutil::{TempDir, isolated};
 
     // Unset cwd resolves to an absolute path (not "."), so the record folder is not "misc".
@@ -4535,7 +4708,7 @@ mod tests {
 
     #[test]
     fn idle_deadline_matches_go_cases() {
-        let h = Duration::from_secs(3599);
+        let h = Duration::from_secs(3570);
         assert_eq!(idle_deadline(h, "1h"), h);
         assert_eq!(idle_deadline(h, "5m"), Duration::from_secs(290));
         // Unobserved auto keeps the base 1 h; only an observed 5m cache shortens it.
@@ -4546,6 +4719,48 @@ mod tests {
         );
         assert_eq!(idle_deadline(Duration::ZERO, "1h"), Duration::ZERO);
         assert_eq!(idle_deadline(Duration::ZERO, "5m"), Duration::ZERO);
+    }
+
+    // User rule 261109: the pickChild warm window is idle_rotate (3570 s) even when the cache showed 5m.
+    #[test]
+    fn pick_warm_window_ignores_observed_5m_ttl() {
+        let h = Duration::from_secs(3570);
+        let cfg = Config {
+            idle_rotate: h,
+            cache_ttl: "5m".to_string(),
+            ..Config::default()
+        };
+        assert_eq!(pick_warm_window(&cfg), h);
+        // The 5m window still applies to the cache-cost estimate, not to the warm window.
+        assert_eq!(
+            idle_deadline(h, effective_ttl("5m", "1h")),
+            Duration::from_secs(290)
+        );
+        assert_eq!(
+            pick_warm_window(&Config {
+                idle_rotate: Duration::ZERO,
+                ..cfg
+            }),
+            NEVER_COLD
+        );
+    }
+
+    // User rule: the main session's idle rotation stays at idle_rotate (3570 s) even with a 5m cache.
+    #[test]
+    fn main_idle_rotation_stays_at_idle_rotate_with_5m_cache() {
+        let h = Duration::from_secs(3570);
+        let cfg = Config {
+            idle_rotate: h,
+            cache_ttl: "5m".to_string(),
+            ..Config::default()
+        };
+        assert_eq!(main_idle_rotation(&cfg), h);
+        let off = Config {
+            idle_rotate: Duration::ZERO,
+            cache_ttl: "5m".to_string(),
+            ..Config::default()
+        };
+        assert_eq!(main_idle_rotation(&off), Duration::ZERO);
     }
 
     // Go repl.go rotate: the old child drains only with agents running and max_drain > 0.
@@ -4644,13 +4859,58 @@ mod tests {
     #[test]
     fn out_path_matches_go_regex() {
         assert_eq!(
-            out_path_in("read notes/runs/a-b.md, then stop"),
+            out_path_in("Write the summary to notes/runs/a-b.md, then stop"),
             "notes/runs/a-b.md"
         );
-        assert_eq!(out_path_in("see `notes/runs/x.md`."), "notes/runs/x.md");
-        assert_eq!(out_path_in("notes/runs/x.md.bak"), "notes/runs/x.md");
+        assert_eq!(out_path_in("save to `notes/runs/x.md`."), "notes/runs/x.md");
+        assert_eq!(out_path_in("Write notes/runs/x.md.bak"), "notes/runs/x.md");
         assert_eq!(out_path_in("no path here"), "");
-        assert_eq!(out_path_in("notes/runs/.md"), "");
+        assert_eq!(out_path_in("Write notes/runs/.md"), "");
+    }
+
+    // Item 1: a path the prompt only reads or cites is not the result file.
+    #[test]
+    fn out_path_ignores_read_only_citations() {
+        assert_eq!(
+            out_path_in(
+                "Read notes/runs/old.md for context.\nWrite the result to notes/runs/new.md."
+            ),
+            "notes/runs/new.md"
+        );
+        assert_eq!(out_path_in("Read notes/runs/old.md, then stop"), "");
+    }
+
+    #[test]
+    fn announce_once_until_the_agent_is_resumed() {
+        let mut set = HashSet::new();
+        assert!(announce_once(&mut set, "toolu_a"));
+        assert!(!announce_once(&mut set, "toolu_a"));
+        assert!(announce_once(&mut set, "toolu_b"));
+        set.remove("toolu_a");
+        assert!(announce_once(&mut set, "toolu_a"));
+    }
+
+    #[test]
+    fn out_path_skips_glob_patterns() {
+        assert_eq!(
+            out_path_in("Read notes/runs/261109-x-*.md and write notes/runs/y.md"),
+            "notes/runs/y.md"
+        );
+        assert_eq!(out_path_in("Write notes/runs/z-*.md"), "");
+    }
+
+    #[test]
+    fn pick_child_row_runs_while_busy_and_is_done_after() {
+        let p = picked_agent_row("sess-1", "sonnet", 100);
+        let running = with_picked(Vec::new(), Some(&p), true);
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].id, "pick:sess-1");
+        assert_eq!(running[0].model, "sonnet");
+        assert!(!running[0].done);
+        let idle = with_picked(Vec::new(), Some(&p), false);
+        assert_eq!(idle.len(), 1);
+        assert!(idle[0].done);
+        assert!(with_picked(Vec::new(), None, true).is_empty());
     }
 
     #[test]

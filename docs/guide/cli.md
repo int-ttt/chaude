@@ -116,7 +116,7 @@ chaude -h | --help | help
 | `--import-dry-run` | false | `--from-claude`와 함께 씁니다. 핸드오프 크기와 추천 상태만 출력하고 `claude`는 띄우지 않습니다 |
 | `--cache-ttl` | `1h` | 프롬프트 캐시 TTL. `auto`, `1h`, `5m` 중 하나입니다 |
 | `--task-budget-usd` | 0 | 작업당 USD 상한. 0이면 끕니다. `claude`에도 `--max-budget-usd`로 넘깁니다 |
-| `--idle-rotate` | 3599s | 자식이 이 시간만큼 놀면 차가운 것으로 보고 회전합니다. 0이면 끕니다. TUI에서만 동작합니다 |
+| `--idle-rotate` | 3570s | 자식이 이 시간만큼 놀면 차가운 것으로 보고 회전합니다. 0이면 끕니다. TUI에서만 동작합니다 |
 | `--clients-file` | `~/.chaude/clients.json` | `(작업 폴더, 모델)`별 클라이언트 기록. 빈 값은 끔 |
 | `--max-workers` | 3 | 동시에 살아 있을 수 있는 워커 세션 수 상한. `CHAUDE_MAX_WORKERS`가 설정되어 있고 옵션이 없으면 그 값을 씁니다 |
 | `--orch` | `m0` | 오케스트레이션 모드. `m0`, `b`, `c`, `d`, `e`, `f` 중 하나입니다. 모드 `b`, `c`, `d`, `f`는 모델을 opus로, `e`는 haiku로 정합니다 |

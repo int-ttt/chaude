@@ -139,12 +139,6 @@ pub(crate) fn rfc3339(secs: i64) -> String {
     )
 }
 
-// Today as YYMMDD (UTC): the date prefix of notes/runs result files (Go agentResultRel).
-pub(crate) fn yymmdd_today() -> String {
-    let (y, m, d) = civil_from_days(unix_secs().div_euclid(86_400));
-    format!("{:02}{m:02}{d:02}", y.rem_euclid(100))
-}
-
 // Days since 1970-01-01 to (year, month, day). Howard Hinnant's civil_from_days.
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;

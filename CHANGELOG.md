@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.11.10 - 2026-11-09
+- Agents: each finished agent is announced once, with its own result path. A resumed agent is announced again on its next finish. A glob pattern in a prompt (`notes/runs/x-*.md`) is no longer taken as the result path.
+- Agent list: a running agent with no output or tool activity for 10 minutes shows "possibly stalled" with its silent minutes. This is a display mark only.
+- Agent list: a child session picked with pick_child shows as a row while it runs, and as done when idle.
+- Idle: every session (main, prompter, TUI, base coder, extra coders) idles out after 3570 seconds. An observed 5-minute cache no longer shortens the main session's idle rotation. Extra coders used 290 seconds before.
+- Settings: the extra coder idle label is read from the same constant as the idle timeout.
+- `resident_coder`: a blocked, partial, or failed reply keeps its `reason:` line in the MCP text.
+- Hooks: the Bash guard denies an unbounded `until`/`while` wait loop with no alarm, timeout, or counter bound. The shipped hook file is updated.
+
 ## 0.11.9 - 2026-11-08
 - Idle timeouts: base sessions (main, prompter, TUI, base coder) expire after 1 hour idle. Extra coders and agents expire after 290 seconds, matching the 5-minute prompt cache.
   - 유휴 시간 제한: 기본 세션(메인, prompter, TUI, 기본 coder)은 1시간 동안 쉬면 만료됩니다. 추가 coder와 에이전트는 5분 프롬프트 캐시에 맞춰 290초 후 만료됩니다.

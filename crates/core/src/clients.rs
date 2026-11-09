@@ -365,9 +365,9 @@ pub fn is_warm(rec: &ClientRec, limit: i64, now: Stamp, deadline: Duration) -> b
     recent(now, rec.last_api, deadline) && rec.last_ctx < limit
 }
 
-/// How long a client may sit idle before its prompt cache is assumed cold. "5m" gives 290s, capped by
-/// idle_rotate. "1h" and an unobserved "auto" give idle_rotate (1 h by default). idle_rotate zero disables it
-/// (returns zero).
+/// Cache-warm window: how long a client may sit idle before its prompt cache is assumed cold. "5m" gives 290s,
+/// capped by idle_rotate. "1h" and an unobserved "auto" give idle_rotate (1 h by default). idle_rotate zero
+/// disables it (returns zero). Not the main idle rotation, which is always idle_rotate (see api.rs main_idle_rotation).
 pub fn idle_deadline(idle_rotate: Duration, ttl: &str) -> Duration {
     if idle_rotate.is_zero() {
         return Duration::ZERO;
@@ -619,7 +619,7 @@ mod tests {
     // Go TestIdleDeadline
     #[test]
     fn idle_deadline_by_ttl_and_cap() {
-        let h = Duration::from_secs(3599);
+        let h = Duration::from_secs(3570);
         let s290 = Duration::from_secs(290);
         let cases = [
             (h, "1h", h),
@@ -643,7 +643,7 @@ mod tests {
     fn expired_zero_deadline() {
         assert!(!expired_zero(Duration::ZERO));
         assert!(expired_zero(Duration::from_secs(1)));
-        assert!(expired_zero(Duration::from_secs(3599)));
+        assert!(expired_zero(Duration::from_secs(3570)));
     }
 
     #[test]

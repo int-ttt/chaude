@@ -5,7 +5,10 @@ segment as the call (python3 - <<EOF, cat <<EOF | python3 -). Other heredoc bodi
 Denied when that code holds a write: open(..., 'w'|'a'|'x'|'+'...), .write_text/.write_bytes,
 os.replace/rename/remove/unlink, shutil.copy*/move (python); fs.writeFile*/appendFile*/copyFile/rename/unlink/rm (node).
 Read-only code, plain test runs (python3 -m pytest) and script files run by path (their code is not in the command)
-stay allowed. Fail-open on unreadable input."""
+stay allowed.
+Also denied: unbounded wait loops (until, or while that is not a `while read` over a file) with no bound in the
+command (alarm / timeout / numeric compare / (( )) ). A background poll that never ends can hang the agent.
+Fail-open on unreadable input."""
 import json, re, sys
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
@@ -17,6 +20,11 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 
 DENY_MSG = "Edit files with the Edit/Write tools, not Python. Use Read + Edit (replace_all for bulk)."
+WAIT_MSG = ("Unbounded wait loop denied: bound it (perl -e 'alarm shift; exec @ARGV' <secs> <cmd>, or a counter "
+            "limit in the loop condition) so the Bash call cannot hang.")
+LOOP_KW = re.compile(r"(?:^|[\s;&|(`])(until|while)\s")
+READ_LOOP = re.compile(r"(?:^|[\s;&|(`])while\s+read\b")
+BOUND = re.compile(r"\balarm\b|\btimeout\b|\bgtimeout\b|\bseq\b|\(\(|-(?:lt|le|gt|ge|eq|ne)\s")
 
 PY_CALL = re.compile(r"(?:^|[\s;&|(`/])python(?:3(?:\.\d+)?)?(?=[\s;&|)`]|$)")
 PY_WRITE = re.compile(
@@ -96,6 +104,19 @@ def code_given(cmd):
                 yield kind, rest.split("\n", 1)[0]
 
 
+def unbounded_wait(cmd):
+    """True when the command has a until/while loop (with do) that is not `while read` over input and
+    the command holds no bound (alarm, timeout, seq, (( )), numeric compare)."""
+    for m in LOOP_KW.finditer(cmd):
+        tail = cmd[m.start(1):]
+        if not re.search(r"\bdo\b", tail):
+            continue
+        if READ_LOOP.search(cmd, m.start()) and m.group(1) == "while":
+            continue
+        return not BOUND.search(cmd)
+    return False
+
+
 try:
     data = json.loads(sys.stdin.read())
     if not isinstance(data, dict) or (data.get("tool_name") or "") != "Bash":
@@ -103,6 +124,8 @@ try:
     cmd = (data.get("tool_input") or {}).get("command") or ""
     if not isinstance(cmd, str):
         sys.exit(0)
+    if unbounded_wait(cmd):
+        deny(WAIT_MSG)
     for kind, code in code_given(cmd):
         if (kind == "py" and PY_WRITE.search(code)) or (kind == "node" and NODE_WRITE.search(code)):
             deny(DENY_MSG)

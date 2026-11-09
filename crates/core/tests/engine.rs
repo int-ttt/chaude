@@ -719,6 +719,7 @@ fn fake_drain(name: &str, first: &str, second: &str, notice: &str) -> Fake {
 n=0
 while IFS= read -r line; do
   printf '%s\n' "$line" >> 'DIR/stdin.log'
+  printf '%s\n' "$line" >> 'DIR/stdin-'"$$"'.log'
   case "$line" in
     *'"type":"user"'*)
       n=$((n + 1))
@@ -743,13 +744,67 @@ done
     }
 }
 
-// Go drain.consume (drain.go:317-327): a drained child's <task-notification> does not end its background agent.
-// Go pollDrains (repl.go:1040-1062): when the drain closes at drain_timeout, the agent only gets a "[agent done]"
-// notice (타임아웃, it was still running) in front of the next user message. It is not marked done.
+// Regression: a background agent whose completion arrives on the drained (old) child. The agent must end at once
+// (AgentEnd, terminal), and its "[agent done]" notice must reach the rotated main's next prompt exactly once. The
+// drain_timeout is long, so only the completion can end the agent here.
 #[test]
-fn drained_background_agent_gets_done_notice_and_stays_running() {
+fn drained_agent_completion_is_delivered_once_and_terminal() {
     let _g = lock();
     let notice = "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<task-notification><tool-use-id>toolu_bg1</tool-use-id></task-notification>\"}}\n";
+    let f = fake_drain(
+        "drain_complete",
+        &fs::read_to_string(fixture("bg_rotate_turn.jsonl")).unwrap(),
+        &fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap(),
+        notice,
+    );
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    // The drained child's completion ends the agent while it is still draining.
+    let t0 = Instant::now();
+    while !evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1"))
+        && t0.elapsed() < WAIT
+    {
+        if let Ok(e) = rx.recv_timeout(Duration::from_millis(200)) {
+            evs.push(e);
+        }
+    }
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1")),
+        "drained agent never reached terminal state: {evs:?}"
+    );
+    h.submit("second");
+    evs.extend(until_idle(&rx));
+    let log = wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
+    assert_eq!(
+        log.matches("[agent done] toolu_bg1").count(),
+        1,
+        "completion notice not delivered exactly once: {log}"
+    );
+    assert!(log.contains("완료"), "{log}");
+    h.shutdown();
+}
+
+// Go pollDrains (repl.go:1040-1062): when the drain closes at drain_timeout with the agent still running, the agent
+// gets a "[agent done]" notice (타임아웃) in front of the next user message, and it ends (terminal, AgentEnd).
+#[test]
+fn drained_background_agent_times_out_with_notice_and_ends() {
+    let _g = lock();
+    // A drained line that is not a completion: the agent is still running when the drain closes.
+    let notice = "{\"type\":\"system\",\"subtype\":\"noop\"}\n";
     let f = fake_drain(
         "drain_end",
         &fs::read_to_string(fixture("bg_rotate_turn.jsonl")).unwrap(),
@@ -776,17 +831,286 @@ fn drained_background_agent_gets_done_notice_and_stays_running() {
     }
     // Let the drain close at drain_timeout, then send the next user message: it carries the queued notice.
     std::thread::sleep(Duration::from_secs(3));
+    // The drain closes during the sleep (on quiet or at the next submit): read its AgentEnd before the next turn.
+    let t0 = Instant::now();
+    while !evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1"))
+        && t0.elapsed() < WAIT
+    {
+        if let Ok(e) = rx.recv_timeout(Duration::from_millis(200)) {
+            evs.push(e);
+        }
+    }
     h.submit("second");
     evs.extend(until_idle(&rx));
-    let log = wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
-    assert!(
-        log.contains("[agent done] toolu_bg1") && log.contains("타임아웃"),
-        "no timed-out done notice for the drained agent: {log}"
+    wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
+    // Item 5: the notice must sit in the post-rotation main's own stdin (the one that got "second"), exactly once.
+    let holders: Vec<String> = child_stdin_logs(&f.dir)
+        .into_iter()
+        .filter(|l| l.contains("[agent done] toolu_bg1"))
+        .collect();
+    assert_eq!(
+        holders.len(),
+        1,
+        "notice not delivered exactly once: {holders:?}"
     );
+    assert!(
+        holders[0].contains("타임아웃") && holders[0].contains("second"),
+        "no timed-out done notice on the current main: {}",
+        holders[0]
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1")),
+        "timed-out drained agent did not reach terminal state: {evs:?}"
+    );
+    h.shutdown();
+}
+
+// Item 1: an agent launched on the first child, rotated into a drain, then resumed (SendMessage) on the new child.
+// The live agent must not be settled by the drain's close: no AgentEnd and no 타임아웃 notice (the drain timeout
+// passes while the resumed agent still runs). Fails before the resume-branch fix in api.rs.
+#[test]
+fn resumed_drained_agent_is_not_settled_by_old_drain_close() {
+    let _g = lock();
+    let dir = temp_dir("drain_resume");
+    let resume = concat!(
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_sm\",\"name\":\"SendMessage\",\"input\":{\"to\":\"abc123\",\"summary\":\"recap\"}}]},\"session_id\":\"r1\",\"parent_tool_use_id\":null}\n",
+        "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_sm\",\"content\":\"{\\\"success\\\":true,\\\"message\\\":\\\"Resuming agent abc123\\\",\\\"resumedAgentId\\\":\\\"abc123\\\"}\",\"is_error\":false}]},\"session_id\":\"r1\",\"parent_tool_use_id\":null}\n",
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Resumed\"}],\"usage\":{\"input_tokens\":1,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":1}},\"session_id\":\"r1\",\"parent_tool_use_id\":null}\n",
+        "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Resumed\",\"session_id\":\"r1\",\"duration_ms\":42,\"total_cost_usd\":0.01}\n",
+    );
+    fs::write(
+        dir.join("turn1.jsonl"),
+        fs::read_to_string(fixture("bg_agentid_turn.jsonl")).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("turn2.jsonl"),
+        fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap(),
+    )
+    .unwrap();
+    fs::write(dir.join("resume.jsonl"), resume).unwrap();
+    fs::write(
+        dir.join("notice.jsonl"),
+        "{\"type\":\"system\",\"subtype\":\"noop\"}\n",
+    )
+    .unwrap();
+    // The first child launches the agent; its handoff turn is the second frame. The new child gets the marker prompt.
+    let script = r#"#!/bin/sh
+n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> 'DIR/stdin.log'
+  printf '%s\n' "$line" >> 'DIR/stdin-'"$$"'.log'
+  case "$line" in
+    *'resume-now'*) cat 'DIR/resume.jsonl' ;;
+    *'"type":"user"'*)
+      n=$((n + 1))
+      if [ $n -eq 1 ]; then
+        cat 'DIR/turn1.jsonl'
+      else
+        cat 'DIR/turn2.jsonl'
+        sleep 1
+        cat 'DIR/notice.jsonl'
+      fi
+      ;;
+  esac
+done
+"#
+    .replace("DIR", &dir.display().to_string());
+    let bin = dir.join("claude");
+    fs::write(&bin, script).unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    let f = Fake {
+        bin: bin.display().to_string(),
+        dir,
+    };
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(2);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    // The rotation finishes after Rotated (RotatedFrom, then Busy(false)); a submit before that is dropped.
+    evs.extend(until_idle(&rx));
+    h.submit("resume-now");
+    evs.extend(until_idle(&rx));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentResumed { id, .. } if id == "toolu_bg1")),
+        "agent was not resumed: {:?} {evs:?}",
+        child_stdin_logs(&f.dir)
+    );
+    // Outlast the drain timeout while the resumed agent still runs.
+    std::thread::sleep(Duration::from_secs(3));
+    while let Ok(e) = rx.recv_timeout(Duration::from_millis(200)) {
+        evs.push(e);
+    }
     assert!(
         !evs.iter()
             .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1")),
-        "drained agent was marked done: {evs:?}"
+        "old drain's close ended the resumed agent: {evs:?}"
+    );
+    h.submit("third");
+    evs.extend(until_idle(&rx));
+    let holders: Vec<String> = child_stdin_logs(&f.dir)
+        .into_iter()
+        .filter(|l| l.contains("[agent done] toolu_bg1"))
+        .collect();
+    assert!(
+        holders.is_empty(),
+        "resumed agent got a done notice while still running: {holders:?}"
+    );
+    h.shutdown();
+}
+
+// Contents of each child's own stdin log (fake_drain writes stdin-<pid>.log), one entry per child process.
+fn child_stdin_logs(dir: &std::path::Path) -> Vec<String> {
+    let mut logs: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("stdin-"))
+        .map(|e| fs::read_to_string(e.path()).unwrap_or_default())
+        .collect();
+    logs.sort();
+    logs
+}
+
+// Item 2: max_drain 0 means the old child is killed, not drained. Its running agent settles at once (AgentEnd,
+// 타임아웃), and that notice reaches the post-rotation child exactly once.
+#[test]
+fn killed_child_agent_settles_and_notice_reaches_new_child() {
+    let _g = lock();
+    let notice = "{\"type\":\"system\",\"subtype\":\"noop\"}\n";
+    let f = fake_drain(
+        "kill_settle",
+        &fs::read_to_string(fixture("bg_rotate_turn.jsonl")).unwrap(),
+        &fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap(),
+        notice,
+    );
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    cfg.max_drain = 0;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    h.submit("second");
+    evs.extend(until_idle(&rx));
+    let t0 = Instant::now();
+    while !evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1"))
+        && t0.elapsed() < WAIT
+    {
+        if let Ok(e) = rx.recv_timeout(Duration::from_millis(200)) {
+            evs.push(e);
+        }
+    }
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1")),
+        "agent on the killed child never reached terminal state: {evs:?}"
+    );
+    wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
+    let holders: Vec<String> = child_stdin_logs(&f.dir)
+        .into_iter()
+        .filter(|l| l.contains("[agent done] toolu_bg1"))
+        .collect();
+    assert_eq!(
+        holders.len(),
+        1,
+        "notice not delivered exactly once: {holders:?}"
+    );
+    assert!(
+        holders[0].contains("타임아웃") && holders[0].contains("second"),
+        "notice did not reach the post-rotation child with its prompt: {}",
+        holders[0]
+    );
+    h.shutdown();
+}
+
+// Item 1: with max_drain 1 a second rotation while the first drain still runs evicts the oldest drain. The evicted
+// drain's agent goes through the same finish path: AgentEnd, one 타임아웃 notice, delivered to the current main once.
+#[test]
+fn evicted_drain_agent_settles_once_and_notice_reaches_current_main() {
+    let _g = lock();
+    let notice = "{\"type\":\"system\",\"subtype\":\"noop\"}\n";
+    let f = fake_drain(
+        "drain_evict",
+        &fs::read_to_string(fixture("bg_rotate_turn.jsonl")).unwrap(),
+        &fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap(),
+        notice,
+    );
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    cfg.max_drain = 1;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    // The first drain still runs (its agent is running): the next rotation drains the new child too.
+    h.submit("second");
+    evs.extend(until_idle(&rx));
+    // Eviction settles the agent (AgentEnd) before rotate_child emits Rotated, so wait for both.
+    let t1 = Instant::now();
+    while !(evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1"))
+        && evs.iter().any(|e| matches!(e, UiEvent::Rotated { .. })))
+        && t1.elapsed() < WAIT
+    {
+        if let Ok(e) = rx.recv_timeout(Duration::from_millis(200)) {
+            evs.push(e);
+        }
+    }
+    assert!(
+        evs.iter().any(|e| matches!(e, UiEvent::Rotated { .. })),
+        "second rotation did not happen: {evs:?}"
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1")),
+        "evicted drain agent never reached terminal state: {evs:?}"
+    );
+    h.submit("third");
+    evs.extend(until_idle(&rx));
+    wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
+    let holders: Vec<String> = child_stdin_logs(&f.dir)
+        .into_iter()
+        .filter(|l| l.contains("[agent done] toolu_bg1"))
+        .collect();
+    assert_eq!(
+        holders.len(),
+        1,
+        "notice not delivered exactly once: {holders:?}"
+    );
+    assert!(
+        holders[0].contains("타임아웃") && holders[0].contains("third"),
+        "notice did not reach the current main with its prompt: {}",
+        holders[0]
     );
     h.shutdown();
 }
@@ -1608,6 +1932,63 @@ fn idle_rotation_hands_off_after_quiet_child() {
     h.shutdown();
 }
 
+// Real-time check (slow, so #[ignore]): an observed 5m cache must not shorten main's idle rotation.
+// User rule 261109: main idles out at idle_rotate (3570 s). Run with:
+//   cargo test -p chaude-core --test engine main_survives_310s_idle_on_5m_cache -- --ignored
+#[test]
+#[ignore]
+fn main_survives_310s_idle_on_5m_cache() {
+    let _g = lock();
+    let f = fake("idle310", &["text_turn_5m.jsonl", "text_turn_5m.jsonl"]);
+    // config() keeps the real default idle_rotate (3570 s); nothing is overridden here.
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("first");
+    let first = until_idle(&rx);
+    assert!(
+        first
+            .iter()
+            .any(|e| matches!(e, UiEvent::SessionIds { main, .. } if main == "s1"))
+    );
+    let pid = opus_child_pid(&f.dir);
+    // The 5m cache is observed from the first answer's usage; the idle wait below runs past 290 s.
+    thread::sleep(Duration::from_secs(310));
+    let quiet: Vec<UiEvent> = rx.try_iter().collect();
+    assert!(
+        !quiet
+            .iter()
+            .any(|e| matches!(e, UiEvent::Rotated { .. } | UiEvent::RotatedFrom { .. })),
+        "main rotated during 310 s idle: {quiet:?}"
+    );
+    // Checked before the second prompt: a respawned main would otherwise hide behind a later timeout.
+    let spawned = fs::read_to_string(f.dir.join("spawned.log")).unwrap_or_default();
+    assert_eq!(
+        spawned.lines().filter(|l| *l == "main").count(),
+        1,
+        "main spawned more than once after 310 s idle: {spawned}"
+    );
+    assert_eq!(
+        opus_child_pid(&f.dir),
+        pid,
+        "child pid changed after 310 s idle"
+    );
+    h.submit("second");
+    let second = until_idle(&rx);
+    assert!(
+        !second
+            .iter()
+            .any(|e| matches!(e, UiEvent::Rotated { .. } | UiEvent::RotatedFrom { .. })),
+        "main rotated before second prompt: {second:?}"
+    );
+    // SessionIds is emitted only when the session changes, so its absence means the session stayed s1.
+    assert!(
+        !second
+            .iter()
+            .any(|e| matches!(e, UiEvent::SessionIds { main, .. } if main != "s1")),
+        "session changed on second prompt: {second:?}"
+    );
+    h.shutdown();
+}
+
 #[test]
 fn context_rotation_hands_off_and_fresh_child_gets_snapshot() {
     let _g = lock();
@@ -1720,7 +2101,7 @@ fn go_rotate_keeps_pending_snapshot() {
 }
 
 #[test]
-fn handoff_snapshot_lists_running_background_agent_with_result_path() {
+fn handoff_snapshot_lists_running_background_agent() {
     let _g = lock();
     let f = fake("bgsnap", &["bg_async_turn.jsonl", "handoff_turn.jsonl"]);
     let mut cfg = config(&f);
@@ -1745,11 +2126,12 @@ fn handoff_snapshot_lists_running_background_agent_with_result_path() {
         .lines()
         .find(|l| l.contains("## Current user message"))
         .expect("snapshot frame");
-    assert!(frame.contains("## Background agents (results in notes/runs/)"));
+    assert!(frame.contains("## Background agents (running)"));
     // Go joins each header and its body as separate parts with a blank line (the frame is JSON, so \n is escaped).
-    assert!(frame.contains(r"## Background agents (results in notes/runs/)\n\n- scan (toolu_bg1)"));
-    assert!(frame.contains("- scan (toolu_bg1): running, result file: notes/runs/"));
-    assert!(frame.contains("-agent-toolu_bg1.md"));
+    assert!(frame.contains(r"## Background agents (running)\n\n- scan (toolu_bg1): running"));
+    // No result file is written, so no path is advertised.
+    assert!(!frame.contains("result file"));
+    assert!(!frame.contains("notes/runs/"));
     h.shutdown();
 }
 
@@ -1782,7 +2164,7 @@ fn agent_rows_carry_panel_fields_for_a_background_launch() {
     assert_eq!(row.model, "");
     assert!(row.background && !row.done, "{row:?}");
     assert_eq!(row.agent_id, "abc123");
-    assert!(row.result_path.ends_with("-agent-toolu_bg1.md"), "{row:?}");
+    assert!(row.result_path.is_empty(), "{row:?}");
     assert!(row.started_at > 0);
     h.shutdown();
 }
@@ -2920,7 +3302,6 @@ fn idle_resident_exits_then_resumes_the_same_session() {
     cfg.cwd = Some(f.dir.clone());
     // The base coder has its own 1 h limit (base_idle_exit_secs); shorten it so the test exits quickly.
     cfg.base_idle_exit_secs = 1;
-    cfg.agent_idle_exit_secs = 1;
     let (h, rx) = Engine::start(cfg);
     h.coder("first");
     until_coder_reply(&rx);

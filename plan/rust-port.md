@@ -27,7 +27,7 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - done: record file format (record.rs: render/parse_entries, append_turn with lock, next_number, topic_of, slugify, dir_for; Stamp passed in, no local-time dep).
      - done: mcp temp dir guard (mcp::McpConfig/start_owned removes chaude-mcp-* dir on drop; api.rs uses start_owned, api.rs:2378).
      - done: record_folder.rs (project folders, legacy root migration, list/filter/load, /resume lines; date fn passed in) and record_turn.rs (RecordState topic/save, measure_line, resume, pick).
-     - done: orch.rs (Go orch.go, orchws.go: parse/default_model/rule, mode f Router with parse_ws, WsState rotation at 20 turns/40k ctx/270s idle, handoff_text; api.rs routing hook needed).
+     - done: orch.rs (Go orch.go, orchws.go: parse/default_model/rule, mode f Router with parse_ws, WsState rotation at 20 turns/40k ctx/3570s idle, handoff_text; api.rs routing hook needed).
      - done: rotate_defer.rs (Go rotate_defer.go: due, Deferral hold/is_due/take with timeout, bg_handoff_lines, running_count; api.rs uses rotate_defer::Deferral, api.rs:2060-2120).
      - done: import/--from-claude core (7b60fb4; import_claude.rs: transcript read, /resume group merge, snapshot, dry-run record; import_view.rs: paired-turn view for the TUI).
      - done: metrics core (cf3d7f1; metrics::usage_fields, metrics_report.rs: summary text and 14-column CSV from the per-day JSONL files).

@@ -27,12 +27,15 @@ pub fn resident_slots(main_model: &str) -> Vec<(&'static str, String)> {
     ]
 }
 
-// Go summarizeReply: keeps the status and changed lines; a reply without them is cut to 300 chars.
+// Go summarizeReply: keeps the status, reason (blocked/partial/fail) and changed lines; a reply without them is cut to
+// 300 chars.
 pub fn summarize_reply(reply: &str) -> String {
     let keep: Vec<String> = reply
         .split('\n')
         .map(|ln| ln.trim().trim_start_matches("- ").trim())
-        .filter(|t| t.starts_with("status:") || t.starts_with("changed:"))
+        .filter(|t| {
+            t.starts_with("status:") || t.starts_with("reason:") || t.starts_with("changed:")
+        })
         .map(str::to_string)
         .collect();
     if keep.is_empty() {
@@ -262,6 +265,15 @@ mod tests {
         assert_eq!(
             summarize_reply(reply),
             "status: done\nchanged: a.rs: fix\nchanged: b.rs: add"
+        );
+    }
+
+    #[test]
+    fn summarize_keeps_reason_of_blocked_reply() {
+        let reply = "working\nstatus: blocked\nreason: notes/runs/x.md is missing\nchanged: -";
+        assert_eq!(
+            summarize_reply(reply),
+            "status: blocked\nreason: notes/runs/x.md is missing\nchanged: -"
         );
     }
 
