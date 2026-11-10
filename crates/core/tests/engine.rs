@@ -12,7 +12,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use chaude_core::api::{Config, Engine, InterruptSource, Role, UiEvent};
+use chaude_core::api::{CoderContext, Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::clients::{ClientRegistry, PARKED};
 use chaude_core::handoff;
 use chaude_core::import_claude::ClaudeImport;
@@ -507,8 +507,13 @@ fn agent_tool_maps_to_agent_start_and_end_and_hides_subagent_tools() {
         matches!(&rel[4], UiEvent::AgentEnd { id, .. } if id == "toolu_agent1"),
         "{rel:?}"
     );
+    // Subagent tools stay out of the main pane's tool events. Their AgentLog lines (agent pane) carry the id by design.
     assert!(
-        !evs.iter().any(|e| format!("{e:?}").contains("toolu_sub1")),
+        !evs.iter().any(|e| matches!(e,
+            UiEvent::ToolStart { id, .. }
+            | UiEvent::ToolInput { id, .. }
+            | UiEvent::ToolEnd { id, .. }
+            | UiEvent::ToolResult { id, .. } if id == "toolu_sub1")),
         "{evs:?}"
     );
     h.shutdown();
@@ -744,13 +749,656 @@ done
     }
 }
 
+// Owned-task tests. Turn 1 starts the Agent toolu_bg1 and its owned bash task b1 (owned_by_subagent, parent toolu_bg1),
+// then replies idle. The usage is above the rotate threshold 50 used by the rotation test.
+const OWNED_TURN: &str = concat!(
+    "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\",\"model\":\"claude-haiku-test\"}\n",
+    "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_bg1\",\"name\":\"Agent\",\"input\":{\"description\":\"scan\",\"prompt\":\"look around\",\"subagent_type\":\"general\",\"run_in_background\":true}}]},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n",
+    "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"a1\",\"tool_use_id\":\"toolu_bg1\",\"task_type\":\"local_agent\",\"session_id\":\"s1\"}\n",
+    "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"b1\",\"tool_use_id\":\"toolu_b1\",\"parent_task_id\":\"toolu_bg1\",\"owned_by_subagent\":true,\"task_type\":\"local_bash\",\"session_id\":\"s1\"}\n",
+    "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Started\"}],\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":90,\"output_tokens\":2}},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n",
+    "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Started\",\"session_id\":\"s1\",\"duration_ms\":42,\"total_cost_usd\":0.01}\n",
+);
+// The agent-level completion (tool_use_id of the agent) and the owned bash completion.
+const AGENT_DONE: &str = "{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"a1\",\"tool_use_id\":\"toolu_bg1\",\"status\":\"completed\",\"session_id\":\"s1\"}\n";
+const OWNED_DONE: &str = "{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"b1\",\"tool_use_id\":\"toolu_b1\",\"parent_task_id\":\"toolu_bg1\",\"owned_by_subagent\":true,\"status\":\"completed\",\"session_id\":\"s1\"}\n";
+const PLAIN_REPLY: &str = "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\",\"session_id\":\"s1\",\"duration_ms\":5,\"total_cost_usd\":0.0}\n";
+
+// Fake for the owned-task tests. Frame 1 prints turns[0] and runs first_bg in the background (a timeline that outlives
+// the turn). Frame 2 prints turns[1], then runs second_fg in the foreground. Frames count across processes, so a
+// rotated child's first prompt gets turns[2]. The shell bodies may name DIR.
+fn fake_owned(name: &str, turns: [&str; 3], first_bg: &str, second_fg: &str) -> Fake {
+    let dir = temp_dir(name);
+    for (i, t) in turns.iter().enumerate() {
+        fs::write(dir.join(format!("turn{}.jsonl", i + 1)), t).unwrap();
+    }
+    let script = r#"#!/bin/sh
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> 'DIR/stdin.log'
+  printf '%s\n' "$line" >> 'DIR/stdin-'"$$"'.log'
+  case "$line" in
+    *'"type":"user"'*)
+      n=$(( $(cat 'DIR/frames' 2>/dev/null || echo 0) + 1 ))
+      printf '%s' "$n" > 'DIR/frames'
+      cat 'DIR/turn'$n'.jsonl'
+      if [ $n -eq 1 ]; then
+        ( FIRST_BG ) &
+      fi
+      if [ $n -eq 2 ]; then
+        SECOND_FG
+      fi
+      ;;
+  esac
+done
+"#
+    .replace("FIRST_BG", first_bg)
+    .replace("SECOND_FG", second_fg)
+    .replace("DIR", &dir.display().to_string());
+    let bin = dir.join("claude");
+    fs::write(&bin, script).unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    Fake {
+        bin: bin.display().to_string(),
+        dir,
+    }
+}
+
+// Collects events until AgentEnd for id, then one more second (a second end would show up there). Returns the events
+// and whether flag existed when the AgentEnd arrived: the owned completion writes flag before it prints.
+fn until_agent_end(rx: &Receiver<UiEvent>, id: &str, flag: &Path) -> (Vec<UiEvent>, bool) {
+    let mut out = Vec::new();
+    let mut ended: Option<(Instant, bool)> = None;
+    let t0 = Instant::now();
+    while t0.elapsed() < WAIT {
+        if let Ok(e) = rx.recv_timeout(Duration::from_millis(100)) {
+            if ended.is_none() && matches!(&e, UiEvent::AgentEnd { id: i, .. } if i == id) {
+                ended = Some((Instant::now(), flag.exists()));
+            }
+            out.push(e);
+        }
+        if ended.is_some_and(|(at, _)| at.elapsed() >= Duration::from_secs(1)) {
+            break;
+        }
+    }
+    let (_, at_end) = ended.expect("agent never ended");
+    (out, at_end)
+}
+
+fn agent_ends(evs: &[UiEvent], id: &str) -> usize {
+    evs.iter()
+        .filter(|e| matches!(e, UiEvent::AgentEnd { id: i, .. } if i == id))
+        .count()
+}
+
+// An idle reply with an owned bash task still running must not end the agent (idle_result used to end the oldest).
+#[test]
+fn idle_reply_with_live_owned_task_does_not_end_the_agent() {
+    let _g = lock();
+    // The child starts an idle turn of its own (no user frame) while the owned bash runs. The owned bash ends
+    // first, then the agent-level completion ends the agent.
+    let idle = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Checking\"}]},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Checking\",\"session_id\":\"s1\",\"duration_ms\":3,\"total_cost_usd\":0.0}\n";
+    let body = format!(
+        "sleep 1; printf '%s' '{idle}'; sleep 2; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'; sleep 1; printf '%s' '{AGENT_DONE}'"
+    );
+    let f = fake_owned(
+        "owned-idle",
+        [OWNED_TURN, PLAIN_REPLY, PLAIN_REPLY],
+        &body,
+        ":",
+    );
+    let flag = f.dir.join("owned.flag");
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("scan");
+    let mut evs = until_idle(&rx);
+    // Watch past the idle turn (at 1 s) and before the owned completion (at 3 s).
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_millis(2000) {
+        if let Ok(e) = rx.recv_timeout(Duration::from_millis(100)) {
+            evs.push(e);
+        }
+    }
+    assert_eq!(
+        agent_ends(&evs, "toolu_bg1"),
+        0,
+        "idle reply ended the agent: {evs:?}"
+    );
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(
+        at_end,
+        "agent ended before its owned task completed: {evs:?}"
+    );
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    h.shutdown();
+}
+
+// Live shape: the owned task names its parent by the agent's task_id (a1), not by the agent's tool_use_id.
+// The agent-level completion comes first; the agent must still wait for the owned completion, then end once.
+#[test]
+fn agent_completion_with_task_id_parent_waits_for_owned_task() {
+    let _g = lock();
+    let turn = OWNED_TURN.replace(
+        "\"parent_task_id\":\"toolu_bg1\"",
+        "\"parent_task_id\":\"a1\"",
+    );
+    let body = format!(
+        "sleep 1; printf '%s' '{AGENT_DONE}'; sleep 2; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'"
+    );
+    let f = fake_owned(
+        "owned-task-id-parent",
+        [&turn, PLAIN_REPLY, PLAIN_REPLY],
+        &body,
+        ":",
+    );
+    let flag = f.dir.join("owned.flag");
+    let mut cfg = config(&f);
+    cfg.agent_end_grace = Duration::from_secs(1);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("scan");
+    let mut evs = until_idle(&rx);
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(
+        at_end,
+        "agent ended before its task-id-parented owned task completed: {evs:?}"
+    );
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    h.shutdown();
+}
+
+// An agent-level completion with an owned task still running stays open until the owned completion, then ends once.
+#[test]
+fn agent_completion_waits_for_live_owned_task_then_ends_once() {
+    let _g = lock();
+    let body = format!(
+        "sleep 1; printf '%s' '{AGENT_DONE}'; sleep 2; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'"
+    );
+    let f = fake_owned(
+        "owned-agent-first",
+        [OWNED_TURN, PLAIN_REPLY, PLAIN_REPLY],
+        &body,
+        ":",
+    );
+    let flag = f.dir.join("owned.flag");
+    let mut cfg = config(&f);
+    cfg.agent_end_grace = Duration::from_secs(1);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("scan");
+    let mut evs = until_idle(&rx);
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(
+        at_end,
+        "agent-level completion ended the agent before the owned task: {evs:?}"
+    );
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    h.shutdown();
+}
+
+// The owned bash outlives agent_end_grace (1 s here). The agent-level completion came first, so the agent is pending,
+// but the grace must not end it while the owned task still runs. It ends once, after the owned completion.
+#[test]
+fn agent_pending_on_live_owned_task_is_not_ended_by_grace() {
+    let _g = lock();
+    let body = format!(
+        "sleep 1; printf '%s' '{AGENT_DONE}'; sleep 3; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'"
+    );
+    let f = fake_owned(
+        "owned-grace",
+        [OWNED_TURN, PLAIN_REPLY, PLAIN_REPLY],
+        &body,
+        ":",
+    );
+    let flag = f.dir.join("owned.flag");
+    let cfg = Config {
+        agent_end_grace: Duration::from_secs(1),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("scan");
+    let mut evs = until_idle(&rx);
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(
+        at_end,
+        "grace ended the agent while its owned task still ran: {evs:?}"
+    );
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    h.shutdown();
+}
+
+// Rotation with an owned task on the drained child: the agent stays open on the drained child, its agent-level
+// notice comes first, then the owned completion. The "[agent done]" notice reaches the rotated main once.
+#[test]
+fn rotated_main_keeps_agent_open_for_owned_task_on_drained_child() {
+    let _g = lock();
+    let handoff = fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap();
+    let body = format!(
+        "sleep 1; printf '%s' '{AGENT_DONE}'; sleep 2; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'"
+    );
+    let f = fake_owned(
+        "owned-rotate",
+        [OWNED_TURN, &handoff, PLAIN_REPLY],
+        ":",
+        &body,
+    );
+    let flag = f.dir.join("owned.flag");
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    cfg.agent_end_grace = Duration::from_secs(1);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(at_end, "drained agent ended before its owned task: {evs:?}");
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    // The completion is consumed by the drained child: the new main gets its notice as its own turn (no submit).
+    let log = wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
+    assert_eq!(
+        log.matches("[agent done] toolu_bg1").count(),
+        1,
+        "completion notice not delivered exactly once: {log}"
+    );
+    assert!(log.contains("완료"), "{log}");
+    h.shutdown();
+}
+
+// The drained child consumes the agent's completion, so the new main must get its notice and start a turn on its
+// own (no user prompt). The notice used to wait in the queue for the next submit.
+#[test]
+fn rotated_main_gets_drained_agent_notice_without_a_submit() {
+    let _g = lock();
+    let handoff = fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap();
+    let body = format!(
+        "sleep 1; printf '%s' '{AGENT_DONE}'; sleep 2; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'"
+    );
+    let f = fake_owned(
+        "owned-rotate-auto",
+        [OWNED_TURN, &handoff, PLAIN_REPLY],
+        ":",
+        &body,
+    );
+    let flag = f.dir.join("owned.flag");
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    cfg.agent_end_grace = Duration::from_secs(1);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(at_end, "drained agent ended before its owned task: {evs:?}");
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    let log = wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
+    assert_eq!(
+        log.matches("[agent done] toolu_bg1").count(),
+        1,
+        "new main got no notice without a submit: {log}"
+    );
+    h.shutdown();
+}
+
+// A drained child whose last owned child completes is ended at once (killed, reaped), so its native turn (a task
+// notification, then a reply) never reaches the TUI. The agent ends once and its notice reaches the new main once.
+#[test]
+fn drained_child_native_turn_is_interrupted_and_discarded() {
+    let _g = lock();
+    // The agent must still run when the handoff (frame 2) rotates the old main, so the drain exists. The native job
+    // runs in a background subshell of the old child ($$ is its pid): after the kill it is gone, so kill -0 fails and
+    // the killed flag is written.
+    let f = fake_owned(
+        "drain_native_interrupt",
+        [
+            OWNED_TURN,
+            &fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap(),
+            PLAIN_REPLY,
+        ],
+        ":",
+        "( sleep 1; touch 'DIR/native.flag'; cat 'DIR/native.jsonl'; sleep 2; kill -0 $$ 2>/dev/null || touch 'DIR/killed.flag' ) &",
+    );
+    // The owned bash b1 completes first (native.jsonl starts with it), so the agent completion is not deferred.
+    fs::write(
+        f.dir.join("native.jsonl"),
+        format!(
+            "{OWNED_DONE}{}",
+            fs::read_to_string(fixture("drain_native_notice_turn.jsonl")).unwrap()
+        ),
+    )
+    .unwrap();
+    let flag = f.dir.join("native.flag");
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    cfg.agent_end_grace = Duration::from_secs(1);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(
+        at_end,
+        "drained agent ended before its native turn: {evs:?}"
+    );
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    assert!(
+        evs.iter()
+            .all(|e| !format!("{e:?}").contains("NATIVE-REPLY")),
+        "discarded native turn reached the TUI: {evs:?}"
+    );
+    let killed = f.dir.join("killed.flag");
+    let t0 = Instant::now();
+    while !killed.exists() && t0.elapsed() < WAIT {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        killed.exists(),
+        "old main still alive after its child was done: {evs:?}"
+    );
+    let row_done = evs.iter().rev().find_map(|e| match e {
+        UiEvent::AgentRows { rows } => rows.iter().find(|r| r.id == "toolu_bg1").map(|r| r.done),
+        _ => None,
+    });
+    assert_eq!(row_done, Some(true), "agent row not done: {evs:?}");
+    // Each child writes its own stdin-<pid>.log: the notice must reach exactly one child, the new main. The old main
+    // (the child that got the first prompt) must not hold it.
+    let t0 = Instant::now();
+    let notices = loop {
+        let logs = child_stdin_logs(&f.dir);
+        let found = logs.iter().any(|l| l.contains("[agent done] toolu_bg1"));
+        if found || t0.elapsed() > WAIT {
+            break logs;
+        }
+        thread::sleep(Duration::from_millis(20));
+    };
+    let holders: Vec<&String> = notices
+        .iter()
+        .filter(|l| l.contains("[agent done] toolu_bg1"))
+        .collect();
+    assert_eq!(
+        holders.len(),
+        1,
+        "notice not in exactly one child: {notices:?}"
+    );
+    assert_eq!(
+        holders[0].matches("[agent done] toolu_bg1").count(),
+        1,
+        "new main got no single notice: {}",
+        holders[0]
+    );
+    assert!(
+        !holders[0].contains("\"first\""),
+        "the killed old main got the notice: {}",
+        holders[0]
+    );
+    h.shutdown();
+}
+
+// The drained agent's completion carries its report (task_notification handback_report.text). The new main's
+// "[agent done]" notice must carry that report body, so the new main can answer from it.
+#[test]
+fn rotated_main_notice_carries_report_text() {
+    let _g = lock();
+    let handoff = fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap();
+    let report = "{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"a1\",\"tool_use_id\":\"toolu_bg1\",\"status\":\"completed\",\"handback\":\"send\",\"handback_report\":{\"text\":\"DONE-ROT\"},\"session_id\":\"s1\"}\n";
+    let body = format!(
+        "sleep 1; printf '%s' '{report}'; sleep 2; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'"
+    );
+    let f = fake_owned(
+        "owned-rotate-report",
+        [OWNED_TURN, &handoff, PLAIN_REPLY],
+        ":",
+        &body,
+    );
+    let flag = f.dir.join("owned.flag");
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    cfg.agent_end_grace = Duration::from_secs(1);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(at_end, "drained agent ended before its owned task: {evs:?}");
+    let log = wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
+    assert!(log.contains("DONE-ROT"), "notice has no report body: {log}");
+    h.shutdown();
+}
+
+// The drained child prints the agent's SubagentHandback (final report) and its completion. The done line must use the
+// report, not the agent's task (no text line here), so the drain path has to record the handback too.
+#[test]
+fn drained_agent_done_summary_is_handback_message() {
+    let _g = lock();
+    let handoff = fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap();
+    let handback = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_hb1\",\"name\":\"SubagentHandback\",\"input\":{\"message\":\"DONE-ROT\"}}]},\"session_id\":\"s1\",\"parent_tool_use_id\":\"toolu_bg1\"}\n";
+    let body = format!(
+        "sleep 3; printf '%s' '{handback}'; printf '%s' '{AGENT_DONE}'; sleep 2; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'"
+    );
+    let f = fake_owned(
+        "owned-rotate-handback",
+        [OWNED_TURN, &handoff, PLAIN_REPLY],
+        &body,
+        ":",
+    );
+    let flag = f.dir.join("owned.flag");
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    // The owned completion restarts the grace; a 60 s grace would race the 60 s WAIT below. Sibling tests use 1 s.
+    cfg.agent_end_grace = Duration::from_secs(1);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(at_end, "drained agent ended before its owned task: {evs:?}");
+    let summary = evs.iter().find_map(|e| match e {
+        UiEvent::AgentEnd { id, summary, .. } if id == "toolu_bg1" => Some(summary.clone()),
+        _ => None,
+    });
+    assert_eq!(summary.as_deref(), Some("DONE-ROT"), "{evs:?}");
+    h.shutdown();
+}
+
+// Interrupt with an owned task still live: abandon_turn ends the foreground agent once and clears its pending end.
+// The agent-level completion came first (pending), the interrupt comes after it, and the owned completion lands
+// later. No second AgentEnd may follow.
+#[test]
+fn interrupt_with_live_owned_task_leaves_no_stale_pending_end() {
+    let _g = lock();
+    let fg_turn: String = OWNED_TURN
+        .replace("\"run_in_background\":true", "\"run_in_background\":false")
+        .lines()
+        .filter(|l| !l.contains("\"type\":\"result\""))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let body = format!(
+        "sleep 1; printf '%s' '{AGENT_DONE}'; sleep 2; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'"
+    );
+    let f = fake_owned(
+        "owned-interrupt",
+        [&fg_turn, PLAIN_REPLY, PLAIN_REPLY],
+        &body,
+        ":",
+    );
+    let flag = f.dir.join("owned.flag");
+    let cfg = Config {
+        interrupt_grace: Duration::from_millis(300),
+        ..config(&f)
+    };
+    let (h, rx) = Engine::start(cfg);
+    h.submit("scan");
+    // The agent-level completion lands at ~1 s (pending, owned task live). Interrupt after it.
+    std::thread::sleep(Duration::from_millis(1500));
+    h.interrupt(InterruptSource::EscKey);
+    let mut evs = Vec::new();
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_secs(6) {
+        if let Ok(e) = rx.recv_timeout(Duration::from_millis(100)) {
+            evs.push(e);
+        }
+    }
+    assert!(flag.exists(), "owned task never completed: {evs:?}");
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    h.shutdown();
+}
+
+// A rotated agent with a live owned task is resumed by SendMessage on the new child. The resume and the idle reply on
+// the old child must not end it. It ends once, after the owned completion.
+#[test]
+fn resumed_agent_with_live_owned_task_ends_once_after_owned_completion() {
+    let _g = lock();
+    // The launch result carries the agentId, so the later SendMessage resolves to toolu_bg1.
+    let mut lines: Vec<&str> = OWNED_TURN.lines().collect();
+    lines.insert(
+        2,
+        "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_bg1\",\"content\":\"Async agent launched successfully.\\nagentId: abc123\",\"is_error\":false}]},\"session_id\":\"s1\",\"parent_tool_use_id\":null}",
+    );
+    let turn1 = format!("{}\n", lines.join("\n"));
+    let handoff = fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap();
+    let resume = concat!(
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_sm\",\"name\":\"SendMessage\",\"input\":{\"to\":\"abc123\",\"summary\":\"recap\"}}]},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n",
+        "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_sm\",\"content\":\"{\\\"success\\\":true,\\\"message\\\":\\\"Resuming agent abc123\\\",\\\"resumedAgentId\\\":\\\"abc123\\\"}\",\"is_error\":false}]},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n",
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Resumed\"}],\"usage\":{\"input_tokens\":1,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":1}},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n",
+        "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Resumed\",\"session_id\":\"s1\",\"duration_ms\":42,\"total_cost_usd\":0.01}\n",
+    );
+    // The old child's owned bash idles at 2 s, then completes at 6 s; the agent-level notice follows at 7 s.
+    let idle = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Checking\"}]},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Checking\",\"session_id\":\"s1\",\"duration_ms\":3,\"total_cost_usd\":0.0}\n";
+    let body = format!(
+        "sleep 2; printf '%s' '{idle}'; sleep 4; touch 'DIR/owned.flag'; printf '%s' '{OWNED_DONE}'; sleep 1; printf '%s' '{AGENT_DONE}'"
+    );
+    let f = fake_owned("owned-resume", [&turn1, &handoff, resume], &body, ":");
+    let flag = f.dir.join("owned.flag");
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    evs.extend(until_idle(&rx));
+    h.submit("second");
+    evs.extend(until_idle(&rx));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, UiEvent::AgentResumed { id, .. } if id == "toolu_bg1")),
+        "agent was not resumed: {evs:?}"
+    );
+    let (rest, at_end) = until_agent_end(&rx, "toolu_bg1", &flag);
+    evs.extend(rest);
+    assert!(at_end, "resumed agent ended before its owned task: {evs:?}");
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    h.shutdown();
+}
+
+// Main-stream finish without a report body (captured 261110 norot order): the owned bash completes, the agent resumes
+// (task_started), its final text is plain text (no SubagentHandback), and the native task_notification carries no
+// handback_report. The native notice reaches main without the body, so chaude queues one "[agent done]" notice
+// with the final text. It is sent once, as a turn of its own, and the agent ends once.
+#[test]
+fn main_finish_without_native_body_sends_final_text_notice_once() {
+    let _g = lock();
+    let turn2 = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Waiting\"}],\"usage\":{\"input_tokens\":1,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"output_tokens\":1}},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"Waiting\",\"session_id\":\"s1\",\"duration_ms\":3,\"total_cost_usd\":0.0}\n";
+    let resumed = "{\"type\":\"system\",\"subtype\":\"task_started\",\"task_id\":\"a1\",\"tool_use_id\":\"toolu_bg1\",\"task_type\":\"local_agent\",\"session_id\":\"s1\"}";
+    let sidechain = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"DONE-ROT\"}]},\"session_id\":\"s1\",\"parent_tool_use_id\":\"toolu_bg1\"}";
+    let body = format!(
+        "sleep 1; printf '%s\\n' '{OWNED_DONE}'; printf '%s\\n' '{resumed}'; printf '%s\\n' '{sidechain}'; sleep 1; printf '%s' '{AGENT_DONE}'"
+    );
+    let f = fake_owned(
+        "main-notice-native-no-body",
+        [OWNED_TURN, turn2, PLAIN_REPLY],
+        ":",
+        &body,
+    );
+    let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.drain_timeout = Duration::from_secs(60);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    h.submit("second");
+    evs.extend(until_idle(&rx));
+    let t0 = Instant::now();
+    while agent_ends(&evs, "toolu_bg1") == 0 && t0.elapsed() < WAIT {
+        evs.extend(rx.recv_timeout(Duration::from_millis(100)).ok());
+    }
+    // One more second: a second end or a notice turn would show up here.
+    let t1 = Instant::now();
+    while t1.elapsed() < Duration::from_secs(1) {
+        evs.extend(rx.recv_timeout(Duration::from_millis(100)).ok());
+    }
+    assert_eq!(agent_ends(&evs, "toolu_bg1"), 1, "{evs:?}");
+    let log = wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
+    let notices: Vec<&str> = log
+        .lines()
+        .filter(|l| l.contains("[agent done] toolu_bg1"))
+        .collect();
+    assert_eq!(notices.len(), 1, "notice count: {log}");
+    assert!(log.contains("DONE-ROT"), "notice has no final text: {log}");
+    h.shutdown();
+}
+
 // Regression: a background agent whose completion arrives on the drained (old) child. The agent must end at once
 // (AgentEnd, terminal), and its "[agent done]" notice must reach the rotated main's next prompt exactly once. The
 // drain_timeout is long, so only the completion can end the agent here.
+// The drained child's completion is the line Claude printed when the agent finished (captured 261109, line 356 of
+// /tmp/cap-rot/rot/stdout.raw, sanitized): a system task_notification with tool_use_id and status, and no
+// <task-notification> text. No other record is written.
 #[test]
 fn drained_agent_completion_is_delivered_once_and_terminal() {
     let _g = lock();
-    let notice = "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<task-notification><tool-use-id>toolu_bg1</tool-use-id></task-notification>\"}}\n";
+    let notice = "{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"a1\",\"run_id\":\"r1\",\"tool_use_id\":\"toolu_bg1\",\"status\":\"completed\",\"output_file\":\"/tmp/tasks/a1.output\",\"summary\":\"done\",\"handback\":\"send\",\"handback_report\":{\"text\":\"DONE-ROT\"},\"uuid\":\"u1\",\"session_id\":\"s1\"}\n";
     let f = fake_drain(
         "drain_complete",
         &fs::read_to_string(fixture("bg_rotate_turn.jsonl")).unwrap(),
@@ -758,6 +1406,7 @@ fn drained_agent_completion_is_delivered_once_and_terminal() {
         notice,
     );
     let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
     cfg.rotate_threshold = 50;
     cfg.rotate_defer_timeout = Duration::from_millis(300);
     cfg.drain_timeout = Duration::from_secs(60);
@@ -1250,6 +1899,27 @@ fn running_agent_is_stored_interrupted_on_shutdown() {
 }
 
 #[test]
+fn errored_agent_is_stored_as_failed_not_done() {
+    let _g = lock();
+    let f = fake("agent-error", &["agent_error_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("scan");
+    let evs = until_idle(&rx);
+    assert!(
+        evs.iter().any(|e| matches!(e,
+            UiEvent::ToolEnd { id, ok: false } if id == "toolu_agent1")),
+        "{evs:?}"
+    );
+    h.shutdown();
+    let stored = fs::read_to_string(f.dir.join("agents.json")).unwrap();
+    assert!(
+        stored.contains("toolu_agent1") && stored.contains("\"failed\""),
+        "{stored}"
+    );
+    assert!(!stored.contains("\"done\""), "{stored}");
+}
+
+#[test]
 fn stored_running_agent_is_restored_at_startup_and_cleared_by_next_line() {
     let _g = lock();
     let f = fake("agent-restore", &["text_turn.jsonl"]);
@@ -1295,7 +1965,7 @@ fn stored_agent_summary_is_its_restored_agent_view_body() {
     let mut log = None;
     loop {
         match rx.recv_timeout(WAIT).expect("engine went silent") {
-            UiEvent::AgentLog { id, lines } if id == "toolu_pre2" => log = Some(lines),
+            UiEvent::AgentLog { id, lines, .. } if id == "toolu_pre2" => log = Some(lines),
             UiEvent::AgentsRestored { .. } => break,
             _ => {}
         }
@@ -2020,6 +2690,142 @@ fn context_rotation_hands_off_and_fresh_child_gets_snapshot() {
     h.shutdown();
 }
 
+// The text of the user frame in a stdin log line that holds needle (JSON-escaped in the log, so it is decoded).
+fn user_frame_text(log: &str, needle: &str) -> String {
+    let line = log
+        .lines()
+        .find(|l| l.contains(needle))
+        .unwrap_or_else(|| panic!("no frame with {needle}: {log}"));
+    let v: serde_json::Value = serde_json::from_str(line).expect("stdin line is JSON");
+    v["message"]["content"]
+        .as_str()
+        .unwrap_or_else(|| panic!("content is not a string: {line}"))
+        .to_string()
+}
+
+// Rotation with a live agent (launched by the old main, still running when the rotation runs). The old child is drained,
+// and the rotated main's first input carries the agent's id, brief and launch time, plus the old main's turns from the
+// launch on, newest kept within 12000 chars.
+#[test]
+fn rotation_with_live_agent_carries_brief_and_capped_turns() {
+    let _g = lock();
+    let notice = "{\"type\":\"system\",\"subtype\":\"noop\"}\n";
+    let f = fake_drain(
+        "carry_live",
+        &fs::read_to_string(fixture("bg_rotate_stream_turn.jsonl")).unwrap(),
+        &fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap(),
+        notice,
+    );
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    let (h, rx) = Engine::start(cfg);
+    // A long first prompt: the carried turn is longer than the cap, so only its newest part (the reply) stays.
+    h.submit(&format!("first {}", "z".repeat(20_000)));
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    h.submit("second");
+    evs.extend(until_idle(&rx));
+    let log = wait_for(&f.dir.join("stdin.log"), "Current user message");
+    let msg = user_frame_text(&log, "Current user message");
+    assert!(
+        msg.contains("## Agents still running from the previous session"),
+        "{msg}"
+    );
+    assert!(msg.contains("toolu_bg1 · scan · launched at"), "{msg}");
+    assert!(msg.contains("  brief:\nlook around\n"), "{msg}");
+    // The turns section: the body after its header line, up to the current user message.
+    let start = msg
+        .find("## Previous session turns")
+        .unwrap_or_else(|| panic!("no carried turns: {msg}"));
+    let rest = &msg[start..];
+    let body_start = rest.find(")\n").expect("turns header line") + 2;
+    let body_end = rest
+        .find("\n\n## Current user message")
+        .expect("current user message follows");
+    let body = &rest[body_start..body_end];
+    assert!(
+        body.chars().count() <= 12_000,
+        "turns not capped: {}",
+        body.chars().count()
+    );
+    assert!(body.contains("Assistant: Started"), "{body}");
+    assert!(msg.ends_with("second"), "{msg}");
+    h.shutdown();
+}
+
+// Rotation with no live agent: the rotated main gets the snapshot only, with no carried agent or turns block.
+#[test]
+fn rotation_without_live_agent_carries_no_block() {
+    let _g = lock();
+    let f = fake("carry_none", &["rotate_turn.jsonl", "handoff_turn.jsonl"]);
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let evs = until_idle(&rx);
+    assert!(evs.iter().any(|e| matches!(e, UiEvent::Rotated { .. })));
+    h.submit("second");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "Current user message");
+    let msg = user_frame_text(&log, "Current user message");
+    assert!(
+        msg.contains("Goal: finish the context rotation test"),
+        "{msg}"
+    );
+    assert!(!msg.contains("Agents still running"), "{msg}");
+    assert!(!msg.contains("Previous session turns"), "{msg}");
+    h.shutdown();
+}
+
+// The "[agent done]" notice of an agent the old main launched carries that agent's brief, when it reaches the rotated main.
+#[test]
+fn done_notice_after_rotation_carries_brief() {
+    let _g = lock();
+    let notice = "{\"type\":\"system\",\"subtype\":\"task_notification\",\"task_id\":\"a1\",\"run_id\":\"r1\",\"tool_use_id\":\"toolu_bg1\",\"status\":\"completed\",\"output_file\":\"/tmp/tasks/a1.output\",\"summary\":\"done\",\"handback\":\"send\",\"handback_report\":{\"text\":\"DONE-ROT\"},\"uuid\":\"u1\",\"session_id\":\"s1\"}\n";
+    let f = fake_drain(
+        "done_brief",
+        &fs::read_to_string(fixture("bg_rotate_turn.jsonl")).unwrap(),
+        &fs::read_to_string(fixture("handoff_turn.jsonl")).unwrap(),
+        notice,
+    );
+    let mut cfg = config(&f);
+    cfg.rotate_threshold = 50;
+    cfg.rotate_defer_timeout = Duration::from_millis(300);
+    cfg.drain_timeout = Duration::from_secs(60);
+    let (h, rx) = Engine::start(cfg);
+    h.submit("first");
+    let mut evs = until_idle(&rx);
+    loop {
+        match rx.recv_timeout(WAIT).expect("engine went silent") {
+            UiEvent::Rotated { .. } => break,
+            e => evs.push(e),
+        }
+    }
+    let t0 = Instant::now();
+    while !evs
+        .iter()
+        .any(|e| matches!(e, UiEvent::AgentEnd { id, .. } if id == "toolu_bg1"))
+        && t0.elapsed() < WAIT
+    {
+        if let Ok(e) = rx.recv_timeout(Duration::from_millis(200)) {
+            evs.push(e);
+        }
+    }
+    h.submit("second");
+    until_idle(&rx);
+    let log = wait_for(&f.dir.join("stdin.log"), "[agent done] toolu_bg1");
+    let msg = user_frame_text(&log, "[agent done] toolu_bg1");
+    assert!(msg.contains("brief: look around"), "{msg}");
+    h.shutdown();
+}
+
 #[test]
 fn rotation_waits_for_background_agent_then_runs_at_defer_timeout() {
     let _g = lock();
@@ -2135,6 +2941,47 @@ fn handoff_snapshot_lists_running_background_agent() {
     h.shutdown();
 }
 
+// The Ctrl+T overlay row reads type and model from the panel row of the same agent: a real-shaped Agent call with
+// subagent_type and no model input gives a row named by subagent_type, on the model its type prefix names.
+#[test]
+fn agent_row_of_a_running_typed_agent_carries_type_and_model() {
+    let _g = lock();
+    let f = fake(
+        "agenttype",
+        &["agent_type_row_turn.jsonl", "handoff_turn.jsonl"],
+    );
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("first");
+    let evs = until_idle(&rx);
+    let start = evs
+        .iter()
+        .find_map(|e| match e {
+            UiEvent::AgentStart {
+                id, description, ..
+            } if id == "toolu_slow1" => Some(description.clone()),
+            _ => None,
+        })
+        .expect("AgentStart for the background launch");
+    assert_eq!(start, "SLOW agent sleep 100");
+    let rows = evs
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            UiEvent::AgentRows { rows } => Some(rows.clone()),
+            _ => None,
+        })
+        .expect("AgentRows after the background launch");
+    let row = rows
+        .iter()
+        .find(|r| r.id == "toolu_slow1")
+        .unwrap_or_else(|| panic!("{rows:?}"));
+    assert_eq!(row.task, "SLOW agent sleep 100");
+    assert_eq!(row.name, "haiku-runner", "{row:?}");
+    assert_eq!(row.model, "haiku", "{row:?}");
+    assert!(!row.done && row.started_at > 0, "{row:?}");
+    h.shutdown();
+}
+
 #[test]
 fn agent_rows_carry_panel_fields_for_a_background_launch() {
     let _g = lock();
@@ -2166,6 +3013,40 @@ fn agent_rows_carry_panel_fields_for_a_background_launch() {
     assert_eq!(row.agent_id, "abc123");
     assert!(row.result_path.is_empty(), "{row:?}");
     assert!(row.started_at > 0);
+    h.shutdown();
+}
+
+// An agent's row and its end carry the model its own stream ran on, never the main session's model.
+#[test]
+fn agent_row_model_is_the_agents_own_stream_model() {
+    let _g = lock();
+    let f = fake("sub_model", &["subagent_model_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let rows = evs
+        .iter()
+        .rev()
+        .find_map(|e| match e {
+            UiEvent::AgentRows { rows } => Some(rows.clone()),
+            _ => None,
+        })
+        .expect("AgentRows for the Agent call");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].model, "claude-haiku-5-5", "{rows:?}");
+    // The running row shows the stream's model before the agent ends, not the launch guess (the label must match done).
+    let running = evs.iter().any(|e| match e {
+        UiEvent::AgentRows { rows } => rows
+            .iter()
+            .any(|r| r.id == "toolu_sub1" && !r.done && r.model == "claude-haiku-5-5"),
+        _ => false,
+    });
+    assert!(running, "running row kept the launch model: {evs:?}");
+    let end_model = evs.iter().find_map(|e| match e {
+        UiEvent::AgentEnd { id, model, .. } if id == "toolu_sub1" => Some(model.clone()),
+        _ => None,
+    });
+    assert_eq!(end_model.as_deref(), Some("claude-haiku-5-5"), "{evs:?}");
     h.shutdown();
 }
 
@@ -3914,6 +4795,22 @@ fn agent_end_summary_is_last_subagent_text_else_task() {
     h.shutdown();
 }
 
+// The done line's what is the sub-agent's final SubagentHandback message, not its interim text line (stdout.raw:331).
+#[test]
+fn agent_end_summary_is_subagent_handback_message_not_interim_text() {
+    let _g = lock();
+    let f = fake("agent_handback", &["agent_handback_summary_turn.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("sleep");
+    let evs = until_idle(&rx);
+    let summary = evs.iter().find_map(|e| match e {
+        UiEvent::AgentEnd { summary, .. } => Some(summary.clone()),
+        _ => None,
+    });
+    assert_eq!(summary.as_deref(), Some("DONE-ROT"), "{evs:?}");
+    h.shutdown();
+}
+
 #[test]
 fn opus_prefixed_subagent_type_emits_opus_busy() {
     let _g = lock();
@@ -3951,6 +4848,31 @@ fn coder_task_emits_resident_busy_bracket_before_reply() {
     h.shutdown();
 }
 
+// The coder line: a live resident coder is listed with its context tokens from its result usage and its limit.
+#[test]
+fn coder_contexts_list_the_live_coder_with_its_tokens() {
+    let _g = lock();
+    let f = fake("coder_ctx", &["text_turn.jsonl"]);
+    fs::copy(fixture("resident_usage.jsonl"), f.dir.join("coder.jsonl")).unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.coder("rename the helper");
+    let evs = until_coder_reply(&rx);
+    assert!(
+        evs.contains(&UiEvent::CoderContexts {
+            coders: vec![CoderContext {
+                slot: 1,
+                tokens: 103,
+                limit: 80_000,
+            }],
+        }),
+        "{evs:?}"
+    );
+    h.shutdown();
+}
+
 // Go onSubEvent (repl.go:426, 686): a delegated agent's text, tool calls and tool results reach its log.
 #[test]
 fn subagent_stream_lines_reach_agent_log() {
@@ -3962,7 +4884,7 @@ fn subagent_stream_lines_reach_agent_log() {
     let lines: Vec<String> = evs
         .iter()
         .filter_map(|e| match e {
-            UiEvent::AgentLog { id, lines } if id == "toolu_sub1" => Some(lines.clone()),
+            UiEvent::AgentLog { id, lines, .. } if id == "toolu_sub1" => Some(lines.clone()),
             _ => None,
         })
         .flatten()
@@ -4096,4 +5018,78 @@ fn wire_clients_is_none_without_clients_file() {
         ..Config::default()
     };
     assert!(chaude_core::api::wire_clients(&some).is_some());
+}
+
+// A resumed run starts (task_started with the agent's tool id) after the agent ended, with no SendMessage result
+// that the engine reads. The row must show running again until the run's own completion.
+#[test]
+fn task_started_after_agent_end_reopens_its_row() {
+    let _g = lock();
+    let f = fake("reopen_row", &["resume_task_started_reopens_row.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let last = evs.iter().rev().find_map(|e| match e {
+        UiEvent::AgentRows { rows } => Some(rows.clone()),
+        _ => None,
+    });
+    let row = last
+        .and_then(|rows| rows.into_iter().find(|r| r.id == "toolu_bg1"))
+        .expect("no row for toolu_bg1");
+    assert!(
+        !row.done,
+        "resumed agent row shows done while it runs: {evs:?}"
+    );
+    h.shutdown();
+}
+
+// An agent delivers an interim SubagentHandback, finishes, then resumes (task_started with its tool id) and ends with
+// plain text. Its last done line must show the final text, not the interim handback the resumed run replaced.
+#[test]
+fn resumed_run_final_text_replaces_interim_handback() {
+    let _g = lock();
+    let f = fake(
+        "resume_final_text",
+        &["resume_handback_then_final_text.jsonl"],
+    );
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let ends: Vec<String> = evs
+        .iter()
+        .filter_map(|e| match e {
+            UiEvent::AgentEnd { id, summary, .. } if id == "toolu_bg1" => Some(summary.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        ends.last().map(String::as_str),
+        Some("DONE-ROT"),
+        "last done line of the resumed agent: {ends:?}"
+    );
+    h.shutdown();
+}
+
+// The last owned task of an agent completes before the agent's own completion; the agent then resumes. The owned
+// completion must not finish the agent: one done line, with the final text, at the agent's own completion.
+#[test]
+fn owned_completion_before_resume_is_not_a_finish() {
+    let _g = lock();
+    let f = fake("owned_then_resume", &["resume_owned_then_final_text.jsonl"]);
+    let (h, rx) = Engine::start(config(&f));
+    h.submit("go");
+    let evs = until_idle(&rx);
+    let ends: Vec<String> = evs
+        .iter()
+        .filter_map(|e| match e {
+            UiEvent::AgentEnd { id, summary, .. } if id == "toolu_bg1" => Some(summary.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        ends,
+        vec!["DONE-ROT".to_string()],
+        "done lines of the resumed agent: {ends:?}"
+    );
+    h.shutdown();
 }

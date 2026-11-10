@@ -5,6 +5,8 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+use chaude_core::api::CoderContext;
+
 use super::render::{cluster_width, grapheme_clusters};
 
 // Spinner frames and step from tui.go:259-260 (spinner.Frames, FPS = 1/8 s).
@@ -66,6 +68,8 @@ pub struct BarInput {
     pub bg: usize,
     // Latest context tokens per role (UiEvent::RoleContext): P = prompter, T = tui, C = coder.
     pub role_tokens: BTreeMap<String, u64>,
+    // Live resident coders in spawn order (UiEvent::CoderContexts); empty hides the coder line.
+    pub coders: Vec<CoderContext>,
 }
 
 // Per-role context limit shown in the Go ctx bar (haikuThreshold in repl.go).
@@ -184,6 +188,22 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
     [clip(&top, width), clip(&bottom, width)]
 }
 
+// The coder line under the input box: "C1 12k/80k  C2 3.1k/80k", one entry per live coder in spawn order (used
+// context tokens over the rotation limit). A coder with no context tokens yet (the resident one, idle at start)
+// is not listed; with none listed the line is hidden.
+pub fn coder_line(coders: &[CoderContext], width: usize) -> Option<String> {
+    let shown: Vec<&CoderContext> = coders.iter().filter(|c| c.tokens > 0).collect();
+    if shown.is_empty() {
+        return None;
+    }
+    let text = shown
+        .iter()
+        .map(|c| format!("C{} {}/{}", c.slot, fmt_limit(c.tokens), fmt_limit(c.limit)))
+        .collect::<Vec<_>>()
+        .join("  ");
+    Some(clip(&text, width))
+}
+
 // Display columns of `s` (the width clip uses).
 fn cells(s: &str) -> usize {
     grapheme_clusters(s).into_iter().map(cluster_width).sum()
@@ -286,33 +306,43 @@ pub fn thinking_row(
     }
 }
 
-// hasModelPrefix (tui.go:1546-1554): the name already starts with a model id, so the model segment is skipped.
-pub fn has_model_prefix(name: &str) -> bool {
-    ["haiku-", "opus-", "sonnet-", "fable-"]
+// The agent's model as the row shows it: "claude-haiku-5-5" → "haiku 5.5", "claude-3-5-sonnet-20241022" →
+// "sonnet 3.5", "haiku" → "haiku". Empty stays empty, so the caller omits the segment (no session-model fallback).
+pub fn short_model(model: &str) -> String {
+    let parts: Vec<&str> = model
+        .trim_start_matches("claude-")
+        .split('-')
+        .filter(|p| !p.is_empty())
+        .collect();
+    let Some(family) = parts
         .iter()
-        .any(|p| name.starts_with(p))
+        .find(|p| p.chars().all(|c| c.is_ascii_alphabetic()))
+    else {
+        return String::new();
+    };
+    let versions: Vec<&str> = parts
+        .iter()
+        .filter(|p| p.len() <= 2 && p.chars().all(|c| c.is_ascii_digit()))
+        .take(2)
+        .copied()
+        .collect();
+    if versions.is_empty() {
+        family.to_string()
+    } else {
+        format!("{family} {}", versions.join("."))
+    }
 }
 
-// agentStatusText (tui.go:1527-1543): "<state>-<model>-<name>(<summary>)". Empty model falls back to the
-// session model, empty name becomes "agent". The caller passes the prompt line as summary when no task is set.
-pub fn agent_status_text(
-    state: AgentState,
-    model: &str,
-    session_model: &str,
-    name: &str,
-    summary: &str,
-) -> String {
-    let model = if model.is_empty() {
-        session_model
-    } else {
-        model
-    };
+// Agent row text after its time: "<state> · <agent type> · <short model> (<summary>)". Empty name becomes "agent";
+// an empty model drops its segment. The caller passes the prompt line as summary when no task is set.
+pub fn agent_status_text(state: AgentState, model: &str, name: &str, summary: &str) -> String {
     let name = if name.is_empty() { "agent" } else { name };
     let label = state.label();
-    if has_model_prefix(name) {
-        format!("{label}-{name}({summary})")
+    let short = short_model(model);
+    if short.is_empty() {
+        format!("{label} · {name} ({summary})")
     } else {
-        format!("{label}-{model}-{name}({summary})")
+        format!("{label} · {name} · {short} ({summary})")
     }
 }
 
@@ -547,19 +577,22 @@ mod tests {
         assert!(top.contains(" 5s"), "{top}");
     }
 
-    // Port of TestAgentStatusFormat (panel_test.go:340), text parts only.
+    // Row text: "<state> · <agent type> · <short model> (<summary>)"; the model is the agent's own, else omitted.
     #[test]
     fn agent_status_text_uses_state_model_and_name() {
         let running = AgentState::Running;
         assert_eq!(
-            agent_status_text(running, "", "opus", "", "t"),
-            "실행 중-opus-agent(t)"
+            agent_status_text(running, "claude-haiku-5-5", "haiku-scout", "scan"),
+            "실행 중 · haiku-scout · haiku 5.5 (scan)"
         );
         assert_eq!(
-            agent_status_text(running, "haiku", "opus", "fixer", "버그 수정"),
-            "실행 중-haiku-fixer(버그 수정)"
+            agent_status_text(running, "", "fixer", "버그 수정"),
+            "실행 중 · fixer (버그 수정)"
         );
-        assert!(agent_status_text(AgentState::Done, "", "m", "", "t").starts_with("완료"));
+        assert_eq!(
+            agent_status_text(AgentState::Done, "", "", "t"),
+            "완료 · agent (t)"
+        );
         assert_eq!(agent_state(true, false, true, true), AgentState::Failed);
         assert_eq!(agent_state(false, false, false, false), AgentState::Queued);
         assert_eq!(
@@ -569,19 +602,55 @@ mod tests {
         assert_eq!(agent_state(false, false, false, true), AgentState::Running);
     }
 
-    // Port of TestAgentStatusTextPrefixedName (panel_test.go:314).
+    // The model segment is the agent's own model, shortened to family and version.
     #[test]
-    fn agent_name_with_model_prefix_skips_model_segment() {
-        assert!(has_model_prefix("haiku-scout"));
-        assert!(!has_model_prefix("scout-haiku"));
+    fn short_model_reads_family_and_version() {
+        assert_eq!(short_model("claude-haiku-5-5"), "haiku 5.5");
+        assert_eq!(short_model("claude-opus-5-5"), "opus 5.5");
+        assert_eq!(short_model("claude-3-5-sonnet-20241022"), "sonnet 3.5");
+        assert_eq!(short_model("haiku"), "haiku");
+        assert_eq!(short_model("claude-haiku-test"), "haiku");
+        assert_eq!(short_model(""), "");
+        // A restored agent that ran on opus keeps opus even when its name says haiku.
         assert_eq!(
-            agent_status_text(AgentState::Running, "", "haiku", "haiku-scout", "t"),
-            "실행 중-haiku-scout(t)"
+            agent_status_text(
+                AgentState::Interrupted,
+                "claude-opus-5-5",
+                "haiku-runner",
+                "t"
+            ),
+            "중단 · haiku-runner · opus 5.5 (t)"
         );
+    }
+
+    // The coder line lists every live resident coder in spawn order and hides when none.
+    #[test]
+    fn coder_line_lists_live_coders_and_hides_when_empty() {
+        assert_eq!(coder_line(&[], 80), None);
+        let coders = [
+            CoderContext {
+                slot: 1,
+                tokens: 12_000,
+                limit: 80_000,
+            },
+            CoderContext {
+                slot: 2,
+                tokens: 3_100,
+                limit: 80_000,
+            },
+        ];
         assert_eq!(
-            agent_status_text(AgentState::Running, "", "opus", "opus-architect", "t"),
-            "실행 중-opus-architect(t)"
+            coder_line(&coders, 80).as_deref(),
+            Some("C1 12k/80k  C2 3.10k/80k")
         );
+        assert_eq!(coder_line(&coders, 10).as_deref(), Some("C1 12k/80k"));
+        // An idle resident coder with no tokens yet does not show a 0/80k line.
+        let idle = [CoderContext {
+            slot: 1,
+            tokens: 0,
+            limit: 80_000,
+        }];
+        assert_eq!(coder_line(&idle, 80), None);
     }
 
     // Port of the thinking-row gate in tuiModel.view (tui.go:383-391).

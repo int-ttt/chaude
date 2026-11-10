@@ -9,7 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::bar::{AgentState, agent_status_text, clip};
+use super::bar::{AgentState, agent_status_text, clip, fmt_secs};
 use super::render::{DIM_ON, FG_OFF, ORANGE_ON, RESET};
 
 // Go maxAgentLog: the live transcript kept per agent (oldest lines drop first).
@@ -32,8 +32,9 @@ pub struct AgentRec {
     pub failed: bool,
     pub done: bool,
     pub interrupted: bool,
-    pub started: bool,   // false: queued (Go Started.IsZero())
+    pub started: bool,    // false: queued (Go Started.IsZero())
     pub started_at: u64, // start time as a sortable key (ms since epoch); only compared when both started
+    pub last_active: u64, // finished rows: end (or last activity) in ms since epoch; 0 when unknown
     pub log: Vec<String>,
 }
 
@@ -43,14 +44,31 @@ impl AgentRec {
         super::bar::agent_state(self.failed, self.interrupted, self.done, self.started)
     }
 
-    // Go agentStatusText (tui.go:1527): summary = Task, else the first prompt line.
-    pub fn status_text(&self, session_model: &str) -> String {
+    // The title after the dot, in the agent list format: "HH:MM:SS <status> · <type> · <model> (<task>) (<dur>)".
+    // Go agentStatusText (tui.go:1527) gives the middle part (summary = Task, else the first prompt line). A running
+    // agent runs to `now_ms`; a finished one to its last_active. Time and duration show once their start is known.
+    pub fn status_text(&self, now_ms: u64) -> String {
         let sum = if self.task.is_empty() {
             &self.prompt
         } else {
             &self.task
         };
-        agent_status_text(self.state(), &self.model, session_model, &self.name, sum)
+        let mut text = agent_status_text(self.state(), &self.model, &self.name, sum);
+        let end = if matches!(self.state(), AgentState::Running) {
+            now_ms
+        } else {
+            self.last_active
+        };
+        if self.started_at > 0 && end > self.started_at {
+            text.push_str(&format!(" ({})", fmt_secs((end - self.started_at) / 1000)));
+        }
+        if self.started_at > 0 {
+            text = format!(
+                "{} {text}",
+                super::clock_hhmmss((self.started_at / 1000) as i64)
+            );
+        }
+        text
     }
 }
 
@@ -167,13 +185,78 @@ pub fn sub_event_lines(ev: &Value) -> Option<(String, Vec<String>)> {
     }
 }
 
-// Go onSubEvent cap: append, then keep only the newest MAX_AGENT_LOG lines.
-pub fn push_log(log: &mut Vec<String>, add: Vec<String>) {
-    log.extend(add);
-    let n = log.len();
-    if n > MAX_AGENT_LOG {
-        log.drain(..n - MAX_AGENT_LOG);
+// One agent's live log: its lines, and index-aligned the tool-use id of each call and result line (None for text).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AgentLog {
+    pub lines: Vec<String>,
+    pub ids: Vec<Option<String>>,
+}
+
+// Leads of a tool call line and of a tool result line (see sub_event_lines).
+const CALL_LEAD: &str = "● ";
+const RESULT_LEAD: &str = "  ⎿  ";
+
+// Go onSubEvent cap: append, then keep only the newest MAX_AGENT_LOG lines. A tool result whose id matches a call
+// in the log goes directly under that call, so parallel calls keep their own results whatever the arrival order.
+// A result with no matching call (or no id) is appended.
+pub fn push_log(log: &mut AgentLog, add: Vec<String>, ids: Vec<Option<String>>) {
+    let ids = ids.into_iter().chain(std::iter::repeat(None));
+    for (line, id) in add.into_iter().zip(ids) {
+        let call = match &id {
+            Some(k) if line.starts_with(RESULT_LEAD) => log
+                .ids
+                .iter()
+                .zip(&log.lines)
+                .position(|(i, l)| i.as_ref() == Some(k) && l.starts_with(CALL_LEAD)),
+            _ => None,
+        };
+        let at = call.map_or(log.lines.len(), |c| c + 1);
+        log.lines.insert(at, line);
+        log.ids.insert(at, id);
     }
+    let n = log.lines.len();
+    if n > MAX_AGENT_LOG {
+        log.lines.drain(..n - MAX_AGENT_LOG);
+        log.ids.drain(..n - MAX_AGENT_LOG);
+    }
+}
+
+// Local arrival stamp for log lines (core lines carry no time). The stamp follows the line's lead ("● " tool,
+// "  ⎿  " result) so the lead and the wrap hang stay first; text lines get it at column 0. Blank and already
+// stamped lines are kept as they are.
+pub fn stamp_lines(lines: Vec<String>, hhmmss: &str) -> Vec<String> {
+    lines
+        .into_iter()
+        .map(|l| {
+            if l.is_empty() {
+                return l;
+            }
+            let lead = ["● ", "  ⎿  "]
+                .into_iter()
+                .find(|p| l.starts_with(*p))
+                .unwrap_or("");
+            let (head, rest) = l.split_at(lead.len());
+            if has_stamp(rest) {
+                l
+            } else {
+                format!("{head}{hhmmss} {rest}")
+            }
+        })
+        .collect()
+}
+
+// True when `s` starts with "HH:MM:SS " (the shape clock_hhmmss writes).
+fn has_stamp(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() >= 9
+        && b[8] == b' '
+        && b[..8].iter().enumerate().all(|(i, c)| {
+            if i == 2 || i == 5 {
+                *c == b':'
+            } else {
+                c.is_ascii_digit()
+            }
+        })
 }
 
 // Go agentView: `off` = lines scrolled up from the tail.
@@ -252,13 +335,7 @@ impl AgentView {
 
     // Go agentViewLines: exactly `hh` rows, replacing the transcript. `rec` is the snapshot of `self.id`.
     // Clamps the scroll offset to the body like Go, so the caller can keep `self` across frames.
-    pub fn lines(
-        &mut self,
-        rec: &AgentRec,
-        session_model: &str,
-        width: usize,
-        hh: usize,
-    ) -> Vec<String> {
+    pub fn lines(&mut self, rec: &AgentRec, width: usize, hh: usize, now_ms: u64) -> Vec<String> {
         let head_a = clip(HEAD, width);
         let head_b = clip(
             HINT,
@@ -268,7 +345,7 @@ impl AgentView {
 
         let dot = format!("\x1b[38;5;{}m●{FG_OFF}", rec.state().dot_color());
         let status = clip(
-            &format!(" {}", rec.status_text(session_model)),
+            &format!(" {}", rec.status_text(now_ms)),
             width.saturating_sub(3),
         );
         let title = format!("  {dot}{DIM_ON}{status}{RESET}");
@@ -476,12 +553,64 @@ mod tests {
     // Go onSubEvent cap (maxAgentLog = 400): the newest lines are kept.
     #[test]
     fn log_keeps_newest_400_lines() {
-        let mut log = Vec::new();
-        push_log(&mut log, (0..399).map(|i| format!("l{i}")).collect());
-        push_log(&mut log, vec!["x".into(), "y".into()]);
-        assert_eq!(log.len(), MAX_AGENT_LOG);
-        assert_eq!(log[0], "l1");
-        assert_eq!(log.last().map(String::as_str), Some("y"));
+        let mut log = AgentLog::default();
+        push_log(
+            &mut log,
+            (0..399).map(|i| format!("l{i}")).collect(),
+            vec![],
+        );
+        push_log(&mut log, vec!["x".into(), "y".into()], vec![]);
+        assert_eq!(log.lines.len(), MAX_AGENT_LOG);
+        assert_eq!(log.ids.len(), MAX_AGENT_LOG);
+        assert_eq!(log.lines[0], "l1");
+        assert_eq!(log.lines.last().map(String::as_str), Some("y"));
+    }
+
+    // A tool result goes under the call with its id, whatever the order the results arrive in.
+    #[test]
+    fn results_sit_under_their_calls() {
+        let id = |s: &str| Some(s.to_string());
+        let mut log = AgentLog::default();
+        push_log(
+            &mut log,
+            vec!["● Bash(ls)".into(), "● Bash(cat)".into()],
+            vec![id("A"), id("B")],
+        );
+        // Results in reverse order: each one lands under its own call.
+        push_log(&mut log, vec!["  ⎿  cat out".into()], vec![id("B")]);
+        push_log(&mut log, vec!["  ⎿  ls out".into()], vec![id("A")]);
+        assert_eq!(
+            log.lines,
+            vec!["● Bash(ls)", "  ⎿  ls out", "● Bash(cat)", "  ⎿  cat out"]
+        );
+        // A result that arrives after a third call started still lands under its own call.
+        let mut log = AgentLog::default();
+        push_log(
+            &mut log,
+            vec!["● Bash(ls)".into(), "● Bash(cat)".into()],
+            vec![id("A"), id("B")],
+        );
+        push_log(&mut log, vec!["● Read(x)".into()], vec![id("C")]);
+        push_log(&mut log, vec!["  ⎿  ls out".into()], vec![id("A")]);
+        push_log(&mut log, vec!["  ⎿  cat out".into()], vec![id("B")]);
+        assert_eq!(
+            log.lines,
+            vec![
+                "● Bash(ls)",
+                "  ⎿  ls out",
+                "● Bash(cat)",
+                "  ⎿  cat out",
+                "● Read(x)"
+            ]
+        );
+        assert_eq!(log.ids.len(), log.lines.len());
+        // No id, or an id with no call in the log: appended as today.
+        push_log(
+            &mut log,
+            vec!["  ⎿  orphan".into(), "  ⎿  unknown".into()],
+            vec![None, id("Z")],
+        );
+        assert_eq!(log.lines[5..], ["  ⎿  orphan", "  ⎿  unknown"]);
     }
 
     // Go agentViewLines: header, title, then the newest body rows; exactly hh rows; placeholder when empty;
@@ -490,21 +619,21 @@ mod tests {
     fn draw_is_exact_height_and_clamps_scroll() {
         let mut r = rec("a", 1, false);
         let mut v = AgentView::open("a");
-        let rows = v.lines(&r, "opus", 80, 6);
+        let rows = v.lines(&r, 80, 6, 0);
         assert_eq!(rows.len(), 6);
         assert!(rows[0].contains(HEAD));
-        assert!(rows[1].contains("실행 중-opus-worker(fix bug)"));
+        assert!(rows[1].contains("실행 중 · worker (fix bug)"));
         assert_eq!(rows[2], format!("{DIM_ON}{NO_OUTPUT}{RESET}"));
         assert_eq!(rows[3], format!("{DIM_ON}task: do it{RESET}"));
 
         r.log = (1..=10).map(|i| format!("row{i}")).collect();
         v.off = 100;
-        let rows = v.lines(&r, "opus", 80, 6);
+        let rows = v.lines(&r, 80, 6, 0);
         assert_eq!(v.off, 6, "clamped to body - room");
         assert_eq!((rows[2].as_str(), rows[5].as_str()), ("row1", "row4"));
 
         v.off = 0;
-        let rows = v.lines(&r, "opus", 80, 6);
+        let rows = v.lines(&r, 80, 6, 0);
         assert_eq!((rows[2].as_str(), rows[5].as_str()), ("row7", "row10"));
     }
 
@@ -515,14 +644,14 @@ mod tests {
         let mut r = rec("agent-zz9", 1, false);
         r.log = (1..=300).map(|i| format!("row{i}")).collect();
         let mut v = AgentView::open("agent-zz9");
-        let rows = v.lines(&r, "opus", 100, 30);
+        let rows = v.lines(&r, 100, 30, 0);
         assert_eq!(rows.len(), 30);
         assert!(rows[1].contains("worker"), "{:?}", rows[1]);
         assert!(!rows[0].contains("agent-zz9") && !rows[1].contains("agent-zz9"));
         assert_eq!((rows[2].as_str(), rows[29].as_str()), ("row273", "row300"));
 
         v.off = 10_000;
-        let rows = v.lines(&r, "opus", 100, 30);
+        let rows = v.lines(&r, 100, 30, 0);
         assert_eq!(v.off, 272, "clamped to 300 - 28");
         assert_eq!((rows[2].as_str(), rows[29].as_str()), ("row1", "row28"));
     }
@@ -533,10 +662,40 @@ mod tests {
         let mut r = rec("a", 1, false);
         r.log = vec!["abcdefghijklmnop".into()];
         let mut v = AgentView::open("a");
-        let rows = v.lines(&r, "opus", 12, 5);
+        let rows = v.lines(&r, 12, 5, 0);
         assert_eq!(
             (rows[2].as_str(), rows[3].as_str()),
             ("abcdefghij", "klmnop")
+        );
+    }
+
+    // The Ctrl+T title uses the list format: HH:MM:SS, status, type, model, task, then the elapsed time. A finished
+    // row's elapsed runs to its last_active; a running one's runs to the given now.
+    #[test]
+    fn title_uses_list_format_with_clock_and_elapsed() {
+        let done = AgentRec {
+            model: "claude-haiku-5-5".into(),
+            last_active: 1_700_000_125_000,
+            ..rec("a", 1_700_000_000_000, true)
+        };
+        let text = done.status_text(0);
+        let (clock, rest) = text.split_at(8);
+        assert!(
+            clock.chars().enumerate().all(|(i, c)| match i {
+                2 | 5 => c == ':',
+                _ => c.is_ascii_digit(),
+            }),
+            "{text}"
+        );
+        assert_eq!(rest, " 완료 · worker · haiku 5.5 (fix bug) (2m05s)");
+
+        let running = rec("b", 1_700_000_000_000, false);
+        assert!(
+            running
+                .status_text(1_700_000_065_000)
+                .ends_with(" 실행 중 · worker (fix bug) (1m05s)"),
+            "{}",
+            running.status_text(1_700_000_065_000)
         );
     }
 }

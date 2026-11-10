@@ -159,7 +159,7 @@ pub struct App {
     // Agents an earlier harness left unfinished, listed after the running rows (UiEvent::AgentsRestored).
     restored_rows: Vec<AgentRow>,
     // Agent-view log by agent tool id (UiEvent::AgentLog; Go agentRec.log, newest MAX_AGENT_LOG lines).
-    agent_logs: HashMap<String, Vec<String>>,
+    agent_logs: HashMap<String, agentview::AgentLog>,
     // Finished agents of this run by id (Go tracker keeps them): the agent view lists them as 완료/실패 with their log.
     finished_agents: HashMap<String, agentview::AgentRec>,
     // First agent row shown in the panels (Go panOff), moved by the wheel over them.
@@ -354,6 +354,7 @@ impl App {
                 | UiEvent::AgentRows { .. }
                 | UiEvent::AgentsRestored { .. }
                 | UiEvent::AgentLog { .. }
+                | UiEvent::AgentLogAt { .. }
                 | UiEvent::QueueTexts(_)
                 | UiEvent::OpusBusy(_)
                 | UiEvent::ResidentBusy { .. }
@@ -450,14 +451,22 @@ impl App {
                 }
             }
             // Go toolResultMsg: the first line cut to 160 runes, then "… (+N lines)" for the rest.
-            UiEvent::ToolResult { text, .. } => {
+            UiEvent::ToolResult { id, text } => {
                 // Go hides an agent's caveman return from the transcript (tui.go:481); None means hidden.
                 let Some(head) = render::tool_result_text(&text) else {
                     return;
                 };
-                self.transcript
-                    .push(format!("{GREY_ON}  ⎿  {head}{FG_OFF}"));
-                self.transcript.push(String::new());
+                // The result row carries its local arrival time after the lead, as the action rows do.
+                let rows = [
+                    format!("{GREY_ON}  ⎿  {} {head}{FG_OFF}", clock_hhmmss(unix_now())),
+                    String::new(),
+                ];
+                // The result sits directly under its own tool row (matched by tool id), so parallel calls keep
+                // their results; a result with no open tool row is appended.
+                match self.tool_rows.get(&id).map(|r| r.row) {
+                    Some(at) => self.insert_rows(at + 1, rows.to_vec()),
+                    None => self.transcript.extend(rows),
+                }
             }
             UiEvent::AgentBackground { id } => self.bg_agents.push(id),
             UiEvent::AgentStart {
@@ -571,6 +580,8 @@ impl App {
             UiEvent::RoleContext { role, tokens } => {
                 self.bar.role_tokens.insert(role, tokens);
             }
+            // The coder line under the input box: every live resident coder in spawn order.
+            UiEvent::CoderContexts { coders } => self.bar.coders = coders,
             // Go /view: this run's main, resident and owned session ids.
             UiEvent::SessionIds {
                 main,
@@ -728,8 +739,27 @@ impl App {
                 self.last_run = self.running_n();
             }
             UiEvent::AgentsRestored { rows } => self.restored_rows = rows,
-            UiEvent::AgentLog { id, lines } => {
-                agentview::push_log(self.agent_logs.entry(id).or_default(), lines)
+            // Core log lines carry no time, so each gets this arrival's local stamp (agentview::stamp_lines).
+            UiEvent::AgentLog {
+                id,
+                lines,
+                tool_ids,
+            } => agentview::push_log(
+                self.agent_logs.entry(id).or_default(),
+                agentview::stamp_lines(lines, &clock_hhmmss(unix_now())),
+                tool_ids,
+            ),
+            // Restored log lines keep the second they arrived (SavedLine.at); 0 means unknown, so the restore time.
+            UiEvent::AgentLogAt { id, lines } => {
+                let log = self.agent_logs.entry(id).or_default();
+                for l in lines {
+                    let at = if l.at == 0 { unix_now() } else { l.at as i64 };
+                    agentview::push_log(
+                        log,
+                        agentview::stamp_lines(vec![l.text], &clock_hhmmss(at)),
+                        Vec::new(),
+                    );
+                }
             }
             // The engine drains the queue into the next turn (core next_turn: one merged prompt, joined by a blank line).
             // That is the moment a queued prompt is sent, so it is echoed here, once, and becomes the turn's label.
@@ -766,6 +796,8 @@ impl App {
                         },
                         background: false,
                         done: false,
+                        failed: false,
+                        interrupted: false,
                         last_active: 0,
                         agent_id: String::new(),
                         result_path: String::new(),
@@ -787,7 +819,8 @@ impl App {
 
     // True while something changes with time (spinner, elapsed clock, copy note). The loop wakes every TICK only then.
     pub fn animating(&self) -> bool {
-        self.busy || self.copy_note.is_some()
+        // A running agent's elapsed time ticks in the panel and the Ctrl+T view, so its loop keeps waking too.
+        self.busy || self.copy_note.is_some() || self.agent_rows.iter().any(|r| !r.done)
     }
 
     // Hands the TUI the engine's agent list. The tick re-reads it (Go tick: m.r.tracker.running()).
@@ -1383,21 +1416,36 @@ impl App {
 
     // Body rows of the open /settings, /resume or /view picker (same geometry as /usage). None when none is open.
     // Running agents as the agent view sees them (Go tracker). The name is the description, never the id.
+    // The lines of one agent's live log (empty when it has none yet).
+    fn agent_log_lines(&self, id: &str) -> Vec<String> {
+        self.agent_logs
+            .get(id)
+            .map(|l| l.lines.clone())
+            .unwrap_or_default()
+    }
+
     fn agent_recs(&self) -> Vec<agentview::AgentRec> {
         let mut recs: Vec<agentview::AgentRec> = self
             .agents
             .iter()
-            .map(|(id, desc, _, started_at)| agentview::AgentRec {
-                id: id.clone(),
-                task: desc.clone(),
-                name: desc.clone(),
-                started: true,
-                started_at: *started_at,
-                log: self.agent_logs.get(id).cloned().unwrap_or_default(),
-                ..Default::default()
+            .map(|(id, desc, _, started_at)| {
+                // Type and model are the panel row's (core AgentRow: name = name else subagent_type); the
+                // description is only the task.
+                let row = self.agent_rows.iter().find(|r| r.id == *id);
+                agentview::AgentRec {
+                    id: id.clone(),
+                    task: desc.clone(),
+                    name: row.map(|r| r.name.clone()).unwrap_or_default(),
+                    model: row.map(|r| r.model.clone()).unwrap_or_default(),
+                    started: true,
+                    started_at: *started_at,
+                    log: self.agent_log_lines(id),
+                    ..Default::default()
+                }
             })
             .collect();
-        // Restored rows are finished and interrupted; they open in the view like running agents.
+        // Restored rows are finished (interrupted or failed when their saved status says so); they open in the view
+        // like running agents.
         recs.extend(
             self.restored_rows
                 .iter()
@@ -1409,29 +1457,35 @@ impl App {
                     model: r.model.clone(),
                     name: r.name.clone(),
                     done: true,
-                    interrupted: true,
+                    failed: r.failed,
+                    interrupted: r.interrupted,
                     started: true,
                     started_at: r.started_at * 1000,
-                    log: self.agent_logs.get(&r.id).cloned().unwrap_or_default(),
-                    ..Default::default()
+                    last_active: r.last_active * 1000,
+                    log: self.agent_log_lines(&r.id),
                 }),
         );
-        // A finished agent leaves the list (it returns only through a SendMessage resume).
+        // Agents finished in this session stay listed (Ctrl+T) until the session ends; a SendMessage resume
+        // moves them back to running (AgentResumed drops the finished record).
+        recs.extend(
+            self.finished_agents
+                .iter()
+                .filter(|(id, _)| {
+                    self.agents.iter().all(|(aid, _, _, _)| aid != *id)
+                        && self.restored_rows.iter().all(|r| r.id != **id)
+                })
+                .map(|(id, r)| agentview::AgentRec {
+                    log: self.agent_log_lines(id),
+                    ..r.clone()
+                }),
+        );
         agentview::sort_all(&mut recs);
         recs
     }
 
-    // The record the open agent view shows: a listed agent, else a finished one kept open (its pane stays open).
+    // The record the open agent view shows (a listed agent, including finished ones from this session).
     fn view_rec(&self, id: &str) -> Option<agentview::AgentRec> {
-        self.agent_recs()
-            .into_iter()
-            .find(|r| r.id == id)
-            .or_else(|| {
-                self.finished_agents.get(id).map(|r| agentview::AgentRec {
-                    log: self.agent_logs.get(id).cloned().unwrap_or_default(),
-                    ..r.clone()
-                })
-            })
+        self.agent_recs().into_iter().find(|r| r.id == id)
     }
 
     fn overlay_lines(&self, width: usize, h: usize) -> Option<Vec<String>> {
@@ -1445,7 +1499,7 @@ impl App {
         }
         if let Some(av) = &self.av {
             let rec = self.view_rec(&av.id).unwrap_or_default();
-            let mut lines = av.clone().lines(&rec, &self.bar.model, width, h);
+            let mut lines = av.clone().lines(&rec, width, h, unix_now() as u64 * 1000);
             // Window rows take the selection by the same absolute row index as the main body.
             let start = self.start_row(self.body(width).len(), h);
             for (i, row) in lines.iter_mut().skip(agentview::HEAD_ROWS).enumerate() {
@@ -1539,13 +1593,15 @@ impl App {
         let started_at = start.map_or(0, |(_, _, _, started_at)| *started_at);
         let rec = agentview::AgentRec {
             id: id.to_string(),
-            task: desc.clone(),
-            name: desc,
+            task: desc,
+            // AgentEnd's name is the Go agentRec name (name input, else subagent_type), not the description.
+            name: name.to_string(),
             model: model.to_string(),
             failed,
             done: true,
             started: true,
             started_at,
+            last_active: unix_now() as u64 * 1000,
             ..Default::default()
         };
         self.finished_agents.insert(id.to_string(), rec);
@@ -1579,6 +1635,52 @@ impl App {
         self.link_from(at);
         self.transcript.push(String::new());
         self.follow_tail();
+    }
+
+    // Inserts rows at transcript index `at` and shifts every index-keyed row record at or below it.
+    fn insert_rows(&mut self, at: usize, rows: Vec<String>) {
+        // Off the agent pane, the body rows above the insert keep their place: the view and selection below it move
+        // by the rows that wrapped in (the view when it is held above the tail).
+        let anchor =
+            (!self.av_shown()).then(|| (self.transcript_row_start(at), self.total_rows(self.cols)));
+        let n = rows.len();
+        self.transcript.splice(at..at, rows);
+        let shift = |i: usize| if i >= at { i + n } else { i };
+        for r in self
+            .tool_rows
+            .values_mut()
+            .chain(self.resume_rows.values_mut())
+        {
+            r.row = shift(r.row);
+        }
+        for r in self.stage_rows.values_mut() {
+            r.row = shift(r.row);
+        }
+        for p in self.prompts.iter_mut() {
+            p.0 = shift(p.0);
+        }
+        self.wide = self.wide.iter().map(|&i| shift(i)).collect();
+        self.linked = self.linked.iter().map(|&i| shift(i)).collect();
+        if let Some((start, before)) = anchor {
+            let grown = self.total_rows(self.cols).saturating_sub(before);
+            if !self.follow && start <= self.top {
+                self.top += grown;
+            }
+            for pos in [&mut self.sel.anchor, &mut self.sel.head] {
+                if pos.line >= start {
+                    pos.line += grown;
+                }
+            }
+        }
+    }
+
+    // Body row where transcript row `at` starts, welcome rows first. Refreshes the wrap cache of every transcript row.
+    fn transcript_row_start(&self, at: usize) -> usize {
+        let width = text_width(self.cols);
+        self.body(width);
+        let head = self.welcome_rows(width + 1).len();
+        let cache = self.wraps.borrow();
+        head + cache.rows[..at].iter().map(|r| r.1.len()).sum::<usize>()
     }
 
     // Marks the rows pushed since `at` as assistant or user rows, whose links body() styles.
@@ -1708,6 +1810,9 @@ impl App {
         }
         chrome.extend(self.queue_lines(w, h));
         chrome.extend(self.input_box(w));
+        if let Some(line) = bar::coder_line(&bi.coders, width) {
+            chrome.push(format!("{GREY_ON}{line}{FG_OFF}"));
+        }
         chrome.extend(fg);
         chrome.extend(bg);
         chrome.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&status, width)));
@@ -1718,7 +1823,9 @@ impl App {
     // Go queueLines (tui.go:929-945): waiting prompts above the input box, oldest first, dim. Past the cap the
     // last row becomes "… +N 대기" with the count still waiting. The transcript keeps MIN_VIEW_ROWS.
     fn queue_lines(&self, w: usize, h: usize) -> Vec<String> {
-        let room = h.saturating_sub(self.input_height(w) + 3 + self.popup_h() + MIN_VIEW_ROWS);
+        let room = h.saturating_sub(
+            self.input_height(w) + 3 + self.coder_h() + self.popup_h() + MIN_VIEW_ROWS,
+        );
         let max_show = MAX_QUEUE_ROWS.min(room);
         if max_show == 0 {
             return Vec::new();
@@ -1774,7 +1881,13 @@ impl App {
             return (Vec::new(), 0, 0);
         }
         let room = h.saturating_sub(
-            self.input_height(w) + 3 + queue_h + self.popup_h() + MIN_VIEW_ROWS + used,
+            self.input_height(w)
+                + 3
+                + self.coder_h()
+                + queue_h
+                + self.popup_h()
+                + MIN_VIEW_ROWS
+                + used,
         );
         let limit = MAX_PANEL_ROWS.min(room);
         if limit == 0 {
@@ -1806,10 +1919,7 @@ impl App {
             return Vec::new();
         }
         let width = text_width(w);
-        let mut out: Vec<String> = shown
-            .iter()
-            .map(|r| agent_row_line(r, &self.bar.model, width))
-            .collect();
+        let mut out: Vec<String> = shown.iter().map(|r| agent_row_line(r, width)).collect();
         if total > shown.len() {
             out.push(format!(
                 "{GREY_ON}{}{FG_OFF}",
@@ -2204,6 +2314,11 @@ impl App {
         (rows, cur.0, cur.1)
     }
 
+    // One row for the coder line under the input box, when a resident coder is live.
+    fn coder_h(&self) -> usize {
+        usize::from(self.bar.coders.iter().any(|c| c.tokens > 0))
+    }
+
     // Visual rows the input box shows: at least 1, at most MAX_INPUT_ROWS.
     fn input_height(&self, w: usize) -> usize {
         let inner = w.saturating_sub(2).max(1);
@@ -2582,28 +2697,45 @@ fn text_width(w: usize) -> usize {
 // Silence after which a running agent row says it may be stalled (10 minutes).
 const STALL_SECS: u64 = 600;
 
-// One agent panel row (Go rowsA): "  ● 상태-모델-이름(작업)" with the dot in Go's running colour (220). Only running
-// agents reach the panel, so the state is always 실행 중. The model falls back to the session model; the summary is
-// the task, else the first prompt line.
-fn agent_row_line(r: &AgentRow, session_model: &str, width: usize) -> String {
+// One agent panel row: "  ● HH:MM:SS 상태 · 이름 · 모델 (작업) (경과)" with the dot in Go's running colour (220). The model is the
+// agent's own (never the session's); the summary is the task, else the first prompt line.
+fn agent_row_line(r: &AgentRow, width: usize) -> String {
     let summary = if r.task.is_empty() {
         &r.prompt
     } else {
         &r.task
     };
-    // Finished rows here are restored ones (AgentsRestored), which were interrupted.
-    let state = if r.done {
+    // Finished rows here are restored ones (AgentsRestored): their saved status decides the label, and their model is
+    // the saved one only (never the current session's model, which they did not run on).
+    let state = if r.failed {
+        bar::AgentState::Failed
+    } else if r.interrupted {
         bar::AgentState::Interrupted
+    } else if r.done {
+        bar::AgentState::Done
     } else {
         bar::AgentState::Running
     };
-    let mut text = bar::agent_status_text(state, &r.model, session_model, &r.name, summary);
+    let mut text = bar::agent_status_text(state, &r.model, &r.name, summary);
+    // Elapsed after the status: a running agent runs to now, a restored one to its last activity (when known).
+    let end = if matches!(state, bar::AgentState::Running) {
+        unix_now() as u64
+    } else {
+        r.last_active
+    };
+    if r.started_at > 0 && end > r.started_at {
+        text.push_str(&format!(" ({})", bar::fmt_secs(end - r.started_at)));
+    }
     // Display only: a running agent with no output or tool activity for STALL_SECS is flagged with its silence.
     if matches!(state, bar::AgentState::Running) && r.last_active > 0 {
         let silent = (unix_now() as u64).saturating_sub(r.last_active);
         if silent >= STALL_SECS {
             text.push_str(&format!(" · 멈췄을 수 있음 {}분 무응답", silent / 60));
         }
+    }
+    // The local start time leads the row, so clipping at a narrow width cuts the end first.
+    if r.started_at > 0 {
+        text = format!("{} {text}", clock_hhmmss(r.started_at as i64));
     }
     // Go tui.go:1494: only the dot is coloured (agentDot: running 220, interrupted 208); the text is dimSt grey.
     let dot_on = match state {
@@ -3511,13 +3643,13 @@ mod tests {
     use super::*;
     use crossterm::event::KeyEventState;
 
-    // Drop the "HH:MM:SS " start stamp after an action row's lead ("● " / "· ") and any " → HH:MM:SS (..)" end.
+    // Drop the "HH:MM:SS " start stamp after an action row's lead ("● " / "· " / result "  ⎿  ") and any " → HH:MM:SS (..)" end.
     fn untime(row: &str) -> String {
         let mut plain = render::strip_sgr(row);
         if let Some(i) = plain.find(" → ") {
             plain.truncate(i);
         }
-        for lead in ["● ", "· "] {
+        for lead in ["● ", "· ", "  ⎿  ", ""] {
             if let Some(rest) = plain.strip_prefix(lead) {
                 let b = rest.as_bytes();
                 if b.len() >= 9 && b[2] == b':' && b[5] == b':' && b[8] == b' ' {
@@ -3610,6 +3742,11 @@ mod tests {
                 out
             })
             .collect()
+    }
+
+    // An agent record's log with the arrival stamp removed.
+    fn untimed_log(rec: &agentview::AgentRec) -> Vec<String> {
+        rec.log.iter().map(|l| untime(l)).collect()
     }
 
     // The idle status row clipped to the text width (w - 1 columns).
@@ -3813,6 +3950,8 @@ mod tests {
             model: "haiku-4".into(),
             background,
             done,
+            failed: false,
+            interrupted: false,
             agent_id: String::new(),
             result_path: String::new(),
             started_at: 0,
@@ -3929,11 +4068,11 @@ mod tests {
         });
         let rows = plain_frame(&app, 60, 20);
         let top = box_top(&rows);
-        let fg = rows.iter().position(|r| r.contains("실행 중-")).unwrap();
+        let fg = rows.iter().position(|r| r.contains("실행 중 · ")).unwrap();
         // Bottom border is top+2 and the status row is last, so the agent row sits between them.
         assert_eq!(fg, top + 3, "{rows:?}");
-        assert_eq!(rows[fg], "  ● 실행 중-haiku-4-scout(task a)");
-        assert_eq!(rows.iter().filter(|r| r.contains("실행 중-")).count(), 1);
+        assert_eq!(rows[fg], "  ● 실행 중 · scout · haiku 4 (task a)");
+        assert_eq!(rows.iter().filter(|r| r.contains("실행 중 · ")).count(), 1);
         assert!(!rows.iter().any(|r| r.contains("task d")));
     }
 
@@ -3944,29 +4083,147 @@ mod tests {
             rows: vec![agent_row("a", false, false)],
         });
         app.apply(UiEvent::AgentsRestored {
-            rows: vec![agent_row("r", false, true)],
+            rows: vec![AgentRow {
+                interrupted: true,
+                ..agent_row("r", false, true)
+            }],
         });
         let rows = plain_frame(&app, 60, 20);
         let run = rows.iter().position(|r| r.contains("task a")).unwrap();
         let rest = rows.iter().position(|r| r.contains("task r")).unwrap();
         assert_eq!(rest, run + 1, "{rows:?}");
-        assert!(rows[rest].contains("중단-"), "{rows:?}");
+        assert!(rows[rest].contains("중단 · "), "{rows:?}");
         app.apply(UiEvent::AgentsRestored { rows: Vec::new() });
         let rows = plain_frame(&app, 60, 20);
         assert!(!rows.iter().any(|r| r.contains("task r")), "{rows:?}");
+    }
+
+    // Restored log lines are stamped with the second they first arrived, not with the restore time.
+    #[test]
+    fn restored_log_lines_keep_their_stored_arrival_time() {
+        let mut app = App::new(80, 24);
+        let (first, last) = (1_700_000_010_i64, 1_700_000_090_i64);
+        app.apply(UiEvent::AgentLogAt {
+            id: "r".to_string(),
+            lines: vec![
+                chaude_core::agent_store::SavedLine {
+                    at: first as u64,
+                    text: "first".to_string(),
+                },
+                chaude_core::agent_store::SavedLine {
+                    at: last as u64,
+                    text: "last".to_string(),
+                },
+            ],
+        });
+        assert_eq!(
+            app.agent_log_lines("r"),
+            vec![
+                format!("{} first", clock_hhmmss(first)),
+                format!("{} last", clock_hhmmss(last)),
+            ]
+        );
     }
 
     #[test]
     fn restored_row_opens_in_the_agent_view() {
         let mut app = App::new(80, 24);
         app.apply(UiEvent::AgentsRestored {
-            rows: vec![agent_row("r", false, true)],
+            rows: vec![AgentRow {
+                interrupted: true,
+                ..agent_row("r", false, true)
+            }],
         });
         let recs = app.agent_recs();
         let rec = recs.iter().find(|r| r.id == "r").expect("restored agent");
         assert!(rec.done && rec.interrupted, "{rec:?}");
         let av = agentview::AgentView::open_first(&recs).expect("restored agent opens");
         assert_eq!(av.id, "r");
+    }
+
+    // The agent panel rows only (the welcome box above them also names the session model).
+    fn restored_panel(app: &App) -> Vec<String> {
+        let (fg, bg) = app.panel_lines(120, 20);
+        fg.iter()
+            .chain(bg.iter())
+            .map(|r| render::strip_sgr(r))
+            .collect()
+    }
+    // A restored done agent keeps its done status and its saved model (not the session model).
+    #[test]
+    fn restored_done_row_shows_done_with_saved_model() {
+        let mut app = App::new(60, 20);
+        app.bar.model = "opus".to_string();
+        app.apply(UiEvent::AgentsRestored {
+            rows: vec![agent_row("r", false, true)],
+        });
+        let rows = restored_panel(&app);
+        assert!(
+            rows.iter().any(|r| r.contains("완료 · scout · haiku 4 (")),
+            "{rows:?}"
+        );
+        assert!(!rows.iter().any(|r| r.contains("중단")), "{rows:?}");
+        assert!(!rows.iter().any(|r| r.contains("opus")), "{rows:?}");
+    }
+
+    // A restored interrupted (or still running at shutdown) agent shows 중단 with its real model.
+    #[test]
+    fn restored_interrupted_row_keeps_saved_model() {
+        let mut app = App::new(60, 20);
+        app.bar.model = "opus".to_string();
+        app.apply(UiEvent::AgentsRestored {
+            rows: vec![AgentRow {
+                interrupted: true,
+                ..agent_row("r", false, true)
+            }],
+        });
+        let rows = restored_panel(&app);
+        assert!(
+            rows.iter().any(|r| r.contains("중단 · scout · haiku 4 (")),
+            "{rows:?}"
+        );
+    }
+
+    // A restored failed agent shows 실패 with its saved model.
+    #[test]
+    fn restored_failed_row_shows_failed() {
+        let mut app = App::new(60, 20);
+        app.apply(UiEvent::AgentsRestored {
+            rows: vec![AgentRow {
+                failed: true,
+                ..agent_row("r", false, true)
+            }],
+        });
+        let rows = restored_panel(&app);
+        assert!(
+            rows.iter().any(|r| r.contains("실패 · scout · haiku 4 (")),
+            "{rows:?}"
+        );
+    }
+
+    // An unknown model is omitted from the label: no placeholder segment.
+    #[test]
+    fn restored_row_without_model_omits_model_segment() {
+        let mut app = App::new(60, 20);
+        app.bar.model = "opus".to_string();
+        app.apply(UiEvent::AgentsRestored {
+            rows: vec![AgentRow {
+                model: String::new(),
+                interrupted: true,
+                ..agent_row("r", false, true)
+            }],
+        });
+        let rows = restored_panel(&app);
+        assert!(
+            rows.iter().any(|r| r.contains("중단 · scout (")),
+            "{rows:?}"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|r| r.contains("opus") || r.contains("모델")),
+            "{rows:?}"
+        );
     }
 
     // AgentRow.started_at is Unix seconds (api.rs restored_row); AgentRec.started_at is ms.
@@ -3992,10 +4249,10 @@ mod tests {
             last_active: now - 700,
             ..agent_row("st", false, false)
         };
-        let line = agent_row_line(&row, "sonnet", 200);
+        let line = agent_row_line(&row, 200);
         assert!(line.contains("멈췄을 수 있음 11분 무응답"), "{line}");
         row.last_active = now - 60;
-        let line = agent_row_line(&row, "sonnet", 200);
+        let line = agent_row_line(&row, 200);
         assert!(!line.contains("멈췄을 수 있음"), "{line}");
     }
 
@@ -4011,6 +4268,7 @@ mod tests {
         app.apply(UiEvent::AgentLog {
             id: "f1".into(),
             lines: vec!["step one".into()],
+            tool_ids: Vec::new(),
         });
         app.apply(UiEvent::AgentEnd {
             id: "f1".into(),
@@ -4020,8 +4278,12 @@ mod tests {
             summary: "done".into(),
         });
         assert!(app.agents.iter().all(|(id, _, _, _)| id != "f1"));
-        // (a) done: removed from the agent list.
-        assert!(app.agent_recs().iter().all(|r| r.id != "f1"));
+        // (a) done: stays listed for the session as a finished row.
+        assert!(
+            app.agent_recs().iter().any(|r| r.id == "f1" && r.done),
+            "{:?}",
+            app.agent_recs()
+        );
         // (c) the pane opened before the finish stays open, with its done record and log.
         app.av = Some(agentview::AgentView::open("f1"));
         app.apply(UiEvent::AgentEnd {
@@ -4034,13 +4296,88 @@ mod tests {
         let rec = app.view_rec("f1").expect("finished agent viewable");
         assert!(rec.done && !rec.failed, "{rec:?}");
         assert_eq!(rec.state(), bar::AgentState::Done, "{rec:?}");
-        assert_eq!(rec.log, vec!["step one".to_string()], "{rec:?}");
+        assert_eq!(untimed_log(&rec), vec!["step one".to_string()], "{rec:?}");
         assert_eq!(app.av.as_ref().map(|v| v.id.as_str()), Some("f1"));
         let lines = app.overlay_lines(80, 24).expect("pane open");
         assert!(lines.iter().any(|l| l.contains("step one")), "{lines:?}");
     }
 
-    // (b) SendMessage resume: the agent reappears as running; its next finish hides it again.
+    // Item 3: a short agent that finished in this session is still reachable from Ctrl+T (no "no agents yet").
+    #[test]
+    fn finished_in_session_agent_opens_from_ctrl_t() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "q1".into(),
+            description: "quick check".into(),
+            started_at: 1_700_000_000,
+        });
+        app.apply(UiEvent::AgentEnd {
+            id: "q1".into(),
+            elapsed_ms: 900,
+            model: "claude-haiku-5-5".into(),
+            name: "quick check".into(),
+            summary: "ok".into(),
+        });
+        let recs = app.agent_recs();
+        assert!(recs.iter().any(|r| r.id == "q1" && r.done), "{recs:?}");
+        let view =
+            agentview::AgentView::open_first(&recs).expect("Ctrl+T opens the finished agent");
+        assert_eq!(view.id, "q1");
+    }
+
+    // The Ctrl+T row takes its type and model from the agent's panel row (core AgentRow: name = subagent_type, model
+    // from its type prefix), never from the description. A finished row keeps the AgentEnd name and model.
+    #[test]
+    fn ctrl_t_row_takes_type_and_model_not_description() {
+        let now_ms = 1_700_000_008_000;
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "toolu_slow1".into(),
+            description: "SLOW agent sleep 100".into(),
+            started_at: 1_700_000_000,
+        });
+        app.apply(UiEvent::AgentRows {
+            rows: vec![AgentRow {
+                task: "SLOW agent sleep 100".into(),
+                name: "haiku-runner".into(),
+                model: "haiku".into(),
+                started_at: 1_700_000_000,
+                last_active: 1_700_000_000,
+                ..agent_row("toolu_slow1", true, false)
+            }],
+        });
+        let recs = app.agent_recs();
+        let rec = recs
+            .iter()
+            .find(|r| r.id == "toolu_slow1")
+            .expect("running agent listed");
+        let text = rec.status_text(now_ms);
+        assert!(
+            text.ends_with(" 실행 중 · haiku-runner · haiku (SLOW agent sleep 100) (8s)"),
+            "{text}"
+        );
+
+        app.apply(UiEvent::AgentEnd {
+            id: "toolu_slow1".into(),
+            elapsed_ms: 8000,
+            model: "haiku".into(),
+            name: "haiku-runner".into(),
+            summary: "SLOW-DONE".into(),
+        });
+        let recs = app.agent_recs();
+        let rec = recs
+            .iter()
+            .find(|r| r.id == "toolu_slow1")
+            .expect("finished agent listed");
+        // The finished row's elapsed runs to AgentEnd's wall-clock time, so only the type, model and task are pinned.
+        let text = rec.status_text(now_ms);
+        assert!(
+            text.contains(" 완료 · haiku-runner · haiku (SLOW agent sleep 100) ("),
+            "{text}"
+        );
+    }
+
+    // (b) SendMessage resume: the agent reappears as running (once, not twice); its next finish lists it done again.
     #[test]
     fn resumed_agent_reappears_running_then_hidden_after_done() {
         let mut app = App::new(80, 24);
@@ -4056,7 +4393,7 @@ mod tests {
             name: "worker".into(),
             summary: "first".into(),
         });
-        assert!(app.agent_recs().iter().all(|r| r.id != "r1"));
+        assert!(app.agent_recs().iter().any(|r| r.id == "r1" && r.done));
         app.apply(UiEvent::AgentResumed {
             id: "r1".into(),
             description: "worker".into(),
@@ -4075,7 +4412,13 @@ mod tests {
             name: "worker".into(),
             summary: "second".into(),
         });
-        assert!(app.agent_recs().iter().all(|r| r.id != "r1"));
+        let after = app.agent_recs();
+        assert_eq!(
+            after.iter().filter(|r| r.id == "r1").count(),
+            1,
+            "{after:?}"
+        );
+        assert!(after.iter().any(|r| r.id == "r1" && r.done), "{after:?}");
     }
 
     // (d) a resumed agent's open pane shows only the new turn; the earlier turn is dropped.
@@ -4090,6 +4433,7 @@ mod tests {
         app.apply(UiEvent::AgentLog {
             id: "t1".into(),
             lines: vec!["turn one".into()],
+            tool_ids: Vec::new(),
         });
         app.apply(UiEvent::AgentEnd {
             id: "t1".into(),
@@ -4108,9 +4452,10 @@ mod tests {
         app.apply(UiEvent::AgentLog {
             id: "t1".into(),
             lines: vec!["turn two".into()],
+            tool_ids: Vec::new(),
         });
         let rec = app.view_rec("t1").expect("resumed agent viewable");
-        assert_eq!(rec.log, vec!["turn two".to_string()], "{rec:?}");
+        assert_eq!(untimed_log(&rec), vec!["turn two".to_string()], "{rec:?}");
     }
 
     // Real SendMessage resume of an agent launched outside this run (fixture resume_unknown_launch_sendmessage.jsonl):
@@ -4159,8 +4504,8 @@ mod tests {
             name: label.into(),
             summary: "done".into(),
         });
-        // Ended: out of the list; its done record stays for an open view.
-        assert!(app.agent_recs().iter().all(|r| r.id != agent));
+        // Ended: listed as a finished row; the same record serves an open view.
+        assert!(app.agent_recs().iter().any(|r| r.id == agent && r.done));
         let rec = app.view_rec(agent).expect("ended agent kept for view");
         assert!(rec.done, "{rec:?}");
     }
@@ -4187,7 +4532,7 @@ mod tests {
         app.apply(UiEvent::AgentRows { rows: rows_in });
         let rows = plain_frame(&app, 60, 20);
         // Go maxPanel is 4: three agent rows and the "1-3/5" indicator row.
-        assert_eq!(rows.iter().filter(|r| r.contains("실행 중-")).count(), 3);
+        assert_eq!(rows.iter().filter(|r| r.contains("실행 중 · ")).count(), 3);
         let more = rows.iter().position(|r| r.contains("1-3/5")).unwrap();
         assert_eq!(rows[more], "  … 1-3/5 (마우스 휠로 스크롤)");
     }
@@ -4259,7 +4604,7 @@ mod tests {
         assert_eq!(bg.len(), 1, "{bg:?}");
         assert!(bg[0].contains("●"), "{bg:?}");
         assert!(
-            render::strip_sgr(&bg[0]).contains("실행 중-haiku-fixer(버그 수정)"),
+            render::strip_sgr(&bg[0]).contains("실행 중 · fixer · haiku (버그 수정)"),
             "{bg:?}"
         );
     }
@@ -4309,7 +4654,7 @@ mod tests {
         // Too short for any panel: only the input box and the status row are left.
         let tiny = plain_frame(&app, 60, 6);
         assert!(queue_rows(&tiny).is_empty());
-        assert!(!tiny.iter().any(|r| r.contains("실행 중-")));
+        assert!(!tiny.iter().any(|r| r.contains("실행 중 · ")));
     }
 
     // Go panelWheel (tui.go:541-567): a wheel notch over the panels moves the shared panel window one row.
@@ -4322,7 +4667,7 @@ mod tests {
                 .collect(),
         });
         let rows = plain_frame(&app, 60, 20);
-        let first = rows.iter().position(|r| r.contains("실행 중-")).unwrap();
+        let first = rows.iter().position(|r| r.contains("실행 중 · ")).unwrap();
         assert!(app.overlay_wheel(false, first));
         assert_eq!(app.pan_off, 1);
         let rows = plain_frame(&app, 60, 20);
@@ -4392,7 +4737,7 @@ mod tests {
         assert!(
             !plain_frame(&app, 9, 20)
                 .iter()
-                .any(|r| r.contains("실행 중-"))
+                .any(|r| r.contains("실행 중 · "))
         );
     }
 
@@ -4739,6 +5084,142 @@ mod tests {
             rows,
             vec!["● hi", "", "● Agent(scan repo)", "  ⎿  done", ""]
         );
+    }
+
+    // Parallel tool calls: each result renders under its own call, even when the results come back reversed.
+    #[test]
+    fn parallel_tool_results_sit_under_their_calls() {
+        let mut app = App::new(40, 12);
+        for (id, cmd) in [("t1", "ls"), ("t2", "cat")] {
+            app.apply(UiEvent::ToolStart {
+                id: id.into(),
+                name: "Bash".into(),
+                summary: cmd.into(),
+            });
+        }
+        app.apply(UiEvent::ToolResult {
+            id: "t2".into(),
+            text: "cat out".into(),
+        });
+        app.apply(UiEvent::ToolResult {
+            id: "t1".into(),
+            text: "ls out".into(),
+        });
+        let rows: Vec<String> = app.transcript.iter().map(|l| untime(l)).collect();
+        assert_eq!(
+            rows,
+            vec![
+                "● Bash(ls)",
+                "  ⎿  ls out",
+                "",
+                "● Bash(cat)",
+                "  ⎿  cat out",
+                "",
+            ]
+        );
+        let shown = screen(&app, 40, 12);
+        let at = shown
+            .iter()
+            .position(|r| r.contains("Bash(ls)"))
+            .expect("ls call shown");
+        assert!(
+            shown[at + 1].contains("⎿") && shown[at + 1].ends_with("ls out"),
+            "ls result under ls call: {shown:?}"
+        );
+    }
+
+    // A result that arrives after a third call started still lands under its own call, and the rows below
+    // it (the later call) move down without losing their tool row.
+    #[test]
+    fn late_tool_result_is_inserted_under_its_call() {
+        let mut app = App::new(40, 12);
+        for (id, cmd) in [("t1", "ls"), ("t2", "cat")] {
+            app.apply(UiEvent::ToolStart {
+                id: id.into(),
+                name: "Bash".into(),
+                summary: cmd.into(),
+            });
+        }
+        app.apply(UiEvent::ToolStart {
+            id: "t3".into(),
+            name: "Read".into(),
+            summary: "x".into(),
+        });
+        app.apply(UiEvent::ToolResult {
+            id: "t1".into(),
+            text: "ls out".into(),
+        });
+        app.apply(UiEvent::ToolResult {
+            id: "t2".into(),
+            text: "cat out".into(),
+        });
+        let rows: Vec<String> = app.transcript.iter().map(|l| untime(l)).collect();
+        assert_eq!(
+            rows,
+            vec![
+                "● Bash(ls)",
+                "  ⎿  ls out",
+                "",
+                "● Bash(cat)",
+                "  ⎿  cat out",
+                "",
+                "● Read(x)",
+            ]
+        );
+        // The third call's tool row followed the shift, so its own later result still finds it.
+        app.apply(UiEvent::ToolResult {
+            id: "t3".into(),
+            text: "x out".into(),
+        });
+        assert_eq!(untime(app.transcript.last().unwrap()), "");
+        assert_eq!(untime(&app.transcript[7]), "  ⎿  x out");
+    }
+
+    // A result inserted above a view held up the transcript keeps the visible rows and the selection on their text:
+    // the view and the selection move down by the two inserted rows (result and blank).
+    #[test]
+    fn tool_result_above_a_held_view_keeps_rows_and_selection() {
+        let mut app = App::new(30, 6);
+        app.transcript.push("head".to_string());
+        app.apply(UiEvent::ToolStart {
+            id: "t1".into(),
+            name: "Bash".into(),
+            summary: "ls".into(),
+        });
+        for i in 0..30 {
+            app.transcript.push(format!("line {i}"));
+        }
+        app.scroll_to(20);
+        assert!(!app.follow, "the view must be held above the tail");
+        let width = text_width(app.cols);
+        let before = app.body(width);
+        let top = app.top;
+        let visible: Vec<String> = before[top..top + 3].to_vec();
+        app.sel = render::TextSel {
+            set: true,
+            anchor: render::TextPos {
+                line: top + 1,
+                col: 0,
+            },
+            head: render::TextPos {
+                line: top + 2,
+                col: 2,
+            },
+        };
+        app.apply(UiEvent::ToolResult {
+            id: "t1".into(),
+            text: "ls out".into(),
+        });
+        let after = app.body(width);
+        assert_eq!(app.top, top + 2, "the view moves with its rows");
+        assert_eq!(
+            after[app.top..app.top + 3],
+            visible[..],
+            "visible rows stay on their text"
+        );
+        assert_eq!(app.sel.anchor.line, top + 3, "anchor follows its row");
+        assert_eq!(app.sel.head.line, top + 4, "head follows its row");
+        assert!(!app.follow, "a held view stays held");
     }
 
     // Go indent (tui.go:353-378): wrapped rows of a block line up under its text after the lead; a plain note
@@ -5127,6 +5608,46 @@ mod tests {
     }
 
     #[test]
+    fn coder_contexts_show_a_line_under_the_input_box_only_while_coders_live() {
+        use chaude_core::api::CoderContext;
+        let mut app = App::new(80, 24);
+        let line = "C1 12k/80k";
+        assert!(
+            !app.chrome(80, 24).iter().any(|r| r.contains("C1 ")),
+            "no coder line without a live coder"
+        );
+        app.apply(UiEvent::CoderContexts {
+            coders: vec![
+                CoderContext {
+                    slot: 1,
+                    tokens: 12_000,
+                    limit: 80_000,
+                },
+                CoderContext {
+                    slot: 2,
+                    tokens: 0,
+                    limit: 80_000,
+                },
+            ],
+        });
+        let rows = app.chrome(80, 24);
+        let at = rows
+            .iter()
+            .position(|r| r.contains(line))
+            .expect("coder line rendered");
+        let input_bottom = rows
+            .iter()
+            .rposition(|r| r.contains('╰'))
+            .expect("input box bottom border");
+        assert_eq!(at, input_bottom + 1, "coder line sits under the input box");
+        app.apply(UiEvent::CoderContexts { coders: vec![] });
+        assert!(
+            !app.chrome(80, 24).iter().any(|r| r.contains(line)),
+            "line hides when the last coder exits"
+        );
+    }
+
+    #[test]
     fn role_context_fills_the_bar_and_session_ids_join_this_run() {
         let mut app = App::new(80, 24);
         app.apply(UiEvent::RoleContext {
@@ -5328,13 +5849,16 @@ mod tests {
             run[0]
         );
         assert!(
-            run[0].contains(&format!("{GREY_ON} 실행 중-haiku-fixer")),
+            run[0].contains(&format!("{GREY_ON} 실행 중 · fixer · haiku")),
             "{:?}",
             run[0]
         );
 
         let mut app = App::new(120, 20);
-        let finished = agent_row("r1", true, true);
+        let finished = AgentRow {
+            interrupted: true,
+            ..agent_row("r1", true, true)
+        };
         app.apply(UiEvent::AgentsRestored {
             rows: vec![finished],
         });
@@ -5360,7 +5884,7 @@ mod tests {
     // An AgentEnd for an agent this run has no start row for (synthetic fixture): not in the list, but its
     // done record is kept for an open view.
     #[test]
-    fn agent_end_without_local_start_is_hidden_but_viewable() {
+    fn agent_end_without_local_start_is_listed_and_viewable() {
         let mut app = App::new(80, 24);
         app.apply(UiEvent::AgentEnd {
             id: "x9".to_string(),
@@ -5369,9 +5893,217 @@ mod tests {
             name: "scanner".to_string(),
             summary: "scanned".to_string(),
         });
-        assert!(app.agent_recs().iter().all(|r| r.id != "x9"));
+        assert!(app.agent_recs().iter().any(|r| r.id == "x9" && r.done));
         let rec = app.view_rec("x9").expect("finished record kept");
         assert!(rec.done, "{rec:?}");
+    }
+
+    // Local HH:MM:SS shape for the stamps the TUI adds (the value depends on the clock, so only the shape is checked).
+    fn is_hhmmss(s: &str) -> bool {
+        let b = s.as_bytes();
+        b.len() == 8
+            && b.iter().enumerate().all(|(i, c)| {
+                if i == 2 || i == 5 {
+                    *c == b':'
+                } else {
+                    c.is_ascii_digit()
+                }
+            })
+    }
+
+    // Agent pane lines get the local arrival stamp after their lead ("● " tool, "  ⎿  " result); text lines get it first.
+    #[test]
+    fn agent_pane_lines_carry_arrival_time() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "a1".to_string(),
+            description: "Scan repo".to_string(),
+            started_at: 0,
+        });
+        let plain = ["Looking around", "● Bash(ls)", "  ⎿  a.txt … (+2 lines)"];
+        app.apply(UiEvent::AgentLog {
+            id: "a1".to_string(),
+            lines: plain.iter().map(|l| l.to_string()).collect(),
+            tool_ids: Vec::new(),
+        });
+        let recs = app.agent_recs();
+        let log = &recs
+            .iter()
+            .find(|r| r.id == "a1")
+            .expect("running agent")
+            .log;
+        assert_eq!(log.len(), plain.len(), "{log:?}");
+        for (got, want) in log.iter().zip(plain) {
+            let lead = ["● ", "  ⎿  "]
+                .into_iter()
+                .find(|l| want.starts_with(l))
+                .unwrap_or("");
+            let rest = got.strip_prefix(lead).unwrap_or_default();
+            assert!(
+                rest.len() >= 9 && is_hhmmss(&rest[..8]) && rest.as_bytes()[8] == b' ',
+                "{got:?}"
+            );
+            assert_eq!(format!("{lead}{}", &rest[9..]), want, "{got:?}");
+        }
+    }
+
+    // A ToolResult row in the output carries its local arrival time after the "  ⎿  " lead.
+    #[test]
+    fn tool_result_row_carries_arrival_time() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::ToolResult {
+            id: "t1".to_string(),
+            text: "done".to_string(),
+        });
+        let row = app
+            .transcript
+            .iter()
+            .map(|l| render::strip_sgr(l))
+            .find(|l| l.starts_with("  ⎿  "))
+            .expect("result row");
+        let rest = row.strip_prefix("  ⎿  ").unwrap_or_default();
+        assert!(
+            rest.len() >= 9 && is_hhmmss(&rest[..8]) && rest.as_bytes()[8] == b' ',
+            "{row:?}"
+        );
+        assert_eq!(&rest[9..], "done", "{row:?}");
+    }
+
+    // An agent list row shows its local start time (AgentRow.started_at, Unix seconds) and its elapsed time.
+    #[test]
+    fn agent_row_shows_start_time_and_elapsed() {
+        let now = unix_now() as u64;
+        let row = AgentRow {
+            started_at: now - 125,
+            ..agent_row("ar", false, false)
+        };
+        let line = render::strip_sgr(&agent_row_line(&row, 200));
+        let start = clock_hhmmss((now - 125) as i64);
+        assert!(line.contains(&format!("● {start} ")), "{line}");
+        // Elapsed is 125 s, or 126 s if the second ticked over during the test.
+        assert!(line.contains("(2m0"), "{line}");
+    }
+
+    // The agent list row stays within its width at narrow sizes (the start time is kept first, the rest is clipped).
+    #[test]
+    fn agent_row_keeps_narrow_width() {
+        let now = unix_now() as u64;
+        let row = AgentRow {
+            started_at: now - 125,
+            ..agent_row("ar", false, false)
+        };
+        for w in [8, 12, 20, 30] {
+            let line = render::strip_sgr(&agent_row_line(&row, w));
+            assert!(UnicodeWidthStr::width(line.as_str()) <= w, "w={w} {line:?}");
+        }
+    }
+
+    // The frame row holding `text` has a local HH:MM:SS stamp right after `lead` (empty lead: at column 0).
+    fn stamped_before(rows: &[String], lead: &str, text: &str) -> bool {
+        rows.iter().any(|r| {
+            let Some(i) = r.find(text) else {
+                return false;
+            };
+            let pre = &r[..i];
+            pre.len() >= lead.len() + 9
+                && pre.ends_with(' ')
+                && is_hhmmss(&pre[pre.len() - 9..pre.len() - 1])
+                && pre[..pre.len() - 9].ends_with(lead)
+        })
+    }
+
+    // Agent pane frame: a live agent's log lines show their arrival stamp after the lead (text lines at column 0).
+    #[test]
+    fn agent_pane_frame_stamps_live_lines() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "a1".to_string(),
+            description: "Scan repo".to_string(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentLog {
+            id: "a1".to_string(),
+            lines: vec![
+                "Looking around".to_string(),
+                "● Bash(ls)".to_string(),
+                "  ⎿  a.txt … (+2 lines)".to_string(),
+            ],
+            tool_ids: Vec::new(),
+        });
+        app.av = Some(agentview::AgentView::open("a1"));
+        let rows = plain_frame(&app, 80, 24);
+        assert!(stamped_before(&rows, "", "Looking around"), "{rows:?}");
+        assert!(stamped_before(&rows, "● ", "Bash(ls)"), "{rows:?}");
+        assert!(stamped_before(&rows, "  ⎿  ", "a.txt"), "{rows:?}");
+    }
+
+    // A restored agent: its "(restored)" summary line in the pane has a stamp, and its list row starts with the saved
+    // start time.
+    #[test]
+    fn restored_agent_pane_and_row_carry_times() {
+        let now = unix_now() as u64;
+        let mut app = App::new(80, 24);
+        // Core sends the summary line before AgentsRestored (api.rs restore_agents_at_start).
+        app.apply(UiEvent::AgentLog {
+            id: "r1".to_string(),
+            lines: vec!["(restored) earlier summary".to_string()],
+            tool_ids: Vec::new(),
+        });
+        let row = AgentRow {
+            interrupted: true,
+            started_at: now - 125,
+            ..agent_row("r1", false, true)
+        };
+        app.apply(UiEvent::AgentsRestored {
+            rows: vec![row.clone()],
+        });
+        app.av = Some(agentview::AgentView::open("r1"));
+        let rows = plain_frame(&app, 80, 24);
+        assert!(
+            stamped_before(&rows, "", "(restored) earlier summary"),
+            "{rows:?}"
+        );
+        let line = render::strip_sgr(&agent_row_line(&row, 200));
+        let start = clock_hhmmss((now - 125) as i64);
+        assert!(line.contains(&format!("● {start} ")), "{line}");
+    }
+
+    // A resumed agent's pane shows only the new turn, and that turn's lines are stamped.
+    #[test]
+    fn resumed_agent_pane_frame_stamps_the_new_turn() {
+        let mut app = App::new(80, 24);
+        app.apply(UiEvent::AgentStart {
+            id: "t1".into(),
+            description: "worker".into(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentLog {
+            id: "t1".into(),
+            lines: vec!["turn one".into()],
+            tool_ids: Vec::new(),
+        });
+        app.apply(UiEvent::AgentEnd {
+            id: "t1".into(),
+            elapsed_ms: 5,
+            model: "haiku".into(),
+            name: "worker".into(),
+            summary: "one".into(),
+        });
+        app.apply(UiEvent::AgentResumed {
+            id: "t1".into(),
+            description: "worker".into(),
+            started_at: 0,
+            send_id: "s2".into(),
+        });
+        app.apply(UiEvent::AgentLog {
+            id: "t1".into(),
+            lines: vec!["turn two".into()],
+            tool_ids: Vec::new(),
+        });
+        app.av = Some(agentview::AgentView::open("t1"));
+        let rows = plain_frame(&app, 80, 24);
+        assert!(stamped_before(&rows, "", "turn two"), "{rows:?}");
+        assert!(!rows.iter().any(|r| r.contains("turn one")), "{rows:?}");
     }
 
     // Go onSubEvent: AgentLog lines land in the running agent's view log, capped, and add no transcript row.
@@ -5387,11 +6119,12 @@ mod tests {
         app.apply(UiEvent::AgentLog {
             id: "a1".to_string(),
             lines: vec!["Looking around".to_string(), "● Bash(ls)".to_string()],
+            tool_ids: Vec::new(),
         });
         assert_eq!(app.transcript.len(), before);
         let recs = app.agent_recs();
         let rec = recs.iter().find(|r| r.id == "a1").expect("running agent");
-        assert_eq!(rec.log, vec!["Looking around", "● Bash(ls)"]);
+        assert_eq!(untimed_log(rec), vec!["Looking around", "● Bash(ls)"]);
     }
 
     // Go TestAgentViewClickReadOnlyClose (agentview_test.go:21-54): a left press on the "worker" panel row opens the
@@ -5414,6 +6147,7 @@ mod tests {
         app.apply(UiEvent::AgentLog {
             id: "w1".to_string(),
             lines: vec!["SUBLINE".to_string()],
+            tool_ids: Vec::new(),
         });
         // The panel row carries the "●" dot; the status bar also names the agent but has no dot.
         let rows = plain_frame(&app, 80, 30);
@@ -5820,7 +6554,10 @@ mod tests {
             started_at: 1,
         });
         let row = app.panel_lines(80, 30).0.join("\n");
-        assert!(row.contains("-haiku-prompter("), "resident label: {row}");
+        assert!(
+            row.contains(" · prompter · haiku ("),
+            "resident label: {row}"
+        );
         assert!(
             !row.contains("opus"),
             "resident row shows main model: {row}"
@@ -5835,7 +6572,7 @@ mod tests {
         });
         let row = app.panel_lines(80, 30).0.join("\n");
         assert!(
-            row.contains("-haiku-tui("),
+            row.contains(" · tui · haiku ("),
             "empty model falls back to haiku: {row}"
         );
         assert!(
@@ -6271,6 +7008,7 @@ mod tests {
         app.apply(UiEvent::AgentLog {
             id: "w1".into(),
             lines: (0..lines).map(|i| format!("line {i}")).collect(),
+            tool_ids: Vec::new(),
         });
         app.av = Some(agentview::AgentView::open("w1"));
         app
@@ -6282,7 +7020,7 @@ mod tests {
         let (w, h) = (40, 14);
         let room = app.body_h(w, h) - agentview::HEAD_ROWS;
         let start = 20 - room;
-        assert_eq!(screen(&app, w, h)[2], format!("line {start}"));
+        assert_eq!(untime(&screen(&app, w, h)[2]), format!("line {start}"));
         // The head rows are not part of the selection.
         app.select_press(0, 0);
         assert!(!app.sel.set);
@@ -6301,7 +7039,11 @@ mod tests {
             3,
             3,
         );
-        assert_eq!(copied, [format!("line {start}\nlin")]);
+        // The copy takes the rows as shown, so each row keeps its arrival stamp.
+        let (first, second) = copied[0].split_once('\n').expect("two copied rows");
+        assert!(is_hhmmss(&first[..8]), "{first:?}");
+        assert_eq!(&first[8..], format!(" line {start}"));
+        assert!(second.len() == 3 && second.ends_with(':'), "{second:?}");
     }
 
     #[test]
@@ -6315,7 +7057,7 @@ mod tests {
         app.edge_tick(t0);
         assert_eq!(app.av.as_ref().map(|v| v.off), Some(1));
         assert_eq!(app.sel.head.line, tail - 1, "head follows the edge line");
-        assert_eq!(screen(&app, w, h)[2], format!("line {}", tail - 1));
+        assert_eq!(untime(&screen(&app, w, h)[2]), format!("line {}", tail - 1));
         for k in 1..=(tail as u32 + 2) {
             app.edge_tick(t0 + EDGE_TICK * k);
         }
@@ -6337,13 +7079,13 @@ mod tests {
         app.select_drag(0, body as u16 - 1); // the last window row is the bottom edge
         app.edge_tick(t0);
         assert_eq!(app.av.as_ref().map(|v| v.off), Some(tail - 1));
-        assert_eq!(screen(&app, w, h)[2], "line 1");
+        assert_eq!(untime(&screen(&app, w, h)[2]), "line 1");
         for k in 1..=(tail as u32 + 2) {
             app.edge_tick(t0 + EDGE_TICK * k);
         }
         assert!(app.edge.is_none(), "the tail stops the scroll");
         assert_eq!(app.av.as_ref().map(|v| v.off), Some(0));
-        assert_eq!(screen(&app, w, h)[2 + room - 1], "line 19");
+        assert_eq!(untime(&screen(&app, w, h)[2 + room - 1]), "line 19");
     }
 
     #[test]
@@ -6352,9 +7094,12 @@ mod tests {
         let (w, h) = (40, 14);
         let start = 20 - (app.body_h(w, h) - agentview::HEAD_ROWS);
         assert!(app.overlay_wheel(true, 5));
-        assert_eq!(screen(&app, w, h)[2], format!("line {}", start - 3));
+        assert_eq!(
+            untime(&screen(&app, w, h)[2]),
+            format!("line {}", start - 3)
+        );
         assert!(app.overlay_wheel(false, 5));
-        assert_eq!(screen(&app, w, h)[2], format!("line {start}"));
+        assert_eq!(untime(&screen(&app, w, h)[2]), format!("line {start}"));
     }
 
     #[test]
@@ -6373,7 +7118,7 @@ mod tests {
         );
         assert!(app.overlay_wheel(false, 5));
         assert_eq!(app.av.as_ref().map(|v| v.off), Some(oldest - 3));
-        assert_eq!(screen(&app, w, h)[2], "line 3");
+        assert_eq!(untime(&screen(&app, w, h)[2]), "line 3");
     }
 
     #[test]
@@ -6392,12 +7137,16 @@ mod tests {
         );
         app.on_key(key(KeyCode::Down, KeyModifiers::NONE));
         assert_eq!(
-            screen(&app, w, h)[2],
+            untime(&screen(&app, w, h)[2]),
             "line 1",
             "one Down step answers at once"
         );
         app.on_key(key(KeyCode::Home, KeyModifiers::NONE));
-        assert_eq!(screen(&app, w, h)[2], "line 0", "Home is the oldest line");
+        assert_eq!(
+            untime(&screen(&app, w, h)[2]),
+            "line 0",
+            "Home is the oldest line"
+        );
         for _ in 0..50 {
             app.on_key(key(KeyCode::PageDown, KeyModifiers::NONE));
         }
@@ -6483,6 +7232,13 @@ mod tests {
         assert!(app.animating());
         app.busy = false;
         app.copy_done(3, Ok(()));
+        assert!(app.animating());
+        app.copy_note = None;
+        assert!(!app.animating());
+        // A running agent keeps the loop on the timer (its elapsed ticks); a finished one does not.
+        app.agent_rows = vec![agent_row("ar", false, true)];
+        assert!(!app.animating());
+        app.agent_rows = vec![agent_row("ar", false, false)];
         assert!(app.animating());
     }
 

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 0.11.11 - 2026-11-10
+- Rotation: agent completion keeps going to the current main session. Before, the old main stopped after its last child and carried its history over on rotation.
+  - 로테이션 뒤에도 에이전트 완료 알림이 현재 메인에 전달됩니다. 이전 메인은 마지막 자식 에이전트가 끝나면 종료되고, 진행 중인 작업 내역은 새 메인에 미리 실립니다.
+- TUI: every done mark reaches the main session.
+  - TUI에 표시된 모든 완료가 메인에도 전달됩니다.
+- Agents: the agent rows, the agent pane, and the agent output show HH:MM:SS times.
+  - 에이전트 목록, 에이전트 창, 출력에 HH:MM:SS 시각이 표시됩니다.
+- Tool results: each tool result appears under its own tool call.
+  - 도구 결과가 자기 호출 바로 아래에 표시됩니다.
+- Restored agents: the restored agent list keeps each agent's status, model, start time, and duration.
+  - 다시 켜도 에이전트 목록의 상태, 모델, 시작 시각, 걸린 시간이 유지되고, 끝난 에이전트도 목록에 남습니다.
+- Agent list: finished agents stay in the list.
+- Agent model: a running agent's row shows the model from its own stream once it reports, so it matches its done row (`haiku 5.5`, not `haiku`).
+- Resident coder: a usage line `C1 x/80k` shows under the input.
+  - 입력창 아래에 상시 코더 사용량(C1 x/80k)이 표시됩니다.
+
 ## 0.11.10 - 2026-11-09
 - Agents: each finished agent is announced once, with its own result path. A resumed agent is announced again on its next finish. A glob pattern in a prompt (`notes/runs/x-*.md`) is no longer taken as the result path.
   - 에이전트: 끝난 에이전트마다 자기 결과 경로와 함께 한 번만 알립니다. 다시 이어 받은 에이전트는 다음에 끝날 때 다시 알립니다. 프롬프트의 glob 패턴(`notes/runs/x-*.md`)은 더 이상 결과 경로로 쓰지 않습니다.

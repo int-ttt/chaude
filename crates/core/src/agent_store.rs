@@ -70,10 +70,21 @@ pub struct SavedAgent {
     /// Launch handle, for SendMessage resume.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub agent_id: String,
+    /// The agent's log lines, oldest first, each with its original arrival time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub log: Vec<SavedLine>,
     #[serde(default = "epoch", with = "rfc3339_time")]
     pub started: SystemTime,
     #[serde(default = "epoch", with = "rfc3339_time")]
     pub updated: SystemTime,
+}
+
+/// One stored log line of a sub-agent with the unix second it arrived (0 = unknown).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedLine {
+    #[serde(default)]
+    pub at: u64,
+    pub text: String,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -105,6 +116,7 @@ impl SavedAgent {
             background: false,
             owner_pid: 0,
             agent_id: String::new(),
+            log: Vec::new(),
             started,
             updated: UNIX_EPOCH,
         }
@@ -170,6 +182,9 @@ struct Inner {
 pub struct AgentStore {
     path: PathBuf,
     inner: Mutex<Inner>,
+    /// Serializes file writes (tmp write, rename, retries). Taken before `inner`, never while `inner` is held,
+    /// so a retry sleep blocks other writers only, not readers.
+    io: Mutex<()>,
 }
 
 impl AgentStore {
@@ -190,6 +205,7 @@ impl AgentStore {
                 m,
                 last: String::new(),
             }),
+            io: Mutex::new(()),
         }
     }
 
@@ -201,31 +217,41 @@ impl AgentStore {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn io(&self) -> MutexGuard<'_, ()> {
+        self.io.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Merges `recs` (newest wins per id), prunes and writes the file if anything changed.
-    /// Each record is stamped with this process as owner.
+    /// Each record is stamped with this process as owner. The file is read and written outside the
+    /// inner lock; only the in-memory merge holds it.
     pub fn put(&self, recs: &[SavedAgent]) {
         if self.off() || recs.is_empty() {
             return;
         }
-        let mut g = self.lock();
-        merge_disk(&self.path, &mut g.m);
-        let pid = std::process::id();
-        let now = SystemTime::now();
-        for r in recs {
-            let mut a = r.clone();
-            a.owner_pid = pid;
-            if let Some(old) = g.m.get(&a.id) {
-                a.updated = old.updated;
-                if *old == a {
-                    continue;
+        let disk = read_disk(&self.path);
+        let _io = self.io();
+        let text = {
+            let mut g = self.lock();
+            merge_disk(&mut g.m, disk);
+            let pid = std::process::id();
+            let now = SystemTime::now();
+            for r in recs {
+                let mut a = r.clone();
+                a.owner_pid = pid;
+                if let Some(old) = g.m.get(&a.id) {
+                    a.updated = old.updated;
+                    if *old == a {
+                        continue;
+                    }
+                    a.updated = now;
+                } else if a.updated == UNIX_EPOCH {
+                    a.updated = now;
                 }
-                a.updated = now;
-            } else if a.updated == UNIX_EPOCH {
-                a.updated = now;
+                g.m.insert(a.id.clone(), a);
             }
-            g.m.insert(a.id.clone(), a);
-        }
-        self.flush(&mut g);
+            self.render(&mut g)
+        };
+        self.write(text);
     }
 
     /// Marks stored running agents interrupted: those of this process (`own`, shutdown) or of dead
@@ -234,24 +260,41 @@ impl AgentStore {
         if self.off() {
             return;
         }
-        let mut g = self.lock();
-        merge_disk(&self.path, &mut g.m);
-        let pid = std::process::id();
-        let now = SystemTime::now();
-        for a in g.m.values_mut() {
-            let mine = own && a.owner_pid == pid;
-            let dead = !own && !pid_alive(a.owner_pid);
-            if a.status == STO_RUNNING && (mine || dead) {
-                a.status = STO_INTERRUPTED.to_string();
-                a.updated = now;
+        let disk = read_disk(&self.path);
+        let _io = self.io();
+        let text = {
+            let mut g = self.lock();
+            merge_disk(&mut g.m, disk);
+            let pid = std::process::id();
+            let now = SystemTime::now();
+            for a in g.m.values_mut() {
+                let mine = own && a.owner_pid == pid;
+                let dead = !own && !pid_alive(a.owner_pid);
+                if a.status == STO_RUNNING && (mine || dead) {
+                    a.status = STO_INTERRUPTED.to_string();
+                    a.updated = now;
+                }
             }
-        }
-        self.flush(&mut g);
+            self.render(&mut g)
+        };
+        self.write(text);
     }
 
     /// Stored agents matching `parent` (any when empty), oldest first. Without a parent only
     /// interrupted agents updated within 24 hours are returned.
     pub fn load(&self, parent: &str) -> Vec<SavedAgent> {
+        self.select(parent, &[STO_INTERRUPTED])
+    }
+
+    /// Startup restore: stored agents of any parent updated within 24 hours that finished (done, failed) or
+    /// were interrupted, oldest first.
+    pub fn load_restorable(&self) -> Vec<SavedAgent> {
+        self.select("", &[STO_INTERRUPTED, STO_DONE, STO_FAILED])
+    }
+
+    // A non-empty parent matches its agents of any status; without one, agents whose status is in `statuses`
+    // and that were updated within 24 hours.
+    fn select(&self, parent: &str, statuses: &[&str]) -> Vec<SavedAgent> {
         let g = self.lock();
         let now = SystemTime::now();
         let mut l: Vec<SavedAgent> =
@@ -260,7 +303,7 @@ impl AgentStore {
                     if !parent.is_empty() {
                         a.parent == parent
                     } else {
-                        a.status == STO_INTERRUPTED
+                        statuses.contains(&a.status.as_str())
                             && now
                                 .duration_since(a.updated)
                                 .map_or(true, |age| age <= RESTORE_MAX_AGE)
@@ -272,8 +315,9 @@ impl AgentStore {
         l
     }
 
-    /// Drops records older than 7 days, keeps the newest 200, and writes the file if its text changed.
-    fn flush(&self, g: &mut Inner) {
+    /// Drops records older than 7 days, keeps the newest 200, and returns the file text when it differs from
+    /// the last one written. No IO here: the caller writes it outside the inner lock.
+    fn render(&self, g: &mut Inner) -> Option<String> {
         let cut = SystemTime::now()
             .checked_sub(STORE_MAX_AGE)
             .unwrap_or(UNIX_EPOCH);
@@ -290,14 +334,23 @@ impl AgentStore {
         let fmt = serde_json::ser::PrettyFormatter::with_indent(b" ");
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, fmt);
         if l.serialize(&mut ser).is_err() {
-            return;
+            return None;
         }
         let Ok(text) = String::from_utf8(buf) else {
-            return;
+            return None;
         };
         if text == g.last {
-            return;
+            return None;
         }
+        Some(text)
+    }
+
+    /// Writes `text` (from render) with a tmp file and rename, retrying a busy target. The caller holds the io
+    /// gate, not the inner lock; `last` is updated under the inner lock only after the file is in place.
+    fn write(&self, text: Option<String>) {
+        let Some(text) = text else {
+            return;
+        };
         if let Some(dir) = self.path.parent().filter(|d| !d.as_os_str().is_empty())
             && fs::create_dir_all(dir).is_err()
         {
@@ -307,20 +360,22 @@ impl AgentStore {
         tmp.push(".tmp");
         let tmp = PathBuf::from(tmp);
         if write_private(&tmp, text.as_bytes()).is_ok() && replace_file(&tmp, &self.path).is_ok() {
-            g.last = text;
+            self.lock().last = text;
         }
     }
 }
 
+/// Reads the records other harness processes wrote (empty when the file is missing or unreadable).
+fn read_disk(path: &Path) -> Vec<SavedAgent> {
+    let Ok(b) = fs::read(path) else {
+        return Vec::new();
+    };
+    serde_json::from_slice::<Vec<SavedAgent>>(&b).unwrap_or_default()
+}
+
 /// Adds records other harness processes wrote since we last looked. Ours win by id, except entries
 /// another process updated later.
-fn merge_disk(path: &Path, m: &mut HashMap<String, SavedAgent>) {
-    let Ok(b) = fs::read(path) else {
-        return;
-    };
-    let Ok(list) = serde_json::from_slice::<Vec<SavedAgent>>(&b) else {
-        return;
-    };
+fn merge_disk(m: &mut HashMap<String, SavedAgent>, list: Vec<SavedAgent>) {
     let pid = std::process::id();
     for a in list {
         let take = match m.get(&a.id) {
@@ -334,7 +389,7 @@ fn merge_disk(path: &Path, m: &mut HashMap<String, SavedAgent>) {
 }
 
 /// Renames `tmp` over `path`. Windows refuses while another process holds `path` open (a concurrent
-/// merge_disk read), which is transient; a failed write is not retried by the flush that made it, so
+/// merge_disk read), which is transient; a failed write is not retried by the put that made it, so
 /// a finished agent's done record could stay unwritten. A few short retries cover that.
 fn replace_file(tmp: &Path, path: &Path) -> std::io::Result<()> {
     let mut res = fs::rename(tmp, path);
@@ -362,7 +417,7 @@ fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
 }
 
 /// Live log lines kept per agent (Go maxAgentLog).
-const MAX_AGENT_LOG: usize = 400;
+pub const MAX_AGENT_LOG: usize = 400;
 
 /// One delegated sub-agent of a session (Go agentRec).
 #[derive(Debug, Clone)]
@@ -564,7 +619,23 @@ fn content_blocks(ev: &Value) -> &[Value] {
 /// Go onSubEvent formatting: the log lines one sub-agent stream event adds (text lines, "● name(summary)"
 /// tool calls, "  ⎿  first line … (+N lines)" tool results). Empty for other event types.
 pub fn sub_event_lines(ev: &Value) -> Vec<String> {
-    let mut add: Vec<String> = Vec::new();
+    sub_event_entries(ev)
+        .into_iter()
+        .map(|(line, _)| line)
+        .collect()
+}
+
+/// The non-empty string under `key` of a content block, as the tool-use id a log line carries.
+fn id_of(b: &Value, key: &str) -> Option<String> {
+    Some(sget(b, key))
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// The same lines as `sub_event_lines`, each with the tool-use id it belongs to: a call ("● name") carries its
+/// `tool_use` id, a result ("  ⎿  ") the `tool_use_id` it answers. Text lines carry None.
+pub fn sub_event_entries(ev: &Value) -> Vec<(String, Option<String>)> {
+    let mut add: Vec<(String, Option<String>)> = Vec::new();
     match sget(ev, "type") {
         "assistant" => {
             for b in content_blocks(ev) {
@@ -572,17 +643,18 @@ pub fn sub_event_lines(ev: &Value) -> Vec<String> {
                     "text" => {
                         let s = sget(b, "text").trim();
                         if !s.is_empty() {
-                            add.extend(s.split('\n').map(str::to_string));
+                            add.extend(s.split('\n').map(|l| (l.to_string(), None)));
                         }
                     }
                     "tool_use" => {
                         let n = sget(b, "name");
                         let a = tool_summary(b.get("input").unwrap_or(&Value::Null));
-                        add.push(if a.is_empty() {
+                        let line = if a.is_empty() {
                             format!("● {n}")
                         } else {
                             format!("● {n}({a})")
-                        });
+                        };
+                        add.push((line, id_of(b, "id")));
                     }
                     _ => {}
                 }
@@ -598,7 +670,7 @@ pub fn sub_event_lines(ev: &Value) -> Vec<String> {
                     if l.len() > 1 {
                         x.push_str(&format!(" … (+{} lines)", l.len() - 1));
                     }
-                    add.push(x);
+                    add.push((x, id_of(b, "tool_use_id")));
                 }
             }
         }
@@ -842,6 +914,7 @@ mod tests {
     use super::*;
     use crate::testutil::TempDir;
     use serde_json::json;
+    use std::sync::Arc;
 
     // A rename blocked for a while (Windows: the target is open in another process) is retried, so the
     // write lands once the target is free. A directory at the target stands in for the busy file.
@@ -860,6 +933,39 @@ mod tests {
         replace_file(&tmp, &path).expect("rename after the target is released");
         release.join().unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"[]");
+    }
+
+    // A put whose rename waits on a busy target sleeps in replace_file. Readers must not wait for that sleep:
+    // the store lock is not held across IO or retries. The read finishes while the put is still retrying.
+    #[test]
+    fn agent_store_read_is_not_blocked_by_a_retrying_put() {
+        let dir = TempDir::new("agent-store-busy-put");
+        let path = dir.path().join("agents.json");
+        fs::create_dir(&path).unwrap();
+        let st = Arc::new(AgentStore::new(&path));
+        let mut a = SavedAgent::new("a1", STO_RUNNING, SystemTime::now());
+        a.parent = "p".to_string();
+        let writer = {
+            let st = Arc::clone(&st);
+            thread::spawn(move || st.put(std::slice::from_ref(&a)))
+        };
+        thread::sleep(Duration::from_millis(30));
+        let busy = path.clone();
+        let release = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            fs::remove_dir(&busy).unwrap();
+        });
+        let t0 = std::time::Instant::now();
+        let seen = st.load("p");
+        assert!(
+            t0.elapsed() < Duration::from_millis(100),
+            "read waited on the put's retry sleep: {:?}",
+            t0.elapsed()
+        );
+        assert_eq!(seen.len(), 1, "the record is already in memory: {seen:?}");
+        writer.join().unwrap();
+        release.join().unwrap();
+        assert_eq!(AgentStore::new(&path).load("p").len(), 1);
     }
 
     // Go TestAgentStorePersistsEveryChange
@@ -985,6 +1091,22 @@ mod tests {
         let l = st.load("");
         assert_eq!(l.len(), 1, "{l:?}");
         assert_eq!(l[0].status, STO_INTERRUPTED, "dead owner's agent");
+    }
+
+    // Startup restore lists finished (done, failed) and interrupted agents; load("") keeps interrupted only.
+    #[test]
+    fn load_restorable_keeps_finished_agents() {
+        let dir = TempDir::new("agent-store-restorable");
+        let st = AgentStore::new(&dir.path().join("agents.json"));
+        let now = SystemTime::now();
+        st.put(&[
+            SavedAgent::new("d", STO_DONE, now),
+            SavedAgent::new("f", STO_FAILED, now),
+            SavedAgent::new("i", STO_INTERRUPTED, now),
+        ]);
+        let ids = |l: Vec<SavedAgent>| l.into_iter().map(|a| a.id).collect::<Vec<_>>();
+        assert_eq!(ids(st.load_restorable()), ["d", "f", "i"]);
+        assert_eq!(ids(st.load("")), ["i"]);
     }
 
     // Go TestAgentStoreOffAndNil (empty path part; a nil store is Option::None at the call site)

@@ -24,6 +24,18 @@ pub struct SystemEvent {
     pub subtype: Option<String>,
     pub session_id: Option<String>,
     pub model: Option<String>,
+    // Background task events (task_started, task_updated, task_notification). An owned task belongs to a running
+    // agent: parent_task_id names that agent's task_id (not its tool_use_id); api.rs maps it via agent_task_ids.
+    pub task_id: Option<String>,
+    pub tool_use_id: Option<String>,
+    pub task_type: Option<String>,
+    pub status: Option<String>,
+    pub parent_task_id: Option<String>,
+    #[serde(default)]
+    pub owned_by_subagent: bool,
+    pub patch: Option<Value>,
+    // task_notification: the agent's report ({"text": ...}) when it delivered one (handback_report).
+    pub handback_report: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]

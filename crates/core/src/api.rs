@@ -15,14 +15,15 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{Value, json};
 
 use crate::agent_store::{
-    AgentStore, STO_DONE, STO_INTERRUPTED, STO_RUNNING, SavedAgent, last_summary, sub_event_lines,
+    AgentStore, MAX_AGENT_LOG, STO_DONE, STO_FAILED, STO_INTERRUPTED, STO_RUNNING, SavedAgent,
+    SavedLine, last_summary, sub_event_entries,
 };
 use crate::budget::{self, Budget};
 use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
 use crate::child_set::{ChildSet, Close, Parked, child_key};
 use crate::clients::{ClientRec, ClientRegistry, LIVE, PARKED, now_stamp};
-use crate::event::{Block, Content, Delta, Event, StreamInner, Usage, parse_line};
+use crate::event::{Block, Content, Delta, Event, StreamInner, SystemEvent, Usage, parse_line};
 use crate::forward::forward_rule_for;
 use crate::haiku_pool::WorkerPool;
 use crate::handoff::{self, ExitHandoff};
@@ -79,6 +80,15 @@ impl InterruptSource {
             InterruptSource::Api => "api",
         }
     }
+}
+
+// One live resident coder for the coder line: its 1-based slot (coder = 1, coder2 = 2, ...), its context tokens
+// and its rotation limit.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CoderContext {
+    pub slot: usize,
+    pub tokens: u64,
+    pub limit: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -167,9 +177,16 @@ pub enum UiEvent {
         rows: Vec<AgentRow>,
     },
     // Lines one delegated agent's stream event adds to its log (Go onSubEvent); the TUI keeps the newest 400.
+    // tool_ids is index-aligned with lines: the tool-use id of a call or result line, None for text (may be empty).
     AgentLog {
         id: String,
         lines: Vec<String>,
+        tool_ids: Vec<Option<String>>,
+    },
+    // Log lines of a stored agent, each with the unix second it first arrived (restored agent views keep it).
+    AgentLogAt {
+        id: String,
+        lines: Vec<SavedLine>,
     },
     // Agents an earlier harness left unfinished, shown below the running rows (Go restored rows, tui.go:1468).
     // Rows have done = true. Sent empty once the next user line arrives (Go dismissRestored, repl.go:1081).
@@ -241,6 +258,11 @@ pub enum UiEvent {
     RoleContext {
         role: String,
         tokens: u64,
+    },
+    // Every live resident coder in spawn order, with its context tokens and rotation limit (the coder line).
+    // Empty when no coder child is running, which hides the line.
+    CoderContexts {
+        coders: Vec<CoderContext>,
     },
     // This run's session ids (Go /view): the main child, every resident that has answered, and all owned ids.
     SessionIds {
@@ -368,6 +390,9 @@ pub struct Config {
     pub max_drain: usize,
     // Go --drain-timeout: how long a draining child is awaited before it is closed.
     pub drain_timeout: Duration,
+    // How long an agent whose completion arrived while its owned background task still runs stays open. The
+    // agent ends at once when the owned task finishes, or at this grace when it never reports.
+    pub agent_end_grace: Duration,
     // Go --rotate-cooldown: after a held rotation, no automatic context rotation for this long.
     pub rotate_cooldown: Duration,
     // Go --no-category-rotate: disable category-based session rotation. No engine effect yet.
@@ -457,6 +482,7 @@ impl Default for Config {
             no_handoff_validate: false,
             max_drain: 3,
             drain_timeout: Duration::from_secs(60 * 60),
+            agent_end_grace: Duration::from_secs(60),
             rotate_cooldown: Duration::from_secs(2 * 60),
             no_category_rotate: false,
             no_delegation_rule: false,
@@ -632,6 +658,8 @@ struct State {
     proc: Option<ClaudeProc>,
     ui: Sender<UiEvent>,
     busy: bool,
+    // Set while an idle <task-notification> completes agents: its child-initiated reply answers them, so no notice turn.
+    hold_notice_turn: bool,
     turn_started: Option<Instant>,
     queue: VecDeque<String>,
     model: String,
@@ -649,6 +677,14 @@ struct State {
     // Delegated agents by tool_use id. A background agent (launch result said "async") keeps running past the
     // turn, so an abandoned turn does not end it, and it is listed in the handoff snapshot.
     agent_info: HashMap<String, AgentInfo>,
+    // Owned background task id -> the agent (tool_use id) it belongs to. A live entry keeps that agent open.
+    owned_tasks: HashMap<String, String>,
+    // Agent task id -> agent tool_use id (from the agent's task_started). An owned task names its parent by task id.
+    agent_task_ids: HashMap<String, String>,
+    // Agent tool ids whose completion arrived while an owned task still ran, and when (ends at agent_end_grace).
+    pending_end: HashMap<String, Instant>,
+    // Set once a system task_started arrives: the reply-ends-oldest-agent fallback (idle_result) is then off.
+    seen_task_started: bool,
     // Restored agents still shown (UiEvent::AgentsRestored); the next user line clears them.
     restored_rows: Vec<AgentRow>,
     // The pick_child session orch_child resumed: one panel row, running while a turn runs, done when idle.
@@ -731,6 +767,11 @@ struct State {
     last_reco: String,
     // Last normal turns as (prompt, reply), newest last (Go tr.turns).
     recent: VecDeque<(String, String)>,
+    // Normal turns of this session as (turn number, prompt, reply), newest last; at most TURN_LOG_MAX. Only the
+    // user prompt and the assistant text are kept (tool results never reach turn_reply).
+    turn_log: VecDeque<(u64, String, String)>,
+    // Normal turns finished this session; a launch records turn_seq + 1 (its turn's number).
+    turn_seq: u64,
     // Automatic rotations done this run (Go rotations, checked against max_auto_rotations).
     rotations: u64,
     // When the last held rotation failed (Go lastRotFail), for rotate_cooldown.
@@ -823,6 +864,10 @@ pub struct AgentRow {
     pub model: String,
     pub background: bool,
     pub done: bool,
+    // Finished with an error (a restored failed agent).
+    pub failed: bool,
+    // Unfinished when its child went away (a restored interrupted or running agent).
+    pub interrupted: bool,
     // Go AgentID: handle from the launch result ("agentId: <id>"); empty until a background launch reports it.
     pub agent_id: String,
     pub result_path: String,
@@ -842,6 +887,8 @@ fn picked_agent_row(session_id: &str, model: &str, started_at: u64) -> AgentRow 
         model: model.to_string(),
         background: false,
         done: false,
+        failed: false,
+        interrupted: false,
         agent_id: session_id.to_string(),
         result_path: String::new(),
         started_at,
@@ -860,7 +907,18 @@ fn with_picked(mut rows: Vec<AgentRow>, picked: Option<&AgentRow>, busy: bool) -
     rows
 }
 
-// A stored agent as a panel row. Restored agents are finished (done) and were interrupted.
+// The status an agent is saved with: a finished agent whose tool result was an error is saved as failed, so a
+// restart shows 실패 too. Other statuses are kept as given.
+fn saved_status(status: &str, failed: bool) -> &str {
+    if status == STO_DONE && failed {
+        STO_FAILED
+    } else {
+        status
+    }
+}
+
+// A stored agent as a panel row. Restored agents are finished (done); only a stored interrupted or running one
+// (its child is gone) is marked interrupted. A done agent keeps its done status, a failed one its failure.
 fn restored_row(s: &SavedAgent) -> AgentRow {
     AgentRow {
         id: s.id.clone(),
@@ -870,13 +928,23 @@ fn restored_row(s: &SavedAgent) -> AgentRow {
         model: s.model.clone(),
         background: s.background,
         done: true,
+        failed: s.status == STO_FAILED,
+        interrupted: s.status == STO_INTERRUPTED || s.status == STO_RUNNING,
         agent_id: s.agent_id.clone(),
         result_path: s.out_path.clone(),
         started_at: s
             .started
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs()),
-        last_active: 0,
+        // The last log line's arrival, else the stored last change (the finish, or the interrupt for an agent cut
+        // short). Its duration runs from start to here.
+        last_active: match s.log.last() {
+            Some(l) => l.at,
+            None => s
+                .updated
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+        },
     }
 }
 
@@ -888,6 +956,9 @@ struct Drain {
     since: Instant,
     // Every agent the drain waited for, sorted (its end notices).
     started: Vec<String>,
+    // Set when the drained child starts a turn on its own (a native task notification): it was interrupted, and its
+    // output up to its result is discarded. Cleared by that result.
+    interrupting: bool,
 }
 
 // Go rotate: an old child is drained only when agents are running and --max-drain allows it.
@@ -922,10 +993,58 @@ fn finished_drains(
         .collect()
 }
 
-// Go pollDrains: the notice of one agent a drain waited for. done is false when the drain timed out or the agent is still running.
-fn drain_done_notice(id: &str, task: &str, out: &str, done: bool) -> String {
+// Longest report body a "[agent done]" notice carries; a longer report is cut and marked.
+const NOTICE_REPORT_CHARS: usize = 4000;
+// The brief line of a done notice for an agent the previous main launched (one line, short).
+const NOTICE_BRIEF_CHARS: usize = 300;
+// The turns carried into a rotated main with its live agents (newest kept).
+const CARRIED_TURN_CHARS: usize = 12_000;
+// The brief of each live agent in the carried block (head kept, cut marked).
+const CARRIED_BRIEF_CHARS: usize = 1_500;
+// Normal turns kept for the carried block; a launch turn older than this is carried from the oldest kept turn.
+const TURN_LOG_MAX: usize = 200;
+
+// Go pollDrains: the notice of one agent a drain waited for. done is false when the drain timed out or the agent is still
+// running. A non-empty brief (the previous main's agent) adds a one-line "brief:" after the header. The report body (the
+// agent's final report text) follows; empty report: header only.
+fn drain_done_notice(
+    id: &str,
+    task: &str,
+    out: &str,
+    done: bool,
+    brief: &str,
+    report: &str,
+) -> String {
     let st = if done { "완료" } else { "타임아웃" };
-    format!("[agent done] {id} · {task} · {out} · {st}")
+    let mut head = format!("[agent done] {id} · {task} · {out} · {st}");
+    let brief: String = brief.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !brief.is_empty() {
+        head.push_str(&format!("\nbrief: {}", clip(&brief, NOTICE_BRIEF_CHARS)));
+    }
+    if report.is_empty() {
+        return head;
+    }
+    if report.chars().count() <= NOTICE_REPORT_CHARS {
+        return format!("{head}\n{report}");
+    }
+    let cut: String = report.chars().take(NOTICE_REPORT_CHARS).collect();
+    format!("{head}\n{cut}\n[cut at {NOTICE_REPORT_CHARS} chars]")
+}
+
+// input.message of a sub-agent's SubagentHandback tool_use (its final report); None for other lines.
+fn handback_message(raw: &Value) -> Option<String> {
+    raw.get("message")?
+        .get("content")?
+        .as_array()?
+        .iter()
+        .find(|b| {
+            b.get("type").and_then(Value::as_str) == Some("tool_use")
+                && b.get("name").and_then(Value::as_str) == Some("SubagentHandback")
+        })?
+        .get("input")?
+        .get("message")?
+        .as_str()
+        .map(str::to_string)
 }
 
 // Go repl.go runTurn: queued notices, one per line, lead the user text (empty list: text unchanged).
@@ -985,19 +1104,34 @@ struct AgentInfo {
     // Go agentRec Task, Prompt, Name (session name), AgentID, Started (unix secs) for AgentRow.
     task: String,
     prompt: String,
+    // The full Agent input prompt (the brief): carried to a rotated main and into its done notice.
+    brief: String,
+    // The epoch of the main child that launched the agent, and the session turn number of its launch turn.
+    launch_epoch: u64,
+    launch_seq: u64,
     session_name: String,
     agent_id: String,
     started_at: u64,
     // Unix seconds of the agent's last output or tool activity (AgentRow.last_active).
     last_active: u64,
+    // The agent's log lines with their arrival seconds, capped like the view log, for the stored record.
+    log: Vec<SavedLine>,
     // Go lastSummary over the agent's log: its last plain text line, kept as the done notice's what.
     last_text: String,
+    // The message of the agent's SubagentHandback call: its final report, preferred over last_text.
+    handback: String,
+    // handback_report.text of the agent's latest task_notification: the body of its "[agent done]" notice.
+    report: String,
+    // The agent's tool result was an error (a failed run or a hook block): it ends as failed, saved as failed.
+    failed: bool,
 }
 
 impl AgentInfo {
-    // Go doneLine what: the last text line, else the Task.
+    // Go doneLine what: the final report (SubagentHandback), else the last text line, else the Task.
     fn done_what(&self) -> String {
-        if self.last_text.is_empty() {
+        if !self.handback.is_empty() {
+            self.handback.clone()
+        } else if self.last_text.is_empty() {
             self.task.clone()
         } else {
             self.last_text.clone()
@@ -1092,6 +1226,7 @@ fn actor(
         proc: None,
         ui,
         busy: false,
+        hold_notice_turn: false,
         turn_started: None,
         queue: VecDeque::new(),
         model,
@@ -1103,6 +1238,10 @@ fn actor(
         opus_agents: HashSet::new(),
         rotate_deferred: rotate_defer::Deferral::default(),
         agent_info: HashMap::new(),
+        owned_tasks: HashMap::new(),
+        agent_task_ids: HashMap::new(),
+        pending_end: HashMap::new(),
+        seen_task_started: false,
         restored_rows: Vec::new(),
         picked_row: None,
         agent_store,
@@ -1146,6 +1285,8 @@ fn actor(
         files: Vec::new(),
         last_reco: String::new(),
         recent: VecDeque::new(),
+        turn_log: VecDeque::new(),
+        turn_seq: 0,
         rotations: 0,
         last_rot_fail: None,
         turn_prompt: String::new(),
@@ -1899,6 +2040,7 @@ impl State {
         self.coders[i].proc = Some(p);
         // The idle timers run from spawn: the base coder starts at boot, before any task.
         self.coders[i].idle_since = Some(Instant::now());
+        self.emit_coder_contexts();
         Ok(())
     }
 
@@ -1915,6 +2057,7 @@ impl State {
         self.coder_epoch += 1;
         self.coders[i].epoch = self.coder_epoch;
         self.coders[i].idle_since = None;
+        self.emit_coder_contexts();
     }
 
     // Records a session id this run started (Go noteOwn), once.
@@ -1973,8 +2116,31 @@ impl State {
                 role: role.to_string(),
                 tokens,
             });
+            if role.starts_with("coder") {
+                self.emit_coder_contexts();
+            }
             self.persist_live();
         }
+    }
+
+    // The coder line: every live coder child in spawn order (slot index order), with its context tokens (0 until
+    // its first result) and its rotation limit (the threshold its model rotates at, as the Go per-role limit).
+    fn emit_coder_contexts(&self) {
+        let coders = self
+            .coders
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.proc.is_some())
+            .map(|(i, _)| {
+                let role = coder_role(i);
+                CoderContext {
+                    slot: i + 1,
+                    tokens: self.role_ctx.get(&role).copied().unwrap_or(0),
+                    limit: threshold_for(&self.resident_model(&role), self.cfg.rotate_threshold),
+                }
+            })
+            .collect();
+        self.emit(UiEvent::CoderContexts { coders });
     }
 
     // This run's session ids for the handoff (Go handoffSnapshot). A resident counts only while its child runs.
@@ -2099,6 +2265,7 @@ impl State {
         self.coder_epoch += 1;
         self.coders[i].epoch = self.coder_epoch;
         self.coders[i].idle_since = None;
+        self.emit_coder_contexts();
     }
 
     // The coder's result line is its reply. An empty reply is a failure, as for the tui.
@@ -2149,6 +2316,7 @@ impl State {
 
     fn on_coder_eof(&mut self, i: usize) {
         self.coders[i].proc = None;
+        self.emit_coder_contexts();
         if self.coders[i].deadline.is_some() {
             self.finish_coder(i, Err("coder exited".to_string()));
         }
@@ -2454,6 +2622,7 @@ impl State {
     fn on_event(&mut self, ev: Event) {
         match ev {
             Event::System(s) => {
+                self.on_system_task(&s);
                 if let Some(id) = s.session_id {
                     self.note_own(&id);
                     let prev = std::mem::replace(&mut self.sid, id.clone());
@@ -2761,7 +2930,10 @@ impl State {
                     name: description.clone(),
                     // No result file is written for an agent, so none is advertised.
                     result_path: String::new(),
-                    background: false,
+                    background: input
+                        .get("run_in_background")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
                     started: Instant::now(),
                     done: false,
                     result_done: false,
@@ -2773,8 +2945,10 @@ impl State {
                     model: input
                         .get("model")
                         .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
+                        .filter(|m| !m.is_empty())
+                        .map(str::to_string)
+                        .or_else(|| agent_type_model(agent_name.unwrap_or_default()))
+                        .unwrap_or_default(),
                     task: input
                         .get("description")
                         .and_then(Value::as_str)
@@ -2786,6 +2960,13 @@ impl State {
                         .and_then(|p| p.lines().next())
                         .unwrap_or_default()
                         .to_string(),
+                    brief: input
+                        .get("prompt")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    launch_epoch: self.epoch,
+                    launch_seq: self.turn_seq + 1,
                     session_name: ["name", "subagent_type"]
                         .iter()
                         .find_map(|k| {
@@ -2799,7 +2980,11 @@ impl State {
                     agent_id: String::new(),
                     started_at,
                     last_active: started_at,
+                    log: Vec::new(),
                     last_text: String::new(),
+                    handback: String::new(),
+                    report: String::new(),
+                    failed: false,
                 },
             );
             self.emit(UiEvent::AgentStart {
@@ -2881,6 +3066,9 @@ impl State {
             id: id.clone(),
             ok: !is_error,
         });
+        if is_error && let Some(info) = self.agent_info.get_mut(&id) {
+            info.failed = true;
+        }
         // A handback launch result has "agentId: <id>" without the async mark: map it too, so a later SendMessage resolves to this row.
         let launched_aid =
             after_marker(&text, "agentId: ").filter(|_| self.agent_info.contains_key(&id));
@@ -2929,6 +3117,21 @@ impl State {
         }
     }
 
+    /// A new run for an agent that already ended (resumed) shows its row as running again.
+    fn reopen_agent(&mut self, tool: String) {
+        self.agents.entry(tool.clone()).or_insert_with(Instant::now);
+        for d in self.drains.iter_mut() {
+            d.started.retain(|s| s != &tool);
+        }
+        self.announced.remove(&tool);
+        if let Some(info) = self.agent_info.get_mut(&tool) {
+            info.background = true;
+            info.done = false;
+        }
+        self.persist_agent(&tool, STO_RUNNING);
+        self.emit_agent_rows();
+    }
+
     fn emit_agent_rows(&self) {
         self.emit_agent_rows_at(self.busy);
     }
@@ -2949,6 +3152,8 @@ impl State {
                         model: i.model.clone(),
                         background: i.background,
                         done: i.done,
+                        failed: i.failed,
+                        interrupted: false,
                         agent_id: i.agent_id.clone(),
                         result_path: i.result_path.clone(),
                         started_at: i.started_at,
@@ -2970,27 +3175,56 @@ impl State {
         let saved = self
             .agent_store
             .as_ref()
-            .map(|s| s.load(""))
+            .map(|s| s.load_restorable())
             .unwrap_or_default();
         let rows: Vec<AgentRow> = saved.iter().map(restored_row).collect();
         if rows.is_empty() {
             return;
         }
-        // Go restore (agentview): an interrupted agent's saved summary is its agent-view body, marked "(restored)".
-        for s in saved.iter().filter(|s| {
-            (s.status == STO_INTERRUPTED || s.status == STO_RUNNING) && !s.summary.is_empty()
-        }) {
+        // A stored agent's log lines return with their own arrival times.
+        for s in saved.iter().filter(|s| !s.log.is_empty()) {
+            self.emit(UiEvent::AgentLogAt {
+                id: s.id.clone(),
+                lines: s.log.clone(),
+            });
+        }
+        // Go restore (agentview): a stored agent's saved summary is its agent-view body, marked "(restored)".
+        // Agents stored before log lines were kept have no log, so only they take the summary.
+        for s in saved
+            .iter()
+            .filter(|s| s.log.is_empty() && !s.summary.is_empty())
+        {
             self.emit(UiEvent::AgentLog {
                 id: s.id.clone(),
                 lines: vec![format!("(restored) {}", s.summary)],
+                tool_ids: Vec::new(),
             });
         }
         self.restored_rows = rows.clone();
         self.emit(UiEvent::AgentsRestored { rows });
     }
 
+    // The agent's SubagentHandback message (its final report) is kept for the done line. Both the current child and a
+    // drained child can carry it (a rotation may leave the agent on the drained child).
+    fn record_handback(&mut self, raw: &Value) {
+        let Some(msg) = handback_message(raw) else {
+            return;
+        };
+        let Some(p) = raw
+            .get("parent_tool_use_id")
+            .and_then(Value::as_str)
+            .filter(|p| !p.is_empty())
+        else {
+            return;
+        };
+        if let Some(info) = self.agent_info.get_mut(p) {
+            info.handback = msg;
+        }
+    }
+
     // Go onSubEvent (repl.go:426, 686): a delegated agent's text and tool lines go to its agent-view log.
     fn on_sub_agent_line(&mut self, raw: &Value) {
+        self.record_handback(raw);
         let Some(p) = raw
             .get("parent_tool_use_id")
             .and_then(Value::as_str)
@@ -3001,8 +3235,19 @@ impl State {
         let Some(info) = self.agent_info.get_mut(p) else {
             return;
         };
-        let lines = sub_event_lines(raw);
+        // The agent's own model is the one its stream reports; it overrides the input or type-prefix guess.
+        // A change re-emits the panel rows, so the running row shows the model its done row will.
+        let model = stream_model(raw);
+        let model_changed = model.as_ref().is_some_and(|m| *m != info.model);
+        if let Some(m) = model {
+            info.model = m;
+        }
+        let (lines, tool_ids): (Vec<String>, Vec<Option<String>>) =
+            sub_event_entries(raw).into_iter().unzip();
         if lines.is_empty() {
+            if model_changed {
+                self.emit_agent_rows();
+            }
             return;
         }
         // Go lastSummary: the newest plain text line of this batch, if any, is the agent's last text.
@@ -3010,10 +3255,22 @@ impl State {
         if !last.is_empty() {
             info.last_text = last;
         }
+        // Kept with this arrival second, so a restored agent view shows when each line came.
+        let at = now_secs();
+        info.log.extend(lines.iter().map(|text| SavedLine {
+            at,
+            text: text.clone(),
+        }));
+        let excess = info.log.len().saturating_sub(MAX_AGENT_LOG);
+        info.log.drain(..excess);
         self.emit(UiEvent::AgentLog {
             id: p.to_string(),
             lines,
+            tool_ids,
         });
+        if model_changed {
+            self.emit_agent_rows();
+        }
     }
 
     // Go agentTracker persist: writes one delegated agent to the agents file (no-op without one).
@@ -3021,19 +3278,26 @@ impl State {
         let (Some(store), Some(info)) = (&self.agent_store, self.agent_info.get(id)) else {
             return;
         };
+        let status = saved_status(status, info.failed);
         let mut s = SavedAgent::new(
             id,
             status,
             UNIX_EPOCH + Duration::from_secs(info.started_at),
         );
+        // The agent's own model (its stream, else its input or type prefix); never the main session model.
         s.model = info.model.clone();
         s.name = info.session_name.clone();
         s.task = info.task.clone();
         s.prompt = info.prompt.clone();
-        // Go persistLocked: the last text line is kept as the summary the restored agent view shows.
-        s.summary = info.last_text.clone();
+        // Go persistLocked: the summary the restored agent view shows is the final report, else the last text line.
+        s.summary = if info.handback.is_empty() {
+            info.last_text.clone()
+        } else {
+            info.handback.clone()
+        };
         s.background = info.background;
         s.agent_id = info.agent_id.clone();
+        s.log = info.log.clone();
         store.put(&[s]);
     }
 
@@ -3071,6 +3335,9 @@ impl State {
     }
 
     fn finish_agent(&mut self, id: String) {
+        self.pending_end.remove(&id);
+        self.owned_tasks.retain(|_, parent| *parent != id);
+        self.agent_task_ids.retain(|_, tool| *tool != id);
         self.opus_set(&id, false);
         if let Some(t0) = self.agents.remove(&id) {
             let label = self
@@ -3103,10 +3370,191 @@ impl State {
         }
     }
 
+    // System task events (stream-json). An owned task (owned_by_subagent) keeps its agent open: its completion
+    // ends the agent once no owned task of it runs. An agent-level completion (tool_use_id of a tracked agent)
+    // goes through complete_agent. Shared by the main stream and the drained children.
+    fn on_system_task(&mut self, s: &SystemEvent) {
+        match s.subtype.as_deref() {
+            Some("task_started") => {
+                if !s.owned_by_subagent {
+                    self.seen_task_started = true;
+                    if let (Some(tid), Some(tool), Some("local_agent")) =
+                        (&s.task_id, &s.tool_use_id, s.task_type.as_deref())
+                    {
+                        self.agent_task_ids.insert(tid.clone(), tool.clone());
+                        // A resumed run replaces the previous run's handback, text, and report, and cancels a pending end.
+                        if let Some(info) = self.agent_info.get_mut(tool) {
+                            info.handback.clear();
+                            info.last_text.clear();
+                            info.report.clear();
+                            self.pending_end.remove(tool);
+                        }
+                        // A run that starts for an agent already ended (resumed) reopens its row.
+                        if !self.agents.contains_key(tool) && self.agent_info.contains_key(tool) {
+                            self.reopen_agent(tool.clone());
+                        }
+                    }
+                } else if let (Some(tid), Some(parent)) = (&s.task_id, &s.parent_task_id) {
+                    // Live claude names the parent by the agent's task id; the engine keys agents by tool_use id.
+                    let parent = self
+                        .agent_task_ids
+                        .get(parent)
+                        .cloned()
+                        .unwrap_or(parent.clone());
+                    self.owned_tasks.insert(tid.clone(), parent);
+                }
+            }
+            Some(sub @ ("task_updated" | "task_notification")) => {
+                let done = if sub == "task_updated" {
+                    s.patch
+                        .as_ref()
+                        .and_then(|p| p["status"].as_str())
+                        .is_some_and(|st| st == "completed" || st == "killed")
+                } else {
+                    matches!(s.status.as_deref(), Some("completed" | "stopped"))
+                };
+                if !done {
+                    return;
+                }
+                if let Some(parent) = s.task_id.as_ref().and_then(|t| self.owned_tasks.remove(t)) {
+                    // The last owned task gone restarts a pending agent's grace timer; it does not finish the agent.
+                    // The agent ends on its own completion, or on grace expiry when no resumed run cancels the pending end.
+                    if self.pending_end.contains_key(&parent) && !self.owned_live(&parent) {
+                        self.pending_end.insert(parent, Instant::now());
+                    }
+                } else if sub == "task_notification"
+                    && let Some(id) = s.tool_use_id.clone()
+                {
+                    let id = self.resume_ids.get(&id).cloned().unwrap_or(id);
+                    // The agent's own report becomes the body of its "[agent done]" notice.
+                    if let Some(text) = s.handback_report.as_ref().and_then(|r| r["text"].as_str())
+                        && let Some(info) = self.agent_info.get_mut(&id)
+                    {
+                        info.report = text.to_string();
+                    }
+                    self.complete_agent(id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // An agent's completion. It ends now, unless one of its owned tasks still runs: then it is pending until that
+    // task completes or agent_end_grace passes (expire_pending_ends). A drained agent settles through its drain.
+    fn complete_agent(&mut self, id: String) {
+        let id = self.resume_ids.get(&id).cloned().unwrap_or(id);
+        if !self.agents.contains_key(&id) {
+            self.pending_end.remove(&id);
+            return;
+        }
+        if self.owned_tasks.values().any(|p| *p == id) {
+            self.pending_end.entry(id).or_insert_with(Instant::now);
+            return;
+        }
+        if self.drains.iter().any(|d| d.started.contains(&id)) {
+            self.settle_drained(&id, true);
+        } else {
+            self.queue_main_notice(&id);
+            self.finish_agent(id);
+            self.send_notice_turn();
+        }
+    }
+
+    // A background agent that finished on the main child: its "[agent done]" notice with the final text is queued
+    // once per run, unless the native task_notification already carried that text to main. The native body counts
+    // as delivered only when this run's SubagentHandback equals the notification's handback_report.
+    fn queue_main_notice(&mut self, id: &str) {
+        let Some(info) = self.agent_info.get(id) else {
+            return;
+        };
+        if !info.background || (!info.handback.is_empty() && info.report == info.handback) {
+            return;
+        }
+        if !announce_once(&mut self.announced, id) {
+            return;
+        }
+        let body = if info.handback.is_empty() {
+            info.last_text.clone()
+        } else {
+            info.handback.clone()
+        };
+        self.notices.push(drain_done_notice(
+            id,
+            &info.task,
+            &info.out_path,
+            true,
+            &self.old_brief(info),
+            &body,
+        ));
+    }
+
+    // The brief of an agent the previous main launched (a rotation came after its launch); empty otherwise.
+    fn old_brief(&self, info: &AgentInfo) -> String {
+        if info.launch_epoch == self.epoch {
+            String::new()
+        } else {
+            info.brief.clone()
+        }
+    }
+
+    // Queued notices go out as a turn of their own while the main child is idle. A child-initiated turn in flight
+    // answers its own notification, so the notices wait for the next user message instead (no second reply).
+    fn send_notice_turn(&mut self) {
+        if self.notices.is_empty()
+            || self.busy
+            || self.hold_notice_turn
+            || self.idle_turn.active
+            || self.prompter.waiting()
+            || self.proc.is_none()
+        {
+            return;
+        }
+        self.busy = true;
+        self.emit(UiEvent::Busy(true));
+        if !self.send_turn("") {
+            self.busy = false;
+            self.emit(UiEvent::Busy(false));
+        }
+    }
+
+    // Pending ends past agent_end_grace: the agent ends. A pending agent with a live owned task is not expired: its
+    // owned tasks stay tracked, and the last owned completion ends it (on_system_task).
+    fn expire_pending_ends(&mut self) {
+        let grace = self.cfg.agent_end_grace;
+        let due: Vec<String> = self
+            .pending_end
+            .iter()
+            .filter(|(id, t0)| t0.elapsed() >= grace && !self.owned_live(id))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in due {
+            self.complete_agent(id);
+        }
+    }
+
+    // Whether an owned task of this agent still runs.
+    fn owned_live(&self, id: &str) -> bool {
+        self.owned_tasks.values().any(|p| p == id)
+    }
+
+    // Time until the nearest pending end expires. None when none is pending. Pending agents with a live owned task
+    // are left out: they do not expire, so their remaining time would be zero and spin the wait.
+    fn pending_end_left(&self) -> Option<Duration> {
+        self.pending_end
+            .iter()
+            .filter(|(id, _)| !self.owned_live(id))
+            .map(|(_, t0)| self.cfg.agent_end_grace.saturating_sub(t0.elapsed()))
+            .min()
+    }
+
     // A user text (string content or text block) that carries a notice (Go onUserEvent). While no turn runs,
     // a seen notice is recorded for the idle turn (Go idleEvent sawNotif).
     fn on_user_notice(&mut self, text: &str) {
-        if self.on_task_notification(text) && !self.busy {
+        let idle = !self.busy;
+        self.hold_notice_turn = idle;
+        let found = self.on_task_notification(text);
+        self.hold_notice_turn = false;
+        if found && idle {
             self.idle_turn.notif = true;
         }
     }
@@ -3120,9 +3568,7 @@ impl State {
             if self.agent_info.contains_key(&id) {
                 found = true;
             }
-            if self.agents.contains_key(&id) {
-                self.finish_agent(id);
-            }
+            self.complete_agent(id);
         }
         found
     }
@@ -3138,7 +3584,8 @@ impl State {
     // and is logged as a background turn (metrics stage=turn, source=background; repl.go:518-575).
     fn idle_result(&mut self) {
         let idle = std::mem::take(&mut self.idle_turn);
-        if idle.active && !idle.notif {
+        // With a system task_started seen, the agents end on their own events: the reply-ends-oldest fallback is off.
+        if idle.active && !idle.notif && !self.seen_task_started {
             self.finish_oldest_background();
         }
         if idle.active {
@@ -3182,7 +3629,8 @@ impl State {
             .iter()
             .map(|d| self.cfg.drain_timeout.saturating_sub(d.since.elapsed()))
             .min();
-        let own = [coders, drains]
+        // A pending agent end wakes at its grace.
+        let own = [coders, drains, self.pending_end_left()]
             .into_iter()
             .flatten()
             .min()
@@ -3228,6 +3676,7 @@ impl State {
     // notice repeats once per quiet period rather than on every wakeup.
     fn on_quiet(&mut self) {
         self.reap_drains();
+        self.expire_pending_ends();
         if self.prompter_left().is_some_and(|d| d.is_zero()) {
             self.prompter_timeout();
         }
@@ -3289,6 +3738,10 @@ impl State {
             .collect();
         for id in ids {
             self.opus_set(&id, false);
+            // The agent is gone: its pending end and owned tasks must not outlive it.
+            self.pending_end.remove(&id);
+            self.owned_tasks.retain(|_, parent| *parent != id);
+            self.agent_task_ids.retain(|_, tool| *tool != id);
             if let Some(t0) = self.agents.remove(&id) {
                 let (model, name, summary) = self
                     .agent_info
@@ -3502,6 +3955,66 @@ impl State {
         while self.recent.len() > self.cfg.tail_turns {
             self.recent.pop_front();
         }
+        self.turn_seq += 1;
+        self.turn_log.push_back((
+            self.turn_seq,
+            self.turn_prompt.clone(),
+            self.turn_reply.clone(),
+        ));
+        while self.turn_log.len() > TURN_LOG_MAX {
+            self.turn_log.pop_front();
+        }
+    }
+
+    // Rotation with live agents (the previous main launched them): each live agent's full brief, and the previous
+    // main's turns from the first live launch on, newest kept within CARRIED_TURN_CHARS. Empty when none is live.
+    // Called before the old child settles its agents, so a killed child's agents are still listed.
+    fn carried_block(&self) -> String {
+        let mut live: Vec<(&String, &AgentInfo)> = self
+            .agents
+            .keys()
+            .filter_map(|id| self.agent_info.get(id).map(|i| (id, i)))
+            .filter(|(_, i)| i.launch_epoch == self.epoch)
+            .collect();
+        if live.is_empty() {
+            return String::new();
+        }
+        live.sort_by_key(|(_, i)| i.launch_seq);
+        let mut block =
+            String::from("## Agents still running from the previous session (launched by it)\n");
+        for (id, i) in &live {
+            let task = if i.task.is_empty() { &i.name } else { &i.task };
+            block.push_str(&format!(
+                "- {id} · {task} · launched at {} (unix secs)\n  brief:\n{}\n",
+                i.started_at,
+                cap_brief(&i.brief)
+            ));
+        }
+        let turns = self.carried_turns(live[0].1.launch_seq);
+        if !turns.is_empty() {
+            block.push_str(
+                "\n## Previous session turns (from the first live agent's launch, newest kept)\n",
+            );
+            block.push_str(&turns);
+        }
+        block
+    }
+
+    // The logged turns from turn number `from` on, as "User:" and "Assistant:" text, newest kept within
+    // CARRIED_TURN_CHARS. The oldest included turn keeps its tail. Tool results are not in the log.
+    fn carried_turns(&self, from: u64) -> String {
+        let mut left = CARRIED_TURN_CHARS;
+        let mut parts: Vec<String> = Vec::new();
+        for (seq, prompt, reply) in self.turn_log.iter().rev() {
+            if *seq < from || left == 0 {
+                break;
+            }
+            let text = tail(&format!("User: {prompt}\nAssistant: {reply}"), left);
+            left -= text.chars().count();
+            parts.push(text);
+        }
+        parts.reverse();
+        parts.join("\n\n")
     }
 
     // Go shouldRotate at turn end: the context is at or past the threshold.
@@ -3785,6 +4298,7 @@ impl State {
             session,
             since: Instant::now(),
             started,
+            interrupting: false,
         });
         while self.drains.len() > self.cfg.max_drain {
             let oldest = self.drains.remove(0);
@@ -3815,19 +4329,61 @@ impl State {
     // Settles one drained or killed agent exactly once: it leaves every drain's started list, its "[agent done]"
     // notice is queued (done or 타임아웃), and it leaves the tracker so its status is terminal.
     fn settle_drained(&mut self, id: &str, done: bool) {
+        let owners: Vec<u64> = self
+            .drains
+            .iter()
+            .filter(|d| d.started.iter().any(|s| s == id))
+            .map(|d| d.epoch)
+            .collect();
         for d in self.drains.iter_mut() {
             d.started.retain(|s| s != id);
         }
-        let (task, out) = self
+        let (task, out, brief, report) = self
             .agent_info
             .get(id)
-            .map(|i| (i.task.clone(), i.out_path.clone()))
+            .map(|i| {
+                (
+                    i.task.clone(),
+                    i.out_path.clone(),
+                    self.old_brief(i),
+                    i.report.clone(),
+                )
+            })
             .unwrap_or_default();
         if announce_once(&mut self.announced, id) {
-            self.notices.push(drain_done_notice(id, &task, &out, done));
+            self.notices
+                .push(drain_done_notice(id, &task, &out, done, &brief, &report));
         }
         if self.agents.contains_key(id) {
             self.finish_agent(id.to_string());
+        }
+        // A drain whose last owned child just completed has nothing left to wait for: the old main is ended now
+        // (killed and reaped), so a turn it would start on its own never reaches the TUI.
+        if done {
+            for epoch in owners {
+                if self
+                    .drains
+                    .iter()
+                    .any(|d| d.epoch == epoch && d.started.is_empty())
+                {
+                    self.end_drain(epoch, false);
+                }
+            }
+        }
+        // The drained child consumed the completion: an idle current main gets the notice as its own turn now.
+        // A timed-out drain keeps the notice for the next user message (Go).
+        if done
+            && !self.notices.is_empty()
+            && !self.busy
+            && !self.prompter.waiting()
+            && self.proc.is_some()
+        {
+            self.busy = true;
+            self.emit(UiEvent::Busy(true));
+            if !self.send_turn("") {
+                self.busy = false;
+                self.emit(UiEvent::Busy(false));
+            }
         }
     }
 
@@ -3850,28 +4406,53 @@ impl State {
             }
             None => "drain_event",
         };
-        let ty = serde_json::from_str::<Value>(&line)
-            .ok()
-            .and_then(|v| v["type"].as_str().map(str::to_string))
-            .unwrap_or_default();
-        let session = self.drains[i].session.clone();
-        self.log_transcript(kind, json!({"type": ty, "session": session}));
+        let raw = serde_json::from_str::<Value>(&line).ok();
+        // A turn the drained child starts on its own (a native task notification) is not caused by chaude: it is
+        // interrupted once, and its output is discarded up to its result. The agent-done handling still runs below.
+        if raw.as_ref().is_some_and(Self::drain_turn_started) && !self.drains[i].interrupting {
+            self.drains[i].interrupting = true;
+            let _ = self.drains[i].proc.write_interrupt();
+        }
+        let discard = self.drains[i].interrupting;
+        if raw.as_ref().is_some_and(|v| v["type"] == "result") {
+            self.drains[i].interrupting = false;
+        }
+        if !discard {
+            let ty = raw
+                .as_ref()
+                .and_then(|v| v["type"].as_str().map(str::to_string))
+                .unwrap_or_default();
+            let session = self.drains[i].session.clone();
+            self.log_transcript(kind, json!({"type": ty, "session": session}));
+            if let Some(v) = &raw {
+                self.record_handback(v);
+            }
+        }
         self.drain_completed(epoch, &line);
+    }
+
+    // A turn start on a drained child: an assistant message or message_start of the main thread (no parent tool use).
+    // Subagent lines carry parent_tool_use_id and do not count.
+    fn drain_turn_started(v: &Value) -> bool {
+        let top = v["parent_tool_use_id"]
+            .as_str()
+            .is_none_or(|p| p.is_empty());
+        top && (v["type"] == "assistant"
+            || (v["type"] == "stream_event" && v["event"]["type"] == "message_start"))
     }
 
     // A drained agent's <task-notification> ends it at once: the agent leaves the tracker (terminal, AgentEnd) and its
     // "[agent done]" notice is queued now, once. end_drain then skips it. The notice goes out with the next user prompt
     // to the current main, so a rotation in between does not lose it.
     fn drain_completed(&mut self, epoch: u64, line: &str) {
-        for id in task_notification_ids(line) {
-            let id = self.resume_ids.get(&id).cloned().unwrap_or(id);
-            let Some(d) = self.drains.iter().find(|d| d.epoch == epoch) else {
-                return;
-            };
-            if !d.started.contains(&id) || !self.agents.contains_key(&id) {
-                continue;
+        if !self.drains.iter().any(|d| d.epoch == epoch) {
+            return;
+        }
+        match parse_line(line) {
+            Ok(Event::System(s)) => self.on_system_task(&s),
+            _ => {
+                self.on_task_notification(line);
             }
-            self.settle_drained(&id, true);
         }
     }
 
@@ -3978,9 +4559,15 @@ impl State {
 
     // Closes the current child and starts a fresh one that gets the snapshot with its next prompt.
     fn rotate_child(&mut self, snapshot: String, reason: String, valid: bool, attempts: u32) {
+        // Built before restart_child_with: a killed child's agents leave self.agents when they settle.
+        let carried = self.carried_block();
         let drain = drain_wanted(self.cfg.max_drain, self.agents.len());
         let (old, drained) = self.restart_child_with(drain);
-        self.pending_snapshot = snapshot;
+        self.pending_snapshot = if carried.is_empty() {
+            snapshot
+        } else {
+            format!("{snapshot}\n\n{carried}")
+        };
         let _ = self.metrics.log(json!({
             "stage": "rotate",
             "reason": reason,
@@ -4069,6 +4656,7 @@ impl State {
 
     // Returns the spawn error text; the UiEvent::Error is sent either way when the spawn fails.
     fn start_child(&mut self) -> Result<(), String> {
+        self.seen_task_started = false;
         let mut opts = self.opts.clone();
         if let Some(path) = self.mcp_config() {
             opts.shape = Shape {
@@ -4251,6 +4839,26 @@ fn agent_slot(label: &str) -> String {
 }
 
 // Go subagentLabel (resident_coder.go:60): the subagent_type input, else "agent".
+// The model an assistant line of a delegated agent ran on (message.model); None for other lines.
+fn stream_model(raw: &Value) -> Option<String> {
+    if raw.get("type").and_then(Value::as_str) != Some("assistant") {
+        return None;
+    }
+    raw.get("message")
+        .and_then(|m| m.get("model"))
+        .and_then(Value::as_str)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+}
+
+// An agent named with a model prefix (haiku-scout, opus-runner, sonnet-x) runs on that model family.
+fn agent_type_model(name: &str) -> Option<String> {
+    ["haiku", "opus", "sonnet"]
+        .into_iter()
+        .find(|p| name.starts_with(&format!("{p}-")))
+        .map(str::to_string)
+}
+
 fn subagent_label(input: &Value) -> String {
     input
         .get("subagent_type")
@@ -4298,6 +4906,23 @@ fn tool_summary(input: &Value) -> String {
 
 fn clip(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
+}
+
+// A carried agent brief cut to CARRIED_BRIEF_CHARS (its head kept); a cut brief says so.
+fn cap_brief(brief: &str) -> String {
+    if brief.chars().count() <= CARRIED_BRIEF_CHARS {
+        return brief.to_string();
+    }
+    format!(
+        "{}\n[brief truncated: first {CARRIED_BRIEF_CHARS} chars shown]",
+        clip(brief, CARRIED_BRIEF_CHARS)
+    )
+}
+
+// The last max chars of s.
+fn tail(s: &str, max: usize) -> String {
+    let n = s.chars().count();
+    s.chars().skip(n.saturating_sub(max)).collect()
 }
 
 // Go outPathRe `notes/runs/[^\s"'`)]+\.md`: the longest such run, ending at its last ".md".
@@ -4483,6 +5108,114 @@ mod tests {
     use super::*;
     use crate::clients::idle_deadline;
     use crate::testutil::{TempDir, isolated};
+
+    // A restored row keeps its saved final status: done stays done, failed shows failed, and only interrupted or
+    // still-running (at shutdown) rows are marked interrupted. The saved model is kept; an empty one stays empty.
+    #[test]
+    fn restored_row_keeps_saved_status_and_model() {
+        let saved = |status: &str, model: &str| -> SavedAgent {
+            serde_json::from_value(serde_json::json!({
+                "id": "a",
+                "model": model,
+                "name": "scout",
+                "status": status,
+            }))
+            .expect("saved agent")
+        };
+        let done = restored_row(&saved(STO_DONE, "haiku-4"));
+        assert!(done.done && !done.failed && !done.interrupted, "{done:?}");
+        assert_eq!(done.model, "haiku-4");
+        let failed = restored_row(&saved(STO_FAILED, "haiku-4"));
+        assert!(
+            failed.done && failed.failed && !failed.interrupted,
+            "{failed:?}"
+        );
+        let interrupted = restored_row(&saved(STO_INTERRUPTED, "haiku-4"));
+        assert!(
+            interrupted.done && !interrupted.failed && interrupted.interrupted,
+            "{interrupted:?}"
+        );
+        let running = restored_row(&saved(STO_RUNNING, "haiku-4"));
+        assert!(
+            running.done && running.interrupted && !running.failed,
+            "{running:?}"
+        );
+        assert_eq!(running.model, "haiku-4");
+        let unknown = restored_row(&saved(STO_DONE, ""));
+        assert!(unknown.model.is_empty(), "{unknown:?}");
+    }
+
+    // A restored row's duration runs from its start to its stored last change (Unix seconds on both ends).
+    #[test]
+    fn restored_row_last_active_is_the_stored_update() {
+        let mut s: SavedAgent = serde_json::from_value(serde_json::json!({
+            "id": "a",
+            "status": STO_INTERRUPTED,
+        }))
+        .expect("saved agent");
+        s.started = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        s.updated = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_125);
+        let row = restored_row(&s);
+        assert_eq!(row.started_at, 1_700_000_000, "{row:?}");
+        assert_eq!(row.last_active, 1_700_000_125, "{row:?}");
+    }
+
+    // With stored log lines, the last activity is the newest line's arrival, not the later interrupt write.
+    #[test]
+    fn restored_row_last_active_is_the_last_log_line() {
+        let mut s: SavedAgent = serde_json::from_value(serde_json::json!({
+            "id": "a",
+            "status": STO_INTERRUPTED,
+        }))
+        .expect("saved agent");
+        s.started = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        s.updated = UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_500);
+        s.log = vec![
+            SavedLine {
+                at: 1_700_000_010,
+                text: "first".to_string(),
+            },
+            SavedLine {
+                at: 1_700_000_090,
+                text: "last".to_string(),
+            },
+        ];
+        let row = restored_row(&s);
+        assert_eq!(row.last_active, 1_700_000_090, "{row:?}");
+    }
+
+    // An agent's model is its own: the stream model of its assistant lines, else its name prefix. Other lines and
+    // unprefixed names give none, so the row omits the model instead of showing the main session's.
+    #[test]
+    fn agent_model_comes_from_its_own_stream_or_name_prefix() {
+        let asst = serde_json::json!({
+            "type": "assistant",
+            "parent_tool_use_id": "t1",
+            "message": {"model": "claude-haiku-5-5", "content": []},
+        });
+        assert_eq!(stream_model(&asst).as_deref(), Some("claude-haiku-5-5"));
+        let user = serde_json::json!({
+            "type": "user",
+            "parent_tool_use_id": "t1",
+            "message": {"model": "claude-opus-5-5"},
+        });
+        assert_eq!(stream_model(&user), None);
+        assert_eq!(agent_type_model("haiku-scout").as_deref(), Some("haiku"));
+        assert_eq!(agent_type_model("opus-runner").as_deref(), Some("opus"));
+        assert_eq!(agent_type_model("sonnet-x").as_deref(), Some("sonnet"));
+        assert_eq!(agent_type_model("general-purpose"), None);
+        assert_eq!(agent_type_model("haiku"), None);
+    }
+
+    // A finished agent whose tool result errored (a failed run or a hook block) is saved as failed; a clean one
+    // stays done, and the other statuses are kept.
+    #[test]
+    fn errored_agent_is_saved_as_failed() {
+        assert_eq!(saved_status(STO_DONE, true), STO_FAILED);
+        assert_eq!(saved_status(STO_DONE, false), STO_DONE);
+        assert_eq!(saved_status(STO_RUNNING, true), STO_RUNNING);
+        assert_eq!(saved_status(STO_INTERRUPTED, false), STO_INTERRUPTED);
+    }
 
     // Unset cwd resolves to an absolute path (not "."), so the record folder is not "misc".
     #[test]
@@ -4913,16 +5646,43 @@ mod tests {
         assert!(with_picked(Vec::new(), None, true).is_empty());
     }
 
+    // Each carried agent brief keeps its first 1500 chars and says it was cut; a short brief is unchanged.
+    #[test]
+    fn carried_brief_is_capped_and_marked() {
+        assert_eq!(cap_brief("look around"), "look around");
+        let exact = "b".repeat(CARRIED_BRIEF_CHARS);
+        assert_eq!(cap_brief(&exact), exact);
+        let cut = cap_brief(&"a".repeat(1_600));
+        assert!(cut.starts_with(&"a".repeat(1_500)), "{cut}");
+        assert!(!cut.starts_with(&"a".repeat(1_501)), "{cut}");
+        assert!(
+            cut.ends_with("[brief truncated: first 1500 chars shown]"),
+            "{cut}"
+        );
+    }
+
     #[test]
     fn drain_notice_text_and_prefix() {
         assert_eq!(
-            drain_done_notice("a1", "lint", "notes/runs/x.md", true),
+            drain_done_notice("a1", "lint", "notes/runs/x.md", true, "", ""),
             "[agent done] a1 · lint · notes/runs/x.md · 완료"
         );
         assert_eq!(
-            drain_done_notice("a2", "fix", "", false),
+            drain_done_notice("a2", "fix", "", false, "", ""),
             "[agent done] a2 · fix ·  · 타임아웃"
         );
+        assert_eq!(
+            drain_done_notice("a3", "fix", "", true, "", "DONE-ROT"),
+            "[agent done] a3 · fix ·  · 완료\nDONE-ROT"
+        );
+        assert_eq!(
+            drain_done_notice("a5", "fix", "", true, "look\n around", "DONE-ROT"),
+            "[agent done] a5 · fix ·  · 완료\nbrief: look around\nDONE-ROT"
+        );
+        let long = "#".repeat(NOTICE_REPORT_CHARS + 5);
+        let cut = drain_done_notice("a4", "fix", "", true, "", &long);
+        assert!(cut.ends_with(&format!("\n[cut at {NOTICE_REPORT_CHARS} chars]")));
+        assert_eq!(cut.matches('#').count(), NOTICE_REPORT_CHARS);
         assert_eq!(with_notices(&[], "hi"), "hi");
         let ns = vec!["[agent done] a1 · t · o · 완료".to_string()];
         assert_eq!(
