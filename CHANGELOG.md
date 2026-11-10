@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.12.0 - 2026-11-11
+- Language: a new `i18n` setting and the `CHAUDE_LANG` environment variable pick English or Korean. The TUI and the hook messages follow it.
+  - 언어: 새 `i18n` 설정과 `CHAUDE_LANG` 환경 변수로 영어 또는 한국어를 고릅니다. TUI와 훅 메시지가 이 설정을 따릅니다.
+- Installer: `~/.local/bin` is the install directory and needs no sudo. The installer adds it to PATH once.
+  - 설치: 설치 위치는 `~/.local/bin`이며 sudo가 필요 없습니다. 설치 스크립트가 PATH에 한 번만 추가합니다.
+- Windows: times show local time.
+  - Windows: 시각을 로컬 시간으로 표시합니다.
+- Agent tool lines are green.
+  - 에이전트 도구 줄이 녹색으로 표시됩니다.
+- Link color: fixed a drag that changed the link color.
+  - 링크 색: 드래그할 때 링크 색이 바뀌던 문제를 고쳤습니다.
+- Input box: the last cell of the input box is left blank.
+  - 입력창: 입력창의 마지막 칸을 비워 둡니다.
+- Quit is instant. `/resume` notes are kept in `notes/tmp`.
+  - 종료가 즉시 이루어집니다. `/resume` 노트는 `notes/tmp`에 보관합니다.
+- Hooks: fixed the English status line and the imperative hook message.
+  - 훅: 영어 상태 줄과 명령형 훅 메시지를 고쳤습니다.
+
 ## 0.11.11 - 2026-11-10
 - Rotation: agent completion keeps going to the current main session. Before, the old main stopped after its last child and carried its history over on rotation.
   - 로테이션 뒤에도 에이전트 완료 알림이 현재 메인에 전달됩니다. 이전 메인은 마지막 자식 에이전트가 끝나면 종료되고, 진행 중인 작업 내역은 새 메인에 미리 실립니다.

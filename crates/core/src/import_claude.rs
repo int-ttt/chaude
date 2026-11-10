@@ -38,6 +38,8 @@ pub struct ClaudeImport {
     // cleared: a user /clear is in the file. clear_head: it came before any turn (new session start).
     pub cleared: bool,
     pub clear_head: bool,
+    // /resume digest written by resume_note::write; its hint goes into the first input.
+    pub note_path: Option<PathBuf>,
 }
 
 // Go claudeProjectDir: ~/.claude/projects/<project key of cwd>. An empty cwd means the current directory.

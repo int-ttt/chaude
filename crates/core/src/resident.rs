@@ -4,6 +4,8 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::i18n::{Msg, t, tf};
+
 // The prompter's system prompt: the Go resident-prompter rules, copied so the engine does not depend on the removed Go tree.
 pub const PROMPTER_RULE: &str = include_str!("rules/resident-prompter.md");
 
@@ -66,7 +68,7 @@ pub fn agent_body(cwd: &Path, name: &str) -> Result<String, String> {
             }
         }
     }
-    Err(format!("에이전트 규칙 없음({name})"))
+    Err(tf(Msg::AgentRuleMissing, &[&name]))
 }
 
 // Go stripFrontmatter: when the first line is `---`, drops the lines up to and including the second `---`.
@@ -126,7 +128,7 @@ impl Prompter {
     pub fn reply(&mut self, reply: &str) -> Option<PrompterOutcome> {
         let original = self.pending.take()?;
         if reply.is_empty() {
-            return Some(failed(original, &prompter_notice("빈 응답")));
+            return Some(failed(original, &prompter_notice(t(Msg::EmptyResponse))));
         }
         let (_, summary) = parse_prompter_reply(reply);
         if summary.is_empty() {
@@ -146,7 +148,7 @@ impl Prompter {
         let original = self.pending.take()?;
         Some(failed(
             original,
-            &prompter_notice(&format!("오류: {reason}")),
+            &prompter_notice(&tf(Msg::Error, &[&reason])),
         ))
     }
 
@@ -155,19 +157,19 @@ impl Prompter {
         let original = self.pending.take()?;
         Some(failed(
             original,
-            &prompter_notice(&format!("{}초 시간초과", after.as_secs_f64())),
+            &prompter_notice(&tf(Msg::TimedOut, &[&after.as_secs_f64()])),
         ))
     }
 }
 
 // Go notice texts for a failed prompter pass; the original input goes to the main child unchanged.
 pub fn prompter_notice(detail: &str) -> String {
-    format!("prompter 실패({detail}): 원문 그대로 메인에 보냄")
+    tf(Msg::PrompterFailed, &[&detail])
 }
 
 // Go notice texts for a failed tui pass; the main reply is shown as is.
 pub fn tui_notice(detail: &str) -> String {
-    format!("haiku-tui 실패({detail}): 메인 원문 표시")
+    tf(Msg::TuiFailed, &[&detail])
 }
 
 fn failed(original: String, notice: &str) -> PrompterOutcome {

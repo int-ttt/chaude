@@ -15,7 +15,10 @@ use super::render::{DIM_ON, FG_OFF, ORANGE_ON, RESET};
 // Go maxAgentLog: the live transcript kept per agent (oldest lines drop first).
 pub const MAX_AGENT_LOG: usize = 400;
 // Go openAgentKey: shown when there is no agent to view.
-pub const NO_AGENTS: &str = "no agents yet";
+// The note shown when there are no agents yet (catalog Msg::NoAgents).
+pub fn no_agents() -> &'static str {
+    chaude_core::i18n::t(chaude_core::i18n::Msg::NoAgents)
+}
 // Go agentViewLines: header, hint, and the empty-body placeholder.
 const HEAD: &str = "Agent (read-only)";
 const HINT: &str = "  esc/q close · tab next · ↑/↓ pgup/pgdn scroll";
@@ -378,7 +381,14 @@ pub fn body_rows(rec: &AgentRec, width: usize) -> Vec<String> {
     let cw = 10.max(width.saturating_sub(2));
     let mut body: Vec<String> = Vec::new();
     for l in &rec.log {
-        body.extend(wrap(l, cw));
+        let rows = wrap(l, cw);
+        // A tool call line is green in the main pane (tool_color); its wrapped rows stay green. Styling runs after
+        // the wrap so the escape bytes never count as cells.
+        if l.starts_with(CALL_LEAD) {
+            body.extend(rows.iter().map(|r| super::tool_color(r)));
+        } else {
+            body.extend(rows);
+        }
     }
     if rec.log.is_empty() {
         body.push(format!("{DIM_ON}{NO_OUTPUT}{RESET}"));

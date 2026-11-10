@@ -29,8 +29,10 @@ use std::time::{Duration, Instant};
 
 use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::handoff;
+use chaude_core::i18n::{Msg, t, tf};
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::resident::StagePhase;
+use chaude_core::resume_note;
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
@@ -74,7 +76,6 @@ const COPY_NOTE_TTL: Duration = Duration::from_secs(2);
 // Go defaultIdleNotice (repl.go:620): quiet time with no open tool call before the "still waiting" notice.
 const IDLE_NOTICE: Duration = Duration::from_secs(30 * 60);
 // Shown on the running row when output arrived while the view was held above the tail (scroll-bottom.md).
-const NEW_MSG: &str = "↓ 새 메시지";
 // Prefix for agent text lines.
 const AGENT_PREFIX: &str = "  │ ";
 // Go tui.go render(): orange "● " opens an assistant block, green "● " opens a tool block.
@@ -631,7 +632,7 @@ impl App {
             UiEvent::Usage { text } => {
                 let (w, h) = self.usage_geom();
                 let text = if text.trim().is_empty() {
-                    usage::EMPTY.to_string()
+                    t(Msg::UsageEmpty).to_string()
                 } else {
                     render::decorate_usage(&text, self.bar.tokens as i64)
                 };
@@ -915,7 +916,7 @@ impl App {
                 resume_pick::Action::Close => self.pick = None,
                 resume_pick::Action::Pick(key) => {
                     self.pick = None;
-                    self.import_view(&key);
+                    self.import_view(&key, true);
                 }
             }
             return Action::Continue;
@@ -995,7 +996,7 @@ impl App {
                         self.av = Some(av);
                         self.clear_selection();
                     }
-                    None => self.note(agentview::NO_AGENTS),
+                    None => self.note(agentview::no_agents()),
                 }
                 Action::Continue
             }
@@ -1161,16 +1162,14 @@ impl App {
             }
             KeyCode::Up => {
                 // The input width is the one input_rows wraps at, so Up moves the visual row shown on screen.
-                let inner = self.cols.saturating_sub(2).max(1);
-                let w = inner.saturating_sub(UnicodeWidthStr::width(PROMPT));
+                let w = input_text_width(self.cols);
                 if !self.editor.move_row(-1, w) {
                     self.editor.history_prev();
                 }
                 Action::Continue
             }
             KeyCode::Down => {
-                let inner = self.cols.saturating_sub(2).max(1);
-                let w = inner.saturating_sub(UnicodeWidthStr::width(PROMPT));
+                let w = input_text_width(self.cols);
                 if !self.editor.move_row(1, w) {
                     self.editor.history_next();
                 }
@@ -1247,7 +1246,7 @@ impl App {
                 return Action::Continue;
             }
             Some(Dispatch::Import { arg, .. }) => {
-                self.import_view(&arg);
+                self.import_view(&arg, false);
                 return Action::Continue;
             }
             Some(Dispatch::Resume { args }) => return self.resume(&args),
@@ -1267,10 +1266,24 @@ impl App {
     // (handoff::prev_owned, Go loadPrevOwned); this run's ids come from UiEvent::SessionIds.
     // /import [id|latest]: the imported Claude Code view replaces the transcript (Go importedMsg), and the
     // transcript is queued for the engine (Go applyImport) so the next prompt starts from it.
-    fn import_view(&mut self, arg: &str) {
+    // digest: a /resume writes notes/tmp/<session>.md and the engine gets its path with the first input.
+    fn import_view(&mut self, arg: &str, digest: bool) {
         match import_claude::load_import_arg(arg, &self.welcome.cwd) {
             Err(e) => self.note(&e),
-            Ok((_, imp)) => {
+            Ok((_, mut imp)) => {
+                if digest {
+                    let sids: Vec<String> = arg
+                        .split(',')
+                        .filter_map(|a| {
+                            import_claude::resolve_claude_transcript(a, &self.welcome.cwd).ok()
+                        })
+                        .map(|p| import_claude::session_stem(&p))
+                        .collect();
+                    // A failed write leaves the import without the digest hint; the transcript still loads.
+                    imp.note_path =
+                        resume_note::write(std::path::Path::new(&self.welcome.cwd), &imp, &sids)
+                            .ok();
+                }
                 self.show_import(&imp);
                 self.import_install = Some(imp);
             }
@@ -1367,7 +1380,7 @@ impl App {
                 Action::Continue
             }
             Ok(gs) if gs.len() == 1 => {
-                self.import_view(&gs[0].key());
+                self.import_view(&gs[0].key(), true);
                 Action::Continue
             }
             Ok(gs) => {
@@ -1702,7 +1715,7 @@ impl App {
 
     // Go mainStatusText + the spinner (tui.go:385-390): `✶ 생각중-model-메인(prompt) · Mm SSs`, orange frame, grey text.
     fn busy_row(&self, esc: bool) -> String {
-        let mut text = format!("생각중-{}-메인", self.welcome.model);
+        let mut text = tf(Msg::BusyRow, &[&self.welcome.model]);
         if !self.turn_prompt.is_empty() {
             text.push_str(&format!("({})", self.turn_prompt));
         }
@@ -1797,7 +1810,10 @@ impl App {
         let bi = self.bar_input();
         let [mut top, mut status] = bar::rows(&bi, self.spin, width);
         if self.unseen && !self.follow {
-            top = format!("{top} · {NEW_MSG}");
+            top = format!(
+                "{top} · {}",
+                chaude_core::i18n::t(chaude_core::i18n::Msg::NewMessage)
+            );
         }
         // Go tui.go footer: the copy note follows the status text.
         if let Some((note, _)) = &self.copy_note {
@@ -1835,10 +1851,13 @@ impl App {
         let mut out = Vec::new();
         for (i, q) in self.queue_texts.iter().enumerate() {
             if i + 1 == max_show && total > max_show {
-                out.push(format!("{GREY_ON}  … +{} 대기{FG_OFF}", total - i));
+                out.push(format!(
+                    "{GREY_ON}{}{FG_OFF}",
+                    tf(Msg::QueueMore, &[&(total - i)])
+                ));
                 break;
             }
-            let text = format!("  대기 {}", q.replace('\n', " "));
+            let text = tf(Msg::QueueItem, &[&q.replace('\n', " ")]);
             out.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&text, width)));
         }
         out
@@ -2112,8 +2131,8 @@ impl App {
     // Records the outcome of a copy: "복사됨 (N자)" on success, the error otherwise. Shown for 2s.
     fn copy_done(&mut self, chars: usize, result: Result<(), String>) {
         let note = match result {
-            Ok(()) => format!("복사됨 ({chars}자)"),
-            Err(e) => format!("복사 실패: {e}"),
+            Ok(()) => tf(Msg::CopyDone, &[&chars]),
+            Err(e) => tf(Msg::CopyFailed, &[&e]),
         };
         self.copy_note = Some((note, self.clock));
     }
@@ -2281,7 +2300,7 @@ impl App {
     }
 
     // Go inputBox.rows() (input.go:149): logical lines soft-wrapped at `w` cells. Returns the visual rows,
-    // and the visual row and cell column of the cursor.
+    // and the visual row and cell column of the cursor. A full last row is followed by an empty row.
     fn input_rows(&self, w: usize) -> (Vec<String>, usize, usize) {
         let w = w.max(2);
         let pos = self.editor.cursor();
@@ -2307,6 +2326,11 @@ impl App {
             line.push(c);
             cells += cw;
         }
+        // A full last row gets an empty row below it, so the cursor after the text never lands on the blank column.
+        if cells >= w {
+            rows.push(std::mem::take(&mut line));
+            cells = 0;
+        }
         if pos >= self.editor.text().chars().count() {
             cur = (rows.len(), cells);
         }
@@ -2321,9 +2345,7 @@ impl App {
 
     // Visual rows the input box shows: at least 1, at most MAX_INPUT_ROWS.
     fn input_height(&self, w: usize) -> usize {
-        let inner = w.saturating_sub(2).max(1);
-        let pw = UnicodeWidthStr::width(PROMPT);
-        self.input_rows(inner.saturating_sub(pw))
+        self.input_rows(input_text_width(w))
             .0
             .len()
             .min(MAX_INPUT_ROWS)
@@ -2409,15 +2431,14 @@ impl App {
         let mut out = vec![edge("╭", "╮")];
         if self.editor.is_empty() {
             let ph = render::input_placeholder(self.busy);
-            // The cursor cell takes one column after the prompt, so the placeholder gets the rest.
-            let ph = bar::clip(ph, inner.saturating_sub(PROMPT.len() + 1));
+            // The prompt and the cursor cell take their columns; the last column stays blank.
+            let ph = bar::clip(ph, inner.saturating_sub(UnicodeWidthStr::width(PROMPT) + 2));
             let cell = if active { REV_ON } else { "" };
             out.push(side(&format!(
                 "{PROMPT}{cell} {RESET}{GREY_ON}{ph}{FG_OFF}"
             )));
         } else {
-            let pw = UnicodeWidthStr::width(PROMPT);
-            let (rows, cur_row, cur_col) = self.input_rows(inner.saturating_sub(pw));
+            let (rows, cur_row, cur_col) = self.input_rows(input_text_width(w));
             let (top, shown) = input_window(rows.len(), cur_row);
             for (i, row) in rows.iter().enumerate().skip(top).take(shown) {
                 let pre = if i == 0 { PROMPT } else { "  " };
@@ -2505,14 +2526,14 @@ fn wrap_row(line: &str, w: usize, linked: bool) -> Vec<String> {
 // where the label is Go subagentLabel (subagent_type, else "agent").
 fn stage_text(slot: &str, phase: &StagePhase) -> String {
     let (name, start) = match slot.strip_prefix("agent:") {
-        Some(desc) => (format!("agent {desc}"), "호출"),
-        None if slot == "tui" => (slot.to_string(), "번역중"),
-        None => (slot.to_string(), "처리중"),
+        Some(desc) => (format!("agent {desc}"), Msg::StageCall),
+        None if slot == "tui" => (slot.to_string(), Msg::StageTranslate),
+        None => (slot.to_string(), Msg::StageStart),
     };
     match phase {
-        StagePhase::Working => format!("· {name} {start}"),
-        StagePhase::Done => format!("· {name} 완료"),
-        StagePhase::Failed(err) => format!("· {name} 실패: {err}"),
+        StagePhase::Working => tf(start, &[&name]),
+        StagePhase::Done => tf(Msg::StageDone, &[&name]),
+        StagePhase::Failed(err) => tf(Msg::StageFailed, &[&name, err]),
     }
 }
 
@@ -2530,16 +2551,25 @@ fn action_line(lead: &str, start: i64, body: &str, end: Option<(i64, u64)>) -> S
     s
 }
 
+// The green tool block colour (Go tool block). Shared by the main pane's tool rows and the agent pane's call lines.
+pub(super) fn tool_color(s: &str) -> String {
+    format!("{TOOL_ON}{s}{FG_OFF}")
+}
+
 // A tool row as the transcript holds it: the green "● " tool block with its time.
 fn tool_line(r: &ToolRow) -> String {
-    format!(
-        "{TOOL_ON}{}{FG_OFF}",
-        action_line("● ", r.start, &r.head, r.end)
-    )
+    tool_color(&action_line("● ", r.start, &r.head, r.end))
 }
 
 // Go inputBox.View window (input.go:211): at most MAX_INPUT_ROWS rows, scrolled so the cursor row stays visible.
 // Returns the first row and the number of rows shown.
+// Cells one input row may fill, counting the prompt: the box interior less one blank column next to the
+// right border. A full row and its cursor cell therefore never reach that column.
+fn input_text_width(w: usize) -> usize {
+    let inner = w.saturating_sub(2).max(1);
+    inner.saturating_sub(UnicodeWidthStr::width(PROMPT) + 1)
+}
+
 fn input_window(n: usize, cur: usize) -> (usize, usize) {
     let shown = n.min(MAX_INPUT_ROWS);
     let top = (cur + 1).saturating_sub(shown).min(n - shown);
@@ -2730,7 +2760,7 @@ fn agent_row_line(r: &AgentRow, width: usize) -> String {
     if matches!(state, bar::AgentState::Running) && r.last_active > 0 {
         let silent = (unix_now() as u64).saturating_sub(r.last_active);
         if silent >= STALL_SECS {
-            text.push_str(&format!(" · 멈췄을 수 있음 {}분 무응답", silent / 60));
+            text.push_str(&tf(Msg::StallNote, &[&(silent / 60)]));
         }
     }
     // The local start time leads the row, so clipping at a narrow width cuts the end first.
@@ -2803,9 +2833,8 @@ fn layout(app: &App, w: usize, h: usize) -> (Vec<String>, usize) {
 
 // Terminal cell that holds the cursor: inside the input box (after its left border), on the input row.
 fn cursor(app: &App, w: usize, h: usize) -> (u16, u16) {
-    let inner = w.saturating_sub(2).max(1);
     let pw = UnicodeWidthStr::width(PROMPT);
-    let (rows, cur_row, cur_col) = app.input_rows(inner.saturating_sub(pw));
+    let (rows, cur_row, cur_col) = app.input_rows(input_text_width(w));
     let (top, shown) = input_window(rows.len(), cur_row);
     // The input rows sit above the box's bottom border, and the agent rows (below the box) and the status row.
     let (fg, bg) = app.panel_lines(w, h);
@@ -3606,24 +3635,10 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-// Local (hour, minute, second) of a unix time.
-#[cfg(unix)]
+// Local (hour, minute, second) of a unix time, from the shared core localtime helper.
 fn clock_hms(secs: i64) -> (i64, i64, i64) {
-    let t = secs as libc::time_t;
-    // SAFETY: localtime_r writes into the zeroed tm we own and reads only the local `t`.
-    let tm = unsafe {
-        let mut tm: libc::tm = std::mem::zeroed();
-        libc::localtime_r(&t, &mut tm);
-        tm
-    };
-    (tm.tm_hour as i64, tm.tm_min as i64, tm.tm_sec as i64)
-}
-
-// No libc off unix: UTC clock, so the rate text stays well-formed.
-#[cfg(not(unix))]
-fn clock_hms(secs: i64) -> (i64, i64, i64) {
-    let day = secs.rem_euclid(86_400);
-    (day / 3600, day % 3600 / 60, day % 60)
+    let [_, _, _, h, m, s] = chaude_core::localtime::local_civil(secs);
+    (h, m, s)
 }
 
 // Local "HH:MM" (Go time.Format("15:04")).
@@ -4619,6 +4634,74 @@ mod tests {
         assert_eq!((r, c), (1, 4));
         app.editor.insert_str("x");
         assert_eq!(app.input_rows(6).0.len(), 2);
+    }
+
+    // Plain text of the input box rows (border to border), without the SGR marks.
+    fn input_box_plain(app: &App, w: usize) -> Vec<String> {
+        let lines = app.input_box(w);
+        lines[1..lines.len() - 1]
+            .iter()
+            .map(|l| render::strip_sgr(l))
+            .collect()
+    }
+
+    // At 12 columns the interior is 10 cells: prompt (2) plus 7 text cells, and the column next to the right
+    // border is never filled, neither by text, the cursor cell nor the placeholder.
+    #[test]
+    fn input_box_keeps_the_last_column_blank_for_ascii_and_hangul() {
+        let mut app = App::new(60, 20);
+        app.editor.insert_str("abcdefghijklmnop");
+        assert_eq!(
+            app.input_rows(input_text_width(12)).0,
+            vec!["abcdefg", "hijklmn", "op"]
+        );
+        for row in input_box_plain(&app, 12) {
+            assert_eq!(render::cell_width(&row), 12, "{row:?}");
+            assert!(row.ends_with(" │"), "{row:?}");
+        }
+
+        let mut app = App::new(60, 20);
+        app.editor.insert_str("가나다라");
+        assert_eq!(
+            app.input_rows(input_text_width(12)).0,
+            vec!["가나다", "라"],
+            "a 2-cell char that would reach column 10 wraps"
+        );
+        for row in input_box_plain(&app, 12) {
+            assert_eq!(render::cell_width(&row), 12, "{row:?}");
+            assert!(row.ends_with(" │"), "{row:?}");
+        }
+    }
+
+    #[test]
+    fn input_cursor_after_a_full_row_moves_to_a_new_row_before_the_blank_column() {
+        // "abcdefg" fills the 7 text cells, so the cursor after it starts row 1 at cell column 0.
+        let mut app = App::new(60, 20);
+        app.editor.insert_str("abcdefg");
+        let (rows, r, c) = app.input_rows(input_text_width(12));
+        assert_eq!(rows, vec!["abcdefg", ""]);
+        assert_eq!((r, c), (1, 0));
+        assert_eq!(app.input_height(12), 2);
+        assert_eq!(cursor(&app, 12, 20).0, 3, "1 border + 2 prompt + 0 cells");
+        for row in input_box_plain(&app, 12) {
+            assert!(row.ends_with(" │"), "{row:?}");
+        }
+
+        // Hangul: "가나다" is 6 cells, the cursor after it is column 1 + 2 + 6 = 9, before the blank column 10.
+        let mut app = App::new(60, 20);
+        app.editor.insert_str("가나다");
+        assert_eq!(app.input_rows(input_text_width(12)).0.len(), 1);
+        assert_eq!(cursor(&app, 12, 20).0, 9);
+    }
+
+    #[test]
+    fn input_placeholder_leaves_the_last_column_blank() {
+        let app = App::new(60, 20);
+        assert!(app.editor.is_empty());
+        let rows = input_box_plain(&app, 12);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(render::cell_width(&rows[0]), 12, "{:?}", rows[0]);
+        assert!(rows[0].ends_with(" │"), "{:?}", rows[0]);
     }
 
     #[test]
@@ -5945,6 +6028,37 @@ mod tests {
             );
             assert_eq!(format!("{lead}{}", &rest[9..]), want, "{got:?}");
         }
+    }
+
+    // The agent pane's tool call line paints "Bash(" in the same SGR as the main pane's tool row; the result line
+    // keeps its plain style and the stamps stay as they are.
+    #[test]
+    fn agent_tool_call_is_green_like_the_main_pane() {
+        // The SGR sequence that is active right before the tool name in `s`.
+        let name_sgr = |s: &str| {
+            let at = s.find("Bash(").expect("tool name");
+            let start = s[..at].rfind("\x1b[").expect("sgr before name");
+            let end = start + s[start..].find('m').expect("sgr end") + 1;
+            s[start..end].to_string()
+        };
+        let main = tool_line(&ToolRow {
+            row: 0,
+            name: "Bash".into(),
+            head: "Bash(ls)".into(),
+            start: 0,
+            at: Instant::now(),
+            end: None,
+        });
+        let rec = agentview::AgentRec {
+            log: vec!["● 10:00:00 Bash(ls)".into(), "  ⎿  a.txt".into()],
+            ..Default::default()
+        };
+        let agent = agentview::body_rows(&rec, 80);
+        assert_eq!(name_sgr(&main), TOOL_ON, "{main:?}");
+        assert_eq!(name_sgr(&agent[0]), name_sgr(&main), "{agent:?}");
+        assert!(agent[0].ends_with(FG_OFF), "{agent:?}");
+        assert_eq!(render::strip_sgr(&agent[0]), "● 10:00:00 Bash(ls)");
+        assert_eq!(agent[1], "  ⎿  a.txt", "result line stays plain");
     }
 
     // A ToolResult row in the output carries its local arrival time after the "  ⎿  " lead.
@@ -7317,7 +7431,7 @@ mod tests {
         std::fs::write(&path, lines).unwrap();
         let mut app = App::new(80, 24);
         app.transcript.push("old line before import".to_string());
-        app.import_view(path.to_str().unwrap());
+        app.import_view(path.to_str().unwrap(), false);
         let _ = std::fs::remove_file(&path);
         assert!(app.import_install.is_some());
         assert!(

@@ -48,9 +48,40 @@ pub fn main_model(cwd: Option<&Path>) -> &'static str {
     }
 }
 
+// The raw `language` value (auto|ko|en) from the project settings text, or None when absent or not a string.
+pub fn language_from_json(text: &str) -> Option<String> {
+    serde_json::from_str::<Value>(text)
+        .ok()?
+        .get("language")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+// The raw `language` value for a project folder (same file and cwd rule as main_model).
+pub fn language(cwd: Option<&Path>) -> Option<String> {
+    let dir = match cwd {
+        Some(d) => d.to_path_buf(),
+        None => std::env::current_dir().ok()?,
+    };
+    fs::read_to_string(dir.join(".chaude").join("settings.json"))
+        .ok()
+        .and_then(|text| language_from_json(&text))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_field_is_optional_raw_string() {
+        assert_eq!(
+            language_from_json(r#"{"language":"en"}"#).as_deref(),
+            Some("en")
+        );
+        assert_eq!(language_from_json(r#"{"main_model":"opus"}"#), None);
+        assert_eq!(language_from_json(r#"{"language":3}"#), None);
+        assert_eq!(language_from_json("not json"), None);
+    }
 
     #[test]
     fn known_aliases_map_to_ids() {

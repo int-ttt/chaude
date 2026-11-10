@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::handoff::pid_alive;
+use crate::i18n::{Msg, t};
 use crate::import_claude::{Stamp, parse_rfc3339};
 use crate::import_view::{bget, json_str, list, result_text, sget, trunc};
 use crate::metrics::rfc3339;
@@ -506,12 +507,12 @@ fn mark_done(a: &mut AgentRec) -> Option<String> {
 /// Go doneLine: the one-line completion notice.
 fn done_line(a: &AgentRec) -> String {
     let kind = if a.failed {
-        "[agent 실패]"
+        t(Msg::AgentFailedTag)
     } else {
-        "[agent 완료]"
+        t(Msg::AgentDoneTag)
     };
     let model = if a.model.is_empty() {
-        "상속"
+        t(Msg::Inherit)
     } else {
         a.model.as_str()
     };
@@ -561,15 +562,15 @@ pub fn tool_summary(input: &Value) -> String {
 /// Go agentState, with the labels shown in the panel.
 pub fn agent_state(a: &AgentRec) -> &'static str {
     if a.failed {
-        "실패"
+        t(Msg::StateFailed)
     } else if a.interrupted {
-        "중단"
+        t(Msg::StateInterrupted)
     } else if a.done {
-        "완료"
+        t(Msg::StateDone)
     } else if a.started == UNIX_EPOCH {
-        "대기"
+        t(Msg::StateQueued)
     } else {
-        "실행 중"
+        t(Msg::StateRunning)
     }
 }
 

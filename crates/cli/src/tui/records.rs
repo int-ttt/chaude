@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use chaude_core::i18n::{Msg, tf};
 use chaude_core::record_folder;
 
 use super::bar::clip;
@@ -296,7 +297,7 @@ pub fn list_date(t: SystemTime) -> String {
 // Go recordProjectLines row text: "<name> · 파일 <n>개 · <yyyy-mm-dd>".
 fn row_text(p: &RecordProject) -> String {
     let date: String = stamp(p.last, true).chars().take(10).collect();
-    format!("{} · 파일 {}개 · {date}", p.name, p.files)
+    tf(Msg::RecordRow, &[&p.name, &p.files, &date])
 }
 
 // Result of a key press on the record picker.

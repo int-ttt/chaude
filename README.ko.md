@@ -67,12 +67,14 @@ chaude --version
 
 지원 대상은 Apple Silicon(arm64) macOS와 Linux(amd64, arm64)입니다. Intel Mac(darwin/amd64)은 지원하지 않으며 설치 스크립트가 오류로 끝납니다.
 
-`/usr/local/bin/chaude`에 설치합니다. 폴더가 없으면 만듭니다. `sudo`는 폴더에 쓸 권한이 없을 때만, 복사할 때만 씁니다. 기존 `chaude`는 `chaude.<이전 버전>.bak`로 남깁니다.
+`~/.local/bin/chaude`에 설치합니다. 본인 소유의 폴더라서 `sudo`가 필요 없습니다. 폴더가 없으면 만듭니다. `~/.local/bin`이 `PATH`에 없으면 설치 스크립트가 셸 rc 파일(zsh는 `~/.zshrc`, bash는 `~/.bashrc` 또는 `~/.bash_profile`)에 `export PATH="$HOME/.local/bin:$PATH"` 줄을 한 번만 추가합니다. 설치 후에는 새 터미널을 여세요. 기존 `chaude`는 `chaude.<이전 버전>.bak`로 남깁니다.
+
+예전 설치본 `/usr/local/bin/chaude`는 설치 스크립트가 지우지 않습니다. 있으면 지우는 명령(`sudo rm -f /usr/local/bin/chaude`)을 출력합니다. 지우기 전까지는 셸이 예전 복사본을 먼저 실행할 수 있습니다.
 
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.11 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.0 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -86,7 +88,7 @@ chaude --version
 
 Windows on ARM64에서는 설치 스크립트가 amd64 빌드(x64 에뮬레이션)를 받고 안내를 출력합니다.
 
-`%LOCALAPPDATA%\Programs\chaude\chaude.exe`에 설치합니다. 설치 스크립트가 이 폴더를 사용자 `PATH`에 한 번 추가합니다. 설치 후에는 새 터미널을 여세요.
+`%USERPROFILE%\.local\bin\chaude.exe`에 설치합니다. 본인 소유의 폴더라서 관리자 권한이 필요 없습니다. 설치 스크립트가 이 폴더를 사용자 `PATH`에 한 번만 추가합니다(없을 때만). 설치 후에는 새 터미널을 여세요. 예전 설치본 `%LOCALAPPDATA%\Programs\chaude\chaude.exe`는 설치 스크립트가 지우지 않습니다. 있으면 지우는 방법과 `PATH` 항목을 출력합니다.
 
 토큰은 필요 없습니다. GitHub 요청 제한(HTTP 403)에 걸리면 `GH_TOKEN`을 지정하고 다시 설치하세요. 설치 스크립트는 `GITHUB_TOKEN`과 `gh auth token`도 읽습니다.
 
@@ -185,6 +187,7 @@ chaude
 
 - REPL에서 `/update`를 실행하세요. 최신 릴리스를 확인하고, 더 새 버전이 있으면 바이너리를 교체합니다. 사용하려면 chaude를 다시 시작하세요.
 - 셸에서 `chaude update`를 실행해도 같은 확인을 합니다.
+- 실행 중인 바이너리가 있는 폴더에 쓸 수 없으면(예: 예전 `/usr/local/bin` 설치본) 업데이트는 아무것도 바꾸지 않고 그 사실을 알려 줍니다. 설치 스크립트로 `~/.local/bin`에 다시 설치하세요. `sudo`는 필요 없습니다.
 
 ## 설정
 
@@ -212,6 +215,18 @@ REPL 주요 플래그(`chaude repl`):
 | `CHAUDE_VERSION` | 설치할 버전(기본값: 최신), 예: `v0.11.2` |
 | `CHAUDE_REPO` | 설치할 GitHub 저장소(기본값: `int-ttt/chaude`) |
 | `GH_TOKEN`, `GITHUB_TOKEN` | 요청 제한이나 비공개 포크에 쓰는 선택 토큰. 둘 다 없으면 `gh auth token`을 씁니다 |
+
+## 언어
+
+UI와 훅, 에이전트의 응답은 같은 언어를 씁니다. `.chaude/settings.json`에서 설정합니다.
+
+```json
+{ "language": "auto" }
+```
+
+- `auto`(기본값)는 OS 로케일을 따릅니다. `ko`와 `en`은 언어를 고정합니다.
+- 환경변수 `CHAUDE_LANG`이 설정을 덮어씁니다(예: `CHAUDE_LANG=en chaude`).
+- chaude는 확정된 값을 자신이 띄우는 하위 Claude 세션에 내보냅니다. 그래서 훅과 에이전트도 같은 언어로 답합니다.
 
 ## 효과 분석
 
@@ -257,7 +272,7 @@ Rust 포트 기간 동안 장기 프로젝트를 실제로 쓴 양입니다. 메
 > **Go 빌드 삭제:** `deprecated/` 아래의 Go 구현은 0.10.0 이후 6번째 릴리스인 0.11.3에서 삭제했습니다. 0.11.0부터 릴리스 아카이브는 저장소 루트의 Rust 워크스페이스(`crates/cli`, 바이너리 `chaude`)에서 빌드하며, 에셋 이름은 같습니다. Go 소스는 태그 `v0.11.2`의 git 이력에 있습니다. Rust 버전은 아직 Go의 모든 기능을 다루지 않습니다. `plan/rust-port.md`를 보세요.
 
 
-업그레이드하려면 설치 스크립트를 다시 실행하거나 `chaude update`를 실행하세요. 설치 스크립트는 예전 `~/.local/bin` 설치본과 그 `PATH` 줄을 지웁니다.
+업그레이드하려면 설치 스크립트를 다시 실행하거나 `chaude update`를 실행하세요. 설치 위치는 macOS/Linux에서 `~/.local/bin`, Windows에서 `%USERPROFILE%\.local\bin`입니다. `/usr/local/bin/chaude`나 `%LOCALAPPDATA%\Programs\chaude`에 남은 설치본은 자동으로 지우지 않으며, 지우는 방법을 설치 스크립트가 출력합니다.
 
 ## 기여
 

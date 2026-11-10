@@ -426,7 +426,10 @@ fn not_writable_changes_nothing() {
         .asset("checksums.txt", b"x".to_vec());
     let f = |r: &Request| fake.call(r);
     let err = run("0.9.13", opts(&exe, "linux", "amd64"), &f).unwrap_err();
-    assert!(err.to_string().contains("run: sudo chaude update"), "{err}");
+    assert!(
+        err.to_string().contains("reinstall chaude to ~/.local/bin"),
+        "{err}"
+    );
     assert_eq!(fs::read_to_string(&exe).unwrap(), "OLD");
     assert!(fake.downloads().is_empty(), "{:?}", fake.downloads());
 }

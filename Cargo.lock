@@ -43,7 +43,7 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "chaude-clean"
-version = "0.11.11"
+version = "0.12.0"
 dependencies = [
  "chaude-core",
  "serde_json",
@@ -51,7 +51,7 @@ dependencies = [
 
 [[package]]
 name = "chaude-cli"
-version = "0.11.11"
+version = "0.12.0"
 dependencies = [
  "chaude-clean",
  "chaude-core",
@@ -65,22 +65,23 @@ dependencies = [
 
 [[package]]
 name = "chaude-core"
-version = "0.11.11"
+version = "0.12.0"
 dependencies = [
+ "libc",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "chaude-gui"
-version = "0.11.11"
+version = "0.12.0"
 dependencies = [
  "chaude-core",
 ]
 
 [[package]]
 name = "chaude-scripts"
-version = "0.11.11"
+version = "0.12.0"
 dependencies = [
  "chaude-core",
  "flate2",
@@ -89,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "chaude-update"
-version = "0.11.11"
+version = "0.12.0"
 dependencies = [
  "flate2",
  "serde",

@@ -6,7 +6,7 @@ argument-hint: "[project folder, or its transcript folder inside .claude/project
 
 # Distill old sessions into notes (main thread orchestrates; agents do all reading)
 
-Think and write in English; only haiku-tui writes Korean to the user.
+Think and write in English. Only haiku-tui writes user-facing text, in the CHAUDE_LANG language (ko or en).
 
 Goal: notes good enough that the old transcripts are never needed again. Cost target: Haiku for reading, one Opus merge decision, a few short main-thread turns.
 

@@ -749,51 +749,13 @@ impl SessView {
 }
 
 // Local date and time parts [year, month, day, hour, minute] of t (Go time.Format in local time).
-#[cfg(unix)]
 fn local_parts(t: SystemTime) -> [i64; 5] {
     let secs = t
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as libc::time_t)
+        .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    // SAFETY: localtime_r writes into the zeroed tm we own and reads only the local `secs`.
-    let tm = unsafe {
-        let mut tm: libc::tm = std::mem::zeroed();
-        libc::localtime_r(&secs, &mut tm);
-        tm
-    };
-    [
-        tm.tm_year as i64 + 1900,
-        tm.tm_mon as i64 + 1,
-        tm.tm_mday as i64,
-        tm.tm_hour as i64,
-        tm.tm_min as i64,
-    ]
-}
-
-// No libc off unix: UTC, so the list stays well-formed.
-#[cfg(not(unix))]
-fn local_parts(t: SystemTime) -> [i64; 5] {
-    utc_parts(
-        t.duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0),
-    )
-}
-
-// UTC date and time parts for unix seconds (civil-from-days).
-#[cfg(any(not(unix), test))]
-fn utc_parts(secs: i64) -> [i64; 5] {
-    let z = secs.div_euclid(86_400) + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    let rem = secs.rem_euclid(86_400);
-    [y, m, d, rem / 3600, rem % 3600 / 60]
+    let [y, mo, d, h, mi, _] = chaude_core::localtime::local_civil(secs);
+    [y, mo, d, h, mi]
 }
 
 // Go Format("2006-01-02 15:04") when year is true, else Format("01-02 15:04").
@@ -905,9 +867,11 @@ mod tests {
     }
 
     #[test]
-    fn utc_parts_matches_known_epoch() {
-        // 1700000000 = 2023-11-14 22:13:20 UTC.
-        assert_eq!(utc_parts(1_700_000_000), [2023, 11, 14, 22, 13]);
+    fn local_parts_is_the_shared_local_clock() {
+        // 1700000000 = 2023-11-14 22:13:20 UTC; the zone is the host's, so compare with the core helper.
+        let t = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let [y, mo, d, h, mi, _] = chaude_core::localtime::local_civil(1_700_000_000);
+        assert_eq!(local_parts(t), [y, mo, d, h, mi]);
     }
 
     // Go TestViewEscBacksOutToNormalScreen (pure part): the list draws below the input and esc leaves.

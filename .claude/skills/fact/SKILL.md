@@ -1,6 +1,6 @@
 ---
 name: fact
-description: Apply a fact correction everywhere — update notes/FACTS.md and fix every file containing the wrong fact. Use for "A가 아니라 B야" (it's B, not A) style corrections.
+description: Apply a fact correction everywhere — update notes/FACTS.md and fix every file containing the wrong fact. Use for "A가 아니라 B야" (it's B, not A) style corrections; English: "it's B, not A", "that's wrong, it's B", "correct it to B".
 argument-hint: "<old> → <new> [context]"
 context: fork
 agent: haiku-batch-worker
@@ -8,7 +8,7 @@ model: haiku
 background: false
 ---
 
-Think and write in English; only haiku-tui writes Korean to the user.
+Think and write in English. Only haiku-tui writes user-facing text, in the CHAUDE_LANG language (ko or en).
 
 Fact correction: $ARGUMENTS
 1. Update or add the line in `notes/FACTS.md` (format: `- [area] fact (source: user)`).

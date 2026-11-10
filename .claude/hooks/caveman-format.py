@@ -66,6 +66,8 @@ def check(prompt, text, fmt):
 
 
 def check_jondaetmal(text):
+    if os.environ.get("CHAUDE_LANG", "ko").strip().lower() == "en":  # CHAUDE_LANG=en: plain English replies, no 존댓말 rule
+        return []
     text = re.sub(r"```.*?```", "", text, flags=re.S)  # skip code blocks
     for s in re.split(r"[.!?\n]+", text):
         s = s.strip()

@@ -6,6 +6,8 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
+use crate::i18n::{Msg, tf};
+
 /// Default cap on concurrent live worker sessions (Go DefaultMaxWorkers).
 pub const DEFAULT_MAX_WORKERS: usize = 3;
 
@@ -168,9 +170,7 @@ pub fn admit<S: Close>(
 
 /// Go workerCapErr: user-facing refusal when the worker cap is reached.
 pub fn worker_cap_err(max: usize) -> String {
-    format!(
-        "워커 세션 상한({max}개)에 도달해 새 세션을 시작하지 않습니다. 기존 세션을 정리하거나 -max-workers 값을 올려 주세요."
-    )
+    tf(Msg::WorkerCap, &[&max])
 }
 
 #[cfg(test)]

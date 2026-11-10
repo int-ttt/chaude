@@ -3,6 +3,8 @@
 // execute. Ported from Go tree (v0.11.2) internal/harness/tui.go (slashCmds, busyOK, suggestions,
 // runSlash) and mode.go. Plain functions, unit-tested without a terminal.
 
+use chaude_core::i18n::{Msg, t};
+
 // tui.go:192-230 (slashCmds). Order and text are the Go source's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SlashCmd {
@@ -127,7 +129,9 @@ pub const BUSY_OK: &[&str] = &[
 ];
 
 // tui.go:844 (busySlashMsg).
-pub const BUSY_SLASH_MSG: &str = "생각 중에는 /usage, /version, /help, /status, /mode, /mouse, /view 만 사용할 수 있습니다. 답변이 끝난 뒤 다시 입력해 주세요.";
+pub fn busy_slash_msg() -> String {
+    t(Msg::BusySlash).to_string()
+}
 
 // repl.go:1167-1168 (passthroughCmds). /usage is in the Go map too, but runSlash intercepts it first.
 pub const PASSTHROUGH: &[&str] = &[
@@ -372,7 +376,7 @@ pub fn dispatch(line: &str, ctx: &Ctx) -> Option<Dispatch> {
     let first = args.first().copied();
 
     if ctx.busy && name != "/usage" && !BUSY_OK.contains(&name) {
-        return Some(Dispatch::Note(BUSY_SLASH_MSG.to_string()));
+        return Some(Dispatch::Note(busy_slash_msg()));
     }
 
     Some(match name {
@@ -451,14 +455,14 @@ mod tests {
             let d = dispatch(c, &ctx(true)).unwrap();
             assert_ne!(
                 d,
-                Dispatch::Note(BUSY_SLASH_MSG.to_string()),
+                Dispatch::Note(busy_slash_msg()),
                 "{c} refused while busy"
             );
         }
         for c in ["/resume", "/clear", "/rotate", "/model sonnet", "/cost"] {
             assert_eq!(
                 dispatch(c, &ctx(true)),
-                Some(Dispatch::Note(BUSY_SLASH_MSG.to_string())),
+                Some(Dispatch::Note(busy_slash_msg())),
                 "{c} not refused while busy"
             );
         }
@@ -489,10 +493,10 @@ mod tests {
     fn exit_is_refused_while_busy_and_message_matches_go() {
         assert_eq!(
             dispatch("/exit", &ctx(true)),
-            Some(Dispatch::Note(BUSY_SLASH_MSG.to_string()))
+            Some(Dispatch::Note(busy_slash_msg()))
         );
         assert_eq!(
-            BUSY_SLASH_MSG,
+            busy_slash_msg(),
             "생각 중에는 /usage, /version, /help, /status, /mode, /mouse, /view 만 사용할 수 있습니다. 답변이 끝난 뒤 다시 입력해 주세요."
         );
     }

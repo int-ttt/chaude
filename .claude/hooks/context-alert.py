@@ -11,7 +11,7 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
     except Exception:
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
-from _lean import lean_off
+from _lean import lean_off, pick
 
 if lean_off():
     sys.exit(0)
@@ -55,6 +55,7 @@ try:
 except OSError:
     pass
 k = used // 1000
-print(f"[ctx {k}k] After your reply, add exactly one line in Korean (polite form): "
-      "suggest /exit, then claude in the same terminal, to restart without compaction (history stays on screen and in logs/history).")
+print(f"[ctx {k}k] After your reply, add exactly one line in "
+      + pick("Korean (polite form): ", "plain English: ")
+      + "suggest /exit, then claude in the same terminal, to restart without compaction (history stays on screen and in logs/history).")
 sys.exit(0)

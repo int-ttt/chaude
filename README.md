@@ -67,12 +67,14 @@ chaude --version
 
 Supported: macOS on Apple Silicon (arm64) and Linux (amd64, arm64). Intel Macs (darwin/amd64) exit with an error.
 
-Installs to `/usr/local/bin/chaude`. The directory is created if missing. `sudo` is used only for the copy, and only when the directory is not writable. An existing `chaude` is kept as `chaude.<old version>.bak`.
+Installs to `~/.local/bin/chaude`, a folder you own, so no `sudo` is needed. The folder is created if missing. If `~/.local/bin` is not on your `PATH`, the installer adds `export PATH="$HOME/.local/bin:$PATH"` to your shell rc file (`~/.zshrc` for zsh, `~/.bashrc` or `~/.bash_profile` for bash) once. Open a new terminal after installing. An existing `chaude` is kept as `chaude.<old version>.bak`.
+
+An older install at `/usr/local/bin/chaude` is not removed by the installer. If it exists, the installer prints the command to remove it (`sudo rm -f /usr/local/bin/chaude`). Until you remove it, a shell may still run the old copy first.
 
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.11.11 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.0 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -86,7 +88,7 @@ chaude --version
 
 On Windows on ARM64, the installer downloads the amd64 build (x64 emulation) and prints a note.
 
-Installs to `%LOCALAPPDATA%\Programs\chaude\chaude.exe`. The installer adds that folder to your user `PATH` once. Open a new terminal after installing.
+Installs to `%USERPROFILE%\.local\bin\chaude.exe`, a folder you own, so no admin rights are needed. The installer adds that folder to your user `PATH` once, only when it is missing. Open a new terminal after installing. An older install at `%LOCALAPPDATA%\Programs\chaude\chaude.exe` is not removed by the installer. If it exists, the installer prints how to remove it and its `PATH` entry.
 
 No token is needed. If GitHub rate-limits you (HTTP 403), set `GH_TOKEN` and run the installer again. The installer also reads `GITHUB_TOKEN` and `gh auth token`.
 
@@ -185,6 +187,7 @@ Run `chaude repl -h` for all REPL flags.
 
 - In the REPL, run `/update`. It checks the latest release and replaces the binary if a newer one exists. Restart chaude to use it.
 - From a shell, run `chaude update`. It does the same check.
+- If the folder that holds the running binary is not writable (for example an old `/usr/local/bin` install), the update changes nothing and says so. Reinstall with the installer to `~/.local/bin`, which needs no `sudo`.
 
 ## Configuration
 
@@ -212,6 +215,18 @@ The installers read these environment variables:
 | `CHAUDE_VERSION` | Version to install (default: latest), for example `v0.11.2` |
 | `CHAUDE_REPO` | GitHub repo to install from (default: `int-ttt/chaude`) |
 | `GH_TOKEN`, `GITHUB_TOKEN` | Optional token for rate limits or private forks. `gh auth token` is used when neither is set |
+
+## Language
+
+The UI and the replies from hooks and agents use one language. Set it in `.chaude/settings.json`:
+
+```json
+{ "language": "auto" }
+```
+
+- `auto` (default) follows the OS locale. `ko` and `en` force a language.
+- The `CHAUDE_LANG` environment variable overrides the setting (`CHAUDE_LANG=en chaude`).
+- chaude exports the resolved value to the child Claude sessions it starts, so hooks and agents reply in the same language.
 
 ## Effect analysis
 
@@ -257,7 +272,7 @@ The user guide is written in Korean.
 > **Go build removed:** The Go implementation under `deprecated/` was deleted in 0.11.3, the 6th release after 0.10.0. Release archives are built from the Rust workspace at the repo root (`crates/cli`, binary `chaude`) since 0.11.0, with the same asset names. The Go source is in git history at tag `v0.11.2`. The Rust version does not yet cover every Go feature; see `plan/rust-port.md`.
 
 
-To upgrade, run the installer again or run `chaude update`. The installers remove an old `~/.local/bin` install and its `PATH` line.
+To upgrade, run the installer again or run `chaude update`. The installers now use `~/.local/bin` (macOS/Linux) and `%USERPROFILE%\.local\bin` (Windows). An install at `/usr/local/bin/chaude` or `%LOCALAPPDATA%\Programs\chaude` is not removed automatically; the installer prints how to remove it.
 
 ## Contributing
 

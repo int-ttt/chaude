@@ -2,7 +2,7 @@
 """PreToolUse hook: the main (Opus) conversation only listens, decides, and delegates.
 Work tools are blocked unless the call comes from a subagent (agent_id present).
 Agent|Task from the main thread may only call haiku-* agents, opus-architect, claude-code-guide, or sonnet-writer.
-Off in normal mode (type 일반모드, or start with CLAUDE_LEAN=0); CLAUDE_ALLOW_MAIN_TOOLS=1 still works."""
+Off in normal mode (type 일반모드 or "normal mode", or start with CLAUDE_LEAN=0); CLAUDE_ALLOW_MAIN_TOOLS=1 still works."""
 import json, os, sys
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
@@ -34,13 +34,13 @@ if tool in AGENT_TOOLS:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": f"Main session may only call haiku-* agents or opus-architect, not {kind or 'the default general-purpose agent'}. Delegate: search->haiku-scout, code->haiku-coder, writing->haiku-drafter, verify->haiku-checker, bulk->haiku-batch-worker. If the user wants you to work directly, tell them to type 일반모드."
+            "permissionDecisionReason": f"Main session may only call haiku-* agents or opus-architect, not {kind or 'the default general-purpose agent'}. Delegate: search->haiku-scout, code->haiku-coder, writing->haiku-drafter, verify->haiku-checker, bulk->haiku-batch-worker. If the user wants you to work directly, tell them to type 일반모드 (or \"normal mode\")."
         }}, ensure_ascii=False))
     sys.exit(0)
 if tool in WORK_TOOLS:
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
-        "permissionDecisionReason": f"Main session does not use {tool}. Delegate: search->haiku-scout, web->haiku-researcher/`/research`, writing->haiku-drafter, verify->haiku-checker/`/check`, bulk/notes->haiku-batch-worker, jobs->haiku-runner/`/status`, code->haiku-coder, design/judgment->decide yourself (Opus main; Haiku main only: opus-architect), final check->haiku-checker. If the user wants you to work directly, tell them to type 일반모드."
+        "permissionDecisionReason": f"Main session does not use {tool}. Delegate: search->haiku-scout, web->haiku-researcher/`/research`, writing->haiku-drafter, verify->haiku-checker/`/check`, bulk/notes->haiku-batch-worker, jobs->haiku-runner/`/status`, code->haiku-coder, design/judgment->decide yourself (Opus main; Haiku main only: opus-architect), final check->haiku-checker. If the user wants you to work directly, tell them to type 일반모드 (or \"normal mode\")."
     }}))
 sys.exit(0)

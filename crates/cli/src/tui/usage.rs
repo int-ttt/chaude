@@ -4,21 +4,18 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use chaude_core::i18n::{Msg, t, tf};
+
 use super::bar::clip;
 use super::render::{FG_OFF, GREY_ON, ORANGE_ON, wrap_cells};
 
-// Go openUsage: shown until the one-shot claude call answers.
-pub const LOADING: &str = "조회 중…";
-// Go usageFetch: the one-shot answered without a result text.
-pub const EMPTY: &str = "/usage 결과를 읽지 못했습니다.";
-
 // Go usageFetch: the one-shot run failed; the error text follows.
 pub fn failed(err: &str) -> String {
-    // Core reports a result-less answer as "usage: no result"; Go returns "" there, shown as EMPTY.
+    // Core reports a result-less answer as "usage: no result"; Go returns "" there, shown as the empty text.
     if err == "usage: no result" {
-        return EMPTY.to_string();
+        return t(Msg::UsageEmpty).to_string();
     }
-    format!("/usage 조회에 실패했습니다: {err}")
+    tf(Msg::UsageFailed, &[&err])
 }
 
 #[derive(Default)]
@@ -64,7 +61,7 @@ impl Usage {
 
     // Go openUsage: fresh open at the top, loading text until the answer arrives.
     pub fn open(&mut self) {
-        self.text = Some(LOADING.to_string());
+        self.text = Some(t(Msg::UsageLoading).to_string());
         self.pending = true;
         self.top = 0;
     }
@@ -245,7 +242,7 @@ mod tests {
         u.scroll_by(5, W, H - 4);
         u.close();
         u.open();
-        assert_eq!(u.text.as_deref(), Some(LOADING));
+        assert_eq!(u.text.as_deref(), Some(t(Msg::UsageLoading)));
         assert!(u.pending());
         assert_eq!(u.top, 0);
     }
@@ -290,7 +287,7 @@ mod tests {
         let action = app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
         assert!(matches!(action, Action::Usage));
         assert!(app.usage.is_open());
-        assert_eq!(app.usage.text.as_deref(), Some(LOADING));
+        assert_eq!(app.usage.text.as_deref(), Some(t(Msg::UsageLoading)));
         // Echo of the prompt and its blank row only.
         assert_eq!(app.transcript.len(), before + 2);
     }
@@ -322,6 +319,6 @@ mod tests {
         // Result-less answer: Go shows the empty-result text, not a failure.
         app.usage.open();
         app.apply(UiEvent::Error("usage: no result".to_string()));
-        assert_eq!(app.usage.text.as_deref(), Some(EMPTY));
+        assert_eq!(app.usage.text.as_deref(), Some(t(Msg::UsageEmpty)));
     }
 }

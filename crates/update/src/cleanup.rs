@@ -1,11 +1,11 @@
-//! Startup cleanup (Go CleanupOld): removes the `.old` file a windows self-update leaves behind, and migrates an install
-//! from the old `~/.local/bin` installers.
+//! Startup cleanup (Go CleanupOld): removes the `.old` file a windows self-update leaves behind.
+//! `~/.local/bin` is the install dir now, so startup no longer deletes files there (`migrate_legacy` is kept but not called).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::fsutil;
-use crate::update::{host_goos, running_exe};
+use crate::update::running_exe;
 
 /// Go CleanupOld. Call it at startup. Errors are ignored.
 pub fn cleanup_old() {
@@ -13,9 +13,6 @@ pub fn cleanup_old() {
         return;
     };
     remove_old(&exe);
-    if let Some(home) = home_dir() {
-        migrate_legacy(&home, host_goos(), &exe);
-    }
 }
 
 /// Go removeOld: deletes the `exe.old` a windows self-update left behind. Errors are ignored.
@@ -24,7 +21,7 @@ pub fn remove_old(exe: &Path) {
 }
 
 /// Go os.UserHomeDir: $HOME on unix, USERPROFILE on windows.
-fn home_dir() -> Option<PathBuf> {
+pub fn home_dir() -> Option<PathBuf> {
     let key = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     std::env::var_os(key)
         .filter(|v| !v.is_empty())

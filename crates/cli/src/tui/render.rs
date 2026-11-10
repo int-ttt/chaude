@@ -1021,7 +1021,44 @@ pub fn highlight_line(line: &str, from: usize, to: usize) -> String {
     let to = to.min(w);
     let (pre, rest) = split_cells(line, from);
     let (mid, post) = split_cells(&rest, to - from);
-    format!("{pre}\x1b[7m{}\x1b[27m{post}", strip_sgr(&mid))
+    // The selected cells are drawn plain: a link color open before the selection is turned off for them, and
+    // the SGR inside them is replayed after the reverse ends, so a link that starts or ends inside the
+    // selection keeps its state for the cells after it. Other colors stay as they were.
+    let plain_fg = if link_fg_open(&pre) { FG_OFF } else { "" };
+    format!(
+        "{pre}\x1b[7m{plain_fg}{}\x1b[27m{}{post}",
+        strip_sgr(&mid),
+        csi_escapes(&mid).concat()
+    )
+}
+
+// The CSI escapes of s in order, as slices of s.
+fn csi_escapes(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < s.len() {
+        match csi_len(s.as_bytes(), i) {
+            Some(n) => {
+                out.push(&s[i..i + n]);
+                i += n;
+            }
+            None => i += cur_char(s, i).len_utf8(),
+        }
+    }
+    out
+}
+
+// Whether the foreground at the end of s is the link color (LINK_COLOR_ON not yet closed by FG_OFF or RESET).
+fn link_fg_open(s: &str) -> bool {
+    let mut open = false;
+    for esc in csi_escapes(s) {
+        if esc == LINK_COLOR_ON {
+            open = true;
+        } else if esc.starts_with("\x1b[38;") || esc == FG_OFF || esc == RESET {
+            open = false;
+        }
+    }
+    open
 }
 
 // highlightView (selection.go:92): screen row r shows content line y_offset + r, so the highlight is
@@ -1050,9 +1087,9 @@ pub fn highlight_view(frame: &str, lines: &[String], y_offset: usize, s: &TextSe
 // I32 placeholder (tui.go:879): idle hint shown in the empty input box.
 pub fn input_placeholder(busy: bool) -> &'static str {
     if busy {
-        "생각중 - 추가 입력은 한 번에 합쳐 처리"
+        chaude_core::i18n::t(chaude_core::i18n::Msg::InputBusy)
     } else {
-        "대기 - 프롬프트 입력"
+        chaude_core::i18n::t(chaude_core::i18n::Msg::InputIdle)
     }
 }
 
@@ -1588,6 +1625,66 @@ mod tests {
     fn lines_of(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
     }
+    #[test]
+    fn selection_across_link_keeps_link_color_on_link_cells_only() {
+        // A selection over link + plain text: plain cells must not take the link color, during the
+        // selection or after it. `during` lists the link runs left outside [from, to) while selected;
+        // `after` lists the link runs of the unselected row.
+        type Case<'a> = (&'a str, usize, usize, Vec<&'a str>, Vec<&'a str>);
+        let cases: [Case; 5] = [
+            (
+                "see /tmp/foo and more text",
+                2,
+                9,
+                vec!["foo"],
+                vec!["/tmp/foo"],
+            ),
+            (
+                "see /tmp/foo and more text",
+                6,
+                14,
+                vec!["/t"],
+                vec!["/tmp/foo"],
+            ),
+            (
+                "see /tmp/foo and more text",
+                13,
+                20,
+                vec!["/tmp/foo"],
+                vec!["/tmp/foo"],
+            ),
+            (
+                "see /tmp/foo and more text",
+                0,
+                26,
+                vec![],
+                vec!["/tmp/foo"],
+            ),
+            (
+                "open https://x.io/p and more",
+                5,
+                20,
+                vec![],
+                vec!["https://x.io/p"],
+            ),
+        ];
+        for (text, from, to, during, after) in cases {
+            let row = restyle(&mark_links(text));
+            assert_eq!(
+                linked_colored_runs(&row),
+                after,
+                "after selection: {text:?}"
+            );
+            let hl = highlight_line(&row, from, to);
+            assert_eq!(strip_sgr(&hl), text, "{hl:?}");
+            assert_eq!(
+                linked_colored_runs(&hl),
+                during,
+                "{text:?} {from}..{to}: {hl:?}"
+            );
+        }
+    }
+
     #[test]
     fn selection_text_multi_line_and_reversed() {
         // selection_test.go TestSelectionMultiLineAndReversedOrder

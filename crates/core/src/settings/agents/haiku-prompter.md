@@ -32,7 +32,7 @@ Round-count rules:
 - round 1 = original task; round k>1 = re-ask quoting unmet criteria + previous answer excerpt (<=800 chars); in count/deadline mode with all criteria met, round k asks to continue/repeat the task as the user worded it.
 
 - every return starts with the 3.6 head 2 lines (CAVEMAN_FORMAT.md 3.6), then the block below: `status: done | partial | fail | blocked` / `reason: <one line when partial/fail/blocked, else ->`. fail: reason has retry count. blocked: quote the denial verbatim, no workaround.
-- handback (user-facing, main prints it in full; headers stay English until haiku-tui renders Korean): `## Repeat log` then per round `- round N (<agent>, HH:MM~HH:MM): criteria met x/y · unmet: ...` (<=1 line each); `## Final answer` then the last (or best) answer in full, not a path; `end reason: count reached | deadline reached | criteria met | consecutive failures`.
+- handback (user-facing, main prints it in full; headers stay English; haiku-tui renders them in the `lang:` language): `## Repeat log` then per round `- round N (<agent>, HH:MM~HH:MM): criteria met x/y · unmet: ...` (<=1 line each); `## Final answer` then the last (or best) answer in full, not a path; `end reason: count reached | deadline reached | criteria met | consecutive failures`.
 
 Relay (U8 = c, rule_6; U10 = b keeps the loop role above):
 - relay = any call that carries the user prompt to an opus session (target opus-architect): round 1 of a loop, and a single relay call (main asks to forward a prompt without loop words -> one foreground call, no done-criteria, no re-ask).
@@ -42,9 +42,9 @@ Relay (U8 = c, rule_6; U10 = b keeps the loop role above):
     <user prompt, every char as given: no translation, trim, fix, or reorder>
   summary: <1 line, terse English, <=200 chars: goal + hard constraints; nothing absent from user_verbatim>
   ```
-- Korean polite-style rules do not apply to the relay message; Korean text inside user_verbatim stays verbatim.
+- Language rules (ko/en) do not apply to the relay message; text inside user_verbatim stays verbatim.
 - round k>1 to an opus target: same user_verbatim + summary on top, then the re-ask.
-- relay return: target answer unchanged, no rewording. user-facing Korean polite style = haiku-tui (.claude/agents/haiku-tui.md).
+- relay return: target answer unchanged, no rewording. user-facing text (CHAUDE_LANG language) = haiku-tui (.claude/agents/haiku-tui.md).
 - relay return block (CAVEMAN_FORMAT.md 3.2 style, 3.6 head first):
   ```
   status: done | partial | fail | blocked

@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use chaude_core::api::CoderContext;
+use chaude_core::i18n::{self, Lang, Msg};
 
 use super::render::{cluster_width, grapheme_clusters};
 
@@ -25,13 +26,18 @@ pub enum AgentState {
 
 impl AgentState {
     pub fn label(self) -> &'static str {
-        match self {
-            AgentState::Running => "실행 중",
-            AgentState::Done => "완료",
-            AgentState::Failed => "실패",
-            AgentState::Queued => "대기",
-            AgentState::Interrupted => "중단",
-        }
+        self.label_in(i18n::current())
+    }
+
+    pub fn label_in(self, lang: Lang) -> &'static str {
+        let msg = match self {
+            AgentState::Running => Msg::StateRunning,
+            AgentState::Done => Msg::StateDone,
+            AgentState::Failed => Msg::StateFailed,
+            AgentState::Queued => Msg::StateQueued,
+            AgentState::Interrupted => Msg::StateInterrupted,
+        };
+        i18n::text(lang, msg)
     }
 
     // xterm-256 index for the colored ● (agentDot tui.go:1520-1523).
@@ -336,8 +342,19 @@ pub fn short_model(model: &str) -> String {
 // Agent row text after its time: "<state> · <agent type> · <short model> (<summary>)". Empty name becomes "agent";
 // an empty model drops its segment. The caller passes the prompt line as summary when no task is set.
 pub fn agent_status_text(state: AgentState, model: &str, name: &str, summary: &str) -> String {
+    agent_status_text_in(i18n::current(), state, model, name, summary)
+}
+
+// The same row in an explicit language (the state label is the only translated part).
+pub fn agent_status_text_in(
+    lang: Lang,
+    state: AgentState,
+    model: &str,
+    name: &str,
+    summary: &str,
+) -> String {
     let name = if name.is_empty() { "agent" } else { name };
-    let label = state.label();
+    let label = state.label_in(lang);
     let short = short_model(model);
     if short.is_empty() {
         format!("{label} · {name} ({summary})")
@@ -350,11 +367,15 @@ pub fn agent_status_text(state: AgentState, model: &str, name: &str, summary: &s
 // the result is capped at 120 characters (trunc counts runes in Go).
 pub fn done_line(failed: bool, model: &str, name: &str, what: &str) -> String {
     let kind = if failed {
-        "[agent 실패]"
+        i18n::t(Msg::AgentFailedTag)
     } else {
-        "[agent 완료]"
+        i18n::t(Msg::AgentDoneTag)
     };
-    let model = if model.is_empty() { "상속" } else { model };
+    let model = if model.is_empty() {
+        i18n::t(Msg::Inherit)
+    } else {
+        model
+    };
     let joined = format!("{kind} {model} {name} · {what}");
     joined
         .split_whitespace()
@@ -401,12 +422,7 @@ pub fn quiet_notice(idle: Duration) -> String {
 // Agent list scroll indicator (tui.go:1490). `off` is the 0-based first shown row, `shown` the rows in the
 // window, `total` all agents. Shows 1-based bounds, e.g. "  … 3-5/12 (마우스 휠로 스크롤)".
 pub fn scroll_range_text(off: usize, shown: usize, total: usize) -> String {
-    format!(
-        "  … {}-{}/{} (마우스 휠로 스크롤)",
-        off + 1,
-        off + shown,
-        total
-    )
+    i18n::tf(Msg::ScrollHint, &[&(off + 1), &(off + shown), &total])
 }
 
 // Go time.Duration.String for whole seconds: "30s", "1m0s", "1h0m0s". Sub-second parts are dropped.
@@ -592,6 +608,14 @@ mod tests {
         assert_eq!(
             agent_status_text(AgentState::Done, "", "", "t"),
             "완료 · agent (t)"
+        );
+        assert_eq!(
+            agent_status_text_in(Lang::En, running, "claude-haiku-5-5", "haiku-scout", "scan"),
+            "running · haiku-scout · haiku 5.5 (scan)"
+        );
+        assert_eq!(
+            agent_status_text_in(Lang::En, AgentState::Interrupted, "", "fixer", "stop"),
+            "interrupted · fixer (stop)"
         );
         assert_eq!(agent_state(true, false, true, true), AgentState::Failed);
         assert_eq!(agent_state(false, false, false, false), AgentState::Queued);

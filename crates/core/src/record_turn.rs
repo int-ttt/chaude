@@ -7,6 +7,7 @@ use std::time::SystemTime;
 
 use serde_json::{Map, Value};
 
+use crate::i18n::{Msg, t, tf};
 use crate::record::{self, Block, Stamp};
 use crate::record_folder::{self, Project};
 
@@ -77,7 +78,7 @@ pub fn measure_line(fields: &Map<String, Value>) -> String {
     if parts.is_empty() {
         String::new()
     } else {
-        format!("[측정] {}", parts.join(" "))
+        tf(Msg::Measure, &[&parts.join(" ")])
     }
 }
 
@@ -148,7 +149,7 @@ pub fn resume(
         return Err(format!("no record in {}", root.display()));
     }
     if arg.is_empty() {
-        let title = "record projects (/resume <번호|이름|검색어> opens one):";
+        let title = t(Msg::RecordTitle);
         return Ok((
             record_folder::project_lines(title, &projects, true, date),
             Vec::new(),
@@ -168,8 +169,7 @@ pub fn resume(
                 0 => return Err(format!("no project matches {arg:?}")),
                 1 => matches[0].clone(),
                 _ => {
-                    let title =
-                        format!("record projects matching {arg} (/resume <이름> opens one):");
+                    let title = tf(Msg::RecordMatching, &[&arg]);
                     return Ok((
                         record_folder::project_lines(&title, &matches, false, date),
                         Vec::new(),

@@ -6,6 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use crate::i18n::{Msg, tf};
 use crate::record::{self, Entry};
 
 // One project folder under the record root, for the /resume list.
@@ -213,10 +214,8 @@ pub fn project_lines(
             "  - ".to_string()
         };
         lines.push(format!(
-            "{prefix}{} · 파일 {}개 · {}",
-            p.name,
-            p.files,
-            date(p.last)
+            "{prefix}{}",
+            tf(Msg::RecordRow, &[&p.name, &p.files, &date(p.last)])
         ));
     }
     lines

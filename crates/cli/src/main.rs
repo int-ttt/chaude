@@ -10,7 +10,7 @@ use std::process;
 use chaude_core::api::Config;
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::rotate;
-use chaude_core::{metrics_report, orch, osenv, settings};
+use chaude_core::{i18n, metrics_report, orch, osenv, settings};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -106,6 +106,15 @@ fn run_tui(args: &[String]) -> i32 {
         parsed.model(),
         settings::chaude_settings::main_model(cfg.cwd.as_deref()),
     );
+    // Language: env CHAUDE_LANG > project settings `language` > OS locale. Exported so child claude processes match.
+    let lang = i18n::resolve(
+        env::var(i18n::ENV_KEY).ok().as_deref(),
+        settings::chaude_settings::language(cfg.cwd.as_deref()).as_deref(),
+        i18n::os_locale().as_deref(),
+    );
+    i18n::set_current(lang);
+    // SAFETY: called from main before any other thread is spawned.
+    unsafe { env::set_var(i18n::ENV_KEY, lang.code()) };
     let cwd = cfg
         .cwd
         .clone()

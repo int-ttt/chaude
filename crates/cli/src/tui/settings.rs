@@ -7,6 +7,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use chaude_core::i18n::{Msg, t, tf};
 use chaude_core::record::dir_for;
 use chaude_core::record_folder::prune_record_files;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -32,6 +33,7 @@ pub struct Settings {
     pub session_retention_days: i64, // 0 = keep forever
     pub extra_coders: i64,           // extra haiku coders (coder2...) on a 3570s idle TTL, 0-8
     pub main_model: String,          // opus | sonnet | fable
+    pub language: String,            // auto | ko | en (file-only key; no picker row, kept on save)
 }
 
 impl Default for Settings {
@@ -40,6 +42,7 @@ impl Default for Settings {
             session_retention_days: DEFAULT_RETAIN,
             extra_coders: DEFAULT_EXTRA_CODERS,
             main_model: DEFAULT_MODEL.to_string(),
+            language: "auto".to_string(),
         }
     }
 }
@@ -51,6 +54,9 @@ impl Settings {
         self.extra_coders = self.extra_coders.clamp(0, MAX_EXTRA_CODERS);
         if model_id(&self.main_model).is_none() {
             self.main_model = DEFAULT_MODEL.to_string();
+        }
+        if !matches!(self.language.as_str(), "auto" | "ko" | "en") {
+            self.language = "auto".to_string();
         }
         self
     }
@@ -105,6 +111,9 @@ pub fn load(path: Option<&Path>) -> Settings {
     if let Some(m) = v.get("main_model").and_then(Value::as_str) {
         s.main_model = m.to_string();
     }
+    if let Some(l) = v.get("language").and_then(Value::as_str) {
+        s.language = l.to_string();
+    }
     s.clamp()
 }
 
@@ -121,9 +130,10 @@ pub fn save(path: &Path, s: &Settings) -> io::Result<()> {
         fs::create_dir_all(dir)?;
     }
     let model = serde_json::to_string(&s.main_model).map_err(io::Error::other)?;
+    let language = serde_json::to_string(&s.language).map_err(io::Error::other)?;
     let body = format!(
-        "{{\n  \"session_retention_days\": {},\n  \"extra_coders\": {},\n  \"main_model\": {}\n}}\n",
-        s.session_retention_days, s.extra_coders, model
+        "{{\n  \"session_retention_days\": {},\n  \"extra_coders\": {},\n  \"main_model\": {},\n  \"language\": {}\n}}\n",
+        s.session_retention_days, s.extra_coders, model, language
     );
     let tmp = PathBuf::from(format!("{}.tmp", path.display()));
     {
@@ -196,13 +206,10 @@ impl Picker {
     // Go closeSettings: saves the working copy and returns the note that says what applies when.
     pub fn close(&mut self) -> String {
         match &self.path {
-            None => "설정 경로를 알 수 없음 (작업 폴더 없음)".to_string(),
+            None => t(Msg::SettingsNoPath).to_string(),
             Some(p) => match save(p, &self.s) {
-                Ok(()) => format!(
-                    "설정 저장: {} · 보존 기간·추가 coder 수·메인 모델은 다음 세션 시작 시 적용",
-                    p.display()
-                ),
-                Err(e) => format!("설정 저장 실패: {e}"),
+                Ok(()) => tf(Msg::SettingsSaved, &[&p.display()]),
+                Err(e) => tf(Msg::SettingsSaveFailed, &[&e]),
             },
         }
     }
@@ -246,13 +253,15 @@ impl Picker {
         )];
         let rows = [
             format!(
-                "session_retention_days  {}일 (0 = 영구 보존)",
-                self.s.session_retention_days
+                "session_retention_days  {}",
+                tf(Msg::RetainDays, &[&self.s.session_retention_days])
             ),
             format!(
-                "extra_coders            {} (추가 coder ({}초) 수, 0-8)",
-                self.s.extra_coders,
-                chaude_core::api::CODER_IDLE_TTL_SECS
+                "extra_coders            {}",
+                tf(
+                    Msg::ExtraCoders,
+                    &[&self.s.extra_coders, &chaude_core::api::CODER_IDLE_TTL_SECS]
+                )
             ),
             format!("main_model              {}", self.s.main_model),
         ];
@@ -266,7 +275,7 @@ impl Picker {
         }
         l.push(format!(
             "{GREY_ON}{}{FG_OFF}",
-            clip("  변경은 다음 세션 시작 시 적용됩니다.", width)
+            clip(t(Msg::SettingsNextSession), width)
         ));
         l.resize(h.max(l.len()), String::new());
         l.truncate(h);
@@ -323,6 +332,7 @@ mod tests {
             session_retention_days: 30,
             extra_coders: 4,
             main_model: "opus".into(),
+            language: "auto".into(),
         };
         assert_eq!(load(Some(&d.join("none.json"))), want);
         assert_eq!(load(None), want);
@@ -335,6 +345,7 @@ mod tests {
             session_retention_days: -5,
             extra_coders: 99,
             main_model: "gpt".into(),
+            language: "auto".into(),
         }
         .clamp();
         assert_eq!(
@@ -349,6 +360,7 @@ mod tests {
             session_retention_days: 30,
             extra_coders: -1,
             main_model: "sonnet".into(),
+            language: "auto".into(),
         }
         .clamp();
         assert_eq!((low.extra_coders, low.main_model.as_str()), (0, "sonnet"));
@@ -362,16 +374,34 @@ mod tests {
             session_retention_days: 0,
             extra_coders: 2,
             main_model: "fable".into(),
+            language: "en".into(),
         };
         save(&path, &input).unwrap();
         assert_eq!(load(Some(&path)), input);
         assert!(!PathBuf::from(format!("{}.tmp", path.display())).exists());
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.starts_with("{\n  \"session_retention_days\": 0,\n  \"extra_coders\": 2,"));
-        assert!(text.ends_with("\"main_model\": \"fable\"\n}\n"));
+        assert!(text.ends_with("\"main_model\": \"fable\",\n  \"language\": \"en\"\n}\n"));
     }
 
     // Go TestSettingsPartialFileKeepsDefaults.
+    #[test]
+    fn language_round_trips_and_unknown_clamps_to_auto() {
+        let dir = tmp_dir("language");
+        let path = dir.join("settings.json");
+        fs::write(&path, r#"{"language":"en"}"#).unwrap();
+        assert_eq!(load(Some(&path)).language, "en");
+        fs::write(&path, r#"{"language":"fr"}"#).unwrap();
+        assert_eq!(load(Some(&path)).language, "auto");
+        let s = Settings {
+            language: "ko".into(),
+            ..Settings::default()
+        };
+        save(&path, &s).unwrap();
+        assert_eq!(load(Some(&path)).language, "ko");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn partial_file_keeps_defaults_and_reads_legacy_key() {
         let path = tmp_dir("partial").join("s.json");
@@ -425,6 +455,7 @@ mod tests {
             session_retention_days: 7,
             extra_coders: 2,
             main_model: "sonnet".into(),
+            language: "auto".into(),
         };
         save(&path_a, &in_a).unwrap();
         assert_eq!(load(file_for(Some(&b)).as_deref()), Settings::default());

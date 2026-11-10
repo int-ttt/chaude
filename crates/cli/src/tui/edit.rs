@@ -191,6 +191,10 @@ impl Editor {
             cur += cw;
         }
         rows.push((start, self.buf.len()));
+        // A full last row gets an empty row below it, so the cursor after the text never lands on the blank column.
+        if cur >= w {
+            rows.push((self.buf.len(), self.buf.len()));
+        }
         rows
     }
 
@@ -588,6 +592,17 @@ mod tests {
         assert!(e.move_row(1, 80));
         assert_eq!(e.cursor, 5, "column 2 on 'cde' is after 'd'");
         assert!(!e.move_row(1, 80), "no line below");
+    }
+
+    #[test]
+    fn full_last_row_is_followed_by_an_empty_visual_row() {
+        // width 6: "가나다" fills the row, so the cursor after it is on an empty second row
+        let mut e = typed("가나다");
+        assert_eq!(e.visual_rows(6), vec![(0, 3), (3, 3)]);
+        assert!(e.move_row(-1, 6));
+        assert_eq!(e.cursor(), 0);
+        assert!(e.move_row(1, 6), "Down reaches the cursor row");
+        assert_eq!(e.cursor(), 3);
     }
 
     #[test]

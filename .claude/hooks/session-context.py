@@ -81,7 +81,7 @@ if data.get("source", "startup") in ("startup", "resume"):   # compaction keeps 
         pass
 if lean_off():
     emit("[normal mode] The claude-lean policy in CLAUDE.md is OFF: work directly with tools, normal-length replies. "
-          "(The user types 절약모드 to turn it back on.)" + (f"\n[update] {upd}" if upd else ""))
+          "(The user types 절약모드 or \"lean mode\" to turn it back on.)" + (f"\n[update] {upd}" if upd else ""))
     sys.exit(0)
 
 

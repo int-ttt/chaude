@@ -27,6 +27,7 @@ use crate::event::{Block, Content, Delta, Event, StreamInner, SystemEvent, Usage
 use crate::forward::forward_rule_for;
 use crate::haiku_pool::WorkerPool;
 use crate::handoff::{self, ExitHandoff};
+use crate::i18n::{Msg, t, tf};
 use crate::import_claude::{ClaudeImport, import_note};
 use crate::mcp;
 use crate::metrics::{Metrics, RateLog, usage_fields};
@@ -43,6 +44,7 @@ use crate::resident::{
     tui_prompt,
 };
 use crate::resume_group;
+use crate::resume_note;
 use crate::rotate::{
     HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
     validate_handoff, with_reco,
@@ -1015,7 +1017,11 @@ fn drain_done_notice(
     brief: &str,
     report: &str,
 ) -> String {
-    let st = if done { "완료" } else { "타임아웃" };
+    let st = if done {
+        t(Msg::StateDone)
+    } else {
+        t(Msg::StateTimeout)
+    };
     let mut head = format!("[agent done] {id} · {task} · {out} · {st}");
     let brief: String = brief.split_whitespace().collect::<Vec<_>>().join(" ");
     if !brief.is_empty() {
@@ -1398,20 +1404,20 @@ fn actor(
     if let Some(store) = &st.agent_store {
         store.interrupt_running(true);
     }
-    // Quit path: children get stdin EOF and a bounded grace period to flush their transcripts before the kill.
-    let grace = Duration::from_secs(3);
+    // Quit path: every child is killed at once. Session files are already persisted per turn, so nothing
+    // waits for a transcript flush (the old stdin-EOF grace cost up to 3 s per child).
     if let Some(mut p) = st.proc.take() {
-        p.finish(grace);
+        p.kill();
     }
     if let Some(mut p) = st.prompter_proc.take() {
-        p.finish(grace);
+        p.kill();
     }
     if let Some(mut p) = st.tui_proc.take() {
-        p.finish(grace);
+        p.kill();
     }
     for c in &mut st.coders {
         if let Some(mut p) = c.proc.take() {
-            p.finish(grace);
+            p.kill();
         }
     }
     // Go closeDrains on exit: draining children are closed.
@@ -1792,14 +1798,14 @@ impl State {
         if self.prompter_proc.is_none()
             && let Err(e) = self.spawn_prompter()
         {
-            self.notice(prompter_notice(&format!("오류: {e}")));
+            self.notice(prompter_notice(&tf(Msg::Error, &[&e])));
             self.dispatch(&text);
             return;
         }
         let phase = match self.prompter.start(&text) {
             Ok(phase) => phase,
             Err(e) => {
-                self.notice(prompter_notice(&format!("오류: {e}")));
+                self.notice(prompter_notice(&tf(Msg::Error, &[&e])));
                 self.dispatch(&text);
                 return;
             }
@@ -1897,7 +1903,7 @@ impl State {
         if self.tui_proc.is_none()
             && let Err(e) = self.spawn_tui()
         {
-            self.finish_tui(Err(format!("오류: {e}")));
+            self.finish_tui(Err(tf(Msg::Error, &[&e])));
             return;
         }
         self.stage("tui", StagePhase::Working);
@@ -1909,7 +1915,7 @@ impl State {
         };
         if let Err(e) = wrote {
             self.tui_proc = None;
-            self.finish_tui(Err(format!("오류: write failed: {e}")));
+            self.finish_tui(Err(tf(Msg::Error, &[&format!("write failed: {e}")])));
         }
     }
 
@@ -2346,7 +2352,7 @@ impl State {
             Err(reason) => {
                 self.emit(UiEvent::CoderReply {
                     role: role.clone(),
-                    text: format!("오류: {reason}"),
+                    text: tf(Msg::Error, &[&reason]),
                 });
                 self.stage(&role, StagePhase::Failed(reason));
             }
@@ -2371,7 +2377,7 @@ impl State {
         self.role_context("tui", r.usage.as_ref());
         let text = r.result.unwrap_or_default().trim().to_string();
         if text.is_empty() {
-            self.finish_tui(Err("빈 응답".to_string()));
+            self.finish_tui(Err(t(Msg::EmptyResponse).to_string()));
         } else {
             self.finish_tui(Ok(text));
         }
@@ -2380,7 +2386,7 @@ impl State {
     fn on_tui_eof(&mut self) {
         self.tui_proc = None;
         if self.tui_deadline.is_some() {
-            self.finish_tui(Err("오류: exited".to_string()));
+            self.finish_tui(Err(tf(Msg::Error, &[&"exited"])));
         }
     }
 
@@ -2390,9 +2396,9 @@ impl State {
             p.kill();
         }
         self.tui_epoch += 1;
-        self.finish_tui(Err(format!(
-            "{}초 시간초과",
-            self.cfg.tui_timeout.as_secs_f64()
+        self.finish_tui(Err(tf(
+            Msg::TimedOut,
+            &[&self.cfg.tui_timeout.as_secs_f64()],
         )));
     }
 
@@ -3318,7 +3324,7 @@ impl State {
         match agent_body(cwd, name) {
             Ok(body) => body,
             Err(e) => {
-                self.notice(format!("{e}: 기본 세션으로 시작"));
+                self.notice(tf(Msg::DefaultSession, &[&e]));
                 String::new()
             }
         }
@@ -4603,7 +4609,10 @@ impl State {
         self.recent = imp.turns.into_iter().skip(skip).collect();
         self.files = imp.files;
         self.last_reco = imp.reco;
-        let note = import_note(&stem);
+        let mut note = import_note(&stem);
+        if let Some(p) = &imp.note_path {
+            note = format!("{note}\n\n{}", resume_note::hint(p));
+        }
         self.pending_snapshot = with_reco(&self.last_reco, &self.build_snapshot(&note));
     }
 
@@ -4965,21 +4974,12 @@ fn elapsed_ms(since: Option<Instant>) -> u64 {
     since.map(|t| t.elapsed().as_millis() as u64).unwrap_or(0)
 }
 
-// Local wall-clock time for the record file name (Go recordSave). The date tool gives local time without a
-// time-zone crate; None when it cannot run, and the turn is then not saved.
+// Local wall-clock time for the record file name (Go recordSave), from the shared localtime helper.
 fn local_stamp() -> Option<Stamp> {
-    let out = std::process::Command::new("date")
-        .arg("+%Y %m %d %H %M %S")
-        .output()
-        .ok()?;
-    let nums: Vec<u32> = String::from_utf8_lossy(&out.stdout)
-        .split_whitespace()
-        .filter_map(|s| s.parse().ok())
-        .collect();
-    let [y, mo, d, h, mi, s] = nums[..] else {
-        return None;
-    };
-    Some(Stamp::new(y as i32, mo, d, h, mi, s))
+    let [y, mo, d, h, mi, s] = crate::localtime::local_civil(now_secs() as i64);
+    Some(Stamp::new(
+        y as i32, mo as u32, d as u32, h as u32, mi as u32, s as u32,
+    ))
 }
 
 fn now_secs() -> u64 {

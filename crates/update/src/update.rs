@@ -332,8 +332,8 @@ pub(crate) fn host_goarch() -> &'static str {
     }
 }
 
-/// Creates and removes a probe file in `dir`. On unix a permission error means the install dir was set up with sudo;
-/// the user is told to run the update with sudo.
+/// Creates and removes a probe file in `dir`. On unix a permission error means the install dir is not writable
+/// (e.g. an old `/usr/local/bin` install); the user is told to reinstall to `~/.local/bin`, which needs no sudo.
 pub(crate) fn check_writable(dir: &Path, goos: &str) -> Result<(), Error> {
     let probe = dir.join(format!(".chaude-probe-{}", fsutil::unique_suffix()));
     match OpenOptions::new().write(true).create_new(true).open(&probe) {
@@ -344,7 +344,7 @@ pub(crate) fn check_writable(dir: &Path, goos: &str) -> Result<(), Error> {
         Err(e) => {
             if goos != "windows" && e.kind() == io::ErrorKind::PermissionDenied {
                 return Err(Error::Failed(format!(
-                    "{} is not writable; nothing changed. run: sudo chaude update",
+                    "{} is not writable; nothing changed. reinstall chaude to ~/.local/bin (no sudo): curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | bash",
                     dir.display()
                 )));
             }

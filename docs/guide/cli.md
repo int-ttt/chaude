@@ -31,9 +31,9 @@ curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | 
 
 - OS와 CPU에 맞는 `chaude_<버전>_<os>_<arch>.tar.gz`를 받습니다. `x86_64`는 amd64로, `aarch64`는 arm64로 봅니다.
 - `checksums.txt`로 아카이브를 검증합니다. 체크섬 파일을 받지 못하면 설치하지 않습니다.
-- `/usr/local/bin/chaude`에 둡니다. 폴더가 없으면 만듭니다. 이미 있으면 `chaude.<이전버전>.bak`으로 백업합니다.
-- 폴더에 쓸 수 없으면 `sudo`는 복사할 때만 씁니다.
-- 이전 설치(`~/.local/bin/chaude`, `chaude.exe`, `chaude.*.bak`)가 있으면 지우고, 그 설치가 rc 파일에 넣었던 `export PATH="~/.local/bin:$PATH"` 줄 하나를 뺍니다.
+- `~/.local/bin/chaude`에 둡니다. 사용자가 소유한 폴더이므로 `sudo`가 필요 없습니다. 폴더가 없으면 만듭니다. 이미 있으면 `chaude.<이전버전>.bak`으로 백업합니다.
+- `~/.local/bin`이 PATH에 없으면 셸 rc 파일(zsh는 `~/.zshrc`, bash는 `~/.bashrc` 또는 `~/.bash_profile`)에 `export PATH="$HOME/.local/bin:$PATH"` 줄을 한 번만 추가합니다. 같은 줄이 이미 있으면 다시 넣지 않습니다.
+- 예전 설치 `/usr/local/bin/chaude`는 이 스크립트가 지우지 않습니다. 남아 있으면 지우는 명령(`sudo rm -f /usr/local/bin/chaude`)을 출력합니다. 지우기 전까지는 셸이 예전 실행 파일을 먼저 실행할 수 있습니다.
 - macOS에서는 다운로드 격리 속성(quarantine)을 지웁니다.
 - 설치 폴더가 PATH에 없으면 경고만 출력합니다. rc 파일은 바꾸지 않습니다.
 - 필요한 도구는 `curl`, `tar`, `sha256sum` 또는 `shasum`입니다. 없으면 어떤 도구가 없는지 알려 주고 멈춥니다. `git`과 `go`는 필요 없습니다.
@@ -66,7 +66,7 @@ chaude --version
 ### 업데이트와 제거
 
 - 업데이트는 설치 명령을 다시 실행하면 됩니다. 기존 바이너리는 `.bak`으로 남습니다.
-- 제거는 `/usr/local/bin/chaude`(Windows는 `%LOCALAPPDATA%\Programs\chaude\chaude.exe`)를 지우면 됩니다. 백업 파일은 직접 지웁니다. Windows에서 사용자 PATH에 넣은 `%LOCALAPPDATA%\Programs\chaude` 항목도 직접 뺍니다.
+- 제거는 `~/.local/bin/chaude`(예전 설치는 `/usr/local/bin/chaude`, Windows는 `%LOCALAPPDATA%\Programs\chaude\chaude.exe`)를 지우면 됩니다. 백업 파일은 직접 지웁니다. Windows에서 사용자 PATH에 넣은 `%LOCALAPPDATA%\Programs\chaude` 항목도 직접 뺍니다.
 
 ## 명령 한눈에 보기
 
@@ -201,7 +201,7 @@ chaude update
 
 - 설치 스크립트(`install.sh`, `install.ps1`)가 쓰는 것과 같은 `.tar.gz` / `.zip` 아카이브를 받습니다. `checksums.txt`로 검증하며, 이 검증은 필수입니다.
 - 출력은 `chaude updated: vOLD -> vNEW (...). Restart chaude to use it.` 또는 `up to date`입니다. 교체한 뒤에는 chaude를 다시 시작해야 합니다.
-- macOS/Linux에서 실행 파일이 있는 폴더에 쓸 수 없으면 `run: sudo chaude update`를 출력하고 아무것도 바꾸지 않습니다.
+- macOS/Linux에서 실행 파일이 있는 폴더에 쓸 수 없으면 `update failed: <폴더> is not writable; nothing changed. reinstall chaude to ~/.local/bin (no sudo): curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | bash`를 stderr에 출력하고 아무것도 바꾸지 않습니다. `sudo`는 쓰지 않으며, 설치 스크립트로 `~/.local/bin`에 다시 설치하라는 뜻입니다.
 - Windows는 실행 중인 `chaude.exe`를 같은 방식으로 제자리에서 바꿉니다. 이전 파일은 `chaude.exe.old`로 남기고, 다음 실행 때 지웁니다.
 - GitHub에 연결할 수 없으면 오프라인 메시지와 함께 실패하고 아무것도 바꾸지 않습니다.
 - `GH_TOKEN`이 설정되어 있으면 그 토큰을 씁니다. GitHub가 토큰을 거부하면 토큰을 빼고 다시 시도합니다.
