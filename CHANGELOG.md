@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.12.4 - 2026-11-12
+- CI: the release workflow retries apt for the arm64 cross linker and falls back to archive.ubuntu.com when azure.archive.ubuntu.com does not resolve.
+  - CI: arm64 크로스 링커 단계의 apt를 재시도하고, azure.archive.ubuntu.com 이 해석되지 않으면 archive.ubuntu.com 으로 전환합니다.
+- 0.12.3 was tagged but not published; its changes ship in 0.12.4.
+  - 0.12.3은 태그만 만들어지고 배포되지 않았습니다. 0.12.3의 변경 사항은 0.12.4에 포함됩니다.
+- `chaude doctor` and `/doctor`: check old chaude binaries (below 0.12.0), PATH order, install lock (macOS uchg), project hook wiring, Claude login, and repo target/ size. Each check prints OK, WARN or FAIL with a fix hint.
+  - `chaude doctor`과 `/doctor`: 오래된 chaude(0.12.0 미만), PATH 순서, 설치본 잠금(macOS uchg), 프로젝트 훅 연결, Claude 로그인, 저장소 target/ 크기를 점검합니다. 각 항목은 OK, WARN, FAIL 중 하나와 조치 안내를 보여줍니다.
+- `/doctor` runs the checks in the background, shows "checking…" at once, and posts the result when done. The install version is read from the binary bytes without running it, so 0.12.x shows.
+  - `/doctor`는 점검을 백그라운드에서 실행하고 바로 "점검 중…"을 표시한 뒤 끝나면 결과를 보여줍니다. 설치 버전은 바이너리를 실행하지 않고 바이트에서 읽으므로 0.12.x가 표시됩니다.
+- `/lang`: switch the language between English and Korean. The language also applies to hook messages and child agent arguments.
+  - `/lang`: 영어와 한국어를 전환합니다. 언어 설정은 훅 메시지와 하위 에이전트 인자에도 적용됩니다.
+- Agents: new `haiku-test-lead` agent. Tests and gates are routed to it.
+  - 에이전트: 새 `haiku-test-lead` 에이전트를 추가했습니다. 테스트와 게이트 작업이 이 에이전트로 전달됩니다.
+- Agent replies are queued and shown in a Tasks list.
+  - 에이전트 응답은 큐에 쌓이고 Tasks 목록에 표시됩니다.
+- Plan text before a tool call is shown first, above its tool row.
+  - 도구 호출 전 계획 문구가 도구 행보다 먼저 표시됩니다.
+- Scratch layout: `notes/tmp/long` and `notes/tmp/test` are auto-cleaned at startup.
+  - 임시 폴더 구조: `notes/tmp/long`과 `notes/tmp/test`는 시작할 때 자동으로 정리됩니다.
+- Agent list is cleared on a fresh launch and restored by `/resume`.
+  - 에이전트 목록: 새로 실행하면 비워지고 `/resume`으로 복원됩니다.
+- Markdown tables render with borders. The input box's last cell is left blank.
+  - 마크다운 표는 테두리와 함께 그립니다. 입력창의 마지막 칸은 비워 둡니다.
+- Startup cleanup never deletes the `~/.local/bin` install. `mcp-resident` skips cleanup.
+  - 시작 정리는 `~/.local/bin` 설치본을 지우지 않습니다. `mcp-resident`는 정리를 건너뜁니다.
+- Repo: commit flow rule and a pre-commit guard.
+  - 저장소: 커밋 절차 규칙과 pre-commit 가드를 추가했습니다.
+
 ## 0.12.3 - 2026-11-11
 - `chaude doctor` and `/doctor`: check old chaude binaries (below 0.12.0), PATH order, install lock (macOS uchg), project hook wiring, Claude login, and repo target/ size. Each check prints OK, WARN or FAIL with a fix hint.
   - `chaude doctor`과 `/doctor`: 오래된 chaude(0.12.0 미만), PATH 순서, 설치본 잠금(macOS uchg), 프로젝트 훅 연결, Claude 로그인, 저장소 target/ 크기를 점검합니다. 각 항목은 OK, WARN, FAIL 중 하나와 조치 안내를 보여줍니다.

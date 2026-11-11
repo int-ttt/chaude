@@ -78,7 +78,7 @@ An older install at `/usr/local/bin/chaude` is not removed by the installer. If 
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.3 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.4 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
