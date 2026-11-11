@@ -325,6 +325,8 @@ pub struct Config {
     pub model: String,
     pub resume: Option<String>,
     pub cwd: Option<PathBuf>,
+    // Home dir for the agent rule fallback (~/.claude/agents). Tests inject a temp dir instead of setting HOME.
+    pub home: Option<PathBuf>,
     pub cache_ttl: String,
     pub compact_window: u32,
     pub context_window: u64,
@@ -453,6 +455,9 @@ impl Default for Config {
             model: "opus".to_string(),
             resume: None,
             cwd: None,
+            home: std::env::var_os("HOME")
+                .filter(|h| !h.is_empty())
+                .map(PathBuf::from),
             cache_ttl: String::new(),
             compact_window: 0,
             context_window: 200_000,
@@ -919,6 +924,34 @@ fn saved_status(status: &str, failed: bool) -> &str {
     }
 }
 
+// The panel rows of stored agents and the events that show them: their log lines (with arrival times), the saved
+// summary for agents stored before log lines were kept, and the row list itself.
+fn restored_events(saved: &[SavedAgent]) -> (Vec<AgentRow>, Vec<UiEvent>) {
+    let rows: Vec<AgentRow> = saved.iter().map(restored_row).collect();
+    let mut events = Vec::new();
+    // A stored agent's log lines return with their own arrival times.
+    for s in saved.iter().filter(|s| !s.log.is_empty()) {
+        events.push(UiEvent::AgentLogAt {
+            id: s.id.clone(),
+            lines: s.log.clone(),
+        });
+    }
+    // Go restore (agentview): a stored agent's saved summary is its agent-view body, marked "(restored)".
+    // Agents stored before log lines were kept have no log, so only they take the summary.
+    for s in saved
+        .iter()
+        .filter(|s| s.log.is_empty() && !s.summary.is_empty())
+    {
+        events.push(UiEvent::AgentLog {
+            id: s.id.clone(),
+            lines: vec![format!("(restored) {}", s.summary)],
+            tool_ids: Vec::new(),
+        });
+    }
+    events.push(UiEvent::AgentsRestored { rows: rows.clone() });
+    (rows, events)
+}
+
 // A stored agent as a panel row. Restored agents are finished (done); only a stored interrupted or running one
 // (its child is gone) is marked interrupted. A done agent keeps its done status, a failed one its failure.
 fn restored_row(s: &SavedAgent) -> AgentRow {
@@ -1338,7 +1371,6 @@ fn actor(
         }
     }
     st.persist_live();
-    st.restore_agents_at_start();
     let started = st.start_child();
     let main_up = started.is_ok();
     let _ = boot.send(started);
@@ -1448,9 +1480,10 @@ impl State {
     // Runs the one-shot on its own thread so the actor keeps streaming a busy turn.
     fn usage(&self) {
         let bin = resolve_bin(&self.cfg.claude_bin);
+        let cwd = self.engine_cwd();
         let ui = self.ui.clone();
         thread::spawn(move || {
-            let ev = match proc::one_shot_usage(&bin) {
+            let ev = match proc::one_shot_usage(&bin, &cwd) {
                 Ok(text) => UiEvent::Usage { text },
                 Err(e) => UiEvent::Error(e),
             };
@@ -1477,10 +1510,11 @@ impl State {
         self.usage_poll_at = Some(now);
         self.usage_polling.store(true, Ordering::SeqCst);
         let bin = resolve_bin(&self.cfg.claude_bin);
+        let cwd = self.engine_cwd();
         let metrics = Arc::clone(&self.metrics);
         let polling = Arc::clone(&self.usage_polling);
         thread::spawn(move || {
-            let text = proc::one_shot_usage(&bin);
+            let text = proc::one_shot_usage(&bin, &cwd);
             let _ = log_usage(&metrics, text.as_deref().map_err(|e| e.as_str()));
             polling.store(false, Ordering::SeqCst);
         });
@@ -2402,6 +2436,21 @@ impl State {
         )));
     }
 
+    // With residents the main text waits for the tui answer. Text written before a tool call is the work plan: it is
+    // shown when that tool call arrives, so it stays above the tools and the final reply still comes from the tui.
+    fn release_routed_text(&mut self) {
+        if self.cfg.residents && self.busy && self.handoff.is_none() {
+            let text = std::mem::take(&mut self.routed_text);
+            if !text.is_empty() {
+                self.emit(UiEvent::TextDelta {
+                    role: Role::Main,
+                    text,
+                });
+                self.emit(UiEvent::MessageDone { role: Role::Main });
+            }
+        }
+    }
+
     // Ends the tui wait: the answer (or its failure row), then the turn is over.
     fn finish_tui(&mut self, out: Result<String, String>) {
         if self.tui_deadline.take().is_some() {
@@ -2707,6 +2756,9 @@ impl State {
                     self.emit_status(self.cost_usd);
                 }
                 if let Some(Content::Blocks(blocks)) = env.message.content {
+                    if blocks.iter().any(|b| matches!(b, Block::ToolUse { .. })) {
+                        self.release_routed_text();
+                    }
                     for b in blocks {
                         if let Block::ToolUse { id, name, input } = b {
                             self.on_tool_use(id, name, input.unwrap_or(Value::Null));
@@ -3175,39 +3227,19 @@ impl State {
         self.emit(UiEvent::AgentRows { rows });
     }
 
-    // Go restoreAgents (repl.go:1205, agentstore.go:221): recent interrupted agents of earlier runs are listed
-    // below the running rows until the next user line.
-    fn restore_agents_at_start(&mut self) {
+    // Go restoreAgents (agentstore.go:221) for /resume: the stored agents of the imported session are listed
+    // below the running rows until the next user line. A fresh start restores none; the records stay on disk.
+    fn restore_agents_for(&mut self, sid: &str) {
         let saved = self
             .agent_store
             .as_ref()
-            .map(|s| s.load_restorable())
+            .map(|s| s.load(sid))
             .unwrap_or_default();
-        let rows: Vec<AgentRow> = saved.iter().map(restored_row).collect();
-        if rows.is_empty() {
-            return;
+        let (rows, events) = restored_events(&saved);
+        self.restored_rows = rows;
+        for ev in events {
+            self.emit(ev);
         }
-        // A stored agent's log lines return with their own arrival times.
-        for s in saved.iter().filter(|s| !s.log.is_empty()) {
-            self.emit(UiEvent::AgentLogAt {
-                id: s.id.clone(),
-                lines: s.log.clone(),
-            });
-        }
-        // Go restore (agentview): a stored agent's saved summary is its agent-view body, marked "(restored)".
-        // Agents stored before log lines were kept have no log, so only they take the summary.
-        for s in saved
-            .iter()
-            .filter(|s| s.log.is_empty() && !s.summary.is_empty())
-        {
-            self.emit(UiEvent::AgentLog {
-                id: s.id.clone(),
-                lines: vec![format!("(restored) {}", s.summary)],
-                tool_ids: Vec::new(),
-            });
-        }
-        self.restored_rows = rows.clone();
-        self.emit(UiEvent::AgentsRestored { rows });
     }
 
     // The agent's SubagentHandback message (its final report) is kept for the done line. Both the current child and a
@@ -3304,6 +3336,8 @@ impl State {
         s.background = info.background;
         s.agent_id = info.agent_id.clone();
         s.log = info.log.clone();
+        // The session the agent runs in: /resume of that session lists it (AgentStore::load matches parent).
+        s.parent = self.sid.clone();
         store.put(&[s]);
     }
 
@@ -3321,7 +3355,7 @@ impl State {
 
     // Go spawnSlot: a missing agent file shows the notice and the slot starts a default session (no rule).
     fn agent_rule(&mut self, cwd: &Path, name: &str) -> String {
-        match agent_body(cwd, name) {
+        match agent_body(cwd, name, self.cfg.home.as_deref()) {
             Ok(body) => body,
             Err(e) => {
                 self.notice(tf(Msg::DefaultSession, &[&e]));
@@ -4609,6 +4643,7 @@ impl State {
         self.recent = imp.turns.into_iter().skip(skip).collect();
         self.files = imp.files;
         self.last_reco = imp.reco;
+        self.restore_agents_for(&stem);
         let mut note = import_note(&stem);
         if let Some(p) = &imp.note_path {
             note = format!("{note}\n\n{}", resume_note::hint(p));
@@ -4658,7 +4693,9 @@ impl State {
             let caller = CoderCaller {
                 tx: self.self_tx.clone(),
             };
-            self.mcp_cfg = mcp::start_owned(Arc::new(move |task: &str| caller.call(task))).ok();
+            let cwd = self.engine_cwd();
+            self.mcp_cfg =
+                mcp::start_owned(&cwd, Arc::new(move |task: &str| caller.call(task))).ok();
         }
         self.mcp_cfg.as_ref().map(|c| c.path().to_path_buf())
     }
@@ -5182,6 +5219,38 @@ mod tests {
         ];
         let row = restored_row(&s);
         assert_eq!(row.last_active, 1_700_000_090, "{row:?}");
+    }
+
+    // /resume lists only the imported session's stored agents; a session with none empties the list. The other
+    // sessions' records stay in the store (on disk), they are not loaded into the list.
+    #[test]
+    fn resume_lists_only_its_session_agents() {
+        let tmp = TempDir::new("agent-list-resume");
+        let path = tmp.path().join("agents.json");
+        let store = AgentStore::new(&path);
+        let now = SystemTime::now();
+        let mut done = SavedAgent::new("a1", STO_DONE, now);
+        done.parent = "s1".to_string();
+        done.summary = "report".to_string();
+        let mut other = SavedAgent::new("b1", STO_INTERRUPTED, now);
+        other.parent = "s2".to_string();
+        store.put(&[done, other]);
+        let ids = |rows: &[AgentRow]| rows.iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+        let (rows, events) = restored_events(&AgentStore::new(&path).load("s1"));
+        assert_eq!(ids(&rows), ["a1"]);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, UiEvent::AgentLog { id, .. } if id == "a1")),
+            "summary line of the restored agent"
+        );
+        let (rows, _) = restored_events(&AgentStore::new(&path).load("s3"));
+        assert!(rows.is_empty(), "{rows:?}");
+        assert_eq!(
+            AgentStore::new(&path).load("s2").len(),
+            1,
+            "record kept on disk"
+        );
     }
 
     // An agent's model is its own: the stream model of its assistant lines, else its name prefix. Other lines and
@@ -5722,6 +5791,90 @@ mod tests {
         assert_eq!(worker_floor(3, 0), 8);
         assert_eq!(worker_floor(3, 4), 12);
         assert_eq!(worker_floor(20, 4), 20);
+    }
+
+    // With residents, the text a main reply writes before a tool call is shown when that call arrives, ahead of its
+    // row; the final reply after the tools is held and comes from the tui answer. Drives the real actor with a fake
+    // main that streams text, tool_use, tool_result, then text.
+    #[cfg(unix)]
+    #[test]
+    fn pretool_text_shows_before_its_tool_and_final_reply_after() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("pretool-text");
+        let turn = dir.path().join("turn.jsonl");
+        let lines = [
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"plan first"}},"session_id":"s1","parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"},"session_id":"s1","parent_tool_use_id":null}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"plan first"},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]},"session_id":"s1","parent_tool_use_id":null}"#,
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok"}]},"session_id":"s1","parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"final reply"}},"session_id":"s1","parent_tool_use_id":null}"#,
+            r#"{"type":"stream_event","event":{"type":"message_stop"},"session_id":"s1","parent_tool_use_id":null}"#,
+            r#"{"type":"assistant","message":{"content":[{"type":"text","text":"final reply"}]},"session_id":"s1","parent_tool_use_id":null}"#,
+            r#"{"type":"result","session_id":"s1","result":"final reply"}"#,
+        ];
+        std::fs::write(&turn, lines.join("\n") + "\n").expect("write turn");
+        // Role by argv as in the parked test: main replays the turn, the prompter and tui answer with a result.
+        let script = r#"#!/bin/sh
+case "$*" in
+  *--mcp-config*) ROLE=main ;;
+  *"input summarizer"*) ROLE=prompter ;;
+  *) ROLE=tui ;;
+esac
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"user"'*)
+      if [ "$ROLE" = main ]; then
+        cat 'TURN'
+      else
+        printf '%s\n' '{"type":"result","session_id":"s-'"$ROLE"'","result":"ok"}'
+      fi
+      ;;
+  esac
+done
+"#
+        .replace("TURN", &turn.display().to_string());
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, script).expect("write fake claude");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let cfg = Config {
+            claude_bin: bin.display().to_string(),
+            model: "haiku".into(),
+            residents: true,
+            record_dir: Some(dir.path().join("record")),
+            ..isolated(dir.path())
+        };
+        let (h, rx) = Engine::try_start(cfg).expect("engine boots");
+        h.submit("hello");
+        let mut evs = Vec::new();
+        loop {
+            let ev = rx
+                .recv_timeout(Duration::from_secs(60))
+                .expect("engine went silent");
+            if ev == UiEvent::Busy(false) {
+                break;
+            }
+            evs.push(ev);
+        }
+        h.shutdown();
+        let plan = evs
+            .iter()
+            .position(|e| matches!(e, UiEvent::TextDelta { role: Role::Main, text } if text == "plan first"))
+            .unwrap_or_else(|| panic!("pre-tool text not shown: {evs:?}"));
+        let tool = evs
+            .iter()
+            .position(|e| matches!(e, UiEvent::ToolStart { .. }))
+            .expect("tool row");
+        let answer = evs
+            .iter()
+            .position(|e| matches!(e, UiEvent::TuiAnswer { .. }))
+            .expect("tui answer");
+        assert!(plan < tool && tool < answer, "order: {evs:?}");
+        assert!(
+            !evs[..answer]
+                .iter()
+                .any(|e| matches!(e, UiEvent::TextDelta { role: Role::Main, text } if text.contains("final"))),
+            "final reply shown before the tui answer: {evs:?}"
+        );
     }
 
     // Go parkedIdleEvent (livechild.go:42-49): a parked non-coder child's can_use_tool gets a deny, never silence.

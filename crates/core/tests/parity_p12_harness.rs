@@ -139,7 +139,7 @@ fn agent_prompt_loaded() {
         "---\nname: haiku-prompter\n---\nBODY LINE\n",
     )
     .unwrap();
-    let body = agent_body(&cwd, "haiku-prompter").expect("agent file under cwd");
+    let body = agent_body(&cwd, "haiku-prompter", None).expect("agent file under cwd");
     assert_eq!(body.trim(), "BODY LINE");
     assert!(!body.contains("name: haiku-prompter"));
 }
@@ -149,7 +149,7 @@ fn agent_prompt_loaded() {
 #[test]
 fn agent_prompt_missing_is_err() {
     let cwd = scratch("agent-missing");
-    assert!(agent_body(&cwd, "haiku-missing").is_err());
+    assert!(agent_body(&cwd, "haiku-missing", None).is_err());
 }
 
 // Go idlespend_test.go TestIdleSpendRow, partial: sub_output_tokens and spawns only.

@@ -318,7 +318,8 @@ fn mcp_bridge_round_trip_over_loopback() {
 #[test]
 fn mcp_config_is_written_with_bridge_command_and_token_env() {
     let run: Arc<CoderFn> = Arc::new(|_: &str| Ok(String::new()));
-    let cfg = mcp::start_owned(run).expect("start_owned");
+    let cfg = mcp::start_owned(std::path::Path::new(env!("CARGO_TARGET_TMPDIR")), run)
+        .expect("start_owned");
     let text = fs::read_to_string(cfg.path()).expect("mcp.json");
     let v: serde_json::Value = serde_json::from_str(&text).expect("json");
     let chaude = &v["mcpServers"]["chaude"];
@@ -331,7 +332,8 @@ fn mcp_config_is_written_with_bridge_command_and_token_env() {
 #[test]
 fn mcp_config_args_point_at_unix_socket() {
     let run: Arc<CoderFn> = Arc::new(|_: &str| Ok(String::new()));
-    let cfg = mcp::start_owned(run).expect("start_owned");
+    let cfg = mcp::start_owned(std::path::Path::new(env!("CARGO_TARGET_TMPDIR")), run)
+        .expect("start_owned");
     let v: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(cfg.path()).unwrap()).unwrap();
     let addr = v["mcpServers"]["chaude"]["args"][1]
@@ -376,7 +378,7 @@ fn agent_prompt_body_loads_from_cwd_without_frontmatter() {
         "---\nname: haiku-prompter\n---\n\nBODY LINE\n",
     )
     .unwrap();
-    let body = resident::agent_body(&cwd, "haiku-prompter").expect("body");
+    let body = resident::agent_body(&cwd, "haiku-prompter", None).expect("body");
     assert!(body.contains("BODY LINE"), "{body}");
     assert!(!body.contains("name: haiku-prompter"), "{body}");
 }
@@ -386,7 +388,7 @@ fn agent_prompt_body_loads_from_cwd_without_frontmatter() {
 #[test]
 fn agent_prompt_missing_gives_korean_notice_and_default_session() {
     let cwd = temp_cwd("agent-missing");
-    let err = resident::agent_body(&cwd, "haiku-missing").expect_err("missing agent");
+    let err = resident::agent_body(&cwd, "haiku-missing", None).expect_err("missing agent");
     assert!(err.contains("에이전트 규칙 없음"), "{err}");
 }
 

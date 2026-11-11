@@ -118,7 +118,11 @@ fn mcp_round_trip_fake_session() {
 #[cfg(unix)]
 #[test]
 fn resident_mcp_config_written() {
-    let cfg = mcp::start_owned(fake_coder()).expect("start_owned");
+    let cfg = mcp::start_owned(
+        std::path::Path::new(env!("CARGO_TARGET_TMPDIR")),
+        fake_coder(),
+    )
+    .expect("start_owned");
     let path = cfg.path().to_path_buf();
     let raw = fs::read_to_string(&path).expect("read mcp.json");
     let v: Value = serde_json::from_str(&raw).expect("parse mcp.json");

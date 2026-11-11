@@ -1,4 +1,4 @@
-//! Resume digest: a markdown file under notes/tmp/ built from a stored session (user prompts, final replies,
+//! Resume digest: a markdown file under notes/tmp/long/ built from a stored session (user prompts, final replies,
 //! agent rows, the last recommendation, changed files). /resume writes it and puts its path into the first
 //! input of the resumed main. The source is the Claude transcript, so a session that ended by SIGKILL (a
 //! partial last line) reads the same way as a clean one.
@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::agent_store::{AgentStore, SavedAgent};
 use crate::import_claude::{ClaudeImport, session_stem};
 use crate::osenv::home_dir;
+use crate::tmp_layout;
 
 // Upper bound on the digest, in chars. The newest turns are kept when it does not fit.
 pub const RESUME_CAP: usize = 12_000;
@@ -99,7 +100,7 @@ pub fn agents_path() -> PathBuf {
     home_dir().join(".chaude").join("agents.json")
 }
 
-// Writes cwd/notes/tmp/<newest session id>.md and returns its path. Agent rows come from the parent sessions
+// Writes cwd/notes/tmp/long/<newest session id>.md and returns its path. Agent rows come from the parent sessions
 // in sids (every session of a group). Errors are text for the caller.
 pub fn write(cwd: &Path, imp: &ClaudeImport, sids: &[String]) -> Result<PathBuf, String> {
     let store = AgentStore::new(&agents_path());
@@ -110,7 +111,7 @@ pub fn write(cwd: &Path, imp: &ClaudeImport, sids: &[String]) -> Result<PathBuf,
     agents.sort_by(|a, b| a.started.cmp(&b.started).then_with(|| a.id.cmp(&b.id)));
     agents.dedup_by(|a, b| a.id == b.id);
     let md = build(imp, &agents, RESUME_CAP);
-    let dir = cwd.join("notes").join("tmp");
+    let dir = tmp_layout::long_dir(cwd);
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let path = dir.join(format!("{}.md", session_stem(&imp.path)));
     fs::write(&path, md).map_err(|e| format!("{}: {e}", path.display()))?;

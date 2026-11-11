@@ -54,11 +54,12 @@ pub fn tui_prompt(reply: &str) -> String {
 }
 
 // Go agentBody: the agent file under cwd, then under the home directory. Frontmatter is dropped.
-pub fn agent_body(cwd: &Path, name: &str) -> Result<String, String> {
+// home is passed in (Config.home), never read from the environment, so tests cannot touch the real ~/.claude.
+pub fn agent_body(cwd: &Path, name: &str, home: Option<&Path>) -> Result<String, String> {
     let file = format!("{name}.md");
     let mut paths = vec![cwd.join(".claude").join("agents").join(&file)];
-    if let Some(home) = std::env::var_os("HOME") {
-        paths.push(Path::new(&home).join(".claude").join("agents").join(&file));
+    if let Some(home) = home {
+        paths.push(home.join(".claude").join("agents").join(&file));
     }
     for p in paths {
         if let Ok(s) = std::fs::read_to_string(&p) {
@@ -284,6 +285,24 @@ mod tests {
         let long = "x".repeat(400);
         assert_eq!(summarize_reply(&long).chars().count(), 300);
         assert_eq!(summarize_reply("  plain  "), "plain");
+    }
+
+    #[test]
+    fn agent_body_reads_injected_home() {
+        let cwd = crate::testutil::TempDir::new("agent-cwd");
+        let home = crate::testutil::TempDir::new("agent-home");
+        let agents = home.path().join(".claude").join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(
+            agents.join("chaude-injected-agent.md"),
+            "---\nname: x\n---\nINJECTED RULE\n",
+        )
+        .unwrap();
+        assert_eq!(
+            agent_body(cwd.path(), "chaude-injected-agent", Some(home.path())).unwrap(),
+            "INJECTED RULE"
+        );
+        assert!(agent_body(cwd.path(), "chaude-injected-agent", None).is_err());
     }
 
     #[test]

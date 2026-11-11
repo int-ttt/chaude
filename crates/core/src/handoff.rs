@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-// File name in the record project folder. The record listing ignores it (not .md).
+// File name in <cwd>/notes/tmp/long (tmp_layout). Not .md, so the record listing ignores it.
 pub const EXIT_HANDOFF_FILE: &str = ".exit-handoff.json";
 // Written while a run is live and removed on clean exit. Still present at the next start = the run was killed.
 pub const LIVE_HANDOFF_FILE: &str = ".live-handoff.json";
@@ -157,7 +157,7 @@ pub fn pid_alive(pid: u32) -> bool {
     }
 }
 
-// <project record folder>/.exit-handoff.json
+// <cwd>/notes/tmp/long/.exit-handoff.json
 pub fn handoff_file(project_dir: &Path) -> PathBuf {
     project_dir.join(EXIT_HANDOFF_FILE)
 }

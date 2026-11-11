@@ -74,7 +74,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.1 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.2 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -155,7 +155,7 @@ chaude
 | `/clear` | 새 세션 시작 |
 | `/rotate` | 지금 새 세션으로 넘기기 |
 | `/settings` | 설정 화면 열기. `esc`로 나가면 저장되고, 다음 세션 시작 때 적용됩니다 |
-| `/resume [번호 또는 슬러그]` | 기록 주제 목록을 보거나 하나를 엽니다. 강제 종료 뒤에는 검색어 없는 `/resume`이 그 세션을 가져오고 요약을 `notes/tmp/`에 씁니다. `/resume claude [검색어]`는 Claude Code 세션을 보여 줍니다 |
+| `/resume [번호 또는 슬러그]` | 기록 주제 목록을 보거나 하나를 엽니다. 강제 종료 뒤에는 검색어 없는 `/resume`이 그 세션을 가져오고 요약을 `notes/tmp/long/`에 씁니다. `/resume claude [검색어]`는 Claude Code 세션을 보여 줍니다 |
 | `/import [ID 또는 latest]` | Claude Code 세션 가져오기 |
 | `/view [ID 앞부분]` | Claude Code 세션 보기. 하위 에이전트 이름과 SendMessage 행을 함께 보여 줍니다 (`esc`로 돌아갑니다) |
 | `/usage` | 요금제 사용량과 한도 보기 |

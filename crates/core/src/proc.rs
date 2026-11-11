@@ -2,8 +2,9 @@
 // stderr is discarded like cmd.Stderr = nil, and the stdin frames match Send, RespondPermission and Interrupt
 // in Go tree (v0.11.2) internal/harness/core.go. Owned types only: no lifetimes.
 
+use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
@@ -11,6 +12,8 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
+
+use crate::tmp_layout;
 
 // Same value as claudePermissionMode in core.go: chaude always launches claude in auto mode.
 pub const PERMISSION_MODE: &str = "auto";
@@ -145,9 +148,11 @@ fn apply_env(cmd: &mut Command, compact_window: u32, cache_ttl: &str) {
     }
 }
 
-// Go /usage (usageRaw): a separate `claude -p /usage --output-format json` run in the temp dir, so it never
-// touches the session. Returns the JSON `result` text. Not charged to the budget (Go never calls chargeOneShot).
-pub fn one_shot_usage(claude_bin: &str) -> Result<String, String> {
+// Go /usage (usageRaw): a separate `claude -p /usage --output-format json` run in cwd's notes/tmp/test dir, so it
+// never touches the session. Returns the JSON `result` text. Not charged to the budget (Go never calls chargeOneShot).
+pub fn one_shot_usage(claude_bin: &str, cwd: &Path) -> Result<String, String> {
+    let run_dir = tmp_layout::test_dir(cwd);
+    fs::create_dir_all(&run_dir).map_err(|e| format!("usage: {}: {e}", run_dir.display()))?;
     let mut cmd = Command::new(claude_bin);
     cmd.args([
         "-p",
@@ -156,7 +161,7 @@ pub fn one_shot_usage(claude_bin: &str) -> Result<String, String> {
         "json",
         "--no-session-persistence",
     ])
-    .current_dir(std::env::temp_dir())
+    .current_dir(run_dir)
     .stdin(Stdio::null())
     .stderr(Stdio::null());
     apply_env(&mut cmd, 0, "");

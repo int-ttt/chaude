@@ -35,6 +35,7 @@ mod role_coexist;
 pub mod rotate;
 pub mod rotate_defer;
 pub mod settings;
+pub mod tmp_layout;
 pub mod turn_spend;
 pub mod usage_poll;
 

@@ -2,9 +2,9 @@
 //! `resident_coder` tool through `chaude mcp-resident <addr>`, which copies MCP lines to this server.
 //! Unix serves a unix socket in a 0700 temp dir (Go listenMCP); Windows serves loopback TCP with a token.
 
-use std::collections::hash_map::RandomState;
+use std::collections::hash_map::{DefaultHasher, RandomState};
 use std::fs;
-use std::hash::{BuildHasher, Hasher};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::mem::ManuallyDrop;
 #[cfg(not(unix))]
@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::tmp_layout;
 use serde_json::{Value, json};
 
 pub const TOOL: &str = "resident_coder";
@@ -184,9 +184,10 @@ fn serve_conn<S: Conn>(conn: S, run: &CoderFn, token: Option<&str>) {
     }
 }
 
-// Owns the temp dir that holds mcp.json. Dropping it removes the dir (the listener thread stays up until exit).
+// Owns the dirs that hold mcp.json and the socket. Dropping it removes both (the listener thread stays up until exit).
 pub struct McpConfig {
     dir: PathBuf,
+    sock_dir: PathBuf,
     path: PathBuf,
 }
 
@@ -205,30 +206,55 @@ impl McpConfig {
 impl Drop for McpConfig {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.dir);
+        let _ = fs::remove_dir_all(&self.sock_dir);
     }
 }
 
-// Starts the server and writes mcp.json (and on unix mcp.sock) into a fresh temp directory. The guard
-// removes that dir on drop, which also removes the socket file.
-pub fn start_owned(run: Arc<CoderFn>) -> io::Result<McpConfig> {
+// macOS sun_path is 104 bytes (NUL included), so a longer socket path cannot bind.
+const SUN_PATH_MAX: usize = 104;
+
+// <system temp>/chaude-<hash of cwd>: the socket dirs. Sockets are not data, and the system temp path stays short,
+// where a cwd under notes/ can push the socket path past SUN_PATH_MAX.
+fn sock_root(cwd: &Path) -> PathBuf {
+    let mut h = DefaultHasher::new();
+    cwd.to_string_lossy().hash(&mut h);
+    std::env::temp_dir().join(format!("chaude-{:08x}", h.finish() as u32))
+}
+
+// Starts the server and writes mcp.json into a fresh dir under cwd's notes/tmp/test, and the unix socket
+// mcp.sock into a fresh dir under sock_root(cwd). The guard removes both dirs on drop.
+pub fn start_owned(cwd: &Path, run: Arc<CoderFn>) -> io::Result<McpConfig> {
     let token = new_token();
     let exe = std::env::current_exe()?;
-    // The pid, the clock and a process-wide sequence keep parallel callers in distinct dirs (the clock alone can tie).
+    // The pid and a process-wide sequence name the dirs, so parallel callers in one process never share them.
     static SEQ: AtomicU64 = AtomicU64::new(0);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("chaude-mcp-{}-{nanos}-{seq}", std::process::id()));
+    let name = format!("{}-{seq}", std::process::id());
+    let sock_dir = sock_root(cwd).join(&name);
+    let sock = sock_dir.join("mcp.sock");
+    if sock.as_os_str().len() >= SUN_PATH_MAX {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("socket path too long: {}", sock.display()),
+        ));
+    }
+    let parent = tmp_layout::test_dir(cwd);
+    fs::create_dir_all(&parent)?;
+    let dir = parent.join(&name);
+    // A leftover with the same name can only come from a dead process, so it is cleared first.
+    let _ = fs::remove_dir_all(&dir);
+    let _ = fs::remove_dir_all(&sock_dir);
+    fs::create_dir_all(sock_root(cwd))?;
     make_private_dir(&dir)?;
+    // Created before serve, so a failed serve still removes both dirs.
     let path = dir.join("mcp.json");
-    // Created before serve, so a failed serve still removes the dir.
     let cfg = McpConfig {
         dir: dir.clone(),
+        sock_dir: sock_dir.clone(),
         path: path.clone(),
     };
-    let addr = serve(run, &token, &dir.join("mcp.sock"))?;
+    make_private_dir(&sock_dir)?;
+    let addr = serve(run, &token, &sock)?;
     fs::write(
         &path,
         config_json(&exe.display().to_string(), &addr, &token),
@@ -253,8 +279,8 @@ fn make_private_dir(dir: &Path) -> io::Result<()> {
 }
 
 // Same as start_owned, but the dir is never removed (the old behaviour; api.rs still uses it).
-pub fn start(run: Arc<CoderFn>) -> io::Result<PathBuf> {
-    start_owned(run).map(McpConfig::into_path)
+pub fn start(cwd: &Path, run: Arc<CoderFn>) -> io::Result<PathBuf> {
+    start_owned(cwd, run).map(McpConfig::into_path)
 }
 
 // Go MCPResidentBridge: copies MCP lines between the main child's stdio and the socket at addr
@@ -379,7 +405,8 @@ mod tests {
 
     #[test]
     fn owned_config_removes_its_dir_on_drop() {
-        let cfg = start_owned(Arc::new(ok_run)).expect("start");
+        let tmp = crate::testutil::TempDir::new("mcp-drop");
+        let cfg = start_owned(tmp.path(), Arc::new(ok_run)).expect("start");
         let path = cfg.path().to_path_buf();
         let dir = path.parent().expect("dir").to_path_buf();
         assert!(path.is_file());
@@ -390,10 +417,30 @@ mod tests {
     // Back-to-back callers (same pid, clock may tie) each get their own dir, so neither fails or loses its socket.
     #[test]
     fn owned_configs_started_together_use_distinct_dirs() {
-        let a = start_owned(Arc::new(ok_run)).expect("a");
-        let b = start_owned(Arc::new(ok_run)).expect("b");
+        let tmp = crate::testutil::TempDir::new("mcp-distinct");
+        let a = start_owned(tmp.path(), Arc::new(ok_run)).expect("a");
+        let b = start_owned(tmp.path(), Arc::new(ok_run)).expect("b");
         assert_ne!(a.path(), b.path());
         assert!(a.path().is_file() && b.path().is_file());
+    }
+
+    // A long cwd (deep checkout under notes/) must still get a socket path that binds on macOS (sun_path 104).
+    #[test]
+    fn socket_path_stays_under_sun_path_for_a_long_cwd() {
+        let tmp = crate::testutil::TempDir::new("mcp-long-cwd");
+        let cwd = tmp.path().join("long-dir-".repeat(20));
+        assert!(cwd.as_os_str().len() > 150);
+        let cfg = start_owned(&cwd, Arc::new(ok_run)).expect("start");
+        assert!(cfg.path().starts_with(tmp_layout::test_dir(&cwd)));
+        let got: Value = serde_json::from_str(&fs::read_to_string(cfg.path()).unwrap()).unwrap();
+        let args = &got["mcpServers"]["chaude"]["args"];
+        let addr = args[1].as_str().expect("addr");
+        assert!(Path::new(addr).is_absolute());
+        assert!(addr.len() < SUN_PATH_MAX, "{} bytes: {addr}", addr.len());
+        assert!(Path::new(addr).exists(), "socket file: {addr}");
+        let sock_dir = Path::new(addr).parent().expect("sock dir").to_path_buf();
+        drop(cfg);
+        assert!(!sock_dir.exists(), "{}", sock_dir.display());
     }
 
     #[test]

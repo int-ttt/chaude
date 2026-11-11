@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.12.2 - 2026-11-11
+- Agent list: a fresh launch starts with an empty agent list. `/resume` restores the agents of that session only.
+  - 에이전트 목록: 새로 실행하면 에이전트 목록이 비어 있습니다. `/resume`은 그 세션의 에이전트만 복원합니다.
+- Plan text before a tool call appears right away, above its tool row.
+  - 도구 호출 전 계획 문구: 도구 행 위에 바로 표시됩니다.
+- Scratch and exit data moved under `notes/tmp/`: `notes/tmp/long` keeps 30 days (resume digests, rotation handoffs), `notes/tmp/test` keeps 24 hours (MCP config and socket dirs, `/usage` run dir). Old files are cleaned at startup. Existing `notes/tmp/*.md` files move into `long/`.
+  - 임시 데이터 위치: 임시 데이터가 `notes/tmp/` 아래로 옮겨졌습니다. `notes/tmp/long`은 30일(재개 요약, 교체 인계), `notes/tmp/test`는 24시간(MCP 설정과 소켓 폴더, `/usage` 실행 폴더)을 보관합니다. 시작할 때 오래된 파일을 지웁니다. 기존 `notes/tmp/*.md` 파일은 `long/`으로 옮깁니다.
+- MCP sockets use a short system temp path, so long project paths no longer hit the socket path limit.
+  - MCP 소켓: 시스템 임시 폴더의 짧은 경로를 씁니다. 긴 프로젝트 경로에서도 소켓 경로 길이 제한에 걸리지 않습니다.
+- Tests no longer change `HOME`.
+  - 테스트: 더 이상 `HOME`을 바꾸지 않습니다.
+
 ## 0.12.1 - 2026-11-11
 - Markdown tables render as bordered tables in the TUI.
   - 마크다운 표: TUI에서 테두리가 있는 표로 그립니다.

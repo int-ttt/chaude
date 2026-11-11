@@ -374,3 +374,20 @@ fn running_legacy_file_is_left_alone() {
     assert_eq!(fs::read_to_string(&legacy).unwrap(), "LEGACY");
     assert!(bin.join("chaude.0.9.0.bak").exists());
 }
+
+#[test]
+fn startup_cleanup_keeps_local_bin_install() {
+    let home = TempDir::new("chaude-update-test-").unwrap();
+    let bin = home.path().join(".local").join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    write(&bin.join("chaude"), "INSTALLED");
+    write(&bin.join("chaude.0.12.0.bak"), "PREVIOUS");
+
+    crate::cleanup::cleanup_old();
+
+    assert_eq!(fs::read_to_string(bin.join("chaude")).unwrap(), "INSTALLED");
+    assert_eq!(
+        fs::read_to_string(bin.join("chaude.0.12.0.bak")).unwrap(),
+        "PREVIOUS"
+    );
+}

@@ -215,6 +215,10 @@ fn metrics_main(args: &[String]) -> i32 {
 fn main() {
     // Go main.go: update.CleanupOld() runs before dispatch.
     chaude_update::cleanup_old();
+    // Scratch under <cwd>/notes/tmp: migrate old digests, drop expired entries. Errors are ignored.
+    if let Ok(cwd) = env::current_dir() {
+        let _ = chaude_core::tmp_layout::startup(&cwd);
+    }
     let args: Vec<String> = env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
         Some("gen-settings") => settings::gen_settings_main(&args[1..]),

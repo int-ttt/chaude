@@ -1322,7 +1322,7 @@ impl App {
     // The /view list itself, also reopened after SessionResumed so the switch is visible.
     fn open_sessions(&mut self, arg: &str) {
         let mut owned: HashSet<String> = handoff::read_exit_handoff(&handoff::handoff_file(
-            &chaude_core::record::dir_for(std::path::Path::new(&self.welcome.cwd)),
+            &chaude_core::tmp_layout::long_dir(std::path::Path::new(&self.welcome.cwd)),
         ))
         .map(|h| h.prev_owned().into_iter().collect())
         .unwrap_or_default();
@@ -3410,9 +3410,10 @@ fn session_mode_note(
 }
 
 fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
-    // Go writes the exit handoff into the record folder on quit; /view reads it back (prev_owned).
+    // The exit handoff goes into <cwd>/notes/tmp/long on quit; /view reads it back (prev_owned).
     if let (None, Ok(cwd)) = (&cfg.handoff_path, std::env::current_dir()) {
-        cfg.handoff_path = Some(handoff::handoff_file(&chaude_core::record::dir_for(&cwd)));
+        let long = chaude_core::tmp_layout::long_dir(&cwd);
+        cfg.handoff_path = Some(handoff::handoff_file(&long));
     }
     let model = settings::Settings {
         main_model: cfg.model.clone(),
@@ -5581,6 +5582,35 @@ mod tests {
         assert!(app.transcript.join("\n").contains("번역 답변"));
         assert!(!app.main_open);
         assert!(app.pending_main.is_empty());
+    }
+
+    // Text before a tool call stays above its tool row, and the tui answer after the tools comes below both. The
+    // events are the ones the engine sends for text -> tool_use -> tool_result -> final reply with residents.
+    #[test]
+    fn pretool_text_stays_above_its_tool_and_the_final_answer() {
+        let mut app = app_with_lines(0);
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "plan first\n".to_string(),
+        });
+        app.apply(UiEvent::MessageDone { role: Role::Main });
+        app.apply(UiEvent::ToolStart {
+            id: "toolu_1".to_string(),
+            name: "Agent".to_string(),
+            summary: "worker".to_string(),
+        });
+        app.apply(UiEvent::ToolResult {
+            id: "toolu_1".to_string(),
+            text: "done".to_string(),
+        });
+        app.apply(UiEvent::TuiAnswer {
+            text: "최종 답변".to_string(),
+        });
+        let all = app.transcript.join("\n");
+        let plan = all.find("plan first").expect("pre-tool text shown");
+        let tool = all.find("Agent(worker)").expect("tool row");
+        let fin = all.find("최종 답변").expect("final answer");
+        assert!(plan < tool && tool < fin, "{all}");
     }
 
     // R03/R08 (tui.go:374): assistant text gets **bold** and link styling, and keeps its visible text.

@@ -1896,6 +1896,8 @@ fn running_agent_is_stored_interrupted_on_shutdown() {
     let after = fs::read_to_string(&agents).unwrap();
     assert!(after.contains("\"interrupted\""), "{after}");
     assert!(!after.contains("\"running\""), "{after}");
+    // The stored agent names its session, so /resume of that session lists it (AgentStore::load).
+    assert!(!after.contains("\"parent_session\": \"\""), "{after}");
 }
 
 #[test]
@@ -1919,59 +1921,34 @@ fn errored_agent_is_stored_as_failed_not_done() {
     assert!(!stored.contains("\"done\""), "{stored}");
 }
 
+// A fresh start lists no stored agent (the agent list starts empty); the record stays in agents.json. Only /resume
+// of its session lists it (api.rs restored_events, unit-tested there).
 #[test]
-fn stored_running_agent_is_restored_at_startup_and_cleared_by_next_line() {
+fn stored_agents_are_not_listed_at_fresh_start() {
     let _g = lock();
     let f = fake("agent-restore", &["text_turn.jsonl"]);
     // owner_pid 4000000 is no live process, so startup marks the stored running agent interrupted.
     fs::write(
         f.dir.join("agents.json"),
-        r#"[{"id":"toolu_pre1","status":"running","task":"scan repo","background":true,"owner_pid":4000000,"agent_id":"ag1","started":"1970-01-01T00:00:00.000Z","updated":"1970-01-01T00:00:00.000Z"}]"#,
+        r#"[{"id":"toolu_pre1","status":"running","task":"scan repo","summary":"found 3 files","background":true,"owner_pid":4000000,"agent_id":"ag1","started":"1970-01-01T00:00:00.000Z","updated":"1970-01-01T00:00:00.000Z"}]"#,
     )
     .unwrap();
     let (h, rx) = Engine::start(config(&f));
-    let rows = loop {
-        if let UiEvent::AgentsRestored { rows } = rx.recv_timeout(WAIT).expect("engine went silent")
-        {
-            break rows;
-        }
-    };
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    assert_eq!(rows[0].id, "toolu_pre1");
-    assert_eq!(rows[0].task, "scan repo");
-    assert!(rows[0].background && rows[0].done, "{rows:?}");
     h.submit("next");
-    loop {
-        match rx.recv_timeout(WAIT).expect("engine went silent") {
-            UiEvent::AgentsRestored { rows } if rows.is_empty() => break,
-            _ => {}
-        }
-    }
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter().any(|e| matches!(e,
+            UiEvent::AgentsRestored { rows } if !rows.is_empty())),
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(e,
+            UiEvent::AgentLog { id, .. } | UiEvent::AgentLogAt { id, .. } if id == "toolu_pre1")),
+        "{evs:?}"
+    );
     h.shutdown();
-}
-
-#[test]
-fn stored_agent_summary_is_its_restored_agent_view_body() {
-    let _g = lock();
-    let f = fake("agent-restore-summary", &["text_turn.jsonl"]);
-    // Go restore: an interrupted agent keeps its saved summary as the "(restored)" log line.
-    // owner_pid 4000000 is no live process, so startup marks the stored running agent interrupted.
-    fs::write(
-        f.dir.join("agents.json"),
-        r#"[{"id":"toolu_pre2","status":"running","task":"scan repo","summary":"found 3 files","background":true,"owner_pid":4000000,"started":"1970-01-01T00:00:00.000Z","updated":"1970-01-01T00:00:00.000Z"}]"#,
-    )
-    .unwrap();
-    let (h, rx) = Engine::start(config(&f));
-    let mut log = None;
-    loop {
-        match rx.recv_timeout(WAIT).expect("engine went silent") {
-            UiEvent::AgentLog { id, lines, .. } if id == "toolu_pre2" => log = Some(lines),
-            UiEvent::AgentsRestored { .. } => break,
-            _ => {}
-        }
-    }
-    assert_eq!(log, Some(vec!["(restored) found 3 files".to_string()]));
-    h.shutdown();
+    let stored = fs::read_to_string(f.dir.join("agents.json")).unwrap();
+    assert!(stored.contains("toolu_pre1"), "{stored}");
 }
 
 #[test]
@@ -3572,12 +3549,11 @@ fn residents_without_agent_files_notice_and_start_default_session() {
     let f = fake("agent_missing", &["text_turn.jsonl"]);
     let empty = f.dir.join("empty");
     fs::create_dir_all(&empty).unwrap();
-    let old_home = std::env::var_os("HOME");
-    // SAFETY: tests hold lock(); HOME is restored below before this test returns.
-    unsafe { std::env::set_var("HOME", &empty) };
     let mut cfg = config(&f);
     cfg.residents = true;
     cfg.cwd = Some(empty.clone());
+    // The temp dir stands in for HOME: no process env is mutated, so parallel tests never see it.
+    cfg.home = Some(empty.clone());
     let (h, rx) = Engine::start(cfg);
     let want = "에이전트 규칙 없음(haiku-tui): 기본 세션으로 시작";
     let mut notices = Vec::new();
@@ -3601,10 +3577,6 @@ fn residents_without_agent_files_notice_and_start_default_session() {
         thread::sleep(Duration::from_millis(20));
     }
     h.shutdown();
-    match old_home {
-        Some(v) => unsafe { std::env::set_var("HOME", v) },
-        None => unsafe { std::env::remove_var("HOME") },
-    }
     assert!(found, "no missing-agent notice: {notices:?}");
     assert!(
         spawned.lines().filter(|l| *l == "main").count() >= 2 && spawned.contains("prompter"),
@@ -4298,14 +4270,22 @@ fn mcp_config_dir_is_removed_on_shutdown() {
     let f = fake("mcp_dir", &["text_turn.jsonl"]);
     let mut cfg = config(&f);
     cfg.residents = true;
-    cfg.cwd = Some(f.dir.clone());
-    let before = mcp_dirs();
+    // Config dirs live under cwd's notes/tmp/test; the socket sits in the short system temp dir.
+    let short =
+        std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("m{}", process::id()));
+    cfg.cwd = Some(short.clone());
+    let before = mcp_dirs(&short);
     let (h, rx) = Engine::start(cfg);
     h.submit("go");
     until_idle(&rx);
-    assert_eq!(mcp_dirs().len(), before.len() + 1, "{:?}", mcp_dirs());
+    assert_eq!(
+        mcp_dirs(&short).len(),
+        before.len() + 1,
+        "{:?}",
+        mcp_dirs(&short)
+    );
     h.shutdown();
-    assert_eq!(mcp_dirs(), before);
+    assert_eq!(mcp_dirs(&short), before);
 }
 
 // A finished turn is saved to the record folder with its prompt and measurement line (Go recordSave).
@@ -4470,10 +4450,11 @@ fn files_under(dir: &Path) -> Vec<PathBuf> {
 }
 
 // chaude-mcp-<pid>-* dirs in the temp dir, this process only.
-fn mcp_dirs() -> Vec<PathBuf> {
-    let prefix = format!("chaude-mcp-{}-", process::id());
-    let mut out: Vec<PathBuf> = fs::read_dir(std::env::temp_dir())
-        .unwrap()
+fn mcp_dirs(cwd: &std::path::Path) -> Vec<PathBuf> {
+    let prefix = format!("{}-", process::id());
+    let mut out: Vec<PathBuf> = fs::read_dir(chaude_core::tmp_layout::test_dir(cwd))
+        .into_iter()
+        .flatten()
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
             p.file_name()
