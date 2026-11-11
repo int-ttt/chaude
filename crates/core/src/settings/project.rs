@@ -84,6 +84,10 @@ pub const AGENTS: &[(&str, &[u8])] = &[
     ),
     ("haiku-runner.md", include_bytes!("agents/haiku-runner.md")),
     ("haiku-scout.md", include_bytes!("agents/haiku-scout.md")),
+    (
+        "haiku-test-lead.md",
+        include_bytes!("agents/haiku-test-lead.md"),
+    ),
     ("haiku-tui.md", include_bytes!("agents/haiku-tui.md")),
     (
         "opus-architect.md",
