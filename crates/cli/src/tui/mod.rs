@@ -146,6 +146,21 @@ struct TaskRow {
     id: String,
     desc: String,
     state: TaskState,
+    // The agent's total tokens and wall time from its tool result (UiEvent::TaskStats); None until it arrives.
+    tokens: Option<u64>,
+    duration_ms: Option<u64>,
+}
+
+// "12.3k tok · 45s" for a task row; only the figures that are known. None when neither is.
+fn task_stats_text(task: &TaskRow) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(n) = task.tokens {
+        parts.push(format!("{} {}", bar::fmt_tokens(n), t(Msg::TokensUnit)));
+    }
+    if let Some(ms) = task.duration_ms {
+        parts.push(bar::fmt_secs(ms / 1_000));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 pub struct App {
@@ -396,6 +411,7 @@ impl App {
                 | UiEvent::QueueTexts(_)
                 | UiEvent::TaskQueued { .. }
                 | UiEvent::TaskResolved { .. }
+                | UiEvent::TaskStats { .. }
                 | UiEvent::ReplyHeld { .. }
                 | UiEvent::ReplyReleased
                 | UiEvent::OpusBusy(_)
@@ -630,8 +646,25 @@ impl App {
                     id,
                     desc,
                     state: TaskState::Queued,
+                    tokens: None,
+                    duration_ms: None,
                 });
             }
+            UiEvent::TaskStats {
+                id,
+                tokens,
+                duration_ms,
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == id) {
+                    t.tokens = tokens;
+                    t.duration_ms = duration_ms;
+                }
+            }
+            UiEvent::TurnTokens {
+                input,
+                output,
+                cache,
+            } => self.bar.turn_tokens = Some((input, output, cache)),
             UiEvent::TaskResolved { id, status } => {
                 if let Some(t) = self.tasks.iter_mut().find(|t| t.id == id) {
                     t.state = match status {
@@ -2057,7 +2090,10 @@ impl App {
                         chaude_core::i18n::t(Msg::StateTimeout)
                     ),
                 };
-                let text = format!("  {label} {}", t.desc.replace('\n', " "));
+                let mut text = format!("  {label} {}", t.desc.replace('\n', " "));
+                if let Some(stats) = task_stats_text(t) {
+                    text.push_str(&format!(" · {stats}"));
+                }
                 rows.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&text, width)));
             }
         }
@@ -4355,6 +4391,49 @@ mod tests {
         assert_eq!(rows[top - 2], "  대기 one");
         assert_eq!(rows[top - 1], "  대기 two lines");
         assert!(raw[top - 1].starts_with(GREY_ON), "{:?}", raw[top - 1]);
+    }
+
+    // A task row gets its agent's tokens and duration once TaskStats arrives; without it the row is unchanged.
+    #[test]
+    fn task_row_shows_agent_tokens_and_duration() {
+        let mut app = App::new(80, 30);
+        // Both queued before either settles: a new queue after everything settled starts a fresh round.
+        app.apply(UiEvent::TaskQueued {
+            id: "a".into(),
+            desc: "write notes".into(),
+        });
+        app.apply(UiEvent::TaskQueued {
+            id: "b".into(),
+            desc: "plain".into(),
+        });
+        app.apply(UiEvent::TaskResolved {
+            id: "a".into(),
+            status: TaskStatus::Done,
+        });
+        app.apply(UiEvent::TaskResolved {
+            id: "b".into(),
+            status: TaskStatus::Done,
+        });
+        app.apply(UiEvent::TaskStats {
+            id: "a".into(),
+            tokens: Some(12_300),
+            duration_ms: Some(45_000),
+        });
+        let rows = plain_frame(&app, 80, 30);
+        let top = box_top(&rows);
+        assert!(
+            rows[..top]
+                .iter()
+                .any(|r| r.contains("write notes") && r.contains("12.3k") && r.contains(" · 45s")),
+            "{rows:?}"
+        );
+        // Language-neutral: the unit label is ko or en, so only the separator is checked.
+        assert!(
+            rows[..top]
+                .iter()
+                .any(|r| r.contains("plain") && !r.contains(" · ")),
+            "{rows:?}"
+        );
     }
 
     #[test]

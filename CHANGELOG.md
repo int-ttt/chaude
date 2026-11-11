@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.
+  - 토큰 사용량: 대기 상태의 바 줄에 마지막 턴의 입력·출력·캐시 토큰을 표시하고, 작업 목록의 Task/Agent 행에는 도구 결과가 알려주는 토큰과 소요 시간(예: "12.3k 토큰 · 45s")을 표시합니다.
+
 ## 0.12.4 - 2026-11-12
 - CI: the release workflow retries apt for the arm64 cross linker and falls back to archive.ubuntu.com when azure.archive.ubuntu.com does not resolve.
   - CI: arm64 크로스 링커 단계의 apt를 재시도하고, azure.archive.ubuntu.com 이 해석되지 않으면 archive.ubuntu.com 으로 전환합니다.

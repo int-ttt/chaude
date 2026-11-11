@@ -83,10 +83,15 @@ pub struct MessageEnvelope {
     pub message: MessageBody,
     // Set on events produced inside a subagent (Agent/Task tool); None for the main conversation.
     pub parent_tool_use_id: Option<String>,
+    // User events carrying a tool result: that tool's own result object (Agent/Task: totalTokens, totalDurationMs).
+    #[serde(default)]
+    pub tool_use_result: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct MessageBody {
+    // Message id: a streamed reply repeats the same id and usage on each content block.
+    pub id: Option<String>,
     pub content: Option<Content>,
     pub model: Option<String>,
     pub usage: Option<Usage>,
@@ -138,6 +143,55 @@ impl Usage {
             + self.cache_creation_input_tokens.unwrap_or(0)
             + self.cache_read_input_tokens.unwrap_or(0)
     }
+
+    // Field-wise maximum: a streamed reply repeats its usage on each block, and the counts only grow.
+    pub fn max_with(&mut self, o: &Usage) {
+        self.input_tokens = self.input_tokens.max(o.input_tokens);
+        self.cache_creation_input_tokens = self
+            .cache_creation_input_tokens
+            .max(o.cache_creation_input_tokens);
+        self.cache_read_input_tokens = self.cache_read_input_tokens.max(o.cache_read_input_tokens);
+        self.output_tokens = self.output_tokens.max(o.output_tokens);
+    }
+
+    // (input, output, cache) for the turn line: cache = cache read + cache creation. None when all are zero.
+    pub fn turn_counts(&self) -> Option<(u64, u64, u64)> {
+        let input = self.input_tokens.unwrap_or(0);
+        let output = self.output_tokens.unwrap_or(0);
+        let cache = self.cache_read_input_tokens.unwrap_or(0)
+            + self.cache_creation_input_tokens.unwrap_or(0);
+        (input + output + cache > 0).then_some((input, output, cache))
+    }
+}
+
+// Per-agent figures from a Task/Agent tool result (its top-level tool_use_result). Either may be absent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ToolStats {
+    pub tokens: Option<u64>,
+    pub duration_ms: Option<u64>,
+}
+
+// totalTokens, else the sum of the usage buckets; totalDurationMs. None when neither is present.
+pub fn tool_stats(v: &Value) -> Option<ToolStats> {
+    let num = |k: &str| v.get(k).and_then(Value::as_u64);
+    let tokens = num("totalTokens").or_else(|| {
+        let u = v.get("usage")?;
+        let sum: u64 = [
+            "input_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "output_tokens",
+        ]
+        .iter()
+        .filter_map(|k| u.get(*k).and_then(Value::as_u64))
+        .sum();
+        (sum > 0).then_some(sum)
+    });
+    let duration_ms = num("totalDurationMs");
+    (tokens.is_some() || duration_ms.is_some()).then_some(ToolStats {
+        tokens,
+        duration_ms,
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -364,5 +418,66 @@ mod tests {
     #[test]
     fn non_json_is_an_error() {
         assert!(parse_line("not json").is_err());
+    }
+
+    #[test]
+    fn user_tool_use_result_is_read_and_optional() {
+        let with = r#"{"type":"user","message":{"content":[]},"tool_use_result":{"totalTokens":1500,"totalDurationMs":45000}}"#;
+        match parse_line(with).unwrap() {
+            Event::User(env) => {
+                let s = tool_stats(env.tool_use_result.as_ref().unwrap()).unwrap();
+                assert_eq!(s.tokens, Some(1500));
+                assert_eq!(s.duration_ms, Some(45000));
+            }
+            _ => panic!("not a user event"),
+        }
+        let without = r#"{"type":"user","message":{"content":[]}}"#;
+        match parse_line(without).unwrap() {
+            Event::User(env) => assert!(env.tool_use_result.is_none()),
+            _ => panic!("not a user event"),
+        }
+    }
+
+    #[test]
+    fn tool_stats_falls_back_to_usage_sum_and_ignores_empty() {
+        let usage = serde_json::json!({"usage": {"input_tokens": 100, "output_tokens": 50,
+            "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 0}});
+        let s = tool_stats(&usage).unwrap();
+        assert_eq!(s.tokens, Some(1150));
+        assert_eq!(s.duration_ms, None);
+        assert!(
+            tool_stats(&serde_json::json!({"isAsync": true, "status": "async_launched"})).is_none()
+        );
+        assert!(tool_stats(&serde_json::json!({"usage": {}})).is_none());
+    }
+
+    #[test]
+    fn turn_counts_splits_cache_and_hides_zero() {
+        let u = Usage {
+            input_tokens: Some(12),
+            output_tokens: Some(3),
+            cache_read_input_tokens: Some(80_000),
+            cache_creation_input_tokens: Some(5),
+        };
+        assert_eq!(u.turn_counts(), Some((12, 3, 80_005)));
+        assert_eq!(Usage::default().turn_counts(), None);
+    }
+
+    #[test]
+    fn max_with_keeps_largest_per_field() {
+        let mut a = Usage {
+            input_tokens: Some(10),
+            output_tokens: Some(1),
+            ..Default::default()
+        };
+        a.max_with(&Usage {
+            input_tokens: Some(10),
+            output_tokens: Some(7),
+            cache_read_input_tokens: Some(4),
+            ..Default::default()
+        });
+        assert_eq!(a.input_tokens, Some(10));
+        assert_eq!(a.output_tokens, Some(7));
+        assert_eq!(a.cache_read_input_tokens, Some(4));
     }
 }

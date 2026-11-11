@@ -23,7 +23,10 @@ use crate::cache_ttl::observed_ttl;
 use crate::category::{CATEGORY_RULE, MarkerFilter, category_rotation};
 use crate::child_set::{ChildSet, Close, Parked, child_key};
 use crate::clients::{ClientRec, ClientRegistry, LIVE, PARKED, now_stamp};
-use crate::event::{Block, Content, Delta, Event, StreamInner, SystemEvent, Usage, parse_line};
+use crate::event::{
+    Block, Content, Delta, Event, StreamInner, SystemEvent, ToolStats, Usage, parse_line,
+    tool_stats,
+};
 use crate::forward::forward_rule_for;
 use crate::haiku_pool::WorkerPool;
 use crate::handoff::{self, ExitHandoff};
@@ -108,6 +111,31 @@ struct QueuedTask {
     desc: String,
     status: TaskStatus,
     since: Instant,
+    // The agent's totals from its tool result (ToolStats); None until the result carries them.
+    tokens: Option<u64>,
+    duration_ms: Option<u64>,
+}
+
+// Sums per-message usage into (input, output, cache). None when all are zero.
+fn sum_turn_counts<'a>(usages: impl Iterator<Item = &'a Usage>) -> Option<(u64, u64, u64)> {
+    let (mut input, mut output, mut cache) = (0u64, 0u64, 0u64);
+    for u in usages {
+        input += u.input_tokens.unwrap_or(0);
+        output += u.output_tokens.unwrap_or(0);
+        cache +=
+            u.cache_read_input_tokens.unwrap_or(0) + u.cache_creation_input_tokens.unwrap_or(0);
+    }
+    (input + output + cache > 0).then_some((input, output, cache))
+}
+
+// Saved task row fields tokens / duration_ms (missing in older files). None when neither is saved.
+fn saved_stats(r: &Value) -> Option<ToolStats> {
+    let tokens = r["tokens"].as_u64();
+    let duration_ms = r["duration_ms"].as_u64();
+    (tokens.is_some() || duration_ms.is_some()).then_some(ToolStats {
+        tokens,
+        duration_ms,
+    })
 }
 
 fn task_status_name(s: TaskStatus) -> &'static str {
@@ -205,6 +233,18 @@ pub enum UiEvent {
     TaskResolved {
         id: String,
         status: TaskStatus,
+    },
+    // A task's agent totals from its tool result (either may be None). Sent once the result carries them.
+    TaskStats {
+        id: String,
+        tokens: Option<u64>,
+        duration_ms: Option<u64>,
+    },
+    // Main's token counts of the finished turn: input, output, and cache (read + creation). Sent before TurnStats.
+    TurnTokens {
+        input: u64,
+        output: u64,
+        cache: u64,
     },
     // Main's turn ended with pending tasks: the final text is held and no TurnEnd is sent yet.
     ReplyHeld {
@@ -799,6 +839,9 @@ struct State {
     // Go result usage and modelUsage of the turn that just ended (repl.go result_* keys); taken by log_turn.
     result_usage: Option<Usage>,
     result_model_usage: Option<Value>,
+    // Main assistant usage of the running turn keyed by message id (a streamed reply repeats its id);
+    // the fallback for TurnTokens when the result carries no usage.
+    turn_msg_usage: HashMap<String, Usage>,
     // Harness permission mode (Go permMode); decides can_use_tool before any prompt.
     mode: PermMode,
     // can_use_tool requests waiting for a UI answer, keyed by request_id, with the tool input to echo back.
@@ -1377,6 +1420,7 @@ fn actor(
         delegations: 0,
         result_usage: None,
         result_model_usage: None,
+        turn_msg_usage: HashMap::new(),
         // Go repl.go start(): the harness starts in Config.perm_mode (default auto, same as claude --permission-mode auto).
         mode: perm_mode,
         pending_perm: HashMap::new(),
@@ -2634,6 +2678,7 @@ impl State {
                 self.turn_cost_base = self.cost_usd;
                 self.delegations = 0;
                 self.spend = TurnSpend::new();
+                self.turn_msg_usage.clear();
                 true
             }
             Err(e) => {
@@ -2863,6 +2908,12 @@ impl State {
                 if !self.busy {
                     self.idle_started();
                 }
+                if let (Some(id), Some(u)) = (&env.message.id, &env.message.usage) {
+                    self.turn_msg_usage
+                        .entry(id.clone())
+                        .or_default()
+                        .max_with(u);
+                }
                 if let Some(u) = &env.message.usage {
                     self.ctx_tokens = u.context_tokens();
                     self.persist_live();
@@ -2891,6 +2942,13 @@ impl State {
                     self.on_user_notice(text);
                 }
                 if let Some(Content::Blocks(blocks)) = env.message.content {
+                    // The top-level tool_use_result belongs to the single tool result of its message.
+                    let single = blocks
+                        .iter()
+                        .filter(|b| matches!(b, Block::ToolResult { .. }))
+                        .count()
+                        == 1;
+                    let stats = env.tool_use_result.as_ref().and_then(tool_stats);
                     for b in blocks {
                         match b {
                             Block::Text { text } => self.on_user_notice(&text),
@@ -2898,7 +2956,12 @@ impl State {
                                 tool_use_id,
                                 content,
                                 is_error,
-                            } => self.on_tool_result(tool_use_id, content, is_error == Some(true)),
+                            } => {
+                                if let (true, Some(s)) = (single, stats) {
+                                    self.record_task_stats(&tool_use_id, s);
+                                }
+                                self.on_tool_result(tool_use_id, content, is_error == Some(true))
+                            }
                             _ => {}
                         }
                     }
@@ -3975,8 +4038,25 @@ impl State {
             desc: desc.clone(),
             status: TaskStatus::Running,
             since: Instant::now(),
+            tokens: None,
+            duration_ms: None,
         });
         self.emit(UiEvent::TaskQueued { id, desc });
+        self.persist_tasks();
+    }
+
+    // Stores a task's agent totals from its tool result and tells the TUI. Unknown ids are ignored.
+    fn record_task_stats(&mut self, id: &str, s: ToolStats) {
+        let Some(t) = self.queued_tasks.iter_mut().find(|t| t.id == id) else {
+            return;
+        };
+        t.tokens = s.tokens;
+        t.duration_ms = s.duration_ms;
+        self.emit(UiEvent::TaskStats {
+            id: id.to_string(),
+            tokens: s.tokens,
+            duration_ms: s.duration_ms,
+        });
         self.persist_tasks();
     }
 
@@ -4099,7 +4179,10 @@ impl State {
         let rows: Vec<Value> = self
             .queued_tasks
             .iter()
-            .map(|t| json!({"id": t.id, "desc": t.desc, "status": task_status_name(t.status)}))
+            .map(|t| {
+                json!({"id": t.id, "desc": t.desc, "status": task_status_name(t.status),
+                    "tokens": t.tokens, "duration_ms": t.duration_ms})
+            })
             .collect();
         let _ = std::fs::create_dir_all(&dir);
         let _ = std::fs::write(
@@ -4133,7 +4216,17 @@ impl State {
                 id: id.clone(),
                 desc,
             });
-            self.emit(UiEvent::TaskResolved { id, status });
+            self.emit(UiEvent::TaskResolved {
+                id: id.clone(),
+                status,
+            });
+            if let Some(s) = saved_stats(&r) {
+                self.emit(UiEvent::TaskStats {
+                    id,
+                    tokens: s.tokens,
+                    duration_ms: s.duration_ms,
+                });
+            }
         }
     }
 
@@ -4167,6 +4260,14 @@ impl State {
         if let Err(e) = self.record.save(&root, &cwd, &self.turn_prompt, &stamp) {
             self.emit(UiEvent::Error(format!("record save failed: {e}")));
         }
+    }
+
+    // (input, output, cache) of the running turn: the result usage, else the sum of main message usage. None when zero.
+    fn turn_token_counts(&self) -> Option<(u64, u64, u64)> {
+        if let Some(c) = self.result_usage.as_ref().and_then(Usage::turn_counts) {
+            return Some(c);
+        }
+        sum_turn_counts(self.turn_msg_usage.values())
     }
 
     fn log_turn(&mut self, duration_ms: u64, source: Option<&str>) {
@@ -4234,6 +4335,13 @@ impl State {
 
     // The turn's end: stats, record and TurnEnd, then the tui answer or the next turn.
     fn finish_turn(&mut self, duration_ms: u64) {
+        if let Some((input, output, cache)) = self.turn_token_counts() {
+            self.emit(UiEvent::TurnTokens {
+                input,
+                output,
+                cache,
+            });
+        }
         self.emit(UiEvent::TurnStats {
             duration_ms,
             cost_turn_usd: (self.cost_usd - self.turn_cost_base).max(0.0),
@@ -6656,6 +6764,59 @@ done
             }),
             "{evs:?}"
         );
+    }
+
+    // Old task files (no tokens / duration_ms keys) load with no stats; new ones keep them. Missing keys never panic.
+    #[test]
+    fn saved_task_stats_read_optional_keys() {
+        let old: Value = serde_json::from_str(r#"{"id":"t","desc":"d","status":"done"}"#).unwrap();
+        assert_eq!(saved_stats(&old), None);
+        let new: Value = serde_json::from_str(
+            r#"{"id":"t","desc":"d","status":"done","tokens":12300,"duration_ms":45000}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            saved_stats(&new),
+            Some(ToolStats {
+                tokens: Some(12300),
+                duration_ms: Some(45000),
+            })
+        );
+        let partial: Value = serde_json::from_str(r#"{"tokens":null,"duration_ms":7}"#).unwrap();
+        assert_eq!(
+            saved_stats(&partial),
+            Some(ToolStats {
+                tokens: None,
+                duration_ms: Some(7),
+            })
+        );
+    }
+
+    // Turn tokens fall back to the per-message sum: one message id counted once, and cache is read + creation.
+    #[test]
+    fn turn_tokens_fall_back_to_message_sum() {
+        let mut per_msg: HashMap<String, Usage> = HashMap::new();
+        let streamed = Usage {
+            input_tokens: Some(12),
+            output_tokens: Some(1),
+            cache_read_input_tokens: Some(80_000),
+            cache_creation_input_tokens: Some(0),
+        };
+        // The same message id repeats on each content block: it must count once.
+        for _ in 0..3 {
+            per_msg
+                .entry("msg_1".into())
+                .or_default()
+                .max_with(&streamed);
+        }
+        per_msg.entry("msg_2".into()).or_default().max_with(&Usage {
+            input_tokens: Some(3),
+            output_tokens: Some(40),
+            cache_creation_input_tokens: Some(5),
+            cache_read_input_tokens: None,
+        });
+        assert_eq!(sum_turn_counts(per_msg.values()), Some((15, 41, 80_005)));
+        assert_eq!(sum_turn_counts(std::iter::empty()), None);
     }
 
     // Go parkedIdleEvent (livechild.go:42-49): a parked non-coder child's can_use_tool gets a deny, never silence.

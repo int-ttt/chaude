@@ -78,6 +78,8 @@ pub struct BarInput {
     pub role_tokens: BTreeMap<String, u64>,
     // Live resident coders in spawn order (UiEvent::CoderContexts); empty hides the coder line.
     pub coders: Vec<CoderContext>,
+    // Main's token counts of the last finished turn as (input, output, cache) (UiEvent::TurnTokens); shown on the idle row.
+    pub turn_tokens: Option<(u64, u64, u64)>,
 }
 
 // Per-role context limit shown in the Go ctx bar (haikuThreshold in repl.go).
@@ -135,7 +137,7 @@ pub fn fmt_secs(secs: u64) -> String {
     }
 }
 
-#[allow(dead_code)] // blocked: bar P/T/C token counts need the core handoff read API
+// Token count for the turn and task lines: "999", "12.3k", "1.2M".
 pub fn fmt_tokens(n: u64) -> String {
     if n < 1_000 {
         n.to_string()
@@ -157,7 +159,16 @@ pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
         ),
         (None, Some(n)) => i18n::tf(Msg::AgentsWaiting, &[&n]),
         (Some(s), None) => format!("{spinner} running {}", fmt_secs(s)),
-        (None, None) => "idle".to_string(),
+        (None, None) => match b.turn_tokens {
+            Some((input, output, cache)) => format!(
+                "idle · {}",
+                i18n::tf(
+                    Msg::TurnTokens,
+                    &[&fmt_tokens(input), &fmt_tokens(output), &fmt_tokens(cache)]
+                )
+            ),
+            None => "idle".to_string(),
+        },
     };
     // Each running agent keeps a visible segment. When they do not all fit, every description is cut to an
     // equal share of the room left, so a long first agent cannot push later (e.g. resumed) agents off the row.
@@ -525,6 +536,22 @@ mod tests {
             bottom,
             " M 0/200k P 0/80k T 0/80k C 0/80k · rot 0 · mode auto"
         );
+    }
+
+    // The idle top row keeps the last turn's counts (k/M one decimal) and says "idle" when there are none.
+    #[test]
+    fn idle_top_row_shows_last_turn_tokens() {
+        let b = BarInput {
+            turn_tokens: Some((12_300, 1_200, 80_000)),
+            ..BarInput::default()
+        };
+        let [top, _] = rows(&b, '⠋', 80);
+        assert!(top.starts_with("idle · "), "{top}");
+        for want in ["12.3k", "1.2k", "80.0k"] {
+            assert!(top.contains(want), "{top}");
+        }
+        assert_eq!(fmt_tokens(999), "999");
+        assert_eq!(fmt_tokens(1_250_000), "1.2M");
     }
 
     #[test]
