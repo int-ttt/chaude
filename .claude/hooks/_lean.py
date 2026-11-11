@@ -9,7 +9,16 @@ OFF_FLAG = os.path.join(ROOT, ".claude", "lean-off")
 
 
 def lang():
-    """User-facing output language: CHAUDE_LANG=en -> "en"; ko or unset (default) -> "ko"."""
+    """User-facing output language, re-read on every call so /lang reaches a running session.
+    <ROOT>/.chaude/settings.json "language" (ko|en) wins; auto, missing or unreadable falls back to CHAUDE_LANG; default "ko"."""
+    try:
+        import json
+        with open(os.path.join(ROOT, ".chaude", "settings.json"), encoding="utf-8") as f:
+            v = str(json.load(f).get("language", "")).strip().lower()
+        if v in ("ko", "en"):
+            return v
+    except Exception:
+        pass
     return "en" if os.environ.get("CHAUDE_LANG", "ko").strip().lower() == "en" else "ko"
 
 

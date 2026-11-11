@@ -106,7 +106,7 @@ chaude
 
 슬래시 명령은 `/`로 시작합니다. 답변 중에는 아래 여덟 개만 바로 쓸 수 있습니다. 나머지는 답변이 끝난 뒤에 입력합니다.
 
-답변 중에 쓸 수 있는 명령: `/usage`, `/version`, `/help`, `/status`, `/mode`, `/mouse`, `/view`, `/settings`
+답변 중에 쓸 수 있는 명령: `/usage`, `/version`, `/help`, `/status`, `/mode`, `/mouse`, `/view`, `/settings`, `/lang`
 
 답변 중에 다른 명령을 치면 "답변이 끝난 뒤 다시 입력" 안내가 뜹니다.
 
@@ -124,6 +124,7 @@ chaude
 | `/rotate` | 새 세션으로 넘깁니다(핸드오프) |
 | `/mode [이름]` | 권한 모드를 보거나 바꿉니다 |
 | `/mouse` | 마우스 휠 스크롤을 켜거나 끕니다 |
+| `/lang [ko\|en\|auto]` | 인자가 없으면 현재 언어와 ko/en 선택 창을 보여 줍니다. 인자를 주면 `.chaude/settings.json`에 저장하고 화면을 바로 바꿉니다. 실행 중인 메인과 에이전트는 다음 프롬프트부터 그 언어로 답합니다 |
 | `/usage` | 플랜 사용량과 한도를 전체 화면으로 보여 줍니다 |
 | `/version` | chaude와 Claude Code 버전을 보여 줍니다 |
 | `/update` | GitHub 최신 릴리스를 확인해 더 새 버전이면 이 바이너리를 교체합니다. 재시작해야 적용됩니다. (EN: check the latest release and replace this binary if newer; restart chaude to use it. On unix, if the binary dir is not writable it prints `update failed: <dir> is not writable; nothing changed. reinstall chaude to ~/.local/bin (no sudo): curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | bash` and changes nothing.) |

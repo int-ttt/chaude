@@ -162,11 +162,12 @@ chaude
 | `/cost`, `/context`, `/compact`, `/config`, `/mcp`, `/agents` | `claude`에 물어보고 결과를 보여 줍니다 |
 | `/init`, `/review`, `/doctor` | 한 턴을 실행합니다 (CLAUDE.md 제안, 변경 검토, 설치 점검) |
 | `/mouse` | 마우스 휠 스크롤 켜기 또는 끄기 |
+| `/lang [ko\|en\|auto]` | 인자가 없으면 현재 언어와 ko/en 선택 창을 보여 줍니다. 인자를 주면 `.chaude/settings.json`에 저장하고 화면을 바로 바꿉니다 |
 | `/version` | chaude와 Claude Code 버전 보기 |
 | `/update` | 새 릴리스를 확인하고 바이너리를 교체합니다. 사용하려면 chaude를 다시 시작하세요 |
 | `/exit`, `/quit` | 종료 |
 
-답변이 진행 중일 때는 `/usage`, `/version`, `/help`, `/status`, `/mode`, `/mouse`, `/view`, `/settings`만 쓸 수 있습니다. 다른 명령은 답변이 끝난 뒤에 쓸 수 있습니다.
+답변이 진행 중일 때는 `/usage`, `/version`, `/help`, `/status`, `/mode`, `/mouse`, `/view`, `/settings`, `/lang`만 쓸 수 있습니다. 다른 명령은 답변이 끝난 뒤에 쓸 수 있습니다.
 
 ### 명령줄
 
@@ -175,6 +176,7 @@ chaude
 | `chaude [repl] [플래그]` | REPL 시작 (명령이 없을 때 기본값) |
 | `chaude --from-claude ID\|latest\|PATH [--import-dry-run]` | Claude Code 세션을 이어 씁니다. `--import-dry-run`은 크기만 확인합니다 |
 | `chaude metrics [--dir D] [--csv]` | 턴별 지표를 요약하거나 CSV로 출력합니다 |
+| `chaude lang [ko\|en\|auto]` | 언어를 출력하거나 `.chaude/settings.json`에 저장합니다 |
 | `chaude search-history "<검색어>"` | 입력 기록 검색 |
 | `chaude gen-settings mac\|linux\|windows [--out FILE]` | OS에 맞는 `.claude/settings.json`을 만듭니다 |
 | `chaude clean [dir] [--yes]` | 프로젝트에서 하네스를 제거합니다. 기본은 dry-run입니다. `--yes`는 백업한 뒤 제거합니다 |
@@ -225,7 +227,8 @@ UI와 훅, 에이전트의 응답은 같은 언어를 씁니다. `.chaude/settin
 ```
 
 - `auto`(기본값)는 OS 로케일을 따릅니다. `ko`와 `en`은 언어를 고정합니다.
-- 환경변수 `CHAUDE_LANG`이 설정을 덮어씁니다(예: `CHAUDE_LANG=en chaude`).
+- REPL에서는 `/lang en`, 셸에서는 `chaude lang en`으로 바꿉니다. 화면은 바로 바뀝니다. 실행 중인 메인과 에이전트는 매 프롬프트마다 파일을 다시 읽는 훅 덕분에 다음 프롬프트부터 새 언어로 답합니다.
+- 환경변수 `CHAUDE_LANG`은 시작할 때만 파일 설정을 덮어씁니다(예: `CHAUDE_LANG=en chaude`). 시작 뒤에는 파일이 기준이라서 `/lang` 변경이 `CHAUDE_LANG`보다 우선합니다.
 - chaude는 확정된 값을 자신이 띄우는 하위 Claude 세션에 내보냅니다. 그래서 훅과 에이전트도 같은 언어로 답합니다.
 
 ## 효과 분석

@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::i18n::{Msg, t, tf};
+use crate::i18n::{Lang, Msg, t, tf};
 
 // The prompter's system prompt: the Go resident-prompter rules, copied so the engine does not depend on the removed Go tree.
 pub const PROMPTER_RULE: &str = include_str!("rules/resident-prompter.md");
@@ -46,10 +46,15 @@ pub fn summarize_reply(reply: &str) -> String {
     keep.join("\n").chars().take(1200).collect()
 }
 
-// Go viaTUI prompt: the main return is the basis of the answer for the user.
-pub fn tui_prompt(reply: &str) -> String {
+// Go viaTUI prompt: the main return is the basis of the answer for the user, in the chaude language (lang: line).
+pub fn tui_prompt(reply: &str, lang: Lang) -> String {
+    let style = match lang {
+        Lang::Ko => "in polite Korean (존댓말)",
+        Lang::En => "in plain English",
+    };
     format!(
-        "Opus main return follows. Use the relay field if present, else summary_ko (else the body), as the basis. Output only the answer for the user, in polite Korean (존댓말). Add no new facts.\n\n{reply}"
+        "lang: {}\nOpus main return follows. Use the relay field if present, else summary_ko (else the body), as the basis. Output only the answer for the user, {style}. Add no new facts.\n\n{reply}",
+        lang.code()
     )
 }
 
@@ -315,9 +320,13 @@ mod tests {
 
     #[test]
     fn tui_prompt_wraps_reply_after_instruction() {
-        let p = tui_prompt("hello");
-        assert!(p.starts_with("Opus main return follows."));
+        let p = tui_prompt("hello", Lang::Ko);
+        assert!(p.starts_with("lang: ko\nOpus main return follows."));
+        assert!(p.contains("polite Korean"));
         assert!(p.ends_with("\n\nhello"));
+        let e = tui_prompt("hello", Lang::En);
+        assert!(e.starts_with("lang: en\nOpus main return follows."));
+        assert!(e.contains("plain English") && !e.contains("Korean"));
     }
 
     #[test]

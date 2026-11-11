@@ -20,7 +20,7 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
-from _lean import lean_off, OFF_FLAG, pick, trigger
+from _lean import lean_off, OFF_FLAG, pick, trigger, lang
 
 data = json.load(sys.stdin)
 prompt = (data.get("prompt") or "").strip()
@@ -181,6 +181,12 @@ if (os.environ.get("STYLE_INBOX", "1") != "0" and 8 <= len(prompt) <= 120 and "\
                f"{n} note(s) kept (no model call). They go out with your next instruction.\nTo get an answer now, send it again with ? or ! at the end."))
 
 tags = ["[lean] claude-lean is back on: delegate per policy."] if was_off else []
+# /lang changed the reply language after this session started: the env (CHAUDE_LANG) is fixed at spawn, so say it here.
+_spawn_lang = "en" if os.environ.get("CHAUDE_LANG", "ko").strip().lower() == "en" else "ko"
+if lang() != _spawn_lang:
+    _live = lang()
+    tags.append(f"[lang] live language is {_live}, not the spawn CHAUDE_LANG={_spawn_lang}: reply in {'English' if _live == 'en' else 'Korean'} "
+                f"and send `lang: {_live}` in every brief to haiku-tui.")
 pending = tail(inbox, 1000)
 
 # 0b. Upgraded while this session was open: CLAUDE.md/agents/settings are read at launch, so don't inject the policy;

@@ -75,6 +75,7 @@ chaude                          REPL 시작(기본)
 chaude repl [옵션]              REPL 시작(옵션 지정)
 chaude --from-claude ID|latest|경로 [--import-dry-run]
 chaude metrics [--dir D] [--csv]
+chaude lang [ko|en|auto]        언어를 보여 주거나 .chaude/settings.json에 저장합니다 (REPL의 /lang과 같습니다)
 chaude gen-settings [windows|mac|linux] [--out FILE] [--src FILE] [--python CMD]
 chaude clean [dir] [--yes]
 chaude update                   최신 릴리스를 확인해 더 새 버전이면 교체합니다 (REPL의 /update와 같습니다)
@@ -156,6 +157,17 @@ chaude metrics --dir ./record/metrics
 |---|---|---|
 | `--dir` | `auto` | 메트릭 폴더. `auto`는 `<record>/metrics`입니다 |
 | `--csv` | false | 요약 대신 턴별 행을 CSV로 출력합니다 |
+
+## lang
+
+인자가 없으면 저장된 언어와 지금 쓰는 언어를 출력합니다. `ko`, `en`, `auto` 중 하나를 주면 현재 폴더의 `.chaude/settings.json`에 `language`를 저장합니다. 다른 키는 그대로 둡니다.
+
+```sh
+chaude lang
+chaude lang en
+```
+
+잘못된 값(예: `fr`)은 저장하지 않고 종료 코드 2로 끝납니다. 실행 중인 세션은 다음 프롬프트부터 바뀝니다. 자세한 내용은 README의 "Language"를 보세요.
 
 ## gen-settings
 

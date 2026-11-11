@@ -92,6 +92,12 @@ pub fn build_args(model: &str, resume: Option<&str>, shape: &Shape) -> Vec<Strin
         args.push("--resume".to_string());
         args.push(id.to_string());
     }
+    // The chaude language wins over the user's Claude Code `language` setting (flag settings outrank user settings).
+    args.push("--settings".to_string());
+    args.push(format!(
+        r#"{{"language":"{}"}}"#,
+        crate::i18n::current().claude_name()
+    ));
     // Same order as Go sessionArgs: tool/MCP/slash block, then the rule.
     if shape.minimal {
         args.extend(
@@ -377,6 +383,8 @@ mod tests {
             "auto",
             "--permission-prompt-tool",
             "stdio",
+            "--settings",
+            r#"{"language":"korean"}"#,
         ];
         assert_eq!(a, want);
     }
@@ -384,10 +392,8 @@ mod tests {
     #[test]
     fn resume_is_appended_only_when_set() {
         let a = build_args("opus", Some("abc"), &Shape::default());
-        assert_eq!(
-            a[a.len() - 2..],
-            ["--resume".to_string(), "abc".to_string()]
-        );
+        let at = a.iter().position(|s| s == "--resume").unwrap();
+        assert_eq!(a[at..at + 2], ["--resume".to_string(), "abc".to_string()]);
         assert_eq!(
             build_args("opus", Some(""), &Shape::default()).len(),
             build_args("opus", None, &Shape::default()).len()

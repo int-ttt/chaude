@@ -7,6 +7,8 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         _s.reconfigure(encoding="utf-8")
     except Exception:
         pass
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
+from _lean import lang
 
 # watched agents (plan:174; manage the list here only)
 TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "sonnet-writer", "opus-architect", "haiku-tui", "haiku-prompter"}  # S4: extend here only
@@ -66,7 +68,7 @@ def check(prompt, text, fmt):
 
 
 def check_jondaetmal(text):
-    if os.environ.get("CHAUDE_LANG", "ko").strip().lower() == "en":  # CHAUDE_LANG=en: plain English replies, no 존댓말 rule
+    if lang() == "en":  # language en (settings or CHAUDE_LANG): plain English replies, no 존댓말 rule
         return []
     text = re.sub(r"```.*?```", "", text, flags=re.S)  # skip code blocks
     for s in re.split(r"[.!?\n]+", text):

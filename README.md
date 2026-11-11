@@ -162,11 +162,12 @@ Mouse wheel scrolling is on by default. Use `/mouse` to turn it off, so you can 
 | `/cost`, `/context`, `/compact`, `/config`, `/mcp`, `/agents` | Ask `claude` and show its output |
 | `/init`, `/review`, `/doctor` | Run one turn (suggest CLAUDE.md, review changes, check the install) |
 | `/mouse` | Turn mouse wheel scrolling on or off |
+| `/lang [ko or en or auto]` | With no argument, show the language and open a ko/en picker. With an argument, save it to `.chaude/settings.json` and switch the screen now |
 | `/version` | Show chaude and Claude Code versions |
 | `/update` | Check for a newer release and replace the binary. Restart chaude to use it |
 | `/exit`, `/quit` | Quit |
 
-While an answer is running, only `/usage`, `/version`, `/help`, `/status`, `/mode`, `/mouse`, `/view`, and `/settings` can be used. Other commands work after the answer ends.
+While an answer is running, only `/usage`, `/version`, `/help`, `/status`, `/mode`, `/mouse`, `/view`, `/settings`, and `/lang` can be used. Other commands work after the answer ends.
 
 ### Command line
 
@@ -175,6 +176,7 @@ While an answer is running, only `/usage`, `/version`, `/help`, `/status`, `/mod
 | `chaude [repl] [flags]` | Start the REPL (default when no command is given) |
 | `chaude --from-claude ID\|latest\|PATH [--import-dry-run]` | Continue a Claude Code session. `--import-dry-run` only checks the size |
 | `chaude metrics [--dir D] [--csv]` | Summarize per-turn metrics, or print CSV |
+| `chaude lang [ko\|en\|auto]` | Print the language, or save it to `.chaude/settings.json` |
 | `chaude search-history "<terms>"` | Search prompt history |
 | `chaude gen-settings mac\|linux\|windows [--out FILE]` | Write a `.claude/settings.json` for an OS |
 | `chaude clean [dir] [--yes]` | Remove the harness from a project. Dry run by default. `--yes` backs up and removes |
@@ -225,7 +227,8 @@ The UI and the replies from hooks and agents use one language. Set it in `.chaud
 ```
 
 - `auto` (default) follows the OS locale. `ko` and `en` force a language.
-- The `CHAUDE_LANG` environment variable overrides the setting (`CHAUDE_LANG=en chaude`).
+- Change it with `/lang en` in the REPL or `chaude lang en` in a shell. The screen switches at once. A running main or agent replies in the new language from its next prompt, because a per-prompt hook re-reads the file.
+- At startup the `CHAUDE_LANG` environment variable overrides the file (`CHAUDE_LANG=en chaude`). After startup the file is what counts, so a `/lang` change wins over `CHAUDE_LANG`.
 - chaude exports the resolved value to the child Claude sessions it starts, so hooks and agents reply in the same language.
 
 ## Effect analysis

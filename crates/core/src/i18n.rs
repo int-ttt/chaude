@@ -20,6 +20,15 @@ impl Lang {
             Lang::En => "en",
         }
     }
+
+    // The name Claude Code reads from its `language` setting (passed as --settings to every child, so a user-level
+    // "korean" cannot pin the reply language).
+    pub fn claude_name(self) -> &'static str {
+        match self {
+            Lang::Ko => "korean",
+            Lang::En => "english",
+        }
+    }
 }
 
 // A user preference: `auto` defers to the next source, a language pins it.
@@ -156,6 +165,16 @@ pub enum Msg {
     CopyDone,
     CopyFailed,
     StallNote,
+    TasksTitle,
+    TaskRunning,
+    AgentsWaiting,
+    TasksMore,
+    LangCurrent,
+    LangSet,
+    LangInvalid,
+    LangPickTitle,
+    LangSaveFailed,
+    LangHint,
 }
 
 pub fn text(lang: Lang, msg: Msg) -> &'static str {
@@ -254,6 +273,14 @@ pub fn text(lang: Lang, msg: Msg) -> &'static str {
         (Lang::En, Msg::QueueMore) => "  … +{0} queued",
         (Lang::Ko, Msg::QueueItem) => "  대기 {0}",
         (Lang::En, Msg::QueueItem) => "  queued {0}",
+        (Lang::Ko, Msg::TasksTitle) => "작업 목록",
+        (Lang::En, Msg::TasksTitle) => "Tasks",
+        (Lang::Ko, Msg::TaskRunning) => "진행 중",
+        (Lang::En, Msg::TaskRunning) => "in progress",
+        (Lang::Ko, Msg::AgentsWaiting) => "에이전트 {0}개 대기 중",
+        (Lang::En, Msg::AgentsWaiting) => "{0} agents waiting",
+        (Lang::Ko, Msg::TasksMore) => "  … +{0}",
+        (Lang::En, Msg::TasksMore) => "  … +{0}",
         (Lang::Ko, Msg::StageStart) => "· {0} 처리중",
         (Lang::En, Msg::StageStart) => "· {0} working",
         (Lang::Ko, Msg::StageCall) => "· {0} 호출",
@@ -270,6 +297,31 @@ pub fn text(lang: Lang, msg: Msg) -> &'static str {
         (Lang::En, Msg::CopyFailed) => "copy failed: {0}",
         (Lang::Ko, Msg::StallNote) => " · 멈췄을 수 있음 {0}분 무응답",
         (Lang::En, Msg::StallNote) => " · may be stalled, silent for {0} min",
+        (Lang::Ko, Msg::LangCurrent) => "언어: {0} (적용 중: {1})",
+        (Lang::En, Msg::LangCurrent) => "language: {0} (in use: {1})",
+        (Lang::Ko, Msg::LangSet) => {
+            "언어 {0} 저장됨. 화면은 바로 바뀌고, 실행 중인 메인과 에이전트는 다음 프롬프트부터 이 언어로 답합니다."
+        }
+        (Lang::En, Msg::LangSet) => {
+            "language {0} saved. The screen switched now; the running main and agents reply in it from the next prompt."
+        }
+        (Lang::Ko, Msg::LangInvalid) => "알 수 없는 언어 {0} (ko | en | auto)",
+        (Lang::En, Msg::LangInvalid) => "unknown language {0} (ko | en | auto)",
+        (Lang::Ko, Msg::LangPickTitle) => "언어 선택  (↑/↓ 또는 1-2 · enter 적용 · esc 취소)",
+        (Lang::En, Msg::LangPickTitle) => "Language  (↑/↓ or 1-2 · enter apply · esc cancel)",
+        (Lang::Ko, Msg::LangSaveFailed) => "언어 저장 실패: {0}",
+        (Lang::En, Msg::LangSaveFailed) => "language save failed: {0}",
+        (Lang::Ko, Msg::LangHint) => "/lang ko | en | auto 로 바꿉니다",
+        (Lang::En, Msg::LangHint) => "change with /lang ko | en | auto",
+    }
+}
+
+// Pure: a user argument (ko, en, auto, ko-KR, ...) to the settings value auto | ko | en. Unknown -> None.
+pub fn pref_code(raw: &str) -> Option<&'static str> {
+    match parse_pref(raw)? {
+        Pref::Auto => Some("auto"),
+        Pref::Fixed(Lang::Ko) => Some("ko"),
+        Pref::Fixed(Lang::En) => Some("en"),
     }
 }
 
@@ -345,6 +397,15 @@ mod tests {
         assert_eq!(parse_pref("EN"), Some(Pref::Fixed(Lang::En)));
         assert_eq!(parse_pref("ko-KR"), Some(Pref::Fixed(Lang::Ko)));
         assert_eq!(parse_pref("fr"), None);
+    }
+
+    #[test]
+    fn pref_code_maps_user_input_to_settings_value() {
+        assert_eq!(pref_code("EN"), Some("en"));
+        assert_eq!(pref_code("ko-KR"), Some("ko"));
+        assert_eq!(pref_code("auto"), Some("auto"));
+        assert_eq!(pref_code("fr"), None);
+        assert_eq!(pref_code(""), None);
     }
 
     #[test]

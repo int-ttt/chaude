@@ -3,7 +3,7 @@
 // execute. Ported from Go tree (v0.11.2) internal/harness/tui.go (slashCmds, busyOK, suggestions,
 // runSlash) and mode.go. Plain functions, unit-tested without a terminal.
 
-use chaude_core::i18n::{Msg, t};
+use chaude_core::i18n::{self, Msg, t};
 
 // tui.go:192-230 (slashCmds). Order and text are the Go source's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +32,10 @@ pub const SLASH_CMDS: &[SlashCmd] = &[
     SlashCmd {
         name: "/settings",
         desc: "session retention, resident coder slots, main model (saved on esc; applies on next session start)",
+    },
+    SlashCmd {
+        name: "/lang",
+        desc: "show or set the reply and screen language: /lang [ko|en|auto]",
     },
     SlashCmd {
         name: "/resume",
@@ -126,6 +130,7 @@ pub const BUSY_OK: &[&str] = &[
     "/mouse",
     "/view",
     "/settings",
+    "/lang",
 ];
 
 // tui.go:844 (busySlashMsg).
@@ -216,6 +221,10 @@ pub enum Dispatch {
     // Caller flips the mouse state and shows mouse_note(new_state).
     ToggleMouse,
     OpenSettings,
+    // No argument: the caller shows the current language and opens the ko/en picker.
+    OpenLang,
+    // Canonical settings value (ko | en | auto), already validated by i18n::pref_code.
+    SetLang(String),
     OpenUsage,
     OpenView { arg: String },
     // Raw args after /resume. The record and session lookup happens in the caller.
@@ -392,6 +401,13 @@ pub fn dispatch(line: &str, ctx: &Ctx) -> Option<Dispatch> {
             },
         },
         "/settings" => Dispatch::OpenSettings,
+        "/lang" => match first {
+            None => Dispatch::OpenLang,
+            Some(s) => match i18n::pref_code(s) {
+                Some(code) => Dispatch::SetLang(code.to_string()),
+                None => Dispatch::Note(i18n::tf(Msg::LangInvalid, &[&s])),
+            },
+        },
         "/resume" => Dispatch::Resume {
             args: args.iter().map(|s| s.to_string()).collect(),
         },
@@ -541,6 +557,31 @@ mod tests {
                 line: "/model sonnet".to_string(),
                 name: "sonnet".to_string()
             })
+        );
+    }
+
+    #[test]
+    fn lang_without_args_opens_picker_and_with_args_sets_or_refuses() {
+        assert_eq!(dispatch("/lang", &ctx(false)), Some(Dispatch::OpenLang));
+        assert_eq!(
+            dispatch("/lang EN", &ctx(false)),
+            Some(Dispatch::SetLang("en".into()))
+        );
+        assert_eq!(
+            dispatch("/lang ko-KR", &ctx(false)),
+            Some(Dispatch::SetLang("ko".into()))
+        );
+        assert_eq!(
+            dispatch("/lang auto", &ctx(false)),
+            Some(Dispatch::SetLang("auto".into()))
+        );
+        assert_eq!(
+            dispatch("/lang fr", &ctx(false)),
+            Some(Dispatch::Note(i18n::tf(Msg::LangInvalid, &[&"fr"])))
+        );
+        assert_eq!(
+            dispatch("/lang en", &ctx(true)),
+            Some(Dispatch::SetLang("en".into()))
         );
     }
 
