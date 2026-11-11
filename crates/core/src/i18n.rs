@@ -175,6 +175,46 @@ pub enum Msg {
     LangPickTitle,
     LangSaveFailed,
     LangHint,
+    DoctorTitle,
+    DoctorOk,
+    DoctorWarn,
+    DoctorFail,
+    DoctorFixLabel,
+    DoctorNoFix,
+    DoctorSummary,
+    DoctorCheckOld,
+    DoctorCheckPath,
+    DoctorCheckUchg,
+    DoctorCheckHooks,
+    DoctorCheckLogin,
+    DoctorCheckTarget,
+    DoctorOldNone,
+    DoctorOldFound,
+    DoctorOldUnknown,
+    DoctorOldFix,
+    DoctorPathOk,
+    DoctorPathNone,
+    DoctorPathNoneFix,
+    DoctorPathShadow,
+    DoctorPathShadowFix,
+    DoctorUchgClear,
+    DoctorUchgLocked,
+    DoctorUchgFix,
+    DoctorUchgStatFailed,
+    DoctorUchgNa,
+    DoctorHooksOk,
+    DoctorHooksMissing,
+    DoctorHooksNoFile,
+    DoctorHooksBad,
+    DoctorHooksFix,
+    DoctorLoginOk,
+    DoctorLoginNo,
+    DoctorLoginUnknown,
+    DoctorLoginFix,
+    DoctorTargetNone,
+    DoctorTargetOk,
+    DoctorTargetBig,
+    DoctorTargetFix,
 }
 
 pub fn text(lang: Lang, msg: Msg) -> &'static str {
@@ -313,6 +353,100 @@ pub fn text(lang: Lang, msg: Msg) -> &'static str {
         (Lang::En, Msg::LangSaveFailed) => "language save failed: {0}",
         (Lang::Ko, Msg::LangHint) => "/lang ko | en | auto 로 바꿉니다",
         (Lang::En, Msg::LangHint) => "change with /lang ko | en | auto",
+        (Lang::Ko, Msg::DoctorTitle) => "chaude 점검",
+        (Lang::En, Msg::DoctorTitle) => "chaude doctor",
+        (Lang::Ko, Msg::DoctorOk) => "OK",
+        (Lang::En, Msg::DoctorOk) => "OK",
+        (Lang::Ko, Msg::DoctorWarn) => "경고",
+        (Lang::En, Msg::DoctorWarn) => "WARN",
+        (Lang::Ko, Msg::DoctorFail) => "실패",
+        (Lang::En, Msg::DoctorFail) => "FAIL",
+        (Lang::Ko, Msg::DoctorFixLabel) => "조치",
+        (Lang::En, Msg::DoctorFixLabel) => "fix",
+        (Lang::Ko, Msg::DoctorNoFix) => "조치 없음",
+        (Lang::En, Msg::DoctorNoFix) => "nothing to do",
+        (Lang::Ko, Msg::DoctorSummary) => "OK {0} · 경고 {1} · 실패 {2}",
+        (Lang::En, Msg::DoctorSummary) => "OK {0} · WARN {1} · FAIL {2}",
+        (Lang::Ko, Msg::DoctorCheckOld) => "다른 chaude 설치",
+        (Lang::En, Msg::DoctorCheckOld) => "other chaude installs",
+        (Lang::Ko, Msg::DoctorCheckPath) => "PATH 순서",
+        (Lang::En, Msg::DoctorCheckPath) => "PATH order",
+        (Lang::Ko, Msg::DoctorCheckUchg) => "설치본 잠금(uchg)",
+        (Lang::En, Msg::DoctorCheckUchg) => "install lock (uchg)",
+        (Lang::Ko, Msg::DoctorCheckHooks) => "프로젝트 훅 연결",
+        (Lang::En, Msg::DoctorCheckHooks) => "project hook wiring",
+        (Lang::Ko, Msg::DoctorCheckLogin) => "Claude 로그인",
+        (Lang::En, Msg::DoctorCheckLogin) => "claude login",
+        (Lang::Ko, Msg::DoctorCheckTarget) => "target/ 크기",
+        (Lang::En, Msg::DoctorCheckTarget) => "target/ size",
+        (Lang::Ko, Msg::DoctorOldNone) => "0.12.0 미만 chaude 없음",
+        (Lang::En, Msg::DoctorOldNone) => "no chaude older than 0.12.0",
+        (Lang::Ko, Msg::DoctorOldFound) => "0.12.0 미만 설치: {0} (버전 {1})",
+        (Lang::En, Msg::DoctorOldFound) => "older install: {0} (version {1})",
+        (Lang::Ko, Msg::DoctorOldUnknown) => "버전을 알 수 없는 설치: {0}",
+        (Lang::En, Msg::DoctorOldUnknown) => "version unknown: {0}",
+        (Lang::Ko, Msg::DoctorOldFix) => "오래된 복사본이면 지우세요: rm {0}",
+        (Lang::En, Msg::DoctorOldFix) => "remove it if it is an old copy: rm {0}",
+        (Lang::Ko, Msg::DoctorPathOk) => "PATH 첫 항목: {0}",
+        (Lang::En, Msg::DoctorPathOk) => "first on PATH: {0}",
+        (Lang::Ko, Msg::DoctorPathNone) => "PATH에 chaude가 없습니다",
+        (Lang::En, Msg::DoctorPathNone) => "chaude is not on PATH",
+        (Lang::Ko, Msg::DoctorPathNoneFix) => {
+            "설치 폴더를 PATH에 넣으세요. 예: export PATH=\"$HOME/.local/bin:$PATH\""
+        }
+        (Lang::En, Msg::DoctorPathNoneFix) => {
+            "add the install dir to PATH, e.g. export PATH=\"$HOME/.local/bin:$PATH\""
+        }
+        (Lang::Ko, Msg::DoctorPathShadow) => "PATH 첫 항목은 {0}, 실행 중인 파일은 {1}",
+        (Lang::En, Msg::DoctorPathShadow) => "first on PATH is {0}, this binary is {1}",
+        (Lang::Ko, Msg::DoctorPathShadowFix) => {
+            "이 설치 폴더를 {0}보다 PATH 앞에 두거나 {0}를 지우세요"
+        }
+        (Lang::En, Msg::DoctorPathShadowFix) => {
+            "put this install dir before {0} in PATH, or remove {0}"
+        }
+        (Lang::Ko, Msg::DoctorUchgClear) => "uchg 플래그 없음: {0}",
+        (Lang::En, Msg::DoctorUchgClear) => "no uchg flag: {0}",
+        (Lang::Ko, Msg::DoctorUchgLocked) => "uchg 플래그 있음(잠김): {0}",
+        (Lang::En, Msg::DoctorUchgLocked) => "uchg flag set (locked): {0}",
+        (Lang::Ko, Msg::DoctorUchgFix) => "업데이트가 막히면 chflags nouchg {0}",
+        (Lang::En, Msg::DoctorUchgFix) => "if updates fail: chflags nouchg {0}",
+        (Lang::Ko, Msg::DoctorUchgStatFailed) => "stat 실패: {0}",
+        (Lang::En, Msg::DoctorUchgStatFailed) => "stat failed: {0}",
+        (Lang::Ko, Msg::DoctorUchgNa) => "macOS가 아니라 건너뜀",
+        (Lang::En, Msg::DoctorUchgNa) => "not macOS, skipped",
+        (Lang::Ko, Msg::DoctorHooksOk) => "생성 훅 {0}개 모두 연결됨 ({1})",
+        (Lang::En, Msg::DoctorHooksOk) => "all {0} generated hooks wired in {1}",
+        (Lang::Ko, Msg::DoctorHooksMissing) => "생성 훅 {1}개 중 {0}개 없음 ({2})",
+        (Lang::En, Msg::DoctorHooksMissing) => "{0} of {1} generated hooks missing in {2}",
+        (Lang::Ko, Msg::DoctorHooksNoFile) => "설정 파일 없음: {0}",
+        (Lang::En, Msg::DoctorHooksNoFile) => "no settings file: {0}",
+        (Lang::Ko, Msg::DoctorHooksBad) => "설정 파일을 읽을 수 없음: {0}",
+        (Lang::En, Msg::DoctorHooksBad) => "settings file unreadable: {0}",
+        (Lang::Ko, Msg::DoctorHooksFix) => {
+            "이 프로젝트에서 chaude를 한 번 실행하면 훅 설정이 복구됩니다"
+        }
+        (Lang::En, Msg::DoctorHooksFix) => {
+            "run chaude once in this project to restore the hook settings"
+        }
+        (Lang::Ko, Msg::DoctorLoginOk) => "로그인됨 ({0})",
+        (Lang::En, Msg::DoctorLoginOk) => "logged in ({0})",
+        (Lang::Ko, Msg::DoctorLoginNo) => "claude auth status: 로그인 안 됨",
+        (Lang::En, Msg::DoctorLoginNo) => "claude auth status: not logged in",
+        (Lang::Ko, Msg::DoctorLoginUnknown) => "로그인 확인 불가 (macOS는 키체인에 보관할 수 있음)",
+        (Lang::En, Msg::DoctorLoginUnknown) => {
+            "login not confirmed (macOS may keep it in Keychain)"
+        }
+        (Lang::Ko, Msg::DoctorLoginFix) => "터미널에서 claude login 을 실행하세요",
+        (Lang::En, Msg::DoctorLoginFix) => "run claude login in a terminal",
+        (Lang::Ko, Msg::DoctorTargetNone) => "target/ 없음 ({0})",
+        (Lang::En, Msg::DoctorTargetNone) => "no target/ under {0}",
+        (Lang::Ko, Msg::DoctorTargetOk) => "{0} GB",
+        (Lang::En, Msg::DoctorTargetOk) => "{0} GB",
+        (Lang::Ko, Msg::DoctorTargetBig) => "{0} GB (10 GB 초과)",
+        (Lang::En, Msg::DoctorTargetBig) => "{0} GB (over 10 GB)",
+        (Lang::Ko, Msg::DoctorTargetFix) => "쓰지 않는 빌드 산출물을 지우세요: rm -rf target/debug",
+        (Lang::En, Msg::DoctorTargetFix) => "delete unused build output: rm -rf target/debug",
     }
 }
 
@@ -421,6 +555,11 @@ mod tests {
         assert_eq!(text(Lang::En, Msg::StateDone), "done");
         assert_eq!(text(Lang::En, Msg::NewMessage), "↓ new message");
         assert_eq!(text(Lang::En, Msg::NoAgents), "no agents yet");
+        assert_eq!(text(Lang::Ko, Msg::DoctorSummary).matches("{").count(), 3);
+        assert_eq!(
+            text(Lang::En, Msg::DoctorSummary),
+            "OK {0} · WARN {1} · FAIL {2}"
+        );
     }
 
     #[test]

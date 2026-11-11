@@ -1,7 +1,7 @@
 //! chaude command line. With no arguments it opens the inline TUI; gen-settings, --version and help are ported.
 //! The other commands are not ported yet.
 
-use chaude_cli::{mcp_resident, repl_args, tui};
+use chaude_cli::{doctor, mcp_resident, repl_args, tui};
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -14,12 +14,17 @@ use chaude_core::{i18n, metrics_report, orch, osenv, settings};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// Read by `chaude doctor` from other binaries (doctor::MARKER_PREFIX). Builds before this marker have none.
+#[used]
+static VERSION_MARKER: &str = concat!("chaude-version:", env!("CARGO_PKG_VERSION"), "\n");
+
 // Go cmd/chaude/main.go usage, verbatim. The helper-script list is scripts.Names (crates/scripts NAMES).
 const USAGE: &str = "usage: chaude <command> [args]
   repl [flags]           terminal REPL over claude -p stream-json with session rotation (default with no command)
   metrics [--dir D] [--csv]   summarize per-turn metrics (record/metrics)
   --from-claude ID|latest|PATH [--import-dry-run]   start a repl from a plain Claude Code session
   --version              print version
+  lang [ko|en|auto]      print the language, or save it to .chaude/settings.json (same as /lang in the repl)
   gen-settings <os>      print/write OS-specific .claude/settings.json (mac|linux|windows) [--out FILE]
   clean [dir] [--yes]    remove the claude-lean harness from a project (dry-run; --yes backs up then removes)
   update                 check GitHub for a newer release and replace this binary (same as /update in the REPL)
@@ -106,6 +111,7 @@ fn run_tui(args: &[String]) -> i32 {
         parsed.model(),
         settings::chaude_settings::main_model(cfg.cwd.as_deref()),
     );
+    cfg.agent_wait = settings::chaude_settings::agent_wait(cfg.cwd.as_deref());
     // Language: env CHAUDE_LANG > project settings `language` > OS locale. Exported so child claude processes match.
     let lang = i18n::resolve(
         env::var(i18n::ENV_KEY).ok().as_deref(),
@@ -212,14 +218,61 @@ fn metrics_main(args: &[String]) -> i32 {
     0
 }
 
+// `chaude lang [ko|en|auto]`: no argument prints the language in use; with one, saves it to the project settings.
+// The language resolves the same way as at TUI startup (env > settings > OS locale) so the printed name matches.
+fn lang_main(args: &[String]) -> i32 {
+    let cwd = env::current_dir().unwrap_or_else(|_| ".".into());
+    let resolved = i18n::resolve(
+        env::var(i18n::ENV_KEY).ok().as_deref(),
+        settings::chaude_settings::language(Some(&cwd)).as_deref(),
+        i18n::os_locale().as_deref(),
+    );
+    i18n::set_current(resolved);
+    match args {
+        [] => {
+            println!("{}", tui::lang::current_note(Some(&cwd)));
+            0
+        }
+        [raw] => match i18n::pref_code(raw) {
+            None => {
+                eprintln!(
+                    "chaude lang: {}\n{USAGE}",
+                    i18n::tf(i18n::Msg::LangInvalid, &[&raw])
+                );
+                2
+            }
+            Some(code) => match settings::chaude_settings::save_language(&cwd, code) {
+                Ok(()) => {
+                    println!("{}", i18n::tf(i18n::Msg::LangSet, &[&code]));
+                    0
+                }
+                Err(e) => {
+                    eprintln!(
+                        "chaude lang: {}",
+                        i18n::tf(i18n::Msg::LangSaveFailed, &[&e])
+                    );
+                    1
+                }
+            },
+        },
+        _ => {
+            eprintln!("chaude lang: expects at most one argument\n{USAGE}");
+            2
+        }
+    }
+}
+
 fn main() {
-    // Go main.go: update.CleanupOld() runs before dispatch.
-    chaude_update::cleanup_old();
+    let args: Vec<String> = env::args().skip(1).collect();
+    // Go main.go: update.CleanupOld() runs before dispatch. mcp-resident is an internal helper that coder spawns
+    // per call from the running exe, so it must not run the startup cleanup.
+    if args.first().map(String::as_str) != Some("mcp-resident") {
+        chaude_update::cleanup_old();
+    }
     // Scratch under <cwd>/notes/tmp: migrate old digests, drop expired entries. Errors are ignored.
     if let Ok(cwd) = env::current_dir() {
         let _ = chaude_core::tmp_layout::startup(&cwd);
     }
-    let args: Vec<String> = env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
         Some("gen-settings") => settings::gen_settings_main(&args[1..]),
         Some("mcp-resident") => mcp_resident::main(&args[1..]),
@@ -237,8 +290,10 @@ fn main() {
         None => run_tui(&args),
         Some(a) if a.starts_with('-') => run_tui(&args),
         Some("metrics") => metrics_main(&args[1..]),
+        Some("lang") => lang_main(&args[1..]),
         Some("clean") => chaude_clean::main(&args[1..]),
         Some("update") => chaude_update::run_cli(VERSION, &args[1..]),
+        Some("doctor") => doctor::run(),
         Some(cmd) if chaude_scripts::has(cmd) => chaude_scripts::run(cmd, &args[1..]),
         Some(cmd) => {
             eprintln!("chaude: {cmd}: not ported to Rust yet\n{USAGE}");

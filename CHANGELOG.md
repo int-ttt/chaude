@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- `chaude doctor` and `/doctor`: check old chaude binaries (below 0.12.0), PATH order, install lock (macOS uchg), project hook wiring, Claude login, and repo target/ size. Each check prints OK, WARN or FAIL with a fix hint.
+  - `chaude doctor`과 `/doctor`: 오래된 chaude(0.12.0 미만), PATH 순서, 설치본 잠금(macOS uchg), 프로젝트 훅 연결, Claude 로그인, 저장소 target/ 크기를 점검합니다. 각 항목은 OK, WARN, FAIL 중 하나와 조치 안내를 보여줍니다.
 
 ## 0.12.2 - 2026-11-11
 - Agent list: a fresh launch starts with an empty agent list. `/resume` restores the agents of that session only.

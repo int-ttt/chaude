@@ -91,7 +91,7 @@ pub const SLASH_CMDS: &[SlashCmd] = &[
     },
     SlashCmd {
         name: "/doctor",
-        desc: "check installation and config (runs a turn)",
+        desc: "check installation, PATH, hooks, login and target size",
     },
     SlashCmd {
         name: "/mode",
@@ -131,6 +131,7 @@ pub const BUSY_OK: &[&str] = &[
     "/view",
     "/settings",
     "/lang",
+    "/doctor",
 ];
 
 // tui.go:844 (busySlashMsg).
@@ -140,7 +141,7 @@ pub fn busy_slash_msg() -> String {
 
 // repl.go:1167-1168 (passthroughCmds). /usage is in the Go map too, but runSlash intercepts it first.
 pub const PASSTHROUGH: &[&str] = &[
-    "/cost", "/context", "/compact", "/config", "/mcp", "/agents", "/init", "/review", "/doctor",
+    "/cost", "/context", "/compact", "/config", "/mcp", "/agents", "/init", "/review",
 ];
 
 // repl.go:1171 (unsupportedCmds).
@@ -237,6 +238,8 @@ pub enum Dispatch {
     Passthrough { line: String },
     // Caller shows UPDATE_START_NOTE, then runs the check off the UI thread.
     Update,
+    // Caller runs doctor::checks_now() and shows doctor::render() lines.
+    Doctor,
     SetMode(PermMode),
 }
 
@@ -431,6 +434,7 @@ pub fn dispatch(line: &str, ctx: &Ctx) -> Option<Dispatch> {
         },
         "/version" => Dispatch::Note(version_note(ctx.chaude_version, claude_version())),
         "/update" => Dispatch::Update,
+        "/doctor" => Dispatch::Doctor,
         "/usage" => Dispatch::OpenUsage,
         "/clear" => Dispatch::Clear,
         "/rotate" => Dispatch::Rotate {
@@ -659,7 +663,6 @@ mod tests {
     fn passthrough_and_turn_commands_map_to_effects() {
         for c in [
             "/cost", "/context", "/compact", "/config", "/mcp", "/agents", "/init", "/review",
-            "/doctor",
         ] {
             assert_eq!(
                 dispatch(c, &ctx(false)),
@@ -677,6 +680,8 @@ mod tests {
             })
         );
         assert_eq!(dispatch("/update", &ctx(false)), Some(Dispatch::Update));
+        assert_eq!(dispatch("/doctor", &ctx(false)), Some(Dispatch::Doctor));
+        assert_eq!(dispatch("/doctor", &ctx(true)), Some(Dispatch::Doctor));
         assert_eq!(
             dispatch("/settings", &ctx(false)),
             Some(Dispatch::OpenSettings)

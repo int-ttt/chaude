@@ -1340,6 +1340,12 @@ impl App {
                 self.note(commands::UPDATE_START_NOTE);
                 return Action::Update;
             }
+            Some(Dispatch::Doctor) => {
+                for l in crate::doctor::render(&crate::doctor::checks_now()) {
+                    self.note(&l);
+                }
+                return Action::Continue;
+            }
             Some(Dispatch::OpenView { arg }) => {
                 self.open_view(&arg);
                 return Action::Continue;
@@ -3858,6 +3864,11 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
             }
             Some(Dispatch::Update) => {
                 println!("{}", chaude_update::text(env!("CARGO_PKG_VERSION")))
+            }
+            Some(Dispatch::Doctor) => {
+                for l in crate::doctor::render(&crate::doctor::checks_now()) {
+                    println!("{l}");
+                }
             }
             // Plain mode has no picker: a bare /lang prints the current language, /lang ko|en saves and switches.
             Some(Dispatch::OpenLang) => println!("{}", lang::current_note(None)),
