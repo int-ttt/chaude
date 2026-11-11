@@ -1,0 +1,30 @@
+#!/bin/sh
+# Local guard for staged changes. Enable once per clone: git config core.hooksPath .githooks
+# Checks: cargo fmt --all --check when .rs is staged; no staged paths under target/ or notes/tmp/;
+# no staged file over 5 MB.
+export PATH="$HOME/.cargo/bin:$PATH"
+fail=0
+list=$(mktemp "${TMPDIR:-/tmp}/precommit.XXXXXX") || exit 1
+git diff --cached --name-only --diff-filter=ACM > "$list"
+
+while IFS= read -r f; do
+  case "$f" in
+    target/*|*/target/*|notes/tmp/*|*/notes/tmp/*)
+      echo "pre-commit: staged path under target/ or notes/tmp/: $f" >&2; fail=1 ;;
+  esac
+  size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+  if [ "$size" -gt 5242880 ]; then
+    echo "pre-commit: file over 5 MB: $f ($size bytes)" >&2; fail=1
+  fi
+done < "$list"
+
+if grep -q '\.rs$' "$list"; then
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "pre-commit: cargo not found; cannot check fmt" >&2; fail=1
+  elif ! cargo fmt --all --check >/dev/null 2>&1; then
+    echo "pre-commit: cargo fmt --all --check failed (run: cargo fmt --all)" >&2; fail=1
+  fi
+fi
+
+rm -f "$list"
+exit $fail

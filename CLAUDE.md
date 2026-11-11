@@ -19,6 +19,7 @@
 - Result listing `## [haiku] steps` → give that path to matching Haiku agents in one parallel round.
 - Small tasks: Haiku agents directly. Plan returned: reply path + ≤3-line gist + `추천:` (implement `<plan path>`); on approval → `haiku-coder`/`haiku-batch-worker` per step group, then `haiku-checker`. User said go straight through → don't stop.
 - No file/web work needed: Opus answers itself (explanations, opinions, conversation nuance, trade-off/pushback calls); documents the user keeps (plans, researched comparisons) → Opus writes the content, `haiku-batch-worker`/`haiku-drafter` saves it verbatim; relay.
+- Workstream done + checks pass → its agent commits only its own files locally (`area: what`, CHANGELOG Unreleased en+ko line in same commit); push only at release.
 
 ## Reply
 - Final answer content in full in the TUI reply (haiku-tui renders it in Korean 존댓말; main writes English); never only a path, never written to a file. `notes/runs/` = agent hand-off only.

@@ -27,3 +27,5 @@ tests/e2e-rebuild/
 tests/e2e/results/
 .chaude/
 notes/tmp/
+notes/runs/
+target/
