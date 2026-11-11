@@ -1,5 +1,0 @@
-> 다음 텍스트를 notes/runs/abtest-t5.md 에 그대로 저장: 가나다 123 abc
-[haiku-batch-worker][haiku-batch-worker] 파일 저장 작업을 백그라운드에서 진행 중입니다. `notes/runs/abtest-t5.md`에 `가나다 123 abc`를 쓰고 다시 읽어 확인하는 작업이며, 결과가 도착하면 바로 알려드리겠습니다.
-
-
-[2m[ctx 38,610 | in 4 cr 45,039 cc 25,128 out 752 | $0.0064 | 5h 0.76 | sess 5c7a9e21 rot 0][0m

@@ -1,6 +1,0 @@
-> internal/harness 의 TestOrchDefaultModel 이 실패한다. 고쳐라.
-[2m[route → haiku][0m
-현재 TestOrchDefaultModel 진단·수정 작업을 Opus 설계 에이전트에 맡겼고, 아직 실행 중입니다. 결과가 도착하면 원인과 수정 내용, 테스트 결과를 정리해 드리겠습니다.
-
-
-[2m[ctx 38,468 | in 4 cr 50,460 cc 25,122 out 1225 | $0.0061 | 5h 0.37 | sess 0234d9c4 rot 0][0m

@@ -1,5 +1,0 @@
-> rotation threshold 값은?
-rotation threshold는 Haiku main이 80k(넘으면 새 세션으로 handoff), Opus와 Sonnet main이 270k입니다. 프로젝트 지침(CLAUDE.md)에 적힌 값이고, 실제 코드에 설정된 값까지 확인한 것은 아닙니다.
-
-
-[2m[ctx 30,499 | in 2 cr 12,881 cc 17,616 out 123 | $0.1460 | 5h 0.49 | sess 68a20569 rot 0][0m

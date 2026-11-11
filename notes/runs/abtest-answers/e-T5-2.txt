@@ -1,5 +1,0 @@
-> 다음 텍스트를 notes/runs/abtest-t5.md 에 그대로 저장: 가나다 123 abc
-[haiku-batch-worker] `notes/runs/abtest-t5.md`에 `가나다 123 abc`를 저장했고, 다시 읽어서 내용이 일치하는 것을 확인했습니다. 첫 저장에서 줄바꿈이 두 개 들어가서 줄바꿈 없이 다시 저장했습니다. 다른 파일은 건드리지 않았습니다.
-
-
-[2m[ctx 39,182 | in 4 cr 45,039 cc 25,700 out 939 | $0.0073 | 5h 0.76 | sess fa91033a rot 0][0m

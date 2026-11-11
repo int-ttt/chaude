@@ -1,5 +1,0 @@
-> 다음 텍스트를 notes/runs/abtest-t5.md 에 그대로 저장: 가나다 123 abc
-[haiku-batch-worker] 저장을 맡겨 두었고 아직 작업 중입니다. 완료 알림이 오면 결과를 바로 알려드리겠습니다.
-
-
-[2m[ctx 37,184 | in 4 cr 43,136 cc 24,438 out 335 | $0.2108 | 5h 0.74 | sess 2f59b1f7 rot 0][0m

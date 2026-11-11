@@ -1,6 +1,0 @@
-> internal/harness 의 TestOrchDefaultModel 이 실패한다. 고쳐라.
-[2m[route → haiku][0m
-[sonnet-analyst] `TestOrchDefaultModel` 실패의 원인은 코드 쪽 오타였습니다. `internal/harness/orch.go`의 `orchDefaultModel`이 모드 b, c, d, f에서 `"sonet"`을 반환하고 있었고, 테스트는 `"opus"`를 기대했습니다. `orchRuleB`의 "Opus main decides inline" 문구와도 맞아서 의도는 `"opus"`가 맞습니다. 테스트 기대값은 그대로 두고 `orch.go` 23–30행의 `"sonet"`을 `"opus"`로 고쳤습니다.
-
-수정 후 `TestOrchDefaultModel`은 통과하고, `go test ./internal/harness`도 `ok`로 실패가 없습니다. 다만 개별 테스트 통과 개수는 세지 않았습니다. `orch.go`가 아직 커밋되지 않은 untracked 파일이라 `git diff`로는 변경이 보이지 않습니다. 모드 e의 `"haiku"` 값은 건드리지 않았습니다.
-[2m[ctx 39,671 | in 4 cr 50,462 cc 26,325 out 1739 | $0.0608 | 5h 0.37 | sess 87e70767 rot 0][0m

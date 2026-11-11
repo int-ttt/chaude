@@ -1,7 +1,0 @@
-> rotation threshold 값은?
-프로젝트 지침 기준으로 main thread의 rotation threshold는 Haiku 80k이고, Opus와 Sonnet은 270k입니다. Haiku는 80k에 도달하면 handoff를 거쳐 새 세션으로 넘어갑니다.
-
-workstream의 live Haiku child는 기준이 따로 있어서, 40k 토큰, 20턴, idle 270초 초과 중 하나에 해당하면 1500자 이하 handoff로 교체됩니다.
-
-
-[2m[ctx 30,362 | in 2 cr 10,435 cc 19,925 out 184 | $0.1652 | 5h 0.66 | sess e33e52bd rot 0][0m

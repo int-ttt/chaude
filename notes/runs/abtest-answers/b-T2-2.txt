@@ -1,5 +1,0 @@
-> usagepoll.go와 ratestatus.go 관계 설명
-[haiku-scout] 두 파일을 읽어 관계를 조사하고 있습니다. 결과가 도착하면 이어서 설명드리겠습니다.
-
-
-[2m[ctx 37,288 | in 4 cr 43,266 cc 24,467 out 383 | $0.2121 | 5h 0.42 | sess eb9be732 rot 0][0m

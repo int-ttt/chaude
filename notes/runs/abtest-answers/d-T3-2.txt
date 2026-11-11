@@ -1,5 +1,0 @@
-> internal/harness 의 TestOrchDefaultModel 이 실패한다. 고쳐라.
-[haiku-coder] 작업을 맡겼고 아직 진행 중입니다. 완료 통지가 오면 원인과 테스트 결과를 바로 알려드리겠습니다.
-
-
-[2m[ctx 37,425 | in 4 cr 43,204 cc 24,641 out 554 | $0.2169 | 5h 0.62 | sess 348b9f22 rot 0][0m
