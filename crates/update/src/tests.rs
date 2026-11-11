@@ -391,3 +391,16 @@ fn startup_cleanup_keeps_local_bin_install() {
         "PREVIOUS"
     );
 }
+
+#[test]
+fn remove_old_deletes_only_dot_old_never_the_exe() {
+    let dir = TempDir::new("chaude-update-test-").unwrap();
+    let exe = dir.path().join("chaude");
+    write(&exe, "RUNNING");
+    write(&dir.path().join("chaude.old"), "STALE");
+
+    crate::cleanup::remove_old(&exe);
+
+    assert_eq!(fs::read_to_string(&exe).unwrap(), "RUNNING");
+    assert!(!dir.path().join("chaude.old").exists());
+}
