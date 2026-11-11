@@ -72,6 +72,8 @@ pub struct BarInput {
     pub mode: String,
     pub fg: usize,
     pub bg: usize,
+    // Agents a held reply waits for (UiEvent::ReplyHeld pending); None when the reply is not held.
+    pub waiting: Option<usize>,
     // Latest context tokens per role (UiEvent::RoleContext): P = prompter, T = tui, C = coder.
     pub role_tokens: BTreeMap<String, u64>,
     // Live resident coders in spawn order (UiEvent::CoderContexts); empty hides the coder line.
@@ -146,9 +148,16 @@ pub fn fmt_tokens(n: u64) -> String {
 
 // Returns the two status rows: running state and agents, then model/tokens/cost/context/queue.
 pub fn rows(b: &BarInput, spinner: char, width: usize) -> [String; 2] {
-    let mut top = match b.turn_secs {
-        Some(s) => format!("{spinner} running {}", fmt_secs(s)),
-        None => "idle".to_string(),
+    // While a reply is held, the top row says how many agents it waits for (Go-style "N agents waiting").
+    let mut top = match (b.turn_secs, b.waiting) {
+        (Some(s), Some(n)) => format!(
+            "{spinner} {} {}",
+            i18n::tf(Msg::AgentsWaiting, &[&n]),
+            fmt_secs(s)
+        ),
+        (None, Some(n)) => i18n::tf(Msg::AgentsWaiting, &[&n]),
+        (Some(s), None) => format!("{spinner} running {}", fmt_secs(s)),
+        (None, None) => "idle".to_string(),
     };
     // Each running agent keeps a visible segment. When they do not all fit, every description is cut to an
     // equal share of the room left, so a long first agent cannot push later (e.g. resumed) agents off the row.

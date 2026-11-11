@@ -404,7 +404,8 @@ pub fn md_bold(s: &str) -> String {
 }
 
 // GFM table layout. `rows` are the candidate rows after their lead, each with a pipe and outside fences: the
-// header, the delimiter row, then the body rows. Returns the table as lines of at most `width` cells, or None
+// header, the delimiter row, then the body rows. Returns the table as lines of at most `width` cells (top border,
+// header, header rule, body rows, bottom border), or None
 // when the rows are not a table. Cells split on pipes outside backtick spans; `\|` is a literal pipe. Columns
 // shrink to fit and wide cell text is cut with "…".
 pub fn md_table(rows: &[&str], width: usize) -> Option<Vec<String>> {
@@ -439,13 +440,15 @@ pub fn md_table(rows: &[&str], width: usize) -> Option<Vec<String>> {
         };
         cols[j] -= 1;
     }
-    let mut out = Vec::with_capacity(grid.len() + 1);
+    let mut out = Vec::with_capacity(grid.len() + 3);
+    out.push(table_edge(&cols, '┌', '┬', '┐'));
     for (k, cells) in grid.iter().enumerate() {
         out.push(table_row(cells, &cols, &aligns));
         if k == 0 {
-            out.push(table_rule(&cols));
+            out.push(table_edge(&cols, '├', '┼', '┤'));
         }
     }
+    out.push(table_edge(&cols, '└', '┴', '┘'));
     Some(out.iter().map(|l| trunc_ellipsis(l, width)).collect())
 }
 
@@ -538,9 +541,10 @@ fn table_row(cells: &[String], cols: &[usize], aligns: &[Align]) -> String {
     out
 }
 
-fn table_rule(cols: &[usize]) -> String {
+// A horizontal border across the columns: the top ("┌┬┐"), the header rule ("├┼┤") or the bottom ("└┴┘").
+fn table_edge(cols: &[usize], left: char, mid: char, right: char) -> String {
     let segs: Vec<String> = cols.iter().map(|c| "─".repeat(c + 2)).collect();
-    format!("├{}┤", segs.join("┼"))
+    format!("{left}{}{right}", segs.join(&mid.to_string()))
 }
 
 // R04 cavemanStatusRe (tui.go:97): ^status:\s*(done|partial|fail|blocked)\b, applied to a trimmed line.
@@ -1588,10 +1592,12 @@ mod tests {
             ],
             80,
         );
-        assert_eq!(out.len(), 4, "{out:?}");
-        assert_eq!(out[0], "│ 검사      │ 결과 │");
-        assert_eq!(out[1], "├───────────┼──────┤");
-        assert_eq!(out[2], "│ 형식 검사 │ 통과 │");
+        assert_eq!(out.len(), 6, "{out:?}");
+        assert_eq!(out[0], "┌───────────┬──────┐");
+        assert_eq!(out[1], "│ 검사      │ 결과 │");
+        assert_eq!(out[2], "├───────────┼──────┤");
+        assert_eq!(out[3], "│ 형식 검사 │ 통과 │");
+        assert_eq!(out[5], "└───────────┴──────┘");
         let widths: Vec<usize> = out.iter().map(|l| cell_width(l)).collect();
         assert!(widths.iter().all(|&w| w == widths[0]), "{widths:?}");
     }
@@ -1614,9 +1620,9 @@ mod tests {
             ],
             80,
         );
-        assert_eq!(out.len(), 4, "{out:?}");
-        assert!(out[2].contains("`a|b`"), "{out:?}");
-        assert!(out[3].contains("x | y"), "{out:?}");
+        assert_eq!(out.len(), 6, "{out:?}");
+        assert!(out[3].contains("`a|b`"), "{out:?}");
+        assert!(out[4].contains("x | y"), "{out:?}");
         assert!(
             out.iter()
                 .filter(|l| l.starts_with('│'))
@@ -1630,8 +1636,8 @@ mod tests {
         let out = table_lines(&["| 한글 | x |", "|---|---|", "| ab | 가나 |"], 80);
         let widths: Vec<usize> = out.iter().map(|l| cell_width(l)).collect();
         assert!(widths.iter().all(|&w| w == widths[0]), "{widths:?}");
-        assert_eq!(out[0], "│ 한글 │ x    │");
-        assert_eq!(out[2], "│ ab   │ 가나 │");
+        assert_eq!(out[1], "│ 한글 │ x    │");
+        assert_eq!(out[3], "│ ab   │ 가나 │");
     }
 
     #[test]
@@ -1642,21 +1648,23 @@ mod tests {
             30,
         );
         assert!(out.iter().all(|l| cell_width(l) <= 30), "{out:?}");
-        assert!(out[2].contains('…'), "{out:?}");
-        assert!(out[0].starts_with('│') && out[0].ends_with('│'), "{out:?}");
+        assert!(out[3].contains('…'), "{out:?}");
+        assert!(out[1].starts_with('│') && out[1].ends_with('│'), "{out:?}");
+        assert!(out[0].starts_with('┌') && out[0].ends_with('┐'), "{out:?}");
+        assert!(out[4].starts_with('└') && out[4].ends_with('┘'), "{out:?}");
     }
 
     #[test]
     fn md_table_alignment_marks() {
         let out = table_lines(&["| l | c | r |", "|:---|:---:|---:|", "| 1 | 2 | 3 |"], 40);
-        assert_eq!(out[2], "│ 1 │ 2 │ 3 │");
+        assert_eq!(out[3], "│ 1 │ 2 │ 3 │");
         let out = table_lines(
             &["| l | c | r |", "|:---|:---:|---:|", "| aaaa | b | cc |"],
             40,
         );
-        assert_eq!(out[2], "│ aaaa │ b │ cc │");
+        assert_eq!(out[3], "│ aaaa │ b │ cc │");
         let out = table_lines(&["| r |", "|---:|", "| x |", "| yyy |"], 40);
-        assert_eq!(out[2], "│   x │");
+        assert_eq!(out[3], "│   x │");
     }
 
     #[test]

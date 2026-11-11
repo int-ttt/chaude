@@ -6,6 +6,7 @@ pub mod agentview;
 pub mod bar;
 pub mod commands;
 pub mod edit;
+pub mod lang;
 pub mod overlay;
 pub mod records;
 pub mod render;
@@ -27,7 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, UiEvent};
+use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, TaskStatus, UiEvent};
 use chaude_core::handoff;
 use chaude_core::i18n::{Msg, t, tf};
 use chaude_core::import_claude::{self, ClaudeImport};
@@ -60,6 +61,8 @@ const CHROME: usize = 4;
 const MAX_INPUT_ROWS: usize = 5;
 // Go queueLines (tui.go:929): most waiting prompts shown above the input box.
 const MAX_QUEUE_ROWS: usize = 5;
+// Most rows in the task list above the input box, the title row included.
+const MAX_TASK_ROWS: usize = 8;
 // Go maxPanel (tui.go:1452): most rows in one agent panel (foreground or background).
 const MAX_PANEL_ROWS: usize = 4;
 // Go lastTool: `trunc(t, 40)` in runes.
@@ -89,6 +92,8 @@ pub enum Action {
     Submit(String),
     Interrupt(InterruptSource),
     Quit,
+    // Esc while a reply is held: abandon its queued-task wait (Engine::cancel_wait).
+    CancelWait,
     // /usage: the caller asks the engine for the one-shot run (UiEvent::Usage). Never a turn.
     Usage,
     // /update: the caller runs the release check off the UI thread; the result returns as Wake::Note (tui.go:1166).
@@ -122,6 +127,23 @@ struct StageRow {
     body: String,
     start: i64,
     at: Instant,
+}
+
+// One main Agent/Task call in the task list. Queued until its launch ack (TaskResolved Running), then Running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskState {
+    Queued,
+    Running,
+    Done,
+    Failed,
+    Timeout,
+}
+
+#[derive(Debug, Clone)]
+struct TaskRow {
+    id: String,
+    desc: String,
+    state: TaskState,
 }
 
 pub struct App {
@@ -169,6 +191,10 @@ pub struct App {
     last_tool: String,
     // Prompts waiting for the next turn, oldest first (UiEvent::QueueTexts; Go m.queue).
     queue_texts: Vec<String>,
+    // Main's Agent/Task calls of the current round, oldest first (UiEvent::TaskQueued / TaskResolved).
+    tasks: Vec<TaskRow>,
+    // Pending task count while main's final reply is held (UiEvent::ReplyHeld); None once released.
+    held: Option<usize>,
     // Rotations seen this session (UiEvent::Rotated); Go m.r.rotations.
     rot: u32,
     // Time of the last tick. Elapsed times and the spinner are computed from it, so `frame` stays pure.
@@ -196,6 +222,8 @@ pub struct App {
     usage: usage::Usage,
     // Open /settings picker (Go m.settings). Its save note goes to the transcript when it closes.
     settings: Option<settings::Picker>,
+    // Open /lang picker (ko | en). Enter saves the choice and switches the UI language at once.
+    lang: Option<lang::LangPicker>,
     // Open /resume record picker (Go m.rpick) and /view session browser (Go m.sv). Both replace the body.
     recs: Option<records::RecPicker>,
     // Open /resume session picker (Go m.pick): the Claude Code session groups of this project.
@@ -296,6 +324,8 @@ impl App {
             pan_off: 0,
             last_tool: String::new(),
             queue_texts: Vec::new(),
+            tasks: Vec::new(),
+            held: None,
             rot: 0,
             session_id: String::new(),
             clock: Instant::now(),
@@ -319,6 +349,7 @@ impl App {
             sugg_sel: 0,
             usage: usage::Usage::default(),
             settings: None,
+            lang: None,
             recs: None,
             pick: None,
             sess: None,
@@ -361,6 +392,10 @@ impl App {
                 | UiEvent::AgentLog { .. }
                 | UiEvent::AgentLogAt { .. }
                 | UiEvent::QueueTexts(_)
+                | UiEvent::TaskQueued { .. }
+                | UiEvent::TaskResolved { .. }
+                | UiEvent::ReplyHeld { .. }
+                | UiEvent::ReplyReleased
                 | UiEvent::OpusBusy(_)
                 | UiEvent::ResidentBusy { .. }
         );
@@ -580,8 +615,38 @@ impl App {
                 self.quiet_noted = false;
             }
             UiEvent::Queued(n) => self.bar.queued = n,
+            UiEvent::TaskQueued { id, desc } => {
+                // A new round starts once every earlier task has settled, as the engine's own list does.
+                if self
+                    .tasks
+                    .iter()
+                    .all(|t| !matches!(t.state, TaskState::Queued | TaskState::Running))
+                {
+                    self.tasks.clear();
+                }
+                self.tasks.push(TaskRow {
+                    id,
+                    desc,
+                    state: TaskState::Queued,
+                });
+            }
+            UiEvent::TaskResolved { id, status } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == id) {
+                    t.state = match status {
+                        TaskStatus::Running => TaskState::Running,
+                        TaskStatus::Done => TaskState::Done,
+                        TaskStatus::Failed => TaskState::Failed,
+                        TaskStatus::Timeout => TaskState::Timeout,
+                    };
+                }
+            }
+            UiEvent::ReplyHeld { pending } => self.held = Some(pending),
+            UiEvent::ReplyReleased => self.held = None,
             // Go shows no per-turn "done" row; its footer comes from engine stats that UiEvent does not carry yet.
-            UiEvent::TurnEnd { .. } => self.end_main_block(),
+            UiEvent::TurnEnd { .. } => {
+                self.held = None;
+                self.end_main_block();
+            }
             UiEvent::RoleContext { role, tokens } => {
                 self.bar.role_tokens.insert(role, tokens);
             }
@@ -914,6 +979,21 @@ impl App {
             }
             return Action::Continue;
         }
+        if let Some(k) = self.lang.as_mut().map(|p| p.key(key)) {
+            match k {
+                lang::Key::None => {}
+                lang::Key::Cancel => self.lang = None,
+                lang::Key::Pick(code) => {
+                    self.lang = None;
+                    let note = lang::apply(None, code);
+                    self.note(&note);
+                    if lang::is_code(code) {
+                        return Action::Submit(format!("/lang {code}"));
+                    }
+                }
+            }
+            return Action::Continue;
+        }
         if let Some(act) = self.pick.as_mut().map(|gp| gp.key(key)) {
             match act {
                 resume_pick::Action::None => {}
@@ -1056,6 +1136,8 @@ impl App {
                 Action::Continue
             }
             KeyCode::Enter => self.submit(),
+            // While the reply is held, Esc abandons the queued-task wait; it takes precedence over the busy interrupt.
+            KeyCode::Esc if self.held.is_some() => Action::CancelWait,
             // Go tui.go: a single Esc interrupts while busy.
             KeyCode::Esc if self.busy => Action::Interrupt(InterruptSource::EscKey),
             KeyCode::Esc => {
@@ -1239,6 +1321,19 @@ impl App {
                 self.settings = Some(settings::Picker::open(
                     std::env::current_dir().ok().as_deref(),
                 ));
+                return Action::Continue;
+            }
+            Some(Dispatch::OpenLang) => {
+                self.note(&lang::current_note(None));
+                self.lang = Some(lang::LangPicker::open());
+                return Action::Continue;
+            }
+            Some(Dispatch::SetLang(code)) => {
+                let note = lang::apply(None, &code);
+                self.note(&note);
+                if lang::is_code(&code) {
+                    return Action::Submit(format!("/lang {code}"));
+                }
                 return Action::Continue;
             }
             Some(Dispatch::Update) => {
@@ -1543,6 +1638,9 @@ impl App {
         }
         if let Some(p) = &self.settings {
             return Some(p.lines(width, h));
+        }
+        if let Some(lp) = &self.lang {
+            return Some(lp.lines(width, h));
         }
         if let Some(rp) = &self.recs {
             return Some(rp.lines(width, h));
@@ -1874,6 +1972,7 @@ impl App {
             chrome.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&top, width)));
         }
         chrome.extend(self.queue_lines(w, h));
+        chrome.extend(self.task_lines(w, h));
         chrome.extend(self.input_box(w));
         if let Some(line) = bar::coder_line(&bi.coders, width) {
             chrome.push(format!("{GREY_ON}{line}{FG_OFF}"));
@@ -1912,6 +2011,69 @@ impl App {
         out
     }
 
+    // Main's Agent/Task calls, grouped 대기 / 진행 중 / 완료 / 실패 (Timeout under 실패 with its own label), above the
+    // input box and below the queue. Past the cap the last row becomes "… +N" with the count still hidden.
+    fn task_lines(&self, w: usize, h: usize) -> Vec<String> {
+        if self.tasks.is_empty() {
+            return Vec::new();
+        }
+        let room = h.saturating_sub(
+            self.input_height(w)
+                + 3
+                + self.coder_h()
+                + self.popup_h()
+                + MIN_VIEW_ROWS
+                + self.queue_lines(w, h).len(),
+        );
+        let max_show = MAX_TASK_ROWS.min(room);
+        // The title row plus at least one task row.
+        if max_show < 2 {
+            return Vec::new();
+        }
+        let width = text_width(w);
+        let mut rows = Vec::new();
+        for state in [
+            TaskState::Queued,
+            TaskState::Running,
+            TaskState::Done,
+            TaskState::Failed,
+            TaskState::Timeout,
+        ] {
+            for t in self.tasks.iter().filter(|t| t.state == state) {
+                let label = match state {
+                    TaskState::Queued => chaude_core::i18n::t(Msg::StateQueued).to_string(),
+                    TaskState::Running => chaude_core::i18n::t(Msg::TaskRunning).to_string(),
+                    TaskState::Done => chaude_core::i18n::t(Msg::StateDone).to_string(),
+                    TaskState::Failed => chaude_core::i18n::t(Msg::StateFailed).to_string(),
+                    TaskState::Timeout => format!(
+                        "{} · {}",
+                        chaude_core::i18n::t(Msg::StateFailed),
+                        chaude_core::i18n::t(Msg::StateTimeout)
+                    ),
+                };
+                let text = format!("  {label} {}", t.desc.replace('\n', " "));
+                rows.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&text, width)));
+            }
+        }
+        let total = rows.len();
+        let body = max_show - 1;
+        let mut out = vec![format!(
+            "{GREY_ON}{}{FG_OFF}",
+            bar::clip(chaude_core::i18n::t(Msg::TasksTitle), width)
+        )];
+        if total <= body {
+            out.extend(rows);
+        } else {
+            let keep = body - 1;
+            out.extend(rows.into_iter().take(keep));
+            out.push(format!(
+                "{GREY_ON}{}{FG_OFF}",
+                tf(Msg::TasksMore, &[&(total - keep)])
+            ));
+        }
+        out
+    }
+
     // Go panelLines / bgLines: the foreground agent rows (below the input box) and the background rows under
     // them. Only running agents show; the panel above takes its rows out of the room the background panel gets.
     // Go runningN (tui.go:1445): running agents plus busy resident sessions.
@@ -1920,7 +2082,7 @@ impl App {
     }
 
     fn panel_lines(&self, w: usize, h: usize) -> (Vec<String>, Vec<String>) {
-        let queue_h = self.queue_lines(w, h).len();
+        let queue_h = self.queue_lines(w, h).len() + self.task_lines(w, h).len();
         let fg = self.agent_lines(false, w, h, queue_h, 0);
         let bg = self.agent_lines(true, w, h, queue_h, fg.len());
         (fg, bg)
@@ -2240,6 +2402,10 @@ impl App {
             st.wheel(up);
             return true;
         }
+        if let Some(lp) = self.lang.as_mut() {
+            lp.wheel(up);
+            return true;
+        }
         if let Some(sv) = self.sess.as_mut() {
             sv.wheel(up, sw, sh);
             return true;
@@ -2328,6 +2494,7 @@ impl App {
             .turn_start
             .map(|t| self.clock.duration_since(t).as_secs());
         b.limit = self.welcome.threshold;
+        b.waiting = self.held;
         b.agents = self
             .agents
             .iter()
@@ -2400,9 +2567,9 @@ impl App {
             .min(MAX_INPUT_ROWS)
     }
 
-    // Rows below the viewport: the top bar (unseen output or agents), then the input box. Busy state is in the body.
+    // Rows below the viewport: the top bar (unseen output, agents, or a held reply), then the input box. Busy state is in the body.
     fn shows_bar(&self) -> bool {
-        self.unseen || !self.agents.is_empty()
+        self.unseen || !self.agents.is_empty() || self.held.is_some()
     }
 
     // Status row, the input box's top and bottom borders, and the input rows.
@@ -2456,6 +2623,7 @@ impl App {
             && self.perm.is_none()
             && self.av.is_none()
             && self.settings.is_none()
+            && self.lang.is_none()
             && self.pick.is_none()
             && self.recs.is_none()
             && self.sess.is_none()
@@ -3533,6 +3701,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                         }
                         Action::Quit => break 'main,
                         Action::Usage => engine.usage(),
+                        Action::CancelWait => engine.cancel_wait(),
                         Action::Update => {
                             let tx = update_tx.clone();
                             thread::spawn(move || {
@@ -3689,6 +3858,15 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
             }
             Some(Dispatch::Update) => {
                 println!("{}", chaude_update::text(env!("CARGO_PKG_VERSION")))
+            }
+            // Plain mode has no picker: a bare /lang prints the current language, /lang ko|en saves and switches.
+            Some(Dispatch::OpenLang) => println!("{}", lang::current_note(None)),
+            Some(Dispatch::SetLang(code)) => {
+                println!("{}", lang::apply(None, &code));
+                if lang::is_code(&code) {
+                    engine.submit(&format!("/lang {code}"));
+                    pump(&rx, &mut app, true);
+                }
             }
             Some(Dispatch::OpenUsage) => {
                 engine.usage();
@@ -4159,6 +4337,86 @@ mod tests {
         assert_eq!(rows[top - 2], "  대기 one");
         assert_eq!(rows[top - 1], "  대기 two lines");
         assert!(raw[top - 1].starts_with(GREY_ON), "{:?}", raw[top - 1]);
+    }
+
+    #[test]
+    fn task_rows_group_by_state_with_timeout_under_failed() {
+        let mut app = App::new(60, 30);
+        for (id, desc) in [
+            ("a", "run a"),
+            ("b", "done b"),
+            ("c", "slow c"),
+            ("d", "wait d"),
+        ] {
+            app.apply(UiEvent::TaskQueued {
+                id: id.into(),
+                desc: desc.into(),
+            });
+        }
+        app.apply(UiEvent::TaskResolved {
+            id: "a".into(),
+            status: TaskStatus::Running,
+        });
+        app.apply(UiEvent::TaskResolved {
+            id: "b".into(),
+            status: TaskStatus::Done,
+        });
+        app.apply(UiEvent::TaskResolved {
+            id: "c".into(),
+            status: TaskStatus::Timeout,
+        });
+        let rows = plain_frame(&app, 60, 30);
+        let top = box_top(&rows);
+        let at = |text: &str| rows[..top].iter().position(|r| r == text);
+        let title = at("작업 목록").expect("title row");
+        let queued = at("  대기 wait d").expect("queued row");
+        let running = at("  진행 중 run a").expect("running row");
+        let done = at("  완료 done b").expect("done row");
+        let timeout = at("  실패 · 타임아웃 slow c").expect("timeout row");
+        assert!(title < queued && queued < running && running < done && done < timeout);
+    }
+
+    #[test]
+    fn a_new_task_round_starts_once_every_task_has_settled() {
+        let mut app = App::new(60, 30);
+        app.apply(UiEvent::TaskQueued {
+            id: "a".into(),
+            desc: "first".into(),
+        });
+        app.apply(UiEvent::TaskResolved {
+            id: "a".into(),
+            status: TaskStatus::Failed,
+        });
+        app.apply(UiEvent::TaskQueued {
+            id: "b".into(),
+            desc: "second".into(),
+        });
+        let rows = plain_frame(&app, 60, 30);
+        let top = box_top(&rows);
+        assert!(!rows[..top].iter().any(|r| r.contains("first")));
+        assert!(rows[..top].iter().any(|r| r == "  대기 second"));
+    }
+
+    #[test]
+    fn held_reply_shows_the_waiting_count_and_escape_cancels_the_wait() {
+        let mut app = App::new(60, 20);
+        let esc = || key(KeyCode::Esc, KeyModifiers::NONE);
+        app.apply(UiEvent::ReplyHeld { pending: 2 });
+        let rows = plain_frame(&app, 60, 20);
+        assert!(
+            rows.iter().any(|r| r.contains("에이전트 2개 대기 중")),
+            "{rows:?}"
+        );
+        assert_eq!(app.on_key(esc()), Action::CancelWait);
+        app.apply(UiEvent::Busy(true));
+        assert_eq!(app.on_key(esc()), Action::CancelWait);
+        app.apply(UiEvent::ReplyReleased);
+        assert_eq!(
+            app.on_key(esc()),
+            Action::Interrupt(InterruptSource::EscKey)
+        );
+        app.apply(UiEvent::Busy(false));
+        assert_eq!(app.on_key(esc()), Action::Continue);
     }
 
     #[test]
@@ -5648,10 +5906,12 @@ mod tests {
             .iter()
             .position(|r| r.contains("│ 항목"))
             .expect("table header");
+        assert!(plain[top - 1].contains('┌'), "{plain:?}");
         assert!(plain[top + 1].contains('├'), "{plain:?}");
         assert!(plain[top + 2].contains("│ a"), "{plain:?}");
-        assert!(plain[top + 3].contains("after"), "{plain:?}");
-        assert!(plain[top - 1].contains("intro"), "{plain:?}");
+        assert!(plain[top + 3].contains('└'), "{plain:?}");
+        assert!(plain[top + 4].contains("after"), "{plain:?}");
+        assert!(plain[top - 2].contains("intro"), "{plain:?}");
         assert!(
             rows.iter().any(|r| r.contains(render::LINK_COLOR_ON)
                 && render::strip_sgr(r).contains("https://a.io")),
@@ -5688,17 +5948,21 @@ mod tests {
             );
             let head = plain
                 .iter()
-                .position(|r| r.starts_with("● │ 이름"))
-                .expect("assistant table header under the lead");
-            assert!(plain[head + 1].starts_with("  ├"), "{plain:?}");
-            assert!(plain[head + 2].contains("│ 사과"), "{plain:?}");
-            assert!(plain[head + 2].contains("`a|b`"), "{plain:?}");
+                .position(|r| r.starts_with("● ┌"))
+                .expect("assistant table top border under the lead");
+            assert!(plain[head + 1].starts_with("  │ 이름"), "{plain:?}");
+            assert!(plain[head + 2].starts_with("  ├"), "{plain:?}");
+            assert!(plain[head + 3].contains("│ 사과"), "{plain:?}");
+            assert!(plain[head + 3].contains("`a|b`"), "{plain:?}");
+            assert!(plain[head + 5].starts_with("  └"), "{plain:?}");
             let echo = plain
                 .iter()
-                .position(|r| r.starts_with("> │ a"))
+                .position(|r| r.starts_with("> ┌"))
                 .expect("pasted table drawn under the prompt lead");
-            assert!(plain[echo + 1].starts_with("  ├"), "{plain:?}");
-            assert!(plain[echo + 2].starts_with("  │ 1"), "{plain:?}");
+            assert!(plain[echo + 1].starts_with("  │ a"), "{plain:?}");
+            assert!(plain[echo + 2].starts_with("  ├"), "{plain:?}");
+            assert!(plain[echo + 3].starts_with("  │ 1"), "{plain:?}");
+            assert!(plain[echo + 4].starts_with("  └"), "{plain:?}");
         }
     }
 
