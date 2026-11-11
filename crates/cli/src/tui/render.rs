@@ -403,6 +403,146 @@ pub fn md_bold(s: &str) -> String {
     lines.join("\n")
 }
 
+// GFM table layout. `rows` are the candidate rows after their lead, each with a pipe and outside fences: the
+// header, the delimiter row, then the body rows. Returns the table as lines of at most `width` cells, or None
+// when the rows are not a table. Cells split on pipes outside backtick spans; `\|` is a literal pipe. Columns
+// shrink to fit and wide cell text is cut with "…".
+pub fn md_table(rows: &[&str], width: usize) -> Option<Vec<String>> {
+    if rows.len() < 2 || width < 4 || !rows[0].contains('|') {
+        return None;
+    }
+    let aligns = delimiter_aligns(rows[1])?;
+    let n = aligns.len();
+    let mut grid = vec![table_cells(rows[0])];
+    if grid[0].len() != n {
+        return None;
+    }
+    for r in &rows[2..] {
+        let mut cells = table_cells(r);
+        cells.resize(n, String::new());
+        grid.push(cells);
+    }
+    let mut cols: Vec<usize> = (0..n)
+        .map(|j| {
+            grid.iter()
+                .map(|r| cell_width(&r[j]))
+                .max()
+                .unwrap_or(0)
+                .max(1)
+        })
+        .collect();
+    // Each column costs its text plus 3 cells (" " and " │"), and the row starts with one "│".
+    let budget = width.saturating_sub(1 + 3 * n);
+    while cols.iter().sum::<usize>() > budget {
+        let Some(j) = (0..n).filter(|&j| cols[j] > 1).max_by_key(|&j| cols[j]) else {
+            break;
+        };
+        cols[j] -= 1;
+    }
+    let mut out = Vec::with_capacity(grid.len() + 1);
+    for (k, cells) in grid.iter().enumerate() {
+        out.push(table_row(cells, &cols, &aligns));
+        if k == 0 {
+            out.push(table_rule(&cols));
+        }
+    }
+    Some(out.iter().map(|l| trunc_ellipsis(l, width)).collect())
+}
+
+#[derive(Clone, Copy)]
+enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+// Cells of one table row. The outer pipes are optional; a pipe inside a backtick span does not split.
+fn table_cells(line: &str) -> Vec<String> {
+    let t = line.trim();
+    let t = t.strip_prefix('|').unwrap_or(t);
+    let t = match t.strip_suffix('|') {
+        Some(s) if !s.ends_with('\\') => s,
+        _ => t,
+    };
+    let mut cells = Vec::new();
+    let mut cur = String::new();
+    // Length of the open backtick run, 0 outside a code span.
+    let mut ticks = 0;
+    let mut chars = t.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '`' => {
+                let mut n = 1;
+                while chars.peek() == Some(&'`') {
+                    chars.next();
+                    n += 1;
+                }
+                if ticks == 0 {
+                    ticks = n;
+                } else if ticks == n {
+                    ticks = 0;
+                }
+                cur.extend(std::iter::repeat_n('`', n));
+            }
+            '\\' if chars.peek() == Some(&'|') => {
+                chars.next();
+                cur.push('|');
+            }
+            '|' if ticks == 0 => {
+                cells.push(cur.trim().to_string());
+                cur.clear();
+            }
+            _ => cur.push(c),
+        }
+    }
+    cells.push(cur.trim().to_string());
+    cells
+}
+
+// The delimiter row (`---`, `:--`, `--:`, `:-:`): one alignment per cell, or None.
+fn delimiter_aligns(line: &str) -> Option<Vec<Align>> {
+    if !line.contains('|') {
+        return None;
+    }
+    table_cells(line)
+        .iter()
+        .map(|c| {
+            let body = c.trim_start_matches(':').trim_end_matches(':');
+            if body.is_empty() || !body.chars().all(|ch| ch == '-') {
+                return None;
+            }
+            Some(match (c.starts_with(':'), c.ends_with(':')) {
+                (true, true) => Align::Center,
+                (false, true) => Align::Right,
+                _ => Align::Left,
+            })
+        })
+        .collect()
+}
+
+fn table_row(cells: &[String], cols: &[usize], aligns: &[Align]) -> String {
+    let mut out = String::from("│");
+    for (j, cell) in cells.iter().enumerate() {
+        let mut text = trunc_ellipsis(cell, cols[j]);
+        if text.contains(BOLD_ON) {
+            text.push_str(BOLD_OFF);
+        }
+        let pad = cols[j].saturating_sub(cell_width(&text));
+        let (l, r) = match aligns[j] {
+            Align::Right => (pad, 0),
+            Align::Center => (pad / 2, pad - pad / 2),
+            Align::Left => (0, pad),
+        };
+        out.push_str(&format!(" {}{text}{} │", " ".repeat(l), " ".repeat(r)));
+    }
+    out
+}
+
+fn table_rule(cols: &[usize]) -> String {
+    let segs: Vec<String> = cols.iter().map(|c| "─".repeat(c + 2)).collect();
+    format!("├{}┤", segs.join("┼"))
+}
+
 // R04 cavemanStatusRe (tui.go:97): ^status:\s*(done|partial|fail|blocked)\b, applied to a trimmed line.
 fn is_status_line(ln: &str) -> bool {
     let Some(rest) = ln.strip_prefix("status:") else {
@@ -1431,6 +1571,100 @@ mod tests {
         // input.go TestInputWrapWide: 3 Hangul per 6-cell row.
         assert_eq!(wrap_cells("가나다라마", 6), "가나다\n라마");
         assert_eq!(wrap_cells("ab\ncd", 10), "ab\ncd");
+    }
+
+    fn table_lines(rows: &[&str], width: usize) -> Vec<String> {
+        md_table(rows, width).expect("a table")
+    }
+
+    #[test]
+    fn md_table_header_rule_and_rows_align() {
+        let out = table_lines(
+            &[
+                "| 검사 | 결과 |",
+                "|---|---|",
+                "| 형식 검사 | 통과 |",
+                "| core | 290 |",
+            ],
+            80,
+        );
+        assert_eq!(out.len(), 4, "{out:?}");
+        assert_eq!(out[0], "│ 검사      │ 결과 │");
+        assert_eq!(out[1], "├───────────┼──────┤");
+        assert_eq!(out[2], "│ 형식 검사 │ 통과 │");
+        let widths: Vec<usize> = out.iter().map(|l| cell_width(l)).collect();
+        assert!(widths.iter().all(|&w| w == widths[0]), "{widths:?}");
+    }
+
+    #[test]
+    fn md_table_leading_indent_is_ignored() {
+        let plain = table_lines(&["| a | b |", "|---|---|", "| 1 | 2 |"], 40);
+        let indented = table_lines(&["  | a | b |", "    |---|---|", "  | 1 | 2 |"], 40);
+        assert_eq!(plain, indented);
+    }
+
+    #[test]
+    fn md_table_code_span_pipe_does_not_split() {
+        let out = table_lines(
+            &[
+                "| cmd | note |",
+                "|---|---|",
+                "| `a|b` | ok |",
+                "| x \\| y | ok |",
+            ],
+            80,
+        );
+        assert_eq!(out.len(), 4, "{out:?}");
+        assert!(out[2].contains("`a|b`"), "{out:?}");
+        assert!(out[3].contains("x | y"), "{out:?}");
+        assert!(
+            out.iter()
+                .filter(|l| l.starts_with('│'))
+                .all(|l| l.matches('│').count() == 3),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn md_table_cjk_cells_use_display_width() {
+        let out = table_lines(&["| 한글 | x |", "|---|---|", "| ab | 가나 |"], 80);
+        let widths: Vec<usize> = out.iter().map(|l| cell_width(l)).collect();
+        assert!(widths.iter().all(|&w| w == widths[0]), "{widths:?}");
+        assert_eq!(out[0], "│ 한글 │ x    │");
+        assert_eq!(out[2], "│ ab   │ 가나 │");
+    }
+
+    #[test]
+    fn md_table_wide_table_fits_width_with_ellipsis() {
+        let long = "가나다라마바사아자차카타파하".repeat(3);
+        let out = table_lines(
+            &["| name | text |", "|---|---|", &format!("| a | {long} |")],
+            30,
+        );
+        assert!(out.iter().all(|l| cell_width(l) <= 30), "{out:?}");
+        assert!(out[2].contains('…'), "{out:?}");
+        assert!(out[0].starts_with('│') && out[0].ends_with('│'), "{out:?}");
+    }
+
+    #[test]
+    fn md_table_alignment_marks() {
+        let out = table_lines(&["| l | c | r |", "|:---|:---:|---:|", "| 1 | 2 | 3 |"], 40);
+        assert_eq!(out[2], "│ 1 │ 2 │ 3 │");
+        let out = table_lines(
+            &["| l | c | r |", "|:---|:---:|---:|", "| aaaa | b | cc |"],
+            40,
+        );
+        assert_eq!(out[2], "│ aaaa │ b │ cc │");
+        let out = table_lines(&["| r |", "|---:|", "| x |", "| yyy |"], 40);
+        assert_eq!(out[2], "│   x │");
+    }
+
+    #[test]
+    fn md_table_rejects_non_tables() {
+        assert!(md_table(&["a | b", "plain text"], 40).is_none());
+        assert!(md_table(&["| a | b |", "|---|"], 40).is_none());
+        assert!(md_table(&["| a |", "| b |"], 40).is_none());
+        assert!(md_table(&["| a |", "|---|"], 3).is_none());
     }
 
     #[test]

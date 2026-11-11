@@ -176,6 +176,15 @@ pub fn previous_run(exit_path: &Path) -> Option<(ExitHandoff, bool)> {
     read_exit_handoff(exit_path).map(|h| (h, false))
 }
 
+// The main session of the previous run when that run was killed (no clean exit), else None. Bare /resume uses
+// it to import that session's digest. Read before the new run writes its own live marker.
+pub fn killed_main_session(exit_path: &Path) -> Option<String> {
+    match previous_run(exit_path) {
+        Some((h, true)) if !h.main_session.is_empty() => Some(h.main_session),
+        _ => None,
+    }
+}
+
 // Decides how a session of `role` (MAIN_ROLE or a resident role) starts, from the previous run's record.
 // Resume when the run was killed (no clean exit handoff), or when the session's context is below the
 // rotation threshold. Fresh when there is no session id, or a clean exit above the threshold (the handoff
@@ -469,6 +478,30 @@ mod tests {
             previous_run(&exit).map(|(h, k)| (h.main_session, k)),
             Some(("old".to_string(), false))
         );
+    }
+
+    #[test]
+    fn killed_main_session_only_for_unclean_exit() {
+        let dir = TempDir::new("handoff-killed");
+        let exit = handoff_file(dir.path());
+        // No files: nothing to report.
+        assert_eq!(killed_main_session(&exit), None);
+        // Clean exit: the exit handoff alone is not a kill.
+        write_exit_handoff(&exit, &sample()).unwrap();
+        assert_eq!(killed_main_session(&exit), None);
+        // Live marker left behind (no clean exit): its main session is the killed one.
+        write_exit_handoff(&live_handoff_file(&exit), &sample()).unwrap();
+        assert_eq!(killed_main_session(&exit), Some("m1".to_string()));
+        // Clean exit again removes the marker.
+        remove_live_handoff(&exit);
+        assert_eq!(killed_main_session(&exit), None);
+        // Killed run with no main session has no digest target.
+        let no_main = ExitHandoff {
+            main_session: String::new(),
+            ..Default::default()
+        };
+        write_exit_handoff(&live_handoff_file(&exit), &no_main).unwrap();
+        assert_eq!(killed_main_session(&exit), None);
     }
 
     #[test]

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.12.1 - 2026-11-11
+- Markdown tables render as bordered tables in the TUI.
+  - 마크다운 표: TUI에서 테두리가 있는 표로 그립니다.
+- Bare `/resume` after a killed run imports the saved state automatically and writes a work note to `notes/tmp`.
+  - `/resume` 자동 가져오기: 강제 종료된 실행 뒤 인자 없이 `/resume`을 입력하면 저장된 상태를 자동으로 가져오고 `notes/tmp`에 작업 노트를 씁니다.
+- Upgrade: 0.11.x deletes `~/.local/bin/chaude` on start. If an old `/usr/local/bin/chaude` still exists, remove it with `sudo rm -f /usr/local/bin/chaude` so the shell runs the new copy.
+  - 업그레이드: 0.11.x는 시작할 때 `~/.local/bin/chaude`를 지웁니다. 예전 `/usr/local/bin/chaude`가 남아 있으면 `sudo rm -f /usr/local/bin/chaude`로 지워야 셸이 새 실행 파일을 먼저 실행합니다.
+
 ## 0.12.0 - 2026-11-11
 - Language: a new `i18n` setting and the `CHAUDE_LANG` environment variable pick English or Korean. The TUI and the hook messages follow it.
   - 언어: 새 `i18n` 설정과 `CHAUDE_LANG` 환경 변수로 영어 또는 한국어를 고릅니다. TUI와 훅 메시지가 이 설정을 따릅니다.

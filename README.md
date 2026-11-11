@@ -74,7 +74,7 @@ An older install at `/usr/local/bin/chaude` is not removed by the installer. If 
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.0 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.1 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -155,7 +155,7 @@ Mouse wheel scrolling is on by default. Use `/mouse` to turn it off, so you can 
 | `/clear` | Start a new session |
 | `/rotate` | Hand off to a new session now |
 | `/settings` | Open the settings screen. Values are saved on `esc` and apply at the next session start |
-| `/resume [n or slug]` | List record topics, or show one. `/resume claude [query]` lists Claude Code sessions |
+| `/resume [n or slug]` | List record topics, or show one. After a killed run, bare `/resume` imports that session (digest in `notes/tmp/`). `/resume claude [query]` lists Claude Code sessions |
 | `/import [ID or latest]` | Import a Claude Code session |
 | `/view [ID prefix]` | Browse Claude Code sessions, with sub-agent names and SendMessage rows (`esc` goes back) |
 | `/usage` | Show plan usage and limits |

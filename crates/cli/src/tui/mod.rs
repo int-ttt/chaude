@@ -223,6 +223,9 @@ pub struct App {
     copy_note: Option<(String, Instant)>,
     // Which mode the previous session loads with (session_mode_note), shown at start and by /view.
     session_mode: Option<String>,
+    // Main session of the previous run when that run was killed (handoff::killed_main_session). Bare /resume
+    // imports its digest; read at start, before this run writes its own live marker.
+    killed_sid: Option<String>,
     // Session ids of this run (UiEvent::SessionIds: main, residents, owned). /view lists them with the previous run's.
     this_run: BTreeSet<String>,
     // Purpose by session id for the /view names: "main" or the resident role (UiEvent::SessionIds).
@@ -332,6 +335,7 @@ impl App {
             edge: None,
             copy_note: None,
             session_mode: None,
+            killed_sid: None,
             this_run: BTreeSet::new(),
             session_purpose: HashMap::new(),
             rot_from: String::new(),
@@ -1346,6 +1350,13 @@ impl App {
     // Go /resume <args> (resumeTarget): "claude <q>", or any arg no record answers, is a Claude Code session query
     // (group picker). Otherwise the record folder answers: several hits open the picker, one hit or a number loads.
     fn resume(&mut self, args: &[String]) -> Action {
+        // Bare /resume after a killed run: the session that run did not finish is imported as /resume claude does.
+        if args.is_empty()
+            && let Some(sid) = self.killed_sid.clone()
+        {
+            self.resume_killed(&sid);
+            return Action::Continue;
+        }
         let arg = args.join(" ");
         let root =
             chaude_core::record::dir_for(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
@@ -1370,6 +1381,16 @@ impl App {
             },
         }
         Action::Continue
+    }
+
+    // The group that holds the killed session is imported with its digest (import_view, as a single /resume claude
+    // group). When no group lists it, the bare id is tried, and import_view notes the error.
+    fn resume_killed(&mut self, sid: &str) {
+        let key = resume_pick::groups(&self.welcome.cwd, &[])
+            .ok()
+            .and_then(|gs| gs.into_iter().find(|g| g.files.iter().any(|f| f.id == sid)))
+            .map_or_else(|| sid.to_string(), |g| g.key());
+        self.import_view(&key, true);
     }
 
     // Go groupList + pick: one matching group imports it (sendImport), several open the picker, an error is the note.
@@ -1776,12 +1797,40 @@ impl App {
         let mut rows = self.welcome_rows(width + 1);
         let mut cache = self.wraps.borrow_mut();
         cache.rows.truncate(self.transcript.len());
+        let is_linked = |i: usize| {
+            self.linked.contains(&i)
+                || (i == self.transcript.len() && !self.pending_main.is_empty())
+        };
+        let mut tables = md_tables(&lines, is_linked, |i| {
+            if self.wide.contains(&i) {
+                width + 1
+            } else {
+                width
+            }
+        });
+        let mut table_end = 0;
         for (i, l) in lines.into_iter().enumerate() {
             let w = if self.wide.contains(&i) {
                 width + 1
             } else {
                 width
             };
+            // A markdown table is drawn whole at its first row; the rows it covers are skipped. Their cache slots
+            // stay empty so the rows after them keep their place in the cache.
+            if let Some((used, drawn)) = tables.remove(&i) {
+                table_end = i + used;
+                if i < self.transcript.len() {
+                    cache_slot(&mut cache.rows, i, (0, Vec::new()));
+                }
+                rows.extend(drawn);
+                continue;
+            }
+            if i < table_end {
+                if i < self.transcript.len() {
+                    cache_slot(&mut cache.rows, i, (0, Vec::new()));
+                }
+                continue;
+            }
             // Transcript rows come from the cache: rewrapped only when their text, width or style changed.
             if i < self.transcript.len() {
                 let linked = self.linked.contains(&i);
@@ -2453,6 +2502,106 @@ impl App {
         out.push(edge("╰", "╯"));
         out
     }
+}
+
+// Sets wrap-cache row `i`. Rows are visited in order, so the cache is at most one row short and a push fills it.
+fn cache_slot(rows: &mut Vec<(u64, Vec<String>)>, i: usize, v: (u64, Vec<String>)) {
+    if rows.len() <= i {
+        rows.push(v);
+    } else {
+        rows[i] = v;
+    }
+}
+
+// Markdown tables in linked rows, drawn whole. Keyed by the first row: how many rows the table covers and its screen
+// rows. The first row keeps its lead; the rest hang under it. Fenced rows and rows without a pipe end a table.
+fn md_tables(
+    lines: &[&str],
+    linked: impl Fn(usize) -> bool,
+    width: impl Fn(usize) -> usize,
+) -> HashMap<usize, (usize, Vec<String>)> {
+    let mut out = HashMap::new();
+    let mut fenced = false;
+    let mut i = 0;
+    while i < lines.len() {
+        let text = table_text(lines[i], true).2;
+        let opens = text.trim_start().starts_with("```");
+        let table = (!fenced && !opens && linked(i) && text.contains('|'))
+            .then(|| md_table_at(lines, i, &linked, &width))
+            .flatten();
+        if let Some(table) = table {
+            i += table.0;
+            out.insert(i - table.0, table);
+            continue;
+        }
+        if opens {
+            fenced = !fenced;
+        }
+        i += 1;
+    }
+    out
+}
+
+// A row's table text: where it starts (after the lead and any style reset that follows it), its hang, and the text
+// itself without trailing style resets (the user echo ends in one). Otherwise the lead's "ESC[39m" would put an empty
+// cell before the first pipe, and the trailing reset would break the delimiter row.
+fn table_text(line: &str, linked: bool) -> (usize, usize, &str) {
+    let (mut at, hang) = hang_split(line, linked);
+    while let Some(n) = render::csi_len(line.as_bytes(), at) {
+        at += n;
+    }
+    let mut end = line.len();
+    while let Some(start) = line[at..end].rfind("\x1b[").map(|s| s + at) {
+        if render::csi_len(line.as_bytes(), start) != Some(end - start) {
+            break;
+        }
+        end = start;
+    }
+    (at, hang, &line[at..end])
+}
+
+// The table starting at row `i`, or None when the rows from `i` are not one.
+fn md_table_at(
+    lines: &[&str],
+    i: usize,
+    linked: &impl Fn(usize) -> bool,
+    width: &impl Fn(usize) -> usize,
+) -> Option<(usize, Vec<String>)> {
+    let mut texts = Vec::new();
+    let mut head = "";
+    let mut hang = 0;
+    for (j, line) in lines.iter().enumerate().skip(i) {
+        if !linked(j) {
+            break;
+        }
+        let (at, h, text) = table_text(line, true);
+        if text.trim_start().starts_with("```") || !text.contains('|') {
+            break;
+        }
+        if j == i {
+            head = &line[..at];
+            hang = h;
+        }
+        texts.push(text);
+    }
+    let w = width(i);
+    if texts.len() < 2 || w < hang + 4 {
+        return None;
+    }
+    let rows = render::md_table(&texts, w - hang)?;
+    let drawn = rows
+        .iter()
+        .enumerate()
+        .map(|(k, l)| {
+            let pre = if k == 0 {
+                head.to_string()
+            } else {
+                " ".repeat(hang)
+            };
+            render::wrap_linked(&format!("{pre}{l}"), |s| s.to_string())
+        })
+        .collect();
+    Some((texts.len(), drawn))
 }
 
 // Cache key of one transcript row: its text, the width it wraps at and whether its links are styled.
@@ -3278,6 +3427,10 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         cfg.rotate_threshold,
         cfg.resume.is_some(),
     );
+    let killed_sid = cfg
+        .handoff_path
+        .as_deref()
+        .and_then(handoff::killed_main_session);
     let start_mode = cfg.perm_mode;
     let (engine, rx) = Engine::try_start(cfg).unwrap_or_else(|e| start_failed(&e));
     let _guard = TermGuard::enter()?;
@@ -3303,6 +3456,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         app.note(mode);
     }
     app.session_mode = session_mode;
+    app.killed_sid = killed_sid;
     if let Ok(cwd) = std::env::current_dir() {
         app.editor.load_history(&cwd);
     }
@@ -5448,6 +5602,74 @@ mod tests {
                 |r| render::strip_sgr(r).contains("exampl") && r.contains(render::LINK_URL_ON)
             )
         );
+    }
+
+    // A markdown table in assistant text is drawn whole, its link keeps the link color, and rows after it stay in place.
+    #[test]
+    fn assistant_table_draws_whole_with_link_style() {
+        let mut app = app_with_lines(0);
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "intro\n| 항목 | 링크 |\n|---|---|\n| a | https://a.io |\nafter\n".to_string(),
+        });
+        let rows = app.body(40);
+        let plain: Vec<String> = rows.iter().map(|r| render::strip_sgr(r)).collect();
+        let top = plain
+            .iter()
+            .position(|r| r.contains("│ 항목"))
+            .expect("table header");
+        assert!(plain[top + 1].contains('├'), "{plain:?}");
+        assert!(plain[top + 2].contains("│ a"), "{plain:?}");
+        assert!(plain[top + 3].contains("after"), "{plain:?}");
+        assert!(plain[top - 1].contains("intro"), "{plain:?}");
+        assert!(
+            rows.iter().any(|r| r.contains(render::LINK_COLOR_ON)
+                && render::strip_sgr(r).contains("https://a.io")),
+            "{rows:?}"
+        );
+    }
+
+    // The live path: the model streams the table as deltas, its first row shares the "● " lead, and the block ends
+    // with MessageDone. The user's pasted table is echoed as grey "> " rows. Both draw whole at 60 and 120 cols.
+    #[test]
+    fn live_table_after_lead_and_pasted_echo_draw_whole() {
+        for width in [60usize, 120] {
+            let mut app = app_with_lines(0);
+            for chunk in [
+                "| 이름 | 설명 | 코드 |\n|---|---|---|\n",
+                "| 사과 | 과일입니다 | `a\\|b` |\n",
+                "| banana | 노란 과일입니다 | `x\\|y` |\n",
+            ] {
+                app.apply(UiEvent::TextDelta {
+                    role: Role::Main,
+                    text: chunk.to_string(),
+                });
+            }
+            app.apply(UiEvent::MessageDone { role: Role::Main });
+            app.echo_prompt("| a | b |\n|---|---|\n| 1 | 2 |");
+            let plain: Vec<String> = app
+                .body(width)
+                .iter()
+                .map(|r| render::strip_sgr(r))
+                .collect();
+            assert!(
+                plain.iter().all(|r| !r.contains("|---|")),
+                "width {width}: {plain:?}"
+            );
+            let head = plain
+                .iter()
+                .position(|r| r.starts_with("● │ 이름"))
+                .expect("assistant table header under the lead");
+            assert!(plain[head + 1].starts_with("  ├"), "{plain:?}");
+            assert!(plain[head + 2].contains("│ 사과"), "{plain:?}");
+            assert!(plain[head + 2].contains("`a|b`"), "{plain:?}");
+            let echo = plain
+                .iter()
+                .position(|r| r.starts_with("> │ a"))
+                .expect("pasted table drawn under the prompt lead");
+            assert!(plain[echo + 1].starts_with("  ├"), "{plain:?}");
+            assert!(plain[echo + 2].starts_with("  │ 1"), "{plain:?}");
+        }
     }
 
     #[test]
