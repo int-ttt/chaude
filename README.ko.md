@@ -26,6 +26,10 @@ Claude Code를 채팅 형식의 프롬프트로 쓸 수 있고, 반복 작업은
 - Bash 훅 `bash-py-guard.py`는 인라인 Python이나 node로 하는 파일 편집(`open(..., 'w')`, `write_text`, `fs.writeFile*`)을 거부합니다. 읽기 전용 코드와 `python3 -m pytest`는 그대로 허용합니다 (0.11.4).
 - Windows에서는 가드 훅이 `python3`이 아니라 `py -3`(또는 `python`)으로 실행됩니다. Microsoft Store의 `python3` 스텁 때문에 가드가 열린 상태(fail open)가 되었기 때문입니다 (0.11.7). 기존 프로젝트에는 다시 적용하세요. `.claude/settings.json`의 `python3`을 `py -3` 또는 `python`으로 바꾸거나, `chaude gen-settings windows --out .claude/settings.json`으로 다시 만드세요.
 - 세션(메인, prompter, TUI, 기본 coder, 추가 coder)은 1시간 동안 쉬어야 유휴 만료됩니다. 일반 에이전트는 메인 안에서 실행되며 자체 유휴 제한이 없습니다.
+- `/lang`으로 화면 언어를 영어와 한국어 사이에서 바꿉니다. 언어 설정은 훅 메시지와 하위 에이전트 인자에도 적용됩니다.
+- `chaude doctor`와 `/doctor`는 구버전 바이너리(0.12.0 미만), PATH 순서, 설치본 잠금(macOS uchg), 훅 연결, Claude 로그인, `target/` 크기를 점검합니다. 각 항목은 OK, WARN, FAIL 중 하나와 조치 안내를 보여 줍니다.
+- `.chaude/settings.json`의 `agent_wait`(기본값 `true`): 메인 답변은 실행 중인 Agent/Task 호출이 끝날 때까지 기다린 뒤 끝납니다.
+- 에이전트 응답은 큐에 쌓이고 Tasks 목록에 표시됩니다.
 
 ## 작동 방식
 
@@ -74,7 +78,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.2 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.3 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -180,6 +184,7 @@ chaude
 | `chaude search-history "<검색어>"` | 입력 기록 검색 |
 | `chaude gen-settings mac\|linux\|windows [--out FILE]` | OS에 맞는 `.claude/settings.json`을 만듭니다 |
 | `chaude clean [dir] [--yes]` | 프로젝트에서 하네스를 제거합니다. 기본은 dry-run입니다. `--yes`는 백업한 뒤 제거합니다 |
+| `chaude doctor` | 설치, PATH 순서, 훅 연결, Claude 로그인, `target/` 크기를 점검합니다. OK, WARN, FAIL과 조치 안내를 보여 줍니다 |
 | `chaude update` | 새 릴리스를 확인하고 이 바이너리를 교체합니다 |
 | `chaude --version` | 버전 출력 |
 

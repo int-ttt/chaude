@@ -26,6 +26,10 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 - The Bash hook `bash-py-guard.py` denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `fs.writeFile*`). Read-only code and `python3 -m pytest` stay allowed (0.11.4).
 - On Windows the guard hooks run `py -3` (or `python`), not `python3`, because the Microsoft Store `python3` stub made the guard fail open (0.11.7). Re-apply on an existing project: replace `python3` in `.claude/settings.json` with `py -3` or `python`, or regenerate it with `chaude gen-settings windows --out .claude/settings.json`.
 - Sessions (main, prompter, TUI, base coder, extra coders) wait 1 hour before idle expiry. Regular agents run inside main and have no idle limit of their own.
+- `/lang` switches the screen between English and Korean. The language also applies to hook messages and child agent arguments.
+- `chaude doctor` and `/doctor` check old binaries (below 0.12.0), PATH order, the install lock (macOS uchg), hook wiring, Claude login, and `target/` size. Each check prints OK, WARN, or FAIL with a fix hint.
+- `agent_wait` in `.chaude/settings.json` (default `true`): a main reply waits for its running Agent/Task calls before it finishes.
+- Agent replies are queued and shown in a Tasks list.
 
 ## How it works
 
@@ -74,7 +78,7 @@ An older install at `/usr/local/bin/chaude` is not removed by the installer. If 
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.2 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.3 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -180,6 +184,7 @@ While an answer is running, only `/usage`, `/version`, `/help`, `/status`, `/mod
 | `chaude search-history "<terms>"` | Search prompt history |
 | `chaude gen-settings mac\|linux\|windows [--out FILE]` | Write a `.claude/settings.json` for an OS |
 | `chaude clean [dir] [--yes]` | Remove the harness from a project. Dry run by default. `--yes` backs up and removes |
+| `chaude doctor` | Check the install, PATH order, hook wiring, Claude login, and `target/` size. Prints OK, WARN, or FAIL with a fix hint |
 | `chaude update` | Check for a newer release and replace this binary |
 | `chaude --version` | Print the version |
 
