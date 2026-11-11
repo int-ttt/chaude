@@ -435,12 +435,21 @@ mod tests {
         let got: Value = serde_json::from_str(&fs::read_to_string(cfg.path()).unwrap()).unwrap();
         let args = &got["mcpServers"]["chaude"]["args"];
         let addr = args[1].as_str().expect("addr");
-        assert!(Path::new(addr).is_absolute());
-        assert!(addr.len() < SUN_PATH_MAX, "{} bytes: {addr}", addr.len());
-        assert!(Path::new(addr).exists(), "socket file: {addr}");
-        let sock_dir = Path::new(addr).parent().expect("sock dir").to_path_buf();
-        drop(cfg);
-        assert!(!sock_dir.exists(), "{}", sock_dir.display());
+        #[cfg(unix)]
+        {
+            assert!(Path::new(addr).is_absolute());
+            assert!(addr.len() < SUN_PATH_MAX, "{} bytes: {addr}", addr.len());
+            assert!(Path::new(addr).exists(), "socket file: {addr}");
+            let sock_dir = Path::new(addr).parent().expect("sock dir").to_path_buf();
+            drop(cfg);
+            assert!(!sock_dir.exists(), "{}", sock_dir.display());
+        }
+        // Windows serves loopback TCP (see serve), so addr is "tcp:127.0.0.1:<port>" and no socket file exists.
+        #[cfg(not(unix))]
+        {
+            assert!(addr.starts_with("tcp:127.0.0.1:"), "{addr}");
+            drop(cfg);
+        }
     }
 
     #[test]
