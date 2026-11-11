@@ -93,6 +93,41 @@ pub struct CoderContext {
     pub limit: u64,
 }
 
+// Settled state of a main Agent/Task call the reply waits for (UiEvent::TaskResolved).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskStatus {
+    Running,
+    Done,
+    Failed,
+    Timeout,
+}
+
+// A main Agent/Task call the reply waits for. Running entries form the turn's pending set.
+struct QueuedTask {
+    id: String,
+    desc: String,
+    status: TaskStatus,
+    since: Instant,
+}
+
+fn task_status_name(s: TaskStatus) -> &'static str {
+    match s {
+        TaskStatus::Running => "running",
+        TaskStatus::Done => "done",
+        TaskStatus::Failed => "failed",
+        TaskStatus::Timeout => "timeout",
+    }
+}
+
+fn task_status_from_name(s: &str) -> TaskStatus {
+    match s {
+        "done" => TaskStatus::Done,
+        "failed" => TaskStatus::Failed,
+        "timeout" => TaskStatus::Timeout,
+        _ => TaskStatus::Running,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum UiEvent {
@@ -160,6 +195,23 @@ pub enum UiEvent {
     TurnEnd {
         duration_ms: u64,
     },
+    // A main Agent/Task call is queued: the reply waits for it until TaskResolved settles it.
+    TaskQueued {
+        id: String,
+        desc: String,
+    },
+    // A queued task settles. Running only acknowledges an async launch: the task stays pending until it ends.
+    // cancel_wait settles the still-running tasks as Timeout.
+    TaskResolved {
+        id: String,
+        status: TaskStatus,
+    },
+    // Main's turn ended with pending tasks: the final text is held and no TurnEnd is sent yet.
+    ReplyHeld {
+        pending: usize,
+    },
+    // The held reply is released: every task settled, and one continuation input went to main.
+    ReplyReleased,
     Rotated {
         reason: String,
     },
@@ -397,6 +449,11 @@ pub struct Config {
     // How long an agent whose completion arrived while its owned background task still runs stays open. The
     // agent ends at once when the owned task finishes, or at this grace when it never reports.
     pub agent_end_grace: Duration,
+    // How long a queued main Agent/Task call may stay pending before it settles as Timeout (its reply then releases).
+    pub agent_wait_timeout: Duration,
+    // Chaude setting agent_wait (.chaude/settings.json): when false, a main turn ends at once even while its
+    // Agent/Task calls run (no ReplyHeld). True holds the reply until every queued task settles.
+    pub agent_wait: bool,
     // Go --rotate-cooldown: after a held rotation, no automatic context rotation for this long.
     pub rotate_cooldown: Duration,
     // Go --no-category-rotate: disable category-based session rotation. No engine effect yet.
@@ -490,6 +547,8 @@ impl Default for Config {
             max_drain: 3,
             drain_timeout: Duration::from_secs(60 * 60),
             agent_end_grace: Duration::from_secs(60),
+            agent_wait_timeout: Duration::from_secs(1800),
+            agent_wait: true,
             rotate_cooldown: Duration::from_secs(2 * 60),
             no_category_rotate: false,
             no_delegation_rule: false,
@@ -501,6 +560,8 @@ impl Default for Config {
 
 enum Cmd {
     Submit(String),
+    // Abandons the queued-task wait of a held reply (cancel_wait).
+    CancelWait,
     // Go runResidentCoder: one task for an idle coder. The reply comes back as UiEvent::CoderReply.
     Coder(String),
     // Go residentMCPConfig: the MCP tool call waits here for the coder's summary (Err = reason).
@@ -599,6 +660,11 @@ impl EngineHandle {
         let _ = self.tx.send(Input::Cmd(Cmd::Usage));
     }
 
+    // Abandons the wait of a held reply: the held text goes through the usual end of turn now.
+    pub fn cancel_wait(&self) {
+        let _ = self.tx.send(Input::Cmd(Cmd::CancelWait));
+    }
+
     // Stops the child and joins the actor thread.
     pub fn shutdown(mut self) {
         let _ = self.tx.send(Input::Cmd(Cmd::Shutdown));
@@ -690,6 +756,15 @@ struct State {
     agent_task_ids: HashMap<String, String>,
     // Agent tool ids whose completion arrived while an owned task still ran, and when (ends at agent_end_grace).
     pending_end: HashMap<String, Instant>,
+    // Main Agent/Task calls of the current task list (the pending ones are Running).
+    queued_tasks: Vec<QueuedTask>,
+    // A held turn: its final text and duration. Set by hold_reply; cleared by release_held or cancel_wait.
+    held: Option<(String, u64)>,
+    // A child-initiated turn (a background hand-back) runs while a reply is held: its text is not a reply, and the
+    // release waits for its Result, since a continuation written mid-turn would start a second reply.
+    held_turn: bool,
+    // The next send_turn is a release continuation: it keeps the task list.
+    continuation: bool,
     // Set once a system task_started arrives: the reply-ends-oldest-agent fallback (idle_result) is then off.
     seen_task_started: bool,
     // Restored agents still shown (UiEvent::AgentsRestored); the next user line clears them.
@@ -1280,6 +1355,10 @@ fn actor(
         owned_tasks: HashMap::new(),
         agent_task_ids: HashMap::new(),
         pending_end: HashMap::new(),
+        queued_tasks: Vec::new(),
+        held: None,
+        held_turn: false,
+        continuation: false,
         seen_task_started: false,
         restored_rows: Vec::new(),
         picked_row: None,
@@ -1401,6 +1480,7 @@ fn actor(
             Input::Cmd(Cmd::Import(imp)) => st.install_import(*imp),
             Input::Cmd(Cmd::Permission { id, allow }) => st.answer_permission(&id, allow),
             Input::Cmd(Cmd::Usage) => st.usage(),
+            Input::Cmd(Cmd::CancelWait) => st.cancel_wait(),
             Input::Proc(epoch, msg) if epoch == st.epoch => match msg {
                 ProcMsg::Line(line) => st.on_line(&line),
                 ProcMsg::Eof => st.on_eof(),
@@ -1555,6 +1635,25 @@ impl State {
                 return;
             }
             self.model_switch(model.to_string());
+            return;
+        }
+        // /lang CODE (TUI and plain /lang, after the setting is saved and the process language set): a handoff so the
+        // fresh main child starts with the new --settings language. Busy: the saved language applies at the next rotation.
+        if let Some(code) = cmd.strip_prefix("/lang ").map(str::trim)
+            && !code.is_empty()
+        {
+            if self.busy || self.prompter.waiting() {
+                self.emit(UiEvent::Error(
+                    "language saved; the running session switches on the next /rotate".to_string(),
+                ));
+                return;
+            }
+            self.busy = true;
+            self.emit(UiEvent::Busy(true));
+            if !self.start_handoff(format!("lang {code}")) {
+                self.busy = false;
+                self.emit(UiEvent::Busy(false));
+            }
             return;
         }
         if self.busy || self.prompter.waiting() {
@@ -1944,7 +2043,9 @@ impl State {
         self.tui_deadline = Some(Instant::now() + self.cfg.tui_timeout);
         self.resident_busy("tui", true, &reply);
         let wrote = match self.tui_proc.as_mut() {
-            Some(p) => p.write_user(&tui_prompt(&reply)).map_err(|e| e.to_string()),
+            Some(p) => p
+                .write_user(&tui_prompt(&reply, crate::i18n::current()))
+                .map_err(|e| e.to_string()),
             None => Err("tui not running".to_string()),
         };
         if let Err(e) = wrote {
@@ -2491,6 +2592,11 @@ impl State {
 
     // Writes one user frame and starts the turn clock. Returns false if the write failed.
     fn send_turn(&mut self, text: &str) -> bool {
+        // A release continuation keeps the task list; any other prompt starts a fresh one.
+        if !std::mem::take(&mut self.continuation) && !self.queued_tasks.is_empty() {
+            self.queued_tasks.clear();
+            self.persist_tasks();
+        }
         // Go handle/runTurn: each prompt starts a fresh ledger, and is refused when its next call would exceed the cap.
         if let Some(b) = self.budget.as_mut() {
             b.reset();
@@ -2581,6 +2687,11 @@ impl State {
     }
 
     fn interrupt(&mut self, src: InterruptSource) {
+        // A held reply has no child turn to interrupt: the interrupt ends the wait and the held turn ends.
+        if self.held.is_some() {
+            self.cancel_wait();
+            return;
+        }
         let busy = self.busy;
         let mut sent = false;
         // While the tui translates, the main child is idle: there is nothing to interrupt.
@@ -2700,6 +2811,9 @@ impl State {
                     Some(id) => Role::Agent(id),
                     None => Role::Main,
                 };
+                if matches!(role, Role::Main) {
+                    self.note_held_turn();
+                }
                 match w.event {
                     StreamInner::ContentBlockDelta {
                         delta: Delta::TextDelta { text },
@@ -2745,6 +2859,7 @@ impl State {
                     self.note_agent_activity(pid);
                     return;
                 }
+                self.note_held_turn();
                 if !self.busy {
                     self.idle_started();
                 }
@@ -2771,6 +2886,7 @@ impl State {
                     self.note_agent_activity(pid);
                     return;
                 }
+                self.note_held_turn();
                 if let Some(Content::Text(text)) = &env.message.content {
                     self.on_user_notice(text);
                 }
@@ -2981,6 +3097,7 @@ impl State {
             }
             self.agents.insert(id.clone(), Instant::now());
             self.agent_labels.insert(id.clone(), description.clone());
+            self.queue_task(id.clone(), description.clone());
             let started_at = now_secs();
             self.agent_info.insert(
                 id.clone(),
@@ -3141,6 +3258,7 @@ impl State {
             if let Some(info) = self.agent_info.get_mut(&id) {
                 info.background = true;
             }
+            self.settle_task(&id, TaskStatus::Running);
             self.emit_tool_result(id.clone(), text);
             self.emit(UiEvent::AgentBackground { id });
             self.emit_agent_rows();
@@ -3375,6 +3493,15 @@ impl State {
     }
 
     fn finish_agent(&mut self, id: String) {
+        let failed = self.agent_info.get(&id).is_some_and(|i| i.failed);
+        self.settle_task(
+            &id,
+            if failed {
+                TaskStatus::Failed
+            } else {
+                TaskStatus::Done
+            },
+        );
         self.pending_end.remove(&id);
         self.owned_tasks.retain(|_, parent| *parent != id);
         self.agent_task_ids.retain(|_, tool| *tool != id);
@@ -3494,9 +3621,16 @@ impl State {
         if self.drains.iter().any(|d| d.started.contains(&id)) {
             self.settle_drained(&id, true);
         } else {
+            // A report of a task that already timed out is not a new reply: its notice waits for the next prompt.
+            let late = self
+                .queued_tasks
+                .iter()
+                .any(|t| t.id == id && t.status == TaskStatus::Timeout);
             self.queue_main_notice(&id);
             self.finish_agent(id);
-            self.send_notice_turn();
+            if !late {
+                self.send_notice_turn();
+            }
         }
     }
 
@@ -3670,7 +3804,7 @@ impl State {
             .map(|d| self.cfg.drain_timeout.saturating_sub(d.since.elapsed()))
             .min();
         // A pending agent end wakes at its grace.
-        let own = [coders, drains, self.pending_end_left()]
+        let own = [coders, drains, self.pending_end_left(), self.task_left()]
             .into_iter()
             .flatten()
             .min()
@@ -3717,6 +3851,7 @@ impl State {
     fn on_quiet(&mut self) {
         self.reap_drains();
         self.expire_pending_ends();
+        self.expire_tasks();
         if self.prompter_left().is_some_and(|d| d.is_zero()) {
             self.prompter_timeout();
         }
@@ -3822,6 +3957,186 @@ impl State {
 
     // Go recordProjectName: the cwd is absolute (os.Getwd when unset). A "." fallback would name the
     // record folder "misc" and key /clear marks differently from the absolute cwd /resume reads.
+    // Pending main Agent/Task calls: the reply is held while any runs.
+    fn running_tasks(&self) -> usize {
+        self.queued_tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Running)
+            .count()
+    }
+
+    // Registers a main Agent/Task call (on_tool_use). Its settle comes from its result, hand-back, notice or timeout.
+    fn queue_task(&mut self, id: String, desc: String) {
+        if self.queued_tasks.iter().any(|t| t.id == id) {
+            return;
+        }
+        self.queued_tasks.push(QueuedTask {
+            id: id.clone(),
+            desc: desc.clone(),
+            status: TaskStatus::Running,
+            since: Instant::now(),
+        });
+        self.emit(UiEvent::TaskQueued { id, desc });
+        self.persist_tasks();
+    }
+
+    // Settles a queued task. Running only acknowledges an async launch and keeps the task pending.
+    fn settle_task(&mut self, id: &str, status: TaskStatus) {
+        let Some(t) = self.queued_tasks.iter_mut().find(|t| t.id == id) else {
+            return;
+        };
+        if t.status != TaskStatus::Running {
+            return;
+        }
+        if status != TaskStatus::Running {
+            t.status = status;
+            self.persist_tasks();
+        }
+        self.emit(UiEvent::TaskResolved {
+            id: id.to_string(),
+            status,
+        });
+        self.release_held();
+    }
+
+    // Main output while a reply is held means a child-initiated turn started (its own hand-back notice).
+    fn note_held_turn(&mut self) {
+        if self.held.is_some() {
+            self.held_turn = true;
+        }
+    }
+
+    // Ends the hold once no queued task runs: one continuation input carries the results to main.
+    // A child turn still running defers the release to its end (end_turn), so no input goes in mid-turn.
+    fn release_held(&mut self) {
+        if self.held.is_none() || self.running_tasks() > 0 || self.held_turn {
+            return;
+        }
+        self.held = None;
+        self.emit(UiEvent::ReplyReleased);
+        let rows: Vec<String> = self
+            .queued_tasks
+            .iter()
+            .map(|t| format!("- {} ({}): {}", t.id, t.desc, task_status_name(t.status)))
+            .collect();
+        let text = format!(
+            "The background agents you started have settled:\n{}\nContinue with the reply to the user.",
+            rows.join("\n")
+        );
+        self.continuation = true;
+        if !self.send_turn(&text) {
+            self.busy = false;
+            self.emit(UiEvent::Busy(false));
+        }
+    }
+
+    // Main's turn ended with queued tasks still running: its final text is held (ReplyHeld), no TurnEnd yet.
+    fn hold_reply(&mut self, duration_ms: u64) -> bool {
+        let pending = self.running_tasks();
+        if !self.cfg.agent_wait
+            || pending == 0
+            || self.interrupted_at.is_some()
+            || self.budget_hit
+            || self.handoff.is_some()
+        {
+            return false;
+        }
+        self.held = Some((self.turn_reply.clone(), duration_ms));
+        self.emit(UiEvent::ReplyHeld { pending });
+        true
+    }
+
+    // Abandons the wait of a held reply: the running tasks settle as Timeout, then the held text ends the turn.
+    fn cancel_wait(&mut self) {
+        let Some((reply, duration_ms)) = self.held.take() else {
+            return;
+        };
+        // The held text is the reply; text of a child turn that ran during the hold is not.
+        self.turn_reply = reply;
+        self.held_turn = false;
+        let ids: Vec<String> = self
+            .queued_tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Running)
+            .map(|t| t.id.clone())
+            .collect();
+        for id in ids {
+            self.settle_task(&id, TaskStatus::Timeout);
+        }
+        self.finish_turn(duration_ms);
+    }
+
+    // Per-task wait: a queued task still running past agent_wait_timeout settles as Timeout.
+    fn expire_tasks(&mut self) {
+        let limit = self.cfg.agent_wait_timeout;
+        let late: Vec<String> = self
+            .queued_tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Running && t.since.elapsed() >= limit)
+            .map(|t| t.id.clone())
+            .collect();
+        for id in late {
+            self.settle_task(&id, TaskStatus::Timeout);
+        }
+    }
+
+    // Time until the nearest queued task times out (wakes on_quiet).
+    fn task_left(&self) -> Option<Duration> {
+        let limit = self.cfg.agent_wait_timeout;
+        self.queued_tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Running)
+            .map(|t| limit.saturating_sub(t.since.elapsed()))
+            .min()
+    }
+
+    // The task list of this session: notes/tmp/long/tasks-<session>.json, read back on /resume.
+    fn persist_tasks(&self) {
+        if self.sid.is_empty() {
+            return;
+        }
+        let dir = crate::tmp_layout::long_dir(&self.engine_cwd());
+        let rows: Vec<Value> = self
+            .queued_tasks
+            .iter()
+            .map(|t| json!({"id": t.id, "desc": t.desc, "status": task_status_name(t.status)}))
+            .collect();
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(
+            dir.join(format!("tasks-{}.json", self.sid)),
+            Value::Array(rows).to_string(),
+        );
+    }
+
+    // /resume: the saved task list is shown again. Restored rows are display only, never pending.
+    fn load_tasks(&mut self, sid: &str) {
+        if sid.is_empty()
+            || sid
+                .chars()
+                .any(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        {
+            return;
+        }
+        let path =
+            crate::tmp_layout::long_dir(&self.engine_cwd()).join(format!("tasks-{sid}.json"));
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(Value::Array(rows)) = serde_json::from_str::<Value>(&text) else {
+            return;
+        };
+        for r in rows {
+            let id = r["id"].as_str().unwrap_or_default().to_string();
+            let desc = r["desc"].as_str().unwrap_or_default().to_string();
+            let status = task_status_from_name(r["status"].as_str().unwrap_or_default());
+            self.emit(UiEvent::TaskQueued {
+                id: id.clone(),
+                desc,
+            });
+            self.emit(UiEvent::TaskResolved { id, status });
+        }
+    }
+
     fn engine_cwd(&self) -> PathBuf {
         resolve_cwd(self.opts.cwd.clone())
     }
@@ -3898,12 +4213,27 @@ impl State {
             self.finish_handoff();
             return;
         }
+        // A child-initiated turn ended while the reply is held: its text is dropped, the hold goes on, and a release
+        // deferred by this turn goes out now (the child is idle again).
+        if self.held.is_some() {
+            self.held_turn = false;
+            self.release_held();
+            return;
+        }
         if self.interrupted_at.is_some() {
             self.emit(UiEvent::Interrupted);
         }
         if self.budget_hit {
             self.emit_budget_stop();
         }
+        if self.hold_reply(duration_ms) {
+            return;
+        }
+        self.finish_turn(duration_ms);
+    }
+
+    // The turn's end: stats, record and TurnEnd, then the tui answer or the next turn.
+    fn finish_turn(&mut self, duration_ms: u64) {
         self.emit(UiEvent::TurnStats {
             duration_ms,
             cost_turn_usd: (self.cost_usd - self.turn_cost_base).max(0.0),
@@ -4078,8 +4408,10 @@ impl State {
     }
 
     // A held rotation may run now: still wanted, and no background agent runs or the defer timeout passed.
+    // A held reply defers it too: the rotation waits for ReplyReleased.
     fn deferred_due(&self) -> bool {
-        self.rotate_deferred.pending()
+        self.held.is_none()
+            && self.rotate_deferred.pending()
             && self.rotation_wanted()
             && self.rotate_deferred.is_due(
                 self.agents.len(),
@@ -4671,10 +5003,12 @@ impl State {
         self.interrupted_at = None;
         self.stray_results = 0;
         self.pending_perm.clear();
+        self.queued_tasks.clear();
         self.sid.clear();
         self.ctx_tokens = 0;
         self.last_api = None;
         self.opts.resume = Some(session_id.to_string());
+        self.load_tasks(session_id);
         let _ = self.start_child();
         self.emit(UiEvent::SessionResumed {
             old_session: old,
@@ -5874,6 +6208,453 @@ done
                 .iter()
                 .any(|e| matches!(e, UiEvent::TextDelta { role: Role::Main, text } if text.contains("final"))),
             "final reply shown before the tui answer: {evs:?}"
+        );
+    }
+
+    // Engine whose main child replays turn one (an Agent call with the given result, then a final reply) and turn two
+    // (the continuation) on the next prompt. Roles by argv as in the pretool test.
+    #[cfg(unix)]
+    fn agent_queue_engine(
+        dir: &TempDir,
+        agent_wait: bool,
+        wait: Duration,
+        result: &str,
+        is_error: bool,
+    ) -> (EngineHandle, Receiver<UiEvent>) {
+        agent_queue_engine_with(dir, agent_wait, wait, result, is_error, None, "")
+    }
+
+    // extra: a child-initiated turn (file content, delay in seconds) that the main child writes on its own after turn one.
+    #[cfg(unix)]
+    fn agent_queue_engine_with(
+        dir: &TempDir,
+        agent_wait: bool,
+        wait: Duration,
+        result: &str,
+        is_error: bool,
+        extra: Option<(&str, &str)>,
+        inline: &str,
+    ) -> (EngineHandle, Receiver<UiEvent>) {
+        use std::os::unix::fs::PermissionsExt;
+        let turn1 = r#"{"type":"system","subtype":"init","session_id":"s1"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"waiting"}},"session_id":"s1","parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"session_id":"s1","parent_tool_use_id":null}
+{"type":"assistant","message":{"content":[{"type":"text","text":"waiting"},{"type":"tool_use","id":"toolu_a","name":"Agent","input":{"description":"scout","prompt":"look"}}]},"session_id":"s1","parent_tool_use_id":null}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_a","content":"RESULT","is_error":IS_ERROR}]},"session_id":"s1","parent_tool_use_id":null}
+INLINE{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"first final"}},"session_id":"s1","parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"session_id":"s1","parent_tool_use_id":null}
+{"type":"assistant","message":{"content":[{"type":"text","text":"first final"}]},"session_id":"s1","parent_tool_use_id":null}
+{"type":"result","session_id":"s1","result":"first final"}
+"#
+        .replace("RESULT", result)
+        .replace("IS_ERROR", if is_error { "true" } else { "false" })
+        .replace("INLINE", inline);
+        let turn2 = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"all done"}},"session_id":"s1","parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"session_id":"s1","parent_tool_use_id":null}
+{"type":"assistant","message":{"content":[{"type":"text","text":"all done"}]},"session_id":"s1","parent_tool_use_id":null}
+{"type":"result","session_id":"s1","result":"all done"}
+"#;
+        let t1 = dir.path().join("turn1.jsonl");
+        let t2 = dir.path().join("turn2.jsonl");
+        std::fs::write(&t1, turn1).expect("write turn 1");
+        std::fs::write(&t2, turn2).expect("write turn 2");
+        let extra_cmd = match extra {
+            Some((body, delay)) => {
+                let t3 = dir.path().join("extra.jsonl");
+                std::fs::write(&t3, body).expect("write extra turn");
+                format!("(sleep {delay}; cat '{}') &", t3.display())
+            }
+            None => String::new(),
+        };
+        let script = r#"#!/bin/sh
+case "$*" in
+  *--mcp-config*) ROLE=main ;;
+  *"input summarizer"*) ROLE=prompter ;;
+  *) ROLE=tui ;;
+esac
+N=0
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"user"'*)
+      if [ "$ROLE" = main ]; then
+        N=$((N+1))
+        if [ "$N" -eq 1 ]; then cat 'TURN1'; EXTRA_CMD else cat 'TURN2'; fi
+      else
+        printf '%s\n' '{"type":"result","session_id":"s-'"$ROLE"'","result":"ok"}'
+      fi
+      ;;
+  esac
+done
+"#
+        .replace("EXTRA_CMD", &extra_cmd)
+        .replace("TURN1", &t1.display().to_string())
+        .replace("TURN2", &t2.display().to_string());
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, script).expect("write fake claude");
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        let cfg = Config {
+            claude_bin: bin.display().to_string(),
+            model: "haiku".into(),
+            residents: true,
+            record_dir: Some(dir.path().join("record")),
+            cwd: Some(dir.path().to_path_buf()),
+            agent_wait_timeout: wait,
+            agent_wait,
+            ..isolated(dir.path())
+        };
+        let (h, rx) = Engine::try_start(cfg).expect("engine boots");
+        h.submit("hello");
+        (h, rx)
+    }
+
+    // Events up to Busy(false). With cancel set, a held reply is cancelled as soon as it is announced.
+    #[cfg(unix)]
+    fn agent_queue_events(h: &EngineHandle, rx: &Receiver<UiEvent>, cancel: bool) -> Vec<UiEvent> {
+        let mut evs = Vec::new();
+        loop {
+            let ev = rx
+                .recv_timeout(Duration::from_secs(60))
+                .expect("engine went silent");
+            if ev == UiEvent::Busy(false) {
+                break;
+            }
+            if cancel && matches!(ev, UiEvent::ReplyHeld { .. }) {
+                h.cancel_wait();
+            }
+            evs.push(ev);
+        }
+        evs
+    }
+
+    // A background Agent holds the final reply (ReplyHeld, no TurnEnd) until its wait times out; then the timeout
+    // releases one continuation and the reply ends. The task list is saved under the cwd for /resume.
+    #[cfg(unix)]
+    #[test]
+    fn agent_queue_holds_reply_until_timeout_then_releases() {
+        let dir = TempDir::new("agent-queue-timeout");
+        let (h, rx) = agent_queue_engine(
+            &dir,
+            true,
+            Duration::from_secs(1),
+            "Async agent launched. agentId: x1",
+            false,
+        );
+        let evs = agent_queue_events(&h, &rx, false);
+        h.shutdown();
+        let queued = evs
+            .iter()
+            .position(|e| {
+                *e == UiEvent::TaskQueued {
+                    id: "toolu_a".into(),
+                    desc: "scout".into(),
+                }
+            })
+            .expect("task queued");
+        let held = evs
+            .iter()
+            .position(|e| *e == UiEvent::ReplyHeld { pending: 1 })
+            .expect("reply held");
+        let timed = evs
+            .iter()
+            .position(|e| {
+                *e == UiEvent::TaskResolved {
+                    id: "toolu_a".into(),
+                    status: TaskStatus::Timeout,
+                }
+            })
+            .expect("task timed out");
+        let released = evs
+            .iter()
+            .position(|e| *e == UiEvent::ReplyReleased)
+            .expect("reply released");
+        assert!(
+            queued < held && held < timed && timed < released,
+            "order: {evs:?}"
+        );
+        assert!(
+            !evs[..released]
+                .iter()
+                .any(|e| matches!(e, UiEvent::TuiAnswer { .. } | UiEvent::TurnEnd { .. })),
+            "held turn ended early: {evs:?}"
+        );
+        assert!(
+            evs[released..]
+                .iter()
+                .any(|e| matches!(e, UiEvent::TurnEnd { .. })),
+            "continuation did not end: {evs:?}"
+        );
+        let saved =
+            std::fs::read_to_string(crate::tmp_layout::long_dir(dir.path()).join("tasks-s1.json"))
+                .expect("task list saved");
+        assert!(
+            saved.contains("toolu_a") && saved.contains("timeout"),
+            "{saved}"
+        );
+    }
+
+    // A foreground Agent that fails settles as Failed in its own turn: no hold, the turn ends normally.
+    #[cfg(unix)]
+    #[test]
+    fn agent_queue_failed_agent_settles_without_hold() {
+        let dir = TempDir::new("agent-queue-failure");
+        let (h, rx) =
+            agent_queue_engine(&dir, true, Duration::from_secs(600), "agent crashed", true);
+        let evs = agent_queue_events(&h, &rx, false);
+        h.shutdown();
+        assert!(
+            evs.contains(&UiEvent::TaskResolved {
+                id: "toolu_a".into(),
+                status: TaskStatus::Failed,
+            }),
+            "{evs:?}"
+        );
+        assert!(
+            !evs.iter().any(|e| matches!(e, UiEvent::ReplyHeld { .. })),
+            "{evs:?}"
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, UiEvent::TurnEnd { .. })),
+            "{evs:?}"
+        );
+    }
+
+    // agent_wait off keeps the old semantics: the turn ends at once while its Agent call runs, with no hold.
+    #[cfg(unix)]
+    #[test]
+    fn agent_queue_agent_wait_off_does_not_hold_reply() {
+        let dir = TempDir::new("agent-queue-wait-off");
+        let (h, rx) = agent_queue_engine(
+            &dir,
+            false,
+            Duration::from_secs(600),
+            "Async agent launched. agentId: x1",
+            false,
+        );
+        let evs = agent_queue_events(&h, &rx, false);
+        h.shutdown();
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, UiEvent::ReplyHeld { .. } | UiEvent::ReplyReleased)),
+            "{evs:?}"
+        );
+        assert!(
+            evs.iter().any(|e| matches!(e, UiEvent::TurnEnd { .. })),
+            "{evs:?}"
+        );
+    }
+
+    // cancel_wait on a held reply settles the running task as Timeout and ends the turn through the usual path.
+    #[cfg(unix)]
+    #[test]
+    fn agent_queue_cancel_wait_ends_held_turn() {
+        let dir = TempDir::new("agent-queue-cancel");
+        let (h, rx) = agent_queue_engine(
+            &dir,
+            true,
+            Duration::from_secs(600),
+            "Async agent launched. agentId: x1",
+            false,
+        );
+        let evs = agent_queue_events(&h, &rx, true);
+        h.shutdown();
+        assert!(evs.contains(&UiEvent::ReplyHeld { pending: 1 }), "{evs:?}");
+        assert!(
+            evs.contains(&UiEvent::TaskResolved {
+                id: "toolu_a".into(),
+                status: TaskStatus::Timeout,
+            }),
+            "{evs:?}"
+        );
+        assert!(!evs.contains(&UiEvent::ReplyReleased), "{evs:?}");
+        assert!(
+            evs.iter().any(|e| matches!(e, UiEvent::TuiAnswer { .. })),
+            "{evs:?}"
+        );
+    }
+
+    // Ends the first main turn with the agent already settled (its completion arrives before the Result): no hold,
+    // and the one reply is shown when the turn ends. A timed run needs the agent to outlive the turn (live run1 was not).
+    #[cfg(unix)]
+    #[test]
+    fn agent_queue_settled_before_result_is_not_held() {
+        let dir = TempDir::new("agent-queue-settled");
+        let inline = "{\"type\":\"user\",\"message\":{\"content\":\"<task-notification><tool-use-id>toolu_a</tool-use-id><status>completed</status></task-notification>\"},\"session_id\":\"s1\",\"parent_tool_use_id\":null}\n";
+        let (h, rx) = agent_queue_engine_with(
+            &dir,
+            true,
+            Duration::from_secs(30),
+            "Async agent launched. agentId: x1",
+            false,
+            None,
+            inline,
+        );
+        let evs = agent_queue_events(&h, &rx, false);
+        h.shutdown();
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, UiEvent::ReplyHeld { .. } | UiEvent::ReplyReleased)),
+            "settled agent was held: {evs:?}"
+        );
+        // The user sees the tui resident's answer to the main text: one prompt, the whole main reply.
+        let shown: Vec<&str> = evs
+            .iter()
+            .filter_map(|e| match e {
+                UiEvent::ResidentBusy {
+                    role,
+                    busy: true,
+                    prompt,
+                    ..
+                } if role.as_str() == "tui" => Some(prompt.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shown, vec!["waitingfirst final"], "events: {evs:?}");
+    }
+
+    // A background hand-back that arrives while the reply is held starts a child turn of its own. Its text is not a
+    // reply, and the release waits for that turn to end, so the continuation is the only reply (no leak, no second).
+    #[cfg(unix)]
+    #[test]
+    fn agent_queue_early_report_while_held_does_not_leak_or_double_reply() {
+        let dir = TempDir::new("agent-queue-early");
+        let early = r#"{"type":"user","message":{"content":"<task-notification><tool-use-id>toolu_a</tool-use-id><status>completed</status></task-notification>"},"session_id":"s1","parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"early report"}},"session_id":"s1","parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"session_id":"s1","parent_tool_use_id":null}
+{"type":"assistant","message":{"content":[{"type":"text","text":"early report"}]},"session_id":"s1","parent_tool_use_id":null}
+{"type":"result","session_id":"s1","result":"early report"}
+"#;
+        let (h, rx) = agent_queue_engine_with(
+            &dir,
+            true,
+            Duration::from_secs(30),
+            "Async agent launched. agentId: x1",
+            false,
+            Some((early, "1")),
+            "",
+        );
+        let evs = agent_queue_events(&h, &rx, false);
+        h.shutdown();
+        let held = evs
+            .iter()
+            .position(|e| *e == UiEvent::ReplyHeld { pending: 1 })
+            .expect("reply held");
+        let released = evs
+            .iter()
+            .position(|e| *e == UiEvent::ReplyReleased)
+            .expect("reply released");
+        assert!(held < released, "order: {evs:?}");
+        // Only the continuation reaches the tui resident; the early report text never does.
+        let shown: Vec<&str> = evs
+            .iter()
+            .filter_map(|e| match e {
+                UiEvent::ResidentBusy {
+                    role,
+                    busy: true,
+                    prompt,
+                    ..
+                } if role.as_str() == "tui" => Some(prompt.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shown, vec!["all done"], "events: {evs:?}");
+        let turn_ended_while_held = evs[..released]
+            .iter()
+            .any(|e| matches!(e, UiEvent::TurnEnd { .. }));
+        assert!(!turn_ended_while_held, "a turn ended while held: {evs:?}");
+    }
+
+    // A report that lands after the wait timed out and the continuation ended is not a new reply: its notice waits
+    // for the next prompt, and no turn starts by itself.
+    #[cfg(unix)]
+    #[test]
+    fn agent_queue_late_report_after_timeout_is_not_a_second_reply() {
+        let dir = TempDir::new("agent-queue-late");
+        let late = r#"{"type":"user","message":{"content":"<task-notification><tool-use-id>toolu_a</tool-use-id><status>completed</status></task-notification>"},"session_id":"s1","parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"late report"}},"session_id":"s1","parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"session_id":"s1","parent_tool_use_id":null}
+{"type":"assistant","message":{"content":[{"type":"text","text":"late report"}]},"session_id":"s1","parent_tool_use_id":null}
+{"type":"result","session_id":"s1","result":"late report"}
+"#;
+        let (h, rx) = agent_queue_engine_with(
+            &dir,
+            true,
+            Duration::from_secs(1),
+            "Async agent launched. agentId: x1",
+            false,
+            Some((late, "4")),
+            "",
+        );
+        let mut evs = agent_queue_events(&h, &rx, false);
+        // Keep listening past the late report: a second reply would show up here.
+        while let Ok(ev) = rx.recv_timeout(Duration::from_secs(6)) {
+            evs.push(ev);
+        }
+        h.shutdown();
+        assert!(
+            evs.iter().any(|e| matches!(e, UiEvent::ReplyReleased)),
+            "not released: {evs:?}"
+        );
+        let shown: Vec<&str> = evs
+            .iter()
+            .filter_map(|e| match e {
+                UiEvent::ResidentBusy {
+                    role,
+                    busy: true,
+                    prompt,
+                    ..
+                } if role.as_str() == "tui" => Some(prompt.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(shown, vec!["all done"], "events: {evs:?}");
+    }
+
+    // /resume reads the session's saved task list back as display rows (TaskQueued + TaskResolved), before SessionResumed.
+    #[cfg(unix)]
+    #[test]
+    fn agent_queue_resume_shows_saved_tasks() {
+        let dir = TempDir::new("agent-queue-resume");
+        let (h, rx) = agent_queue_engine(
+            &dir,
+            true,
+            Duration::from_secs(1),
+            "Async agent launched. agentId: x1",
+            false,
+        );
+        let _ = agent_queue_events(&h, &rx, false);
+        let long = crate::tmp_layout::long_dir(dir.path());
+        std::fs::create_dir_all(&long).expect("long dir");
+        std::fs::write(
+            long.join("tasks-s9.json"),
+            r#"[{"id":"toolu_old","desc":"legacy","status":"done"}]"#,
+        )
+        .expect("write saved tasks");
+        h.resume_session("s9");
+        let mut evs = Vec::new();
+        loop {
+            let ev = rx
+                .recv_timeout(Duration::from_secs(60))
+                .expect("engine went silent");
+            let resumed = matches!(ev, UiEvent::SessionResumed { .. });
+            evs.push(ev);
+            if resumed {
+                break;
+            }
+        }
+        h.shutdown();
+        assert!(
+            evs.contains(&UiEvent::TaskQueued {
+                id: "toolu_old".into(),
+                desc: "legacy".into(),
+            }),
+            "{evs:?}"
+        );
+        assert!(
+            evs.contains(&UiEvent::TaskResolved {
+                id: "toolu_old".into(),
+                status: TaskStatus::Done,
+            }),
+            "{evs:?}"
         );
     }
 

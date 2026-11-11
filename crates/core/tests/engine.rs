@@ -164,6 +164,8 @@ fn config(f: &Fake) -> Config {
         model: "opus".into(),
         // Baseline tests assert the non-resident event stream; stage tests opt in.
         residents: false,
+        // Old semantics: a turn ends at once while its Agent/Task calls run (no ReplyHeld hold).
+        agent_wait: false,
         // Clients and agents state stay in the test dir, never ~/.chaude.
         agents_file: Some(f.dir.join("agents.json")),
         clients_file: Some(f.dir.join("clients.json")),
