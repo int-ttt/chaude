@@ -171,6 +171,8 @@ fn config(f: &Fake) -> Config {
         clients_file: Some(f.dir.join("clients.json")),
         // Record turns land under the test dir, never the repo record/ folder.
         record_dir: Some(f.dir.join("record")),
+        // notes/tmp (tasks, mcp, usage) lands under the test dir, never the process cwd (crates/core).
+        cwd: Some(f.dir.clone()),
         ..Config::default()
     }
 }
@@ -323,7 +325,11 @@ fn child_pid_recorded_on_park() {
     // Mode f routes lines. The router reads CHAUDE_ORCH once, when the engine is built.
     // SAFETY: set before Engine::start and removed after the run; other engine tests are serialized by lock().
     unsafe { std::env::set_var("CHAUDE_ORCH", "f") };
-    let (h, rx) = Engine::start(config(&f));
+    // No cwd option on purpose: the clients key is the process cwd asserted below.
+    let (h, rx) = Engine::start(Config {
+        cwd: None,
+        ..config(&f)
+    });
     h.submit("[ws:a] first");
     until_idle(&rx);
     // SAFETY: see set_var above.

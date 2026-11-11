@@ -73,8 +73,49 @@ fn parse_version(s: &str) -> Option<Version> {
     it.next().is_none().then_some(v)
 }
 
-/// Version from the first marker in `bytes` that is followed by a version; None when the build has no marker.
+/// Version from the marker in `bytes`; a build from before the marker falls back to `usage_version`.
 pub fn version_in_bytes(bytes: &[u8]) -> Option<Version> {
+    marker_version(bytes).or_else(|| usage_version(bytes))
+}
+
+/// Usage text that every chaude build prints. Its version literal sits next to it in the binary.
+const USAGE_ANCHOR: &[u8] = b"usage: chaude";
+const ANCHOR_WINDOW: usize = 256;
+
+/// Bare version literal near the usage text, read as bytes. Only when exactly one version sits there; else None.
+fn usage_version(bytes: &[u8]) -> Option<Version> {
+    let mut found: Vec<Version> = Vec::new();
+    for (at, _) in bytes
+        .windows(USAGE_ANCHOR.len())
+        .enumerate()
+        .filter(|(_, w)| *w == USAGE_ANCHOR)
+    {
+        let lo = at.saturating_sub(ANCHOR_WINDOW);
+        let hi = (at + USAGE_ANCHOR.len() + ANCHOR_WINDOW).min(bytes.len());
+        let runs: Vec<&[u8]> = bytes[lo..hi]
+            .split(|b| !(b.is_ascii_digit() || *b == b'.'))
+            .collect();
+        // The first and last run may be cut by the window edge; they are skipped unless they touch the file edge.
+        let last = runs.len().saturating_sub(1);
+        for (i, run) in runs.iter().enumerate() {
+            let cut = (i == 0 && lo > 0) || (i == last && hi < bytes.len());
+            if cut {
+                continue;
+            }
+            if let Some(v) = std::str::from_utf8(run).ok().and_then(parse_version)
+                && !found.contains(&v)
+            {
+                found.push(v);
+            }
+        }
+    }
+    match found.as_slice() {
+        [v] => Some(*v),
+        _ => None,
+    }
+}
+
+fn marker_version(bytes: &[u8]) -> Option<Version> {
     let pat = MARKER_PREFIX.as_bytes();
     bytes
         .windows(pat.len())
@@ -151,7 +192,10 @@ pub fn old_checks(installs: &[(PathBuf, Option<Version>)]) -> Vec<Check> {
     for (path, version) in installs {
         let shown = show(path);
         match version {
-            Some(v) if *v >= CLEAN_FROM => {}
+            Some(v) if *v >= CLEAN_FROM => out.push(ok(
+                title,
+                i18n::tf(Msg::DoctorOldClean, &[&shown, &version_str(*v)]),
+            )),
             Some(v) => out.push(check(
                 title,
                 Status::Warn,
@@ -489,6 +533,31 @@ mod tests {
     }
 
     #[test]
+    fn marker_less_build_reads_version_next_to_usage_text() {
+        // Pre-marker builds keep the bare version literal near "usage: chaude".
+        assert_eq!(
+            version_in_bytes(b"\0\0\x01 0.12.2CHAUDE_ORCH\0usage: chaude <command>"),
+            Some((0, 12, 2))
+        );
+        assert_eq!(
+            version_in_bytes(b"usage: chaude <command> 0.11.3 x"),
+            Some((0, 11, 3))
+        );
+        // Two different versions next to the usage text: ambiguous, so unknown.
+        assert_eq!(version_in_bytes(b"0.12.2 usage: chaude 0.11.3"), None);
+        // A version far from the usage text is not used.
+        let mut far = b"usage: chaude".to_vec();
+        far.extend(std::iter::repeat_n(b'x', 400));
+        far.extend_from_slice(b"0.12.2");
+        assert_eq!(version_in_bytes(&far), None);
+        // The marker still wins over the usage fallback.
+        assert_eq!(
+            version_in_bytes(b"chaude-version:0.12.2\nusage: chaude 0.11.0"),
+            Some((0, 12, 2))
+        );
+    }
+
+    #[test]
     fn old_installs_are_found_and_unknown_versions_are_warned() {
         let root = temp("old");
         let exe = put_bin(&root.join("install"), b"self");
@@ -512,8 +581,12 @@ mod tests {
             ]
         );
         let checks = old_checks(&found);
-        assert_eq!(checks.len(), 2);
-        assert!(checks.iter().all(|c| c.status == Status::Warn));
+        assert_eq!(checks.len(), 3);
+        assert_eq!(
+            checks.iter().filter(|c| c.status == Status::Warn).count(),
+            2
+        );
+        assert_eq!(checks[2].status, Status::Ok);
         let _ = fs::remove_dir_all(&root);
     }
 

@@ -98,6 +98,8 @@ pub enum Action {
     Usage,
     // /update: the caller runs the release check off the UI thread; the result returns as Wake::Note (tui.go:1166).
     Update,
+    // /doctor: the caller runs doctor::checks_now() off the UI thread; the rendered lines return as Wake::Note.
+    Doctor,
     // Answer to the open permission prompt (Go tui.go key(): y/Enter allow, n/Esc deny, Ctrl+C deny + interrupt).
     Answer {
         id: String,
@@ -1341,10 +1343,8 @@ impl App {
                 return Action::Update;
             }
             Some(Dispatch::Doctor) => {
-                for l in crate::doctor::render(&crate::doctor::checks_now()) {
-                    self.note(&l);
-                }
-                return Action::Continue;
+                self.note(t(Msg::DoctorChecking));
+                return Action::Doctor;
             }
             Some(Dispatch::OpenView { arg }) => {
                 self.open_view(&arg);
@@ -3716,6 +3716,13 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                                 ))));
                             });
                         }
+                        Action::Doctor => {
+                            let tx = update_tx.clone();
+                            thread::spawn(move || {
+                                let lines = crate::doctor::render(&crate::doctor::checks_now());
+                                let _ = tx.send(Wake::Note(lines.join("\n")));
+                            });
+                        }
                         Action::Answer {
                             id,
                             allow,
@@ -6028,6 +6035,17 @@ mod tests {
                 .iter()
                 .any(|r| r == commands::UPDATE_START_NOTE)
         );
+    }
+
+    #[test]
+    fn doctor_shows_checking_and_asks_the_loop_for_the_check() {
+        let mut app = App::new(80, 24);
+        type_str(&mut app, "/doctor");
+        assert_eq!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),
+            Action::Doctor
+        );
+        assert!(app.transcript.iter().any(|r| r == t(Msg::DoctorChecking)));
     }
 
     #[test]

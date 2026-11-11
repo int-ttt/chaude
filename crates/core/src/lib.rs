@@ -61,10 +61,12 @@ pub(crate) mod testutil {
     }
 
     /// Config with the clients and agents files under `dir`, so a test never writes ~/.chaude.
+    /// The cwd is `dir` too, so notes/tmp writes never land in the process cwd (crates/core).
     pub fn isolated(dir: &Path) -> crate::api::Config {
         crate::api::Config {
             agents_file: Some(dir.join("agents.json")),
             clients_file: Some(dir.join("clients.json")),
+            cwd: Some(dir.to_path_buf()),
             ..crate::api::Config::default()
         }
     }

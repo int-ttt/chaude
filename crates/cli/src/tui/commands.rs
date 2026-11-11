@@ -238,7 +238,7 @@ pub enum Dispatch {
     Passthrough { line: String },
     // Caller shows UPDATE_START_NOTE, then runs the check off the UI thread.
     Update,
-    // Caller runs doctor::checks_now() and shows doctor::render() lines.
+    // Caller shows the checking note, then runs doctor::checks_now() off the UI thread (render as Wake::Note).
     Doctor,
     SetMode(PermMode),
 }

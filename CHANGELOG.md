@@ -3,6 +3,8 @@
 ## Unreleased
 - `chaude doctor` and `/doctor`: check old chaude binaries (below 0.12.0), PATH order, install lock (macOS uchg), project hook wiring, Claude login, and repo target/ size. Each check prints OK, WARN or FAIL with a fix hint.
   - `chaude doctor`과 `/doctor`: 오래된 chaude(0.12.0 미만), PATH 순서, 설치본 잠금(macOS uchg), 프로젝트 훅 연결, Claude 로그인, 저장소 target/ 크기를 점검합니다. 각 항목은 OK, WARN, FAIL 중 하나와 조치 안내를 보여줍니다.
+- `/doctor` runs the checks in the background, shows "checking…" at once, and posts the result when done. The install version is read from the binary bytes without running it, so 0.12.x shows.
+  - `/doctor`는 점검을 백그라운드에서 실행하고 바로 "점검 중…"을 표시한 뒤 끝나면 결과를 보여줍니다. 설치 버전은 바이너리를 실행하지 않고 바이트에서 읽으므로 0.12.x가 표시됩니다.
 - `/lang`: switch the language between English and Korean. The language also applies to hook messages and child agent arguments.
   - `/lang`: 영어와 한국어를 전환합니다. 언어 설정은 훅 메시지와 하위 에이전트 인자에도 적용됩니다.
 - Agents: new `haiku-test-lead` agent. Tests and gates are routed to it.

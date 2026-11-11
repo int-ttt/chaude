@@ -69,6 +69,8 @@ fn engine_cfg(bin: &Path, dir: &Path) -> Config {
         clients_file: Some(dir.join("clients.json")),
         // Turn records go under the test dir, never the repo record/ folder.
         record_dir: Some(dir.join("record")),
+        // mcp.json and the usage run go under the test dir, never the process cwd (crates/core).
+        cwd: Some(dir.to_path_buf()),
         ..Config::default()
     }
 }
