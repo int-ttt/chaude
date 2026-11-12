@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- docs: the TUI agent view and rewind picker headers no longer say they are unwired (both are wired into the TUI); their blanket dead-code allow is removed (S10).
+  - docs: TUI 에이전트 보기와 되감기 선택기의 헤더가 더 이상 연결되지 않았다고 말하지 않습니다 (둘 다 TUI에 연결되어 있습니다). 전체 dead-code 허용도 제거했습니다 (S10).
 - docs: the context-threshold values (80k, 100k, 150k, 200k, 400k) now live only in one table in the claude-lean README; CLAUDE.md, README, the repl guide, APPLY_GUIDE and the rust plan link to it instead of repeating the numbers (S28).
   - docs: 맥락 임계값(80k, 100k, 150k, 200k, 400k)은 claude-lean README의 표 하나에만 둡니다. CLAUDE.md, README, repl 가이드, APPLY_GUIDE, Rust 계획은 숫자를 반복하지 않고 이 표로 링크합니다 (S28).
 - engine: a pure acknowledgement (`ㅇㅇ`, `ok`, `응`, `네`, `좋아`, `계속`, `thanks`, and similar one-word replies) skips the prompter summary and goes straight to the main model. Any other input, including short ones like `go` or `hello`, still goes through the prompter (S26). `is_pure_ack` in api.rs covers it.

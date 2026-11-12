@@ -2,8 +2,6 @@
 //! onSubEvent and sortedAll). Read-only live view of one sub-agent.
 //! Pure over `AgentRec` snapshots: the caller owns the tracker, feeds sub-agent stream events through
 //! `sub_event_lines` + `push_log`, sorts with `sort_all`, and closes the view when the agent is gone.
-// Not wired into mod.rs yet (TUI A owns it), so dead-code warnings are allowed until the hook calls land.
-#![allow(dead_code)]
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;

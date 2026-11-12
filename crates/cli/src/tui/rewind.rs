@@ -2,8 +2,6 @@
 //! Lists the real prompts of the transcript (slash commands excluded), newest selected first.
 //! Confirm returns the cut index (blocks[..cut] are kept) and the prompt text to put back in the input.
 //! Pure over `(kind, text)` pairs: the caller owns the transcript and applies the cut.
-// Not wired into mod.rs yet (TUI A owns it), so dead-code warnings are allowed until the hook calls land.
-#![allow(dead_code)]
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
