@@ -3,6 +3,7 @@
 //! rows written by other harness processes survive. The warm check, idle deadline and orphan reconcile live
 //! here too. Liveness reuses handoff::pid_alive.
 
+use crate::file_lock::FileLock;
 use crate::handoff::pid_alive;
 use crate::osenv::home_dir;
 use serde::{Deserialize, Serialize};
@@ -265,6 +266,7 @@ impl ClientRegistry {
             return;
         }
         let _g = self.mu.lock().unwrap_or_else(|e| e.into_inner());
+        let _fl = FileLock::acquire(&self.path);
         let mut rows = self.read_locked();
         if let Some(i) = rows
             .iter()
@@ -308,6 +310,7 @@ impl ClientRegistry {
             return Vec::new();
         }
         let _g = self.mu.lock().unwrap_or_else(|e| e.into_inner());
+        let _fl = FileLock::acquire(&self.path);
         let mut rows = self.read_locked();
         let mut orphans = Vec::new();
         let mut changed = false;
@@ -570,6 +573,35 @@ mod tests {
             mutate(&mut rec);
             assert_eq!(is_warm(&rec, limit, now, deadline), want, "{name}: {rec:?}");
         }
+    }
+
+    // Two registry instances on one file (as two chaude processes hold) upsert disjoint rows from parallel
+    // threads. Every row must survive: the read-modify-write runs under the cross-process file lock.
+    #[test]
+    fn concurrent_registries_keep_all_rows() {
+        let dir = TempDir::new("clients-concurrent");
+        let path = dir.path().join("clients.json");
+        let handles: Vec<_> = (0..2)
+            .map(|t| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    let reg = ClientRegistry::new(path);
+                    for i in 0..30 {
+                        reg.upsert(ClientRec {
+                            cwd: format!("/w{t}"),
+                            model: format!("m{i}"),
+                            state: LIVE.to_string(),
+                            ..Default::default()
+                        });
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("writer thread");
+        }
+        let rows = ClientRegistry::new(&path).read_locked();
+        assert_eq!(rows.len(), 60, "lost rows: {rows:?}");
     }
 
     // Go TestReconcileKilledOwner

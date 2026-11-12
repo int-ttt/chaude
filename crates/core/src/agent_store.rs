@@ -16,6 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::file_lock::FileLock;
 use crate::handoff::pid_alive;
 use crate::i18n::{Msg, t};
 use crate::import_claude::{Stamp, parse_rfc3339};
@@ -229,6 +230,7 @@ impl AgentStore {
         if self.off() || recs.is_empty() {
             return;
         }
+        let _fl = FileLock::acquire(&self.path);
         let disk = read_disk(&self.path);
         let _io = self.io();
         let text = {
@@ -261,6 +263,7 @@ impl AgentStore {
         if self.off() {
             return;
         }
+        let _fl = FileLock::acquire(&self.path);
         let disk = read_disk(&self.path);
         let _io = self.io();
         let text = {
@@ -1108,6 +1111,31 @@ mod tests {
         let ids = |l: Vec<SavedAgent>| l.into_iter().map(|a| a.id).collect::<Vec<_>>();
         assert_eq!(ids(st.load_restorable()), ["d", "f", "i"]);
         assert_eq!(ids(st.load("")), ["i"]);
+    }
+
+    // Two store instances on one file (as two chaude processes hold) put disjoint rows from parallel threads.
+    // Every row must survive: the read-merge-write runs under the cross-process file lock.
+    #[test]
+    fn concurrent_stores_keep_all_rows() {
+        let dir = TempDir::new("agent-store-concurrent");
+        let path = dir.path().join("agents.json");
+        let handles: Vec<_> = (0..2)
+            .map(|t| {
+                let path = path.clone();
+                thread::spawn(move || {
+                    let st = AgentStore::new(&path);
+                    for i in 0..90 {
+                        let id = format!("t{t}-{i}");
+                        st.put(&[SavedAgent::new(&id, STO_DONE, SystemTime::now())]);
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("writer thread");
+        }
+        let ids: Vec<String> = read_disk(&path).into_iter().map(|a| a.id).collect();
+        assert_eq!(ids.len(), 180, "lost rows: {ids:?}");
     }
 
     // Go TestAgentStoreOffAndNil (empty path part; a nil store is Option::None at the call site)

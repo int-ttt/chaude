@@ -9,6 +9,7 @@ pub mod child_set;
 pub mod clients;
 pub mod doctor;
 pub mod event;
+pub mod file_lock;
 pub mod forward;
 pub mod haiku_pool;
 pub mod handoff;
