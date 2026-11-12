@@ -2610,8 +2610,12 @@ impl App {
     }
 
     // Rows below the viewport: the top bar (unseen output, agents, or a held reply), then the input box. Busy state is in the body.
+    // The top row also stays once a turn has reported its tokens, so the idle "turn: ..." line is visible.
     fn shows_bar(&self) -> bool {
-        self.unseen || !self.agents.is_empty() || self.held.is_some()
+        self.unseen
+            || !self.agents.is_empty()
+            || self.held.is_some()
+            || self.bar.turn_tokens.is_some()
     }
 
     // Status row, the input box's top and bottom borders, and the input rows.
@@ -4391,6 +4395,23 @@ mod tests {
         assert_eq!(rows[top - 2], "  대기 one");
         assert_eq!(rows[top - 1], "  대기 two lines");
         assert!(raw[top - 1].starts_with(GREY_ON), "{:?}", raw[top - 1]);
+    }
+
+    // After a turn reports its tokens, the idle top row shows them (language-neutral: input count and separator).
+    #[test]
+    fn idle_bar_shows_turn_tokens_after_turn() {
+        let mut app = App::new(80, 30);
+        app.apply(UiEvent::TurnTokens {
+            input: 12_300,
+            output: 1_200,
+            cache: 80_000,
+        });
+        let rows = plain_frame(&app, 80, 30);
+        assert!(
+            rows.iter()
+                .any(|r| r.contains("idle") && r.contains("12.3k") && r.contains(" · ")),
+            "{rows:?}"
+        );
     }
 
     // A task row gets its agent's tokens and duration once TaskStats arrives; without it the row is unchanged.

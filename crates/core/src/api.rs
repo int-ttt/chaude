@@ -1334,6 +1334,7 @@ fn actor(
         }
     }
     let rule = main_rule(&cfg);
+    let restore_sid = main_resume.clone();
     let opts = SpawnOpts {
         claude_bin: resolve_bin(&cfg.claude_bin),
         model: cfg.model.clone(),
@@ -1479,6 +1480,10 @@ fn actor(
     };
     for (role, pid, model) in orphans {
         st.emit(UiEvent::OrphanNotice { role, pid, model });
+    }
+    // Resumed main session: show the task list it saved, same as /resume.
+    if let Some(sid) = &restore_sid {
+        st.load_tasks(sid);
     }
     // Go repl.go reconcileStart: repair rows a killed harness left open; show, never kill, orphaned children.
     if let Some(reg) = &st.clients {
@@ -6329,11 +6334,12 @@ done
         result: &str,
         is_error: bool,
     ) -> (EngineHandle, Receiver<UiEvent>) {
-        agent_queue_engine_with(dir, agent_wait, wait, result, is_error, None, "")
+        agent_queue_engine_with(dir, agent_wait, wait, result, is_error, None, "", None)
     }
 
     // extra: a child-initiated turn (file content, delay in seconds) that the main child writes on its own after turn one.
     #[cfg(unix)]
+    #[allow(clippy::too_many_arguments)]
     fn agent_queue_engine_with(
         dir: &TempDir,
         agent_wait: bool,
@@ -6342,6 +6348,7 @@ done
         is_error: bool,
         extra: Option<(&str, &str)>,
         inline: &str,
+        resume: Option<&str>,
     ) -> (EngineHandle, Receiver<UiEvent>) {
         use std::os::unix::fs::PermissionsExt;
         let turn1 = r#"{"type":"system","subtype":"init","session_id":"s1"}
@@ -6408,6 +6415,7 @@ done
             cwd: Some(dir.path().to_path_buf()),
             agent_wait_timeout: wait,
             agent_wait,
+            resume: resume.map(String::from),
             ..isolated(dir.path())
         };
         let (h, rx) = Engine::try_start(cfg).expect("engine boots");
@@ -6595,6 +6603,7 @@ done
             false,
             None,
             inline,
+            None,
         );
         let evs = agent_queue_events(&h, &rx, false);
         h.shutdown();
@@ -6639,6 +6648,7 @@ done
             false,
             Some((early, "1")),
             "",
+            None,
         );
         let evs = agent_queue_events(&h, &rx, false);
         h.shutdown();
@@ -6691,6 +6701,7 @@ done
             false,
             Some((late, "4")),
             "",
+            None,
         );
         let mut evs = agent_queue_events(&h, &rx, false);
         // Keep listening past the late report: a second reply would show up here.
@@ -6717,6 +6728,47 @@ done
         assert_eq!(shown, vec!["all done"], "events: {evs:?}");
     }
 
+    // A startup resume (cfg.resume) restores the saved task list at boot, before the first turn's events.
+    #[cfg(unix)]
+    #[test]
+    fn agent_queue_startup_resume_shows_saved_tasks() {
+        let dir = TempDir::new("agent-queue-startup-resume");
+        let long = crate::tmp_layout::long_dir(dir.path());
+        std::fs::create_dir_all(&long).expect("long dir");
+        std::fs::write(
+            long.join("tasks-s9.json"),
+            r#"[{"id":"toolu_saved","desc":"saved","status":"done","tokens":2100,"duration_ms":9000}]"#,
+        )
+        .expect("write saved tasks");
+        let (h, rx) = agent_queue_engine_with(
+            &dir,
+            true,
+            Duration::from_secs(1),
+            "Async agent launched. agentId: x1",
+            false,
+            None,
+            "",
+            Some("s9"),
+        );
+        let evs = agent_queue_events(&h, &rx, false);
+        h.shutdown();
+        assert!(
+            evs.contains(&UiEvent::TaskQueued {
+                id: "toolu_saved".into(),
+                desc: "saved".into(),
+            }),
+            "{evs:?}"
+        );
+        assert!(
+            evs.contains(&UiEvent::TaskStats {
+                id: "toolu_saved".into(),
+                tokens: Some(2_100),
+                duration_ms: Some(9_000),
+            }),
+            "{evs:?}"
+        );
+    }
+
     // /resume reads the session's saved task list back as display rows (TaskQueued + TaskResolved), before SessionResumed.
     #[cfg(unix)]
     #[test]
@@ -6734,7 +6786,7 @@ done
         std::fs::create_dir_all(&long).expect("long dir");
         std::fs::write(
             long.join("tasks-s9.json"),
-            r#"[{"id":"toolu_old","desc":"legacy","status":"done"}]"#,
+            r#"[{"id":"toolu_old","desc":"legacy","status":"done"},{"id":"toolu_new","desc":"fresh","status":"done","tokens":12300,"duration_ms":45000}]"#,
         )
         .expect("write saved tasks");
         h.resume_session("s9");
@@ -6762,6 +6814,20 @@ done
                 id: "toolu_old".into(),
                 status: TaskStatus::Done,
             }),
+            "{evs:?}"
+        );
+        // Saved stats come back on resume; the legacy row (no keys) gets none.
+        assert!(
+            evs.contains(&UiEvent::TaskStats {
+                id: "toolu_new".into(),
+                tokens: Some(12_300),
+                duration_ms: Some(45_000),
+            }),
+            "{evs:?}"
+        );
+        assert!(
+            !evs.iter()
+                .any(|e| matches!(e, UiEvent::TaskStats { id, .. } if id == "toolu_old")),
             "{evs:?}"
         );
     }
