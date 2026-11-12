@@ -1,8 +1,8 @@
 # TUI parity checklist: Go (bubbletea) → Rust
 
-Source: `deprecated/src/main/intt/internal/harness/` (paths below are relative to this dir unless prefixed).
+Source (historical: deprecated/ deleted in 0.11.3; Go source at tag v0.11.2): `deprecated/src/main/intt/internal/harness/` (paths below are relative to this dir unless prefixed).
 Format: `- [ ] <ID> <behavior>  (<go file:line>) · test: <Go test or none> · core: <engine feature>`
-Status: all items unchecked (`[ ]`); this file is a checklist, not a verdict.
+Status: 181 items checked (`[x]`), 11 unchecked (`[ ]`) (counted 2026-11-12). This file is a checklist, not a verdict.
 Read basis: tui.go (full), input.go, links.go, selection.go, history.go, agentview.go, sessview.go, settings_picker.go, usagebar.go (full or key ranges), repl.go (runTurn, event loop, permission, interrupt, main loop), tui_test names via grep. Items marked `test: none` have no Go test found by name.
 
 Counts (filled at end): see the "Counts" section.

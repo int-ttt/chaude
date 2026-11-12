@@ -1,9 +1,9 @@
 # chaude Rust port plan (decided 2026-11-03)
 
 ## Why
-- GUI support (Tauri) sharing one core with the terminal UI.
+- GUI support (eframe/egui) sharing one core with the terminal UI.
 - Safer data handling (serde enums for stream-json events, exhaustive match).
-- Drop Charm (Bubble Tea) full-screen TUI; inline output + bottom input line.
+- Drop Charm (Bubble Tea) full-screen TUI; inline output + bottom input line. (Code note 2026-11-12: the current TUI uses the alternate screen, crates/cli/src/tui/mod.rs:1.)
 - Memory: wrapper 11.2MB (Go) -> 2.2MB (Rust prototype). The 3 Claude processes per turn (prompter, main, haiku-tui) stay concurrent by user decision; no direct Anthropic API calls.
 
 ## Fixed constraints
@@ -13,7 +13,7 @@
 - gen-settings: if the target directory has no settings folder (.claude/ and its hooks/), create it automatically.
 
 ## Layout
-Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates/gui (Tauri, later).
+Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates/gui (eframe/egui, later; see plan/gui-parity.md).
 
 ## Phases
 1. Workspace + CI (cargo build/test on ubuntu/macos/windows) + cmd dispatch, osenv, flag parsing, settings/gen-settings (hooks embedded via include_str!).
@@ -35,7 +35,7 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - open: api.rs wiring of orch Router (orch.rs is not called from api.rs or cli, verified 2026-11-04 at c8233d6).
      - wired in api.rs (2026-11-04, a9c1d6d and earlier): usage poll after each turn (5 min throttle), turn spend merged into the turn metrics row, delegation rule in the main child system prompt, /clear clear mark, client registry (clients.json: live row on child start, clear ends it, startup reconcile emits OrphanNotice), AgentStore startup interrupt sweep.
      - open (not wired in api.rs, not done): haiku_pool WorkerPool note_edit (Go repl.go:743), pick_child with ChildSet (Go dispatch.go:91, needs multi-child routing), orch Router route/record, AgentTracker persistence per agent (agent_store.rs AgentTracker not used by api.rs).
-4. Terminal UI without Charm: inline streaming output, input line with Korean IME + unicode width, spinner, status/usage bar, slash commands.
+4. Terminal UI without Charm: inline streaming output (code note 2026-11-12: the current TUI uses the alternate screen, crates/cli/src/tui/mod.rs:1), input line with Korean IME + unicode width, spinner, status/usage bar, slash commands.
    - status (2026-11-04, crates/cli/src/tui):
      - done: inline streaming output (live feed + record load, asst rows via markdown path, tool_result_text).
      - done: input line Korean IME + unicode width (render::input_view_row, cursor cell).
@@ -45,13 +45,13 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
      - done: /view lists the previous run's owned sessions (handoff::read_exit_handoff, prev_owned).
      - done (f73b6fb): status bar P/T/C per-role context (UiEvent::RoleContext), /view this run's session ids (UiEvent::SessionIds), /clear new-session notice (UiEvent::NewSession), thinking row, rotated notice, orphan notice, tool summary.
      - done: done row (K8, bar::done_line, UiEvent::AgentEnd) and assistant link wrap (K12, render::wrap_linked in body()). Checklist rows K8 and K12 are done (verified 2026-11-04).
-5. GUI (Tauri): session tabs, conversation view, input, usage display; .dmg / .msi.
+5. GUI (eframe/egui): session tabs, conversation view, input, usage display; .dmg / .msi.
    - status (2026-11-04, crates/gui): placeholder only.
      - done: crates/gui (chaude-gui) is a workspace member again (exclude removed); depends on chaude-core by path only, no UI framework.
      - done: event_kind wraps core event::parse_line + type_name (unit tests: unknown type, invalid JSON).
-     - open: Tauri dependency and UI (session tabs, conversation view, input, usage display, .dmg / .msi).
-6. Parity tests vs Go (320 Go tests as reference), switch release to Rust, keep Go one version in deprecated/.
-- Priority (2026-11-03): Mac first; engine + TUI before phase 2 tools. See plan/rust-engine-tui.md.
+     - open: egui UI (session tabs, conversation view, input, usage display, .dmg / .msi).
+6. Parity tests vs Go (320 Go tests as reference), switch release to Rust, keep Go one version in deprecated/ (historical: deprecated/ deleted in 0.11.3).
+- Priority (2026-11-03): Mac first; engine + TUI before phase 2 tools. See plan/archive/rust-engine-tui.md.
 
 ## Open
 - Which Charm-era features to keep: agent view, session list view, mouse selection/clipboard.

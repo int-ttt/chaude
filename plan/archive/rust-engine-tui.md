@@ -1,3 +1,4 @@
+> Archived 2026-11-12: superseded by plan/rust-port.md
 # Rust engine + TUI design (Mac first, 2026-11-03)
 
 ## Scope

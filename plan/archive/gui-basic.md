@@ -1,3 +1,6 @@
+> Archived 2026-11-12: superseded by plan/gui-parity.md
+> Superseded 2026-11-12 by plan/gui-parity.md (egui instead of Tauri).
+
 # chaude GUI — basic design (2026-11-10)
 
 ## Goal

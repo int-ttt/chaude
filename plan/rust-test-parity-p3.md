@@ -1,3 +1,4 @@
+> Source of truth: plan/rust-test-parity.md. Go paths in this file are historical (deprecated/ deleted in 0.11.3).
 # Rust test parity vs Go, part 3 of 3 (deprecated/src/main/intt)
 
 > Merged into plan/rust-test-parity.md (single deduped 320-row table, recounted totals). This file is kept for per-group detail.

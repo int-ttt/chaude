@@ -1,3 +1,4 @@
+> Historical: Go paths under deprecated/ were deleted in 0.11.3. The Go code is in git at tag v0.11.2.
 # Rust parity checklist (Go user-facing features)
 
 Date: 2026-11-04. Go reference: deprecated/src/main/intt. Rust: crates/cli, crates/core.

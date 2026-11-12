@@ -1,4 +1,4 @@
-# Rust test parity vs Go (deprecated/src/main/intt)
+# Rust test parity vs Go (deprecated/src/main/intt) (historical: deprecated/ deleted in 0.11.3)
 
 Date: 2026-11-04. Reference: 320 Go tests (`grep -rhoE '^func Test' deprecated --include='*_test.go'`).
 This file is the single deduped table. Per-group detail stays in plan/rust-test-parity-p1.md, -p2.md, -p3.md (kept).
