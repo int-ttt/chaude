@@ -11,6 +11,8 @@
   - 문서: caveman-structure는 현재 설계만 남겼습니다(58줄). 이전 설계 기록은 plan/archive/caveman-structure-history.md에 보관했습니다.
 - Docs: the improvement plan adds user field feedback (section 1a), an operating-model review (Finding V) and steps S27-S30; S26 is rewritten to the user's chosen direction.
   - 문서: 개선 계획에 사용자 현장 평가(1a절), 운영 모델 점검(V), 단계 S27-S30을 추가했습니다. S26은 사용자가 고른 방향으로 다시 썼습니다.
+- Docs: the improvement plan adds an execution order (section 3a) that groups steps S1-S30 into five phases, plus a list of steps that need a user decision.
+  - 문서: 개선 계획에 실행 순서(3a절)를 추가했습니다. 단계 S1-S30을 5개 단계로 묶었고, 사용자 결정이 필요한 단계 목록도 넣었습니다.
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.

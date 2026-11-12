@@ -234,6 +234,84 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 - [ ] S29 Fix stale section refs to the old caveman-structure numbering in CLAUDE.md:11 and docs/claude-lean/CAVEMAN_FORMAT.md:3, :32. Accept: each ref points to a section that exists in plan/caveman-structure.md.
 - [ ] S30 Resolve the doc contradictions in V(e). Final-reply owner and main-model rule need user confirmation. Accept: one final-reply owner, one agent count, one main-model rule across docs.
 
+## 3a. Execution order
+
+Arranges the existing steps S1-S30 into phases. Step text in section 3 is not changed.
+Run phases in order. Each phase exit criterion must pass before the next phase starts.
+Every step ID appears once in the phase, Deferred or Unplaced lists below. "Needs user decision" repeats IDs as a cross-reference.
+
+### P1. Per-prompt hooks
+- Reason: smallest change; these hooks run on every prompt.
+- Order:
+  - S17 correction guard false positives
+  - S18 paste hook measures wrong text
+  - S20 inert context alert, two ledgers
+  - S19 prompter summary stateless
+  - S26 skip summary on short follow-ups
+- Exit: S17 and S18 accept tests pass on both hook copies; S20 hook absent when limit is 0; S19 and S26 accept checks pass.
+
+### P2. Single source of truth and one measurement
+- Reason: thresholds, docs and hook copies drift now; one measurement feeds the rotation and TTL decisions.
+- Order:
+  - S6 single hook source, language order
+  - S27 measure real cache TTL
+  - S28 one context-threshold table
+  - S29 fix stale caveman section refs
+  - S30 resolve doc contradictions
+  - S10 docs layout and headers
+  - S24 one caveman return shape
+  - S25 guard hook covers all agents
+- Exit: hook copies identical by test (S6); S27 result in notes/DECISIONS.md; each threshold value in one table only (S28); one final-reply owner, agent count and main-model rule (S30); REQUIRED list matches CAVEMAN_FORMAT.md (S24); all 13 agents in TARGETS or hook removed (S25).
+
+### P3. GUI prerequisite, then GUI
+- Reason: the GUI cannot reuse App logic or session listing until core owns them.
+- Order:
+  - S11 0.13.0 scope decision (start of phase)
+  - S4 move App state and apply to core
+  - S13 one session and records implementation
+  - G1 to G4 GUI steps per plan/gui-parity.md (not S-IDs; G0 status: user confirmation needed)
+- Exit: S4 and S13 accept tests pass; a gui test constructs state and applies an action; S11 scope recorded before GUI work; G3 parity table has no gaps.
+
+### P4. Engine robustness
+- Reason: engine behaviour changes; split and state type first so the fixes land in smaller modules.
+- Order:
+  - S5 split api.rs into modules
+  - S15 engine Phase enum
+  - S14 process lifetime and drop
+  - S21 API error retry with backoff
+  - S22 coder timeout keeps partial work
+  - S23 haiku pool cap and TTL
+- Exit: S5 pub item diff empty; S15 tests pass with no pub API change; S14 drop test leaves no live child; S21 fake 429 twice then success completes the turn; S22 timeout test returns partial output; S23 cap+1 test keeps map at cap.
+
+### P5. Hygiene
+- Reason: no user-facing change; safe after behaviour settles.
+- Order:
+  - S1 CI test and clippy gate
+  - S2 flaky key-press and env tests
+  - S9 release retry and fallback
+  - S7 versioned state files
+  - S8 core error enum, unwrap cleanup
+  - S16 remove or archive e2e-rebuild
+- Exit: S1 failing test blocks release asset; S2 200/200 key-press runs and 5 clean cli runs; S7 0.12.5 fixture loads; S8 no non-test unwrap in update or clean; S16 deletion decided.
+
+### Deferred
+- S12 read-only access for main session. Deferred per section 1a until a problem is felt.
+
+### Unplaced
+- S3 haiku-prompter loop (foreground sub-agents, coder reuse, log write). Fits no phase: it is an agent-loop change, not a hook, GUI, engine or hygiene item. Not forced into a phase; can join P4 if user decides.
+
+### Needs user decision
+- S11 (P3): 0.13.0 scope.
+- S6 (P2): language precedence; proposed `/lang` > `CHAUDE_LANG` > OS locale; confirm.
+- S24 (P2): drop summary_ko or keep.
+- S25 (P2): warn mode or remove the caveman guard hook.
+- S30 (P2): final-reply owner and main-model rule.
+- S20 (P1): which ledger to keep (record/LEDGER.md or notes/LEDGER.md).
+- S21 (P4): retry count, max wait, auto-retry allowed.
+- S9 (P5): allowlisting of the release step.
+- S16 (P5): delete tests/e2e-rebuild; decide tests/chaude-soak.
+- S12 (Deferred): read-only main session access.
+
 ## 4. Not verified
 
 - No build or test was run; flake cause and rate are unmeasured.
