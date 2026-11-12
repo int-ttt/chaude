@@ -17,6 +17,8 @@
   - 정정 감지 훅: 작업 알림과 래퍼 텍스트(`<system-reminder>`, `<task-notification>`, `<command-…>`)는 정정으로 세지 않으며, `말고`와 `…라고` 패턴은 문장 시작에서만 맞습니다.
 - Hooks: the paste hook measures only the text after `[original]` and no longer saves task notifications or wrapper text as pastes, on both hook copies.
   - 훅: 붙여넣기 훅은 `[original]` 뒤의 텍스트만 크기로 재며, 작업 알림과 래퍼 텍스트는 붙여넣기로 저장하지 않습니다. 두 훅 사본 모두 적용했습니다.
+- Docs: stale caveman-structure section refs in CLAUDE.md and docs/claude-lean/CAVEMAN_FORMAT.md now point to the current section names (S29).
+  - 문서: CLAUDE.md와 docs/claude-lean/CAVEMAN_FORMAT.md의 오래된 caveman-structure 절 참조를 현재 절 이름으로 고쳤습니다(S29).
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.

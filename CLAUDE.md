@@ -8,7 +8,7 @@
 
 ## Language
 - All sessions (main and every agent) think, brief, return and write in English. Only haiku-tui writes user-facing text (L0), in the `CHAUDE_LANG` language (`ko`: polite 존댓말 Korean, `en`: plain English; default `ko`); main's user-visible reply = haiku-tui output.
-- Briefs/returns: English caveman (docs/claude-lean/CAVEMAN_FORMAT.md). Returns (R-read, R-write `changed: <path>: <what>`, `check -> PASS|FAIL`) go as relay to haiku-tui; caveman lines hidden (plan/caveman-structure.md 2.1).
+- Briefs/returns: English caveman (docs/claude-lean/CAVEMAN_FORMAT.md). Returns (R-read, R-write `changed: <path>: <what>`, `check -> PASS|FAIL`) go as relay to haiku-tui; caveman lines hidden (plan/caveman-structure.md Channels).
 
 ## Flow
 - Idle until a user prompt; then ONE delegation round (all calls in one message, foreground), ONE final reply, idle. No interim text, no chaining agents through main; agents self-verify.

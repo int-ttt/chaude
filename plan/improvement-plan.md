@@ -231,7 +231,7 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 - [ ] S26 Hop-skip policy: direction chosen by user 2026-11-12 = skip the prompter summary for short follow-up inputs (ack words, one-line instructions). Accept: such inputs reach main without summary; measured latency drop.
 - [ ] S27 Measure real cache TTL of child processes once. Accept: observed cache_read vs cache_creation after 6 min and after 50 min idle; notes/DECISIONS.md updated.
 - [ ] S28 One context-threshold table as the single source (150k, 200k, 80k, 100k, 400k); other docs point to it. Accept: each threshold value appears only in that table; other docs link to it.
-- [ ] S29 Fix stale section refs to the old caveman-structure numbering in CLAUDE.md:11 and docs/claude-lean/CAVEMAN_FORMAT.md:3, :32. Accept: each ref points to a section that exists in plan/caveman-structure.md.
+- [x] S29 Fix stale section refs to the old caveman-structure numbering in CLAUDE.md:11 and docs/claude-lean/CAVEMAN_FORMAT.md:3, :32. Accept: each ref points to a section that exists in plan/caveman-structure.md.
 - [ ] S30 Resolve the doc contradictions in V(e). Final-reply owner and main-model rule need user confirmation. Accept: one final-reply owner, one agent count, one main-model rule across docs.
 
 ## 3a. Execution order
