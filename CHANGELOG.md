@@ -5,6 +5,8 @@
   - GUI: eframe 기반 `chaude-gui` 앱을 추가했습니다. 지금은 빈 창만 열리며 채팅 기능은 아직 없습니다.
 - Internal: slash commands, doctor checks and the settings data model moved into chaude-core, so the GUI can share them. TUI behaviour is unchanged.
   - 내부 변경: 슬래시 명령, doctor 점검, 설정 데이터 모델을 chaude-core로 옮겨 GUI가 함께 쓸 수 있게 했습니다. TUI 동작은 그대로입니다.
+- Docs: the improvement plan adds algorithm findings (N-T) and steps (S17-S23).
+  - 문서: 개선 계획에 알고리즘 점검 결과(N-T)와 단계(S17-S23)를 추가했습니다.
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.

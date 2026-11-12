@@ -140,6 +140,32 @@ Applied by the docs consolidation step. Table rows above show pre-move paths. No
 ### M. Repo leftovers
 - `tests/e2e-rebuild` holds Go files; `tests/chaude-soak` is a separate workspace with a 0.11.9 snapshot; 11 `core/tests/parity_*` files cite removed Go tests in header comments.
 
+### N. Hook: correction-guard.py (`.claude/hooks/`, copy in `crates/core/src/settings/hooks/`)
+- Korean regex, first hit wins. Class A has bare `말고` and sentence-final `…라고`; both give false positives on plain instructions.
+- Does not separate real user prompts from task-notification or wrapper text.
+- Counter file `logs/.corr-{sid}` never resets; this gives a false `[corr x2] stop`.
+- Fix: skip notification and wrapper text; anchor broad patterns to sentence start; reset the counter on a non-correction prompt.
+### O. Hook: style-adapter.py `[paste]` (`.claude/hooks/`, copy in `crates/core/src/settings/hooks/`)
+- Triggers on len > 1500, > 20 newlines, or `<pasted_content`.
+- Saves wrapped prompts and notifications. `record/pastes`: 277 files, 1,410,478 B; 45 contain `[original]`.
+- Fix: measure only the text after `[original]`; skip notifications.
+### P. Prompter summary is stateless
+- Repeated the same resolved "unclear" item for 5 turns (observed, not verified in code).
+- Fix: pass the last 1-2 turn conclusions, or skip the summary for short follow-ups.
+### Q. Hook: context-alert.py is inert; two ledgers
+- `LEAN_RESET_AT` = "0", so the hook does nothing, but it runs on every prompt (`.claude/hooks/`, copy in `crates/core/src/settings/hooks/`).
+- Two ledgers: `record/LEDGER.md` (92 KB) and `notes/LEDGER.md` (83 KB).
+- Fix: unregister the hook when the limit is 0; keep one ledger.
+### R. No retry on API overload or rate limit
+- No 429, overloaded, or backoff retry in `crates/core/src/`. Child death surfaces as "coder exited".
+- Fix: classify API errors; bounded backoff retry. Needs user decision.
+### S. Coder timeout drops partial work
+- `CODER_TIMEOUT` is fixed at 30 min (`crates/core/src/resident.rs:13`). On expiry the child is dropped and only "coder timed out" is returned; partial work is lost.
+- Fix: return partial output and changed files on timeout; make the timeout configurable.
+### T. Haiku pool worker map is unbounded
+- `crates/core/src/haiku_pool.rs` worker map has no cap, TTL, or eviction.
+- Fix: cap the map and add an idle TTL.
+
 ## 3. Steps
 
 Order = dependency order. Each step: own commit, gate through haiku-test-lead, TUI behaviour unchanged unless stated.
@@ -159,6 +185,13 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 - [ ] S14 Process lifetime: `Drop` for `ClaudeProc` (kill + wait); `EngineHandle::drop` joins with a timeout; actor wrapped so a panic still kills children; non-blocking coder exit (no 5 s poll on the actor thread). Accept: test that drops the handle and finds no live child pid; Interrupt is handled within 100 ms while a coder is exiting.
 - [ ] S15 Engine phase enum: replace the busy/hold/proc/turn_started flag set with one `Phase` enum plus per-phase data; do during S5. Accept: no pub API change, tests pass.
 - [ ] S16 Remove or archive `tests/e2e-rebuild` (Go) and decide on `tests/chaude-soak`; update parity test header comments. Needs user decision for deletion.
+- [ ] S17 Correction guard: skip notification and wrapper text; anchor broad patterns (`말고`, `…라고`) to sentence start; reset `logs/.corr-{sid}` on a non-correction prompt; change both hook copies. Accept: plain instructions containing `말고` or `…라고` and a notification text give no hit in a test set; the counter returns to 0 after one non-correction prompt.
+- [ ] S18 Paste hook: measure only the text after `[original]`; skip notifications in `[paste]`; change both hook copies. Accept: re-run the `record/pastes` scan; no new saved file is a notification; the size check uses only the text after `[original]`.
+- [ ] S19 Prompter summary: confirm the repeated "unclear" item in code or logs first (not verified); then pass the last 1-2 turn conclusions, or skip the summary for short follow-ups. Accept: a 5-turn dry run does not repeat the same resolved item.
+- [ ] S20 Context alert and ledgers: unregister `context-alert.py` when `LEAN_RESET_AT` is 0; merge `record/LEDGER.md` and `notes/LEDGER.md` into one ledger. Which ledger to keep: user confirmation needed. Accept: with limit 0 the hook is not in settings; one ledger file is left and every writer uses it.
+- [ ] S21 API retry: classify 429, overloaded, and child-death errors; retry with bounded backoff; show "coder exited" only after retries end. Needs user decision (retry count, max wait, whether auto-retry is allowed). Accept: a fake-claude test that returns 429 twice and then succeeds completes the turn; a permanent error shows its classified message.
+- [ ] S22 Coder timeout: on `CODER_TIMEOUT`, return partial output and the changed-file list; make the timeout configurable. Accept: an engine test where the coder times out returns partial output and changed files; the timeout value is read from config in a test.
+- [ ] S23 Haiku pool: cap the worker map and add an idle TTL; evict and stop idle workers. Accept: after cap+1 workers and the idle TTL, the map size stays at the cap and no idle worker child is left alive.
 
 ## 4. Not verified
 
@@ -167,3 +200,9 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 - Duplication between update/clean/scripts beyond `home_dir` not confirmed.
 - Thread/sync primitive counts in core not measured.
 - cli/core record fn bodies not diffed; update/clean/scripts vs core duplication, install overwrite behaviour, python3 runtime check, version sync mechanism not checked.
+- Not read: the six engine flows that make model calls per trivial prompt (call count and cost not measured).
+- Not read: turn-end detection and timers.
+- Not read: context rotation and handoff cost.
+- Not read: cache keep-alive.
+- Not read: `mode::decide` rules (`crates/core/src/mode.rs:71`).
+- Not verified: possible token double-counting (`crates/core/src/turn_spend.rs:26-120`).
