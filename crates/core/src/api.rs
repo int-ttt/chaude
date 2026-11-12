@@ -119,17 +119,17 @@ struct QueuedTask {
 // Pure acknowledgements that skip the prompter summary (S26). Only the whole input counts, no other words.
 const ACK_WORDS: &[&str] = &[
     "ㅇㅇ",
-    "ㅇ",
-    "ok",
-    "okay",
+    "ㅇㅋ",
     "응",
     "네",
+    "넵",
     "좋아",
     "계속",
+    "ok",
+    "okay",
+    "yes",
     "thanks",
-    "thank you",
-    "고마워",
-    "감사",
+    "감사합니다",
 ];
 
 // True when the input is one pure ack word, ignoring case, surrounding spaces and trailing "." or "!".
@@ -5713,7 +5713,19 @@ mod tests {
 
     #[test]
     fn pure_ack_skips_prompter_but_short_instructions_do_not() {
-        for ack in ["ㅇㅇ", "OK", " 응 ", "좋아.", "계속!", "thanks", "네"] {
+        for ack in [
+            "ㅇㅇ",
+            "ㅇㅋ",
+            "OK",
+            " 응 ",
+            "좋아.",
+            "계속!",
+            "thanks",
+            "yes",
+            "네",
+            "넵",
+            "감사합니다",
+        ] {
             assert!(is_pure_ack(ack), "{ack:?} should be an ack");
         }
         for not_ack in [
@@ -5723,6 +5735,10 @@ mod tests {
             "one",
             "ok, fix it",
             "응 그래서 어떻게?",
+            "고쳐",
+            "다시",
+            "ㅇ",
+            "고마워",
             "",
         ] {
             assert!(
