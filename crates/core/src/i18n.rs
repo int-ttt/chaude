@@ -1,4 +1,4 @@
-//! UI language. Resolved once at startup: env CHAUDE_LANG > settings `language` > OS locale.
+//! UI language. Resolved once at startup: settings `language` (set by /lang) > env CHAUDE_LANG > OS locale.
 //! Auto maps a Korean locale to ko and anything else to en. The resolved value is exported as
 //! CHAUDE_LANG so child claude processes (main, coders, prompter) follow the same language.
 
@@ -59,9 +59,9 @@ pub fn lang_from_locale(locale: &str) -> Lang {
     }
 }
 
-// Pure resolve: env > config > locale. An unknown env or config value is skipped, not fatal.
+// Pure resolve: config (/lang) > env > locale. An unknown env or config value is skipped, not fatal.
 pub fn resolve(env: Option<&str>, config: Option<&str>, locale: Option<&str>) -> Lang {
-    for raw in [env, config].into_iter().flatten() {
+    for raw in [config, env].into_iter().flatten() {
         match parse_pref(raw) {
             Some(Pref::Fixed(l)) => return l,
             Some(Pref::Auto) | None => {}
@@ -512,15 +512,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn env_beats_config_beats_locale() {
+    fn config_beats_env_beats_locale() {
         assert_eq!(
-            resolve(Some("en"), Some("ko"), Some("ko_KR.UTF-8")),
-            Lang::En
-        );
-        assert_eq!(
-            resolve(Some("ko"), Some("en"), Some("en_US.UTF-8")),
+            resolve(Some("en"), Some("ko"), Some("en_US.UTF-8")),
             Lang::Ko
         );
+        assert_eq!(
+            resolve(Some("ko"), Some("en"), Some("ko_KR.UTF-8")),
+            Lang::En
+        );
+        assert_eq!(resolve(Some("en"), None, Some("ko_KR.UTF-8")), Lang::En);
         assert_eq!(resolve(None, Some("en"), Some("ko_KR.UTF-8")), Lang::En);
         assert_eq!(resolve(None, Some("ko"), Some("en_US.UTF-8")), Lang::Ko);
     }

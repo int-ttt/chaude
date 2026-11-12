@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: hook copy parity test (S6). `.claude/hooks/` must be byte-identical to `crates/core/src/settings/hooks/`; `cargo test -p chaude-core --test hook_copies` fails when they differ. Language order is now `/lang` (settings `language`) > `CHAUDE_LANG` > OS locale, in both Rust `i18n::resolve` and the Python `_lean.lang()`. With no locale set, the Python hooks now default to en, matching Rust (was ko).
+  - core: 훅 복사본 동등성 테스트 (S6). `.claude/hooks/`는 `crates/core/src/settings/hooks/`와 바이트 단위로 같아야 하며, 다르면 `cargo test -p chaude-core --test hook_copies`가 실패합니다. 언어 우선순위는 이제 Rust `i18n::resolve`와 Python `_lean.lang()` 모두 `/lang`(설정 `language`) > `CHAUDE_LANG` > OS 로캘입니다. 로캘도 없으면 Python 훅은 이제 en을 씁니다(Rust와 맞춤, 예전에는 ko).
 - hooks: drop context-alert.py (S20). The hook was inert (`LEAN_RESET_AT` 0 by default), so it is removed from the hook set, the package copy list and the docs. The ledger is one file, `record/LEDGER.md`; the old `notes/LEDGER.md` was appended into it and removed.
   - hooks: context-alert.py 삭제 (S20). 이 훅은 `LEAN_RESET_AT` 기본값 0이라 아무 일도 하지 않았으므로 훅 목록, 패키지 복사 목록, 문서에서 뺐습니다. 기록장은 `record/LEDGER.md` 한 파일이며, 예전 `notes/LEDGER.md`는 그 뒤에 이어 붙인 뒤 지웠습니다.
 - core: per-session live handoff for all writers. The live marker is written only as `notes/tmp/long/.live-handoff-<sid>.json`, once the session id is known. Startup and `/clear` no longer write the shared `.live-handoff.json`, so two chaude instances in one project do not share it. Startup cleanup also skips a live peer's per-session marker.

@@ -112,7 +112,7 @@ fn run_tui(args: &[String]) -> i32 {
         settings::chaude_settings::main_model(cfg.cwd.as_deref()),
     );
     cfg.agent_wait = settings::chaude_settings::agent_wait(cfg.cwd.as_deref());
-    // Language: env CHAUDE_LANG > project settings `language` > OS locale. Exported so child claude processes match.
+    // Language: project settings `language` (/lang) > env CHAUDE_LANG > OS locale. Exported so child claude processes match.
     let lang = i18n::resolve(
         env::var(i18n::ENV_KEY).ok().as_deref(),
         settings::chaude_settings::language(cfg.cwd.as_deref()).as_deref(),
@@ -219,7 +219,7 @@ fn metrics_main(args: &[String]) -> i32 {
 }
 
 // `chaude lang [ko|en|auto]`: no argument prints the language in use; with one, saves it to the project settings.
-// The language resolves the same way as at TUI startup (env > settings > OS locale) so the printed name matches.
+// The language resolves the same way as at TUI startup (settings > env > OS locale) so the printed name matches.
 fn lang_main(args: &[String]) -> i32 {
     let cwd = env::current_dir().unwrap_or_else(|_| ".".into());
     let resolved = i18n::resolve(

@@ -20,7 +20,8 @@ def session_flag(sid):
 
 def lang():
     """User-facing output language, re-read on every call so /lang reaches a running session.
-    <ROOT>/.chaude/settings.json "language" (ko|en) wins; auto, missing or unreadable falls back to CHAUDE_LANG; default "ko"."""
+    Same order as i18n.rs resolve: <ROOT>/.chaude/settings.json "language" (ko|en, set by /lang) > env CHAUDE_LANG (ko|en)
+    > OS locale (LC_ALL, LC_MESSAGES, LANG: first non-empty; "ko*" is ko, anything else en). Auto or unknown values are skipped."""
     try:
         import json
         with open(os.path.join(ROOT, ".chaude", "settings.json"), encoding="utf-8") as f:
@@ -29,7 +30,11 @@ def lang():
             return v
     except Exception:
         pass
-    return "en" if os.environ.get("CHAUDE_LANG", "ko").strip().lower() == "en" else "ko"
+    env = os.environ.get("CHAUDE_LANG", "").strip().lower().split("-")[0].split("_")[0].split(".")[0]
+    if env in ("ko", "en"):
+        return env
+    locale = next((os.environ[k] for k in ("LC_ALL", "LC_MESSAGES", "LANG") if os.environ.get(k, "").strip()), "")
+    return "ko" if locale.strip().lower().startswith("ko") else "en"
 
 
 def pick(ko, en):

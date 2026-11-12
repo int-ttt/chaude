@@ -106,7 +106,7 @@ pub fn apply(cwd: Option<&Path>, code: &str) -> String {
     if let Err(e) = chaude_settings::save_language(&base, code) {
         return tf(Msg::LangSaveFailed, &[&e]);
     }
-    // The picked value wins over CHAUDE_LANG here, the same order the hook uses (settings file first).
+    // The picked value wins over CHAUDE_LANG here, the same order the hooks use (settings file first, then CHAUDE_LANG, then OS locale).
     let lang = i18n::resolve(None, Some(code), i18n::os_locale().as_deref());
     i18n::set_current(lang);
     // SAFETY: the TUI and plain loops run on the main thread; no other thread reads CHAUDE_LANG while it is set here.
