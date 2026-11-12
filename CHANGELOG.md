@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- GUI: new `chaude-gui` app (eframe) that opens an empty window. Skeleton only; no chat features yet.
+  - GUI: eframe 기반 `chaude-gui` 앱을 추가했습니다. 지금은 빈 창만 열리며 채팅 기능은 아직 없습니다.
 - Internal: slash commands, doctor checks and the settings data model moved into chaude-core, so the GUI can share them. TUI behaviour is unchanged.
   - 내부 변경: 슬래시 명령, doctor 점검, 설정 데이터 모델을 chaude-core로 옮겨 GUI가 함께 쓸 수 있게 했습니다. TUI 동작은 그대로입니다.
 
