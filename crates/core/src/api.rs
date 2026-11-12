@@ -406,6 +406,15 @@ const DEFER_POLL: Duration = Duration::from_secs(1);
 const NEVER_COLD: Duration = Duration::from_secs(24 * 365 * 3600);
 // How long an idle resident child gets to exit after its stdin closes, before ClaudeProc::finish kills it.
 const CODER_EXIT_WAIT: Duration = Duration::from_secs(5);
+// S21: a coder turn that fails with a transient API error (429, overloaded) or a dead child is sent again,
+// at most RETRY_MAX times with the backoff below, and not past RETRY_TOTAL after the first failure.
+const RETRY_MAX: u32 = 3;
+const RETRY_BACKOFF: [Duration; 3] = [
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+];
+const RETRY_TOTAL: Duration = Duration::from_secs(60);
 
 // Idle limit of an extra coder and of the base coder (Go extraCoderTTL). The settings screen shows it.
 pub const CODER_IDLE_TTL_SECS: u64 = 3570;
@@ -965,6 +974,13 @@ struct Coder {
     idle_since: Option<Instant>,
     // Answer for an MCP call in flight; taken by finish_coder.
     waiter: Option<Sender<Result<String, String>>>,
+    // S21: the full task text, sent again on a retry; cleared by finish_coder.
+    task: Option<String>,
+    retries: u32,
+    // When the first failure of this task happened; the RETRY_TOTAL budget runs from it.
+    retry_started: Option<Instant>,
+    // When the next send of `task` is due.
+    retry_at: Option<Instant>,
 }
 
 // A handoff turn in progress: the rotation reason and how many handoff prompts were sent (Go makeSnapshotN).
@@ -2171,6 +2187,7 @@ impl State {
         self.coders[i].idle_since = None;
         self.coders[i].waiter = waiter;
         let text = format!("{task}{CODER_REPLY_FORMAT}");
+        self.coders[i].task = Some(text.clone());
         let wrote = match self.coders[i].proc.as_mut() {
             Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
             None => Err("coder not running".to_string()),
@@ -2477,7 +2494,14 @@ impl State {
         };
         self.note_resident(&coder_role(i), r.session_id.clone());
         self.role_context(&coder_role(i), r.usage.as_ref());
-        let text = summarize_reply(&r.result.unwrap_or_default());
+        let raw = r.result.unwrap_or_default();
+        if r.is_error == Some(true) && retryable_api_error(&raw) {
+            if !self.coder_retry(i) {
+                self.finish_coder(i, Err(raw));
+            }
+            return;
+        }
+        let text = summarize_reply(&raw);
         if text.is_empty() {
             self.finish_coder(i, Err("coder empty reply".to_string()));
         } else {
@@ -2510,8 +2534,52 @@ impl State {
     fn on_coder_eof(&mut self, i: usize) {
         self.coders[i].proc = None;
         self.emit_coder_contexts();
-        if self.coders[i].deadline.is_some() {
+        if self.coders[i].deadline.is_some() && !self.coder_retry(i) {
             self.finish_coder(i, Err("coder exited".to_string()));
+        }
+    }
+
+    // S21: schedules another send of the held task after its backoff. False when the retry budget is spent,
+    // so the caller reports the failure now.
+    fn coder_retry(&mut self, i: usize) -> bool {
+        if self.coders[i].task.is_none() || self.coders[i].retries >= RETRY_MAX {
+            return false;
+        }
+        let now = Instant::now();
+        let started = *self.coders[i].retry_started.get_or_insert(now);
+        let delay = RETRY_BACKOFF[self.coders[i].retries as usize];
+        if now + delay > started + RETRY_TOTAL {
+            return false;
+        }
+        self.coders[i].retries += 1;
+        self.coders[i].retry_at = Some(now + delay);
+        self.stage(&coder_role(i), StagePhase::Working);
+        true
+    }
+
+    // S21: sends the held task again. A dead child is respawned with --resume on its session.
+    fn coder_resend(&mut self, i: usize) {
+        self.coders[i].retry_at = None;
+        let Some(text) = self.coders[i].task.clone() else {
+            return;
+        };
+        if self.coders[i].proc.is_none() {
+            let role = coder_role(i);
+            if let Some(sid) = self.resident_sids.get(&role).cloned() {
+                self.resume_pending.insert(role, sid);
+            }
+            if let Err(e) = self.spawn_coder(i) {
+                self.finish_coder(i, Err(format!("coder spawn failed: {e}")));
+                return;
+            }
+        }
+        let wrote = match self.coders[i].proc.as_mut() {
+            Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
+            None => Err("coder not running".to_string()),
+        };
+        if let Err(e) = wrote {
+            self.drop_coder(i);
+            self.finish_coder(i, Err(format!("coder write failed: {e}")));
         }
     }
 
@@ -2523,6 +2591,10 @@ impl State {
 
     // Ends a coder task: its stage row, then the reply (or the failure reason) goes to the UI.
     fn finish_coder(&mut self, i: usize, out: Result<String, String>) {
+        self.coders[i].task = None;
+        self.coders[i].retries = 0;
+        self.coders[i].retry_started = None;
+        self.coders[i].retry_at = None;
         if self.coders[i].deadline.take().is_some() {
             self.resident_busy(&coder_role(i), false, "");
         }
@@ -3861,7 +3933,13 @@ impl State {
             .iter()
             .enumerate()
             .filter_map(|(i, c)| match c.deadline {
-                Some(t) => Some(t.saturating_duration_since(Instant::now())),
+                Some(t) => {
+                    let left = t.saturating_duration_since(Instant::now());
+                    Some(match c.retry_at {
+                        Some(r) => left.min(r.saturating_duration_since(Instant::now())),
+                        None => left,
+                    })
+                }
                 None => [self.coder_idle_left(i), self.base_idle_exit_left(i)]
                     .into_iter()
                     .flatten()
@@ -3932,6 +4010,9 @@ impl State {
         for i in 0..self.coders.len() {
             if self.coders[i].deadline.is_some_and(|t| t <= Instant::now()) {
                 self.coder_timeout(i);
+            }
+            if self.coders[i].retry_at.is_some_and(|t| t <= Instant::now()) {
+                self.coder_resend(i);
             }
             if self.coder_idle_left(i).is_some_and(|d| d.is_zero()) {
                 self.drop_coder(i);
@@ -5317,6 +5398,14 @@ fn join_rules(parts: &[&str]) -> String {
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+// S21: API errors that another send can fix: rate limit (429) and overloaded (529). Anything else is permanent.
+fn retryable_api_error(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    ["429", "529", "rate limit", "rate_limit", "overloaded"]
+        .iter()
+        .any(|m| t.contains(m))
 }
 
 fn coder_role(i: usize) -> String {

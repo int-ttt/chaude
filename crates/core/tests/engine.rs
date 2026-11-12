@@ -114,7 +114,10 @@ while IFS= read -r line; do
           *) echo "$$ extra" >> 'DIR/coder.pids' ;;
         esac
         sleep 0.2
-        cat 'DIR/coder.jsonl'
+        # S21 retry test: with coder.retry.jsonl present, the first two replies are that error line.
+        k=$(cat 'DIR/coder.k' 2>/dev/null || echo 0)
+        echo $((k + 1)) > 'DIR/coder.k'
+        if [ -f 'DIR/coder.retry.jsonl' ] && [ "$k" -lt 2 ]; then cat 'DIR/coder.retry.jsonl'; else cat 'DIR/coder.jsonl'; fi
         ;;
     esac
     continue
@@ -4154,6 +4157,38 @@ fn failed_coder_task_still_hands_back_a_reply() {
         "{evs:?}"
     );
     h.shutdown();
+}
+
+// S21: a 429 result is retried with the same task; the third reply succeeds and completes the turn.
+#[test]
+fn coder_retries_429_twice_then_completes() {
+    let _g = lock();
+    let f = fake("coder_retry", &["text_turn.jsonl"]);
+    fs::write(
+        f.dir.join("coder.retry.jsonl"),
+        "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"result\":\"API Error: 429 {\\\"type\\\":\\\"rate_limit_error\\\"}\",\"session_id\":\"c1\"}\n",
+    )
+    .unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.coder("first");
+    let evs = until_coder_reply(&rx);
+    h.shutdown();
+    assert!(
+        evs.iter().any(
+            |e| matches!(e, UiEvent::CoderReply { text, .. } if text.contains("status: done"))
+        ),
+        "{evs:?}"
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, UiEvent::CoderReply { text, .. } if text.contains("429"))),
+        "{evs:?}"
+    );
+    let sends = fs::read_to_string(f.dir.join("coder.k")).unwrap();
+    assert_eq!(sends.trim(), "3", "one first send and two retries");
 }
 
 #[test]
