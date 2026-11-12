@@ -96,8 +96,8 @@ chaude -h | --help | help
 |---|---|---|
 | `--model` | `opus` | 메인 모델 이름 |
 | `--cwd` | 비어 있음 | 작업 폴더. 빈 값이면 chaude를 실행한 현재 폴더(`os.Getwd`)를 씁니다. 자식 `claude`도 이 폴더에서 뜨고, 기록 폴더와 `/resume claude` 검색도 같은 값을 씁니다 |
-| `--threshold` | 80000 | 회전 기준 컨텍스트 토큰. 메인 모델이 opus이면 무시되고 200000을 씁니다 |
-| `--compact-window` | 400000 | 자식 프로세스만 쓰는 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. 0이면 끕니다. 임계값보다 크게 두세요 |
+| `--threshold` | [임계값 표](../claude-lean/README.md#맥락-임계값-표) 참고 | 회전 기준 컨텍스트 토큰. 메인 모델이 opus이면 무시되고 [Opus 값](../claude-lean/README.md#맥락-임계값-표)을 씁니다 |
+| `--compact-window` | [임계값 표](../claude-lean/README.md#맥락-임계값-표) 참고 | 자식 프로세스만 쓰는 `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. 0이면 끕니다. 임계값보다 크게 두세요 |
 | `--max-auto-rotations` | -1 | 자동 회전 최대 횟수. -1이면 제한 없음 |
 | `--transcript` | 상태 폴더의 `transcript.jsonl` | 대화 기록 파일 |
 | `--tail-turns` | 4 | 핸드오프에 넣을 최근 턴 수 |

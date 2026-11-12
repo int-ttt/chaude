@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- tests: the hook language fallback matches the rule order (`/lang` setting > `CHAUDE_LANG` > OS locale, en when undetectable). `_lean.spawn_lang()` is the spawn-time version used by `style-adapter.py`, so a missing `CHAUDE_LANG` no longer defaults to ko. `tests/hooks/test_lang.py` controls the locale explicitly.
+  - tests: 훅 언어 대체 순서를 규칙에 맞췄습니다 (`/lang` 설정 > `CHAUDE_LANG` > OS 로캘, 감지 안 되면 en). `_lean.spawn_lang()`이 시작 시점 언어를 맡고 `style-adapter.py`가 이를 씁니다. 그래서 `CHAUDE_LANG`이 없어도 ko가 기본이 아닙니다. `tests/hooks/test_lang.py`는 로캘을 직접 지정합니다.
+- docs: stale context-alert and reset-notice references removed (automatic notice dropped in S20). APPLY_GUIDE and claude-lean README now say to reset by hand (`/exit`, then `claude`). The threshold table is the single source for the 80k/100k/150k/200k/400k values. `LEAN_RESET_AT` rows removed.
+  - docs: 맥락 알림 관련 오래된 설명을 뺐습니다 (S20에서 자동 안내 제거). APPLY_GUIDE와 claude-lean README는 직접 리셋(`/exit` 후 `claude`)을 안내합니다. 임계값 표가 80k/100k/150k/200k/400k 값의 기준입니다. `LEAN_RESET_AT` 행을 뺐습니다.
+- docs: plan/caveman-structure.md now describes the implemented design: summary_ko replaced by relay (S24), default language is the system language, and the S24/S25 known conflicts are marked done.
+  - docs: plan/caveman-structure.md를 현재 구현 기준으로 고쳤습니다. summary_ko는 relay로 바뀌었고(S24), 기본 언어는 시스템 언어이며, S24/S25 해결 항목을 완료로 표시했습니다.
 - caveman: guard hook warns by default and covers all 13 agents (S25). `CAVEMAN_GUARD` now defaults to `warn` (metrics row + additionalContext); `haiku-extractor` and `haiku-test-lead` join TARGETS. `log` and `off` still work.
   - caveman: 가드 훅은 기본값이 warn이고 13개 에이전트 전체를 봅니다 (S25). `CAVEMAN_GUARD` 기본값이 `warn`(메트릭 행 + additionalContext)으로 바뀌었고, `haiku-extractor`와 `haiku-test-lead`가 TARGETS에 추가됐습니다. `log`와 `off`는 그대로 동작합니다.
 - caveman: drop summary_ko, relay only (S24). Every R-read, R-write and R-decide return ends with a 1-5 line English `relay:` field (docs/claude-lean/CAVEMAN_FORMAT.md 3.7). `summary_ko` is removed from the agents (both copies), the guard hook (every return now requires `relay`) and the resident prompt; haiku-output renders relay in the `lang:` language.

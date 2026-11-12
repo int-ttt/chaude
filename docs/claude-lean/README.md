@@ -28,7 +28,6 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
   - 메인 모델 (Opus / Sonnet)
   - 답변 방식 (설명형 / 5줄 간결형)
   - 정보 문장 메모
-  - 맥락 리셋 안내
   - 대화 기록 저장
   - Sonnet·Opus → Haiku 연계
   - 설치 직후 모드
@@ -41,9 +40,21 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
 ## 모델별 역할과 한도
 | 모델 | 에이전트 | 생각 강도 | 맥락 한도 | 한도에 가까워지면 |
 |---|---|---|---|---|
-| Opus (메인) | 대화·판단·설명 | low (필요한 턴만 `ultrathink`) | 자동 압축 창 150k | 리셋 안내는 선택(기본 끔, 켜면 100k·120k에서 안내). 안내는 `/exit` 후 같은 터미널에서 `claude`로 압축 없이 가벼워지고 직전 대화가 이어짐. 150k에서 자동 압축 |
-| Haiku | `haiku-scout` 탐색 · `haiku-checker` 확인 · `haiku-batch-worker` 일괄 작업 · `haiku-runner` 장시간 작업 · `haiku-researcher` 웹 조사 · `haiku-drafter` 글 · `haiku-coder` 코드 · `haiku-extractor` 기록 추출 | low~medium | 자동 압축 창 100k | 자동으로 압축하고 계속 진행. 100k 창이라 Haiku 단가가 5배가 되는 100k를 넘기 전에 압축됨 |
-| Opus (에이전트) | `opus-architect` Haiku 메인이 넘긴 일만 (`--model haiku` 릴레이 대상). Opus 메인은 `haiku-*`에 직접 위임하고 `opus-architect`를 부르지 않음 | high | 자동 압축 창 100k | 자동으로 압축하고 계속 진행 |
+| Opus (메인) | 대화·판단·설명 | low (필요한 턴만 `ultrathink`) | 자동 압축 창 [150k](#맥락-임계값-표) | 자동 안내는 없음. 직접 `/exit` 후 같은 터미널에서 `claude`로 압축 없이 가벼워지고 직전 대화가 이어짐. [150k](#맥락-임계값-표)에서 자동 압축 |
+| Haiku | `haiku-scout` 탐색 · `haiku-checker` 확인 · `haiku-batch-worker` 일괄 작업 · `haiku-runner` 장시간 작업 · `haiku-researcher` 웹 조사 · `haiku-drafter` 글 · `haiku-coder` 코드 · `haiku-extractor` 기록 추출 | low~medium | 자동 압축 창 [100k](#맥락-임계값-표) | 자동으로 압축하고 계속 진행. [100k](#맥락-임계값-표) 창이라 Haiku 단가가 5배가 되는 100k를 넘기 전에 압축됨 |
+| Opus (에이전트) | `opus-architect` Haiku 메인이 넘긴 일만 (`--model haiku` 릴레이 대상). Opus 메인은 `haiku-*`에 직접 위임하고 `opus-architect`를 부르지 않음 | high | 자동 압축 창 [100k](#맥락-임계값-표) | 자동으로 압축하고 계속 진행 |
+
+### 맥락 임계값 표
+
+이 표가 맥락 임계값의 기준입니다. 다른 문서는 이 표로 링크합니다. 값을 바꾸면 원본 파일도 함께 바꿉니다.
+
+| 값 | 무엇을 제어하나 | 원본 (file:symbol) |
+|---|---|---|
+| 80k (`80000`) | Opus가 아닌 메인 모델의 회전 기준. CLI `--threshold` 기본값 | `crates/core/src/rotate.rs:7` `HAIKU_THRESHOLD`; `crates/cli/src/repl_args.rs:55` `GO_THRESHOLD` |
+| 100k (`100000`) | 서브에이전트 자동 압축 창 (`.claude/agents/*.md` 13개 파일) | `.claude/agents/*.md:8` `autoCompactWindow` |
+| 150k (`150000`) | 메인 Opus 자동 압축 창 | `.claude/settings.json:4` `autoCompactWindow` |
+| 200k (`200000`) | Opus 메인의 회전 기준 (고정) | `crates/core/src/rotate.rs:8` `OPUS_THRESHOLD` |
+| 400k (`400000`) | 자식 `claude`의 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 기본값 (`--compact-window`). 회전 기준보다 커야 함 | `crates/cli/src/repl_args.rs:56` `GO_COMPACT_WINDOW` |
 
 | 공통 한도 | 값 | 이유 |
 |---|---|---|
