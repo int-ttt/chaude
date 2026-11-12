@@ -17,7 +17,7 @@ REQUIRED = {                                    # 3.2~3.4 keys (status header 3.
     "R-write": ["changed", "diffstat", "check", "ws"],
     "R-decide": ["decision", "why", "rejected", "risks", "open_q", "plan_path"],
 }
-STATUS_KEYS = ["status", "reason"]
+STATUS_KEYS = ["status", "reason", "relay"]  # 3.6 head + 3.7 relay, every R-* return
 STATUS_VALUES = {"done", "partial", "fail", "blocked"}
 B_KEYS = ("task", "paths", "limits", "return", "lang")  # plan:160 required B-format keys
 
@@ -45,7 +45,7 @@ def value_of(text, key):
     return m.group(1).strip() if m else None
 
 
-def check(prompt, text, fmt):
+def check(text, fmt):
     missing = []
     for key in STATUS_KEYS + REQUIRED[fmt]:
         if not re.search(rf"^\s*{key}:", text, re.M):
@@ -62,8 +62,6 @@ def check(prompt, text, fmt):
         claims = re.findall(r"^\s*claim:.*$", text, re.M)
         if claims and not all(re.search(r"^\s*claim:\s*\S+:\d+.*\|", c) for c in claims):
             missing.append("claim(invalid)")
-    if re.search(r"^lang:\s*ko\b", prompt, re.M) and not re.search(r"^\s*summary_ko:", text, re.M):
-        missing.append("summary_ko")
     return missing
 
 
@@ -81,7 +79,7 @@ def check_jondaetmal(text):
 
 def check_caveman_leak(text):                   # S2: caveman return keys leaked into a haiku-output reply
     text = re.sub(r"```.*?```", "", text, flags=re.S)
-    if re.search(r"^\s*(status|reason|claim|searched|not_found|not_checked|truncated|omitted|summary_ko):\s", text, re.M):
+    if re.search(r"^\s*(status|reason|claim|searched|not_found|not_checked|truncated|omitted|relay):\s", text, re.M):
         return ["caveman_leak"]
     return []
 
@@ -108,12 +106,12 @@ def main():
     elif agent == "haiku-prompter":             # brief: B-format key check; polite-form check skipped (plan:160)
         fmt, missing = "prompter", check_brief(prompt)
         if m:
-            missing += check(prompt, resp, m.group(1))
+            missing += check(resp, m.group(1))
     elif not m:
         return                                  # legacy brief: not checked
     else:
         fmt = m.group(1)
-        missing = check(prompt, resp, fmt)
+        missing = check(resp, fmt)
     mode = os.environ.get("CAVEMAN_GUARD", "log")
     if mode not in ("log", "warn", "off"):
         mode = "log"

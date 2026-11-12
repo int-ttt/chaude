@@ -28,6 +28,6 @@ searched: <paths/patterns looked at>
 not_found: <looked, confirmed absent>
 not_checked: <ranges not looked at>
 truncated: yes|no ; omitted: <omitted items or ->
-summary_ko: <required only when lang: ko, 1-5 lines>
+relay: <1-5 lines, plain English, for L0 relay>
 ```
 All R-read values are English (claims, reasons, searched, not_found, not_checked); Korean appears only inside verbatim quotes of source text.

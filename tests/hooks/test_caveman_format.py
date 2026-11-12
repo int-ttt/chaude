@@ -18,6 +18,7 @@ RESP_READ = (
     "not_found: bar\n"
     "not_checked: /abs/other\n"
     "truncated: no ; omitted: -\n"
+    "relay: done\n"
 )
 VALID_RESPONSE = (
     "status: done\n"
@@ -26,7 +27,7 @@ VALID_RESPONSE = (
     "diffstat: 1 file changed\n"
     "check: python3 -m unittest -> PASS\n"
     "ws: none\n"
-    "summary_ko: 완료\n"
+    "relay: done\n"
 )
 
 
@@ -96,14 +97,14 @@ class CavemanFormatHookTest(unittest.TestCase):
         self.assertEqual(rows[0]["fmt"], "R-read")
         self.assertIn("status", rows[0]["missing"])
 
-    def test_c_lang_ko_without_summary_ko(self):
-        self.run_hook(payload(prompt=BRIEF_KO))
+    def test_c_relay_missing_one_row(self):
+        self.run_hook(payload(response=RESP_READ.replace("relay: done\n", "")))
         rows = self.rows()
         self.assertEqual(len(rows), 1)
-        self.assertIn("summary_ko", rows[0]["missing"])
+        self.assertIn("relay", rows[0]["missing"])
 
-    def test_c2_lang_ko_with_summary_ko_no_row(self):
-        self.run_hook(payload(prompt=BRIEF_KO, response=RESP_READ + "summary_ko: 완료했습니다.\n"))
+    def test_c2_lang_ko_with_relay_no_row(self):
+        self.run_hook(payload(prompt=BRIEF_KO))
         self.assertEqual(self.rows(), [])
 
     def test_d_garbage_stdin_exit0_no_row(self):

@@ -30,7 +30,7 @@ paths: <absolute path>[:<line range>], ...
 ctx: E<n>: <path>:<line> / <number or quote gist>   (no inheritance, C6)
 limits: <paths not to edit>, <forbidden actions>
 return: R-read | R-write | R-decide, <cap (chars or lines)>
-lang: caveman | ko | en   (ko = summary_ko required, rule_4; en = plain English, no summary_ko)
+lang: caveman | ko | en   (lang = language of the haiku-output reply; relay is always plain English)
 ```
 When the brief has `return: R-decide`, the final message is the 3.6 status header + the R-decide block:
 ```
@@ -42,5 +42,5 @@ rejected: <discarded option: reason>
 risks: <items>
 open_q: <question only the user can answer | ->
 plan_path: <path | ->
-summary_ko: <English, required when lang: ko, 1-5 lines, for L0 relay>
+relay: <1-5 lines, plain English, for L0 relay>
 ```

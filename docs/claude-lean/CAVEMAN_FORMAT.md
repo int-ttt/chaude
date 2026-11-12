@@ -10,7 +10,7 @@ paths: <absolute path>[:<line range>], ...
 ctx: E<n>: <path>:<line> / <number or quote gist>   (no inheritance, C6)
 limits: <paths not to edit>, <forbidden actions>
 return: R-read | R-write | R-decide, <cap (chars or lines)>
-lang: caveman | ko | en   (ko = summary_ko required, rule_4; en = plain English, no summary_ko)
+lang: caveman | ko | en   (lang = language of the haiku-output reply; relay is always plain English)
 ```
 
 - The E<n> evidence-line format in ctx reuses the earlier definition.
@@ -24,7 +24,7 @@ searched: <paths/patterns looked at>
 not_found: <looked, confirmed absent>
 not_checked: <ranges not looked at>
 truncated: yes|no ; omitted: <omitted items or ->
-summary_ko: <required only when lang: ko, 1-5 lines>
+relay: <1-5 lines, plain English, for L0 relay>
 ```
 
 - not_found and not_checked are never merged ("confirmed absent" vs "not looked at", read-review.md:15).
@@ -38,7 +38,7 @@ changed: <path list>
 diffstat: <gist of git diff --stat>
 check: <command> -> PASS|FAIL
 ws: <workspace id | none>
-summary_ko: <required when lang: ko, 1-5 lines>
+relay: <1-5 lines, plain English, for L0 relay>
 ```
 
 - The field list uses the flow.md:58-61 definition as-is.
@@ -52,7 +52,7 @@ rejected: <discarded option: reason>
 risks: <items>
 open_q: <question only the user can answer | ->
 plan_path: <path | ->
-summary_ko: <required when lang: ko, 1-5 lines, for L0 relay>
+relay: <1-5 lines, plain English, for L0 relay>
 ```
 
 ## 3.5 Caveman allowed and forbidden scope
@@ -71,3 +71,13 @@ reason: <one line when partial/fail/blocked, else ->
 - blocked: tool use blocked by a hook or permission denial. Quote the denial message verbatim and return without a workaround.
 - fail: check FAIL or task impossible. Write the retry count in reason.
 - Main must state any non-done status in the user answer, in the CHAUDE_LANG language (ko: polite Korean, en: plain English).
+
+## 3.7 Relay field (every R-* return, replaces summary_ko)
+
+```
+relay: <1-5 lines, plain English, self-contained summary of the block for haiku-output>
+```
+
+- Last line of each R-read, R-write and R-decide block. Always English, whatever `lang:` says.
+- haiku-output renders relay (and the body when needed) in the `lang:` language. Main relays only haiku-output's output.
+- summary_ko is removed (S24, decided 2026-11-12). The Korean reply text comes from haiku-output, not from the agent.

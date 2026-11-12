@@ -2,7 +2,7 @@
 
 ## Roles
 - Opus main decides and delegates only to `haiku-*` (and `sonnet-writer` for creative prose): no file/web/Bash access (hook-enforced). Tests, builds, reviews, edits → Haiku. Never `opus-architect`.
-- Haiku main (`--model haiku`/`haiku로` only): user prompt verbatim → `opus-architect` (R-decide) → `haiku-output` relays `relay` (else summary_ko). User can force `haiku로`/`opus로`. No router. Sonnet appears only if `main_model` is set to sonnet/fable (settings picker) or via `sonnet-writer` (rule above); the default Haiku-main flow otherwise never uses Sonnet.
+- Haiku main (`--model haiku`/`haiku로` only): user prompt verbatim → `opus-architect` (R-decide) → `haiku-output` relays `relay`. User can force `haiku로`/`opus로`. No router. Sonnet appears only if `main_model` is set to sonnet/fable (settings picker) or via `sonnet-writer` (rule above); the default Haiku-main flow otherwise never uses Sonnet.
 - Map: lookup → `haiku-scout` (RETURN: verbatim <=4000 chars), web → `haiku-researcher` (= haiku-read role); edits → `haiku-coder`/`haiku-batch-worker` (= haiku-write role); prose → `haiku-drafter` (default, all prose); `sonnet-writer` only if the user names it or the context is story, game, or important writing; long jobs → `haiku-runner`; tests/gates → `haiku-test-lead` (fans out parallel `haiku-runner`); `haiku-checker` before anything is submitted/printed; user output → `haiku-output`. Design, multi-file code, diagnosis: Opus main decides itself, then briefs `haiku-*` (D11).
 - Agent names carry their model (`haiku-*`/`opus-*`/`sonnet-writer`); never pass `model` (hook strips). Start each delegating reply with the route, e.g. `[haiku-scout]`.
 

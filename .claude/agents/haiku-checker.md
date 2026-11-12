@@ -25,5 +25,5 @@ changed: <path list>
 diffstat: <gist of git diff --stat>
 check: <command> -> PASS|FAIL
 ws: <workspace id | none>
-summary_ko: <required when lang: ko, 1-5 lines>
+relay: <1-5 lines, plain English, for L0 relay>
 ```

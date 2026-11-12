@@ -77,9 +77,9 @@ flowchart TD
 
 에이전트는 짧은 형식으로 결과를 돌려줍니다. 이 형식을 caveman 형식이라고 합니다. 자세한 규칙은 `docs/claude-lean/CAVEMAN_FORMAT.md`에 있습니다. 모든 형식은 맨 위에 두 줄짜리 상태 머리글을 둡니다. 상태는 `status`와 `reason` 두 줄입니다.
 
-- **R-read**: 찾은 내용을 돌려줍니다. 주요 항목은 `claim`, `searched`, `not_found`, `not_checked`, `truncated`, `omitted`, `summary_ko`입니다. 찾지 못한 것과 확인하지 않은 것은 따로 적습니다.
-- **R-write**: 쓴 결과를 돌려줍니다. 주요 항목은 `changed`, `diffstat`, `check`, `ws`, `summary_ko`입니다.
-- **R-decide**: 설계 결과를 돌려줍니다. 주요 항목은 `decision`, `why`, `rejected`, `risks`, `open_q`, `plan_path`, `summary_ko`입니다.
+- **R-read**: 찾은 내용을 돌려줍니다. 주요 항목은 `claim`, `searched`, `not_found`, `not_checked`, `truncated`, `omitted`, `relay`입니다. 찾지 못한 것과 확인하지 않은 것은 따로 적습니다.
+- **R-write**: 쓴 결과를 돌려줍니다. 주요 항목은 `changed`, `diffstat`, `check`, `ws`, `relay`입니다.
+- **R-decide**: 설계 결과를 돌려줍니다. 주요 항목은 `decision`, `why`, `rejected`, `risks`, `open_q`, `plan_path`, `relay`입니다.
 - **check**: 확인 결과를 돌려줍니다. 실패한 항목을 먼저 보여 주고, 전체 표는 `notes/runs/`에 저장합니다.
 
 짧게 줄여도 경로, 줄 번호, 확실성 표시는 지우지 않습니다. 찾지 못함과 확인하지 않음은 합치지 않습니다. 한국어 값은 번역하지 않습니다.

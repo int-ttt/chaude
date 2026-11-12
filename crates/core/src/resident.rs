@@ -53,7 +53,7 @@ pub fn tui_prompt(reply: &str, lang: Lang) -> String {
         Lang::En => "in plain English",
     };
     format!(
-        "lang: {}\nOpus main return follows. Use the relay field if present, else summary_ko (else the body), as the basis. Output only the answer for the user, {style}. Add no new facts.\n\n{reply}",
+        "lang: {}\nOpus main return follows. Use the relay field if present, else the body, as the basis. Output only the answer for the user, {style}. Add no new facts.\n\n{reply}",
         lang.code()
     )
 }
