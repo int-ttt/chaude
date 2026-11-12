@@ -15,6 +15,8 @@
   - 문서: 개선 계획에 실행 순서(3a절)를 추가했습니다. 단계 S1-S30을 5개 단계로 묶었고, 사용자 결정이 필요한 단계 목록도 넣었습니다.
 - Correction guard: task notifications and wrapper text (`<system-reminder>`, `<task-notification>`, `<command-…>`) no longer count as corrections, and the `말고` and `…라고` patterns only match at sentence start.
   - 정정 감지 훅: 작업 알림과 래퍼 텍스트(`<system-reminder>`, `<task-notification>`, `<command-…>`)는 정정으로 세지 않으며, `말고`와 `…라고` 패턴은 문장 시작에서만 맞습니다.
+- Hooks: the paste hook measures only the text after `[original]` and no longer saves task notifications or wrapper text as pastes, on both hook copies.
+  - 훅: 붙여넣기 훅은 `[original]` 뒤의 텍스트만 크기로 재며, 작업 알림과 래퍼 텍스트는 붙여넣기로 저장하지 않습니다. 두 훅 사본 모두 적용했습니다.
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.

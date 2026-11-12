@@ -235,7 +235,10 @@ if pending:
     os.remove(inbox)
 
 # 3. Long pasted text → file, so briefs carry a path instead of the text.
-if len(prompt) > 1500 or prompt.count("\n") > 20 or "<pasted_content" in prompt:
+# Notifications and wrapper text (same notion as correction-guard) are not pastes; the size is measured on the text after [original].
+NOTICE = r"<(task-notification|system-reminder|agent-message|command-[\w-]+|local-command-[\w-]+)[\s>]|\[Subagent hand-back\]"
+measured = prompt.split("[original]", 1)[1] if "[original]" in prompt else prompt
+if not re.search(NOTICE, prompt) and (len(measured) > 1500 or measured.count("\n") > 20 or "<pasted_content" in prompt):
     h = hashlib.sha1(prompt.encode()).hexdigest()[:8]
     path = os.path.join(rec, "pastes", f"{h}.md")
     dup = os.path.exists(path)
