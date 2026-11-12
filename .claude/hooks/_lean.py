@@ -1,11 +1,21 @@
 """Shared by the hooks: is claude-lean switched off (normal mode) for this project/session?
 
-Off when the session was started with CLAUDE_LEAN=0, or while .claude/lean-off exists
-(created by typing 일반모드 or "normal mode", removed by typing 절약모드 or "lean mode" — see style-adapter.py)."""
+Off when the session was started with CLAUDE_LEAN=0, or when this session's switch says off.
+The switch is per session: logs/.lean-off-<sid> holds "off" or "on" (typed 일반모드 / "normal mode" and
+절약모드 / "lean mode" — see style-adapter.py). Without it, the project default applies:
+<ROOT>/.chaude/settings.json "lean" (on|off); legacy .claude/lean-off still means off (read only, never written)."""
 import os
 
 ROOT = os.environ.get("CLAUDE_PROJECT_DIR", ".")
-OFF_FLAG = os.path.join(ROOT, ".claude", "lean-off")
+OFF_FLAG = os.path.join(ROOT, ".claude", "lean-off")  # legacy project flag: read only
+
+
+def clean_sid(sid):
+    return "".join(c for c in (sid or "") if c.isalnum() or c in "_-")
+
+
+def session_flag(sid):
+    return os.path.join(ROOT, "logs", f".lean-off-{clean_sid(sid)}")
 
 
 def lang():
@@ -32,8 +42,29 @@ def trigger(keywords, name):
     return "|".join(f"(?:{p})" for lang_kw in keywords.values() for p in lang_kw.get(name, []))
 
 
-def lean_off():
-    return os.environ.get("CLAUDE_LEAN", "1") == "0" or os.path.exists(OFF_FLAG)
+def project_lean():
+    """Project default "on" or "off": .chaude/settings.json "lean" wins; else legacy .claude/lean-off means off; else on."""
+    try:
+        import json
+        with open(os.path.join(ROOT, ".chaude", "settings.json"), encoding="utf-8") as f:
+            v = str(json.load(f).get("lean", "")).strip().lower()
+        if v in ("on", "off"):
+            return v
+    except Exception:
+        pass
+    return "off" if os.path.exists(OFF_FLAG) else "on"
+
+
+def lean_off(sid=""):
+    """sid = the hook input's session_id. Empty sid (no session context) uses the project default only."""
+    if os.environ.get("CLAUDE_LEAN", "1") == "0":
+        return True
+    if clean_sid(sid):
+        try:
+            return open(session_flag(sid), encoding="utf-8").read().strip() == "off"
+        except OSError:
+            pass
+    return project_lean() == "off"
 
 
 import re

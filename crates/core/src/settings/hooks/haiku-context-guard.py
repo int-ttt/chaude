@@ -59,7 +59,7 @@ try:
         if tool in FILE_TOOLS:
             deny(DENY_MSG)
         sys.exit(0)
-    if lean_off():
+    if lean_off(data.get("session_id")):
         sys.exit(0)
     if tool == "Read" and tin.get("allow_large"):
         deny("allow_large is disabled for Haiku agents. Read in slices with offset/limit, or grep first.")

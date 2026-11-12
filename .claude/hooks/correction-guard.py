@@ -13,14 +13,14 @@ sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
 from _lean import lean_off, pick, trigger
 
-if lean_off():
-    sys.exit(0)
 try:
     data = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
 prompt = (data.get("prompt") or "").strip()
 sid = re.sub(r"[^\w-]", "", data.get("session_id") or "default")
+if lean_off(sid):
+    sys.exit(0)
 # Task notifications and wrapper text (<task-notification>, <system-reminder>, <command-name>, ...) are not user prompts:
 # no hit, and the counter is left as it is.
 if re.search(r"<(task-notification|system-reminder|command-[\w-]+|local-command-[\w-]+|pasted_content)[\s>]", prompt):

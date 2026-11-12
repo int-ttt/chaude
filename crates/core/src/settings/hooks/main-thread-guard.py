@@ -25,7 +25,7 @@ except Exception:
     sys.exit(0)
 if os.environ.get("CHAUDE_ORCH", "").strip().lower() == "e":
     sys.exit(0)  # E main works inline
-if lean_off() or os.environ.get("CLAUDE_ALLOW_MAIN_TOOLS") == "1" or data.get("agent_id"):
+if lean_off(data.get("session_id")) or os.environ.get("CLAUDE_ALLOW_MAIN_TOOLS") == "1" or data.get("agent_id"):
     sys.exit(0)
 tool = data.get("tool_name", "")
 if tool in AGENT_TOOLS:

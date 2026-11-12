@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """UserPromptSubmit hook: adapts the session to a short, rapid-fire prompting style.
 
-- "일반모드" / "normal mode" and "절약모드" / "lean mode" switch claude-lean off / on for this project (no model call). While off,
-  every prompt gets a [normal] tag and nothing else below runs.
+- "일반모드" / "normal mode" and "절약모드" / "lean mode" switch claude-lean off / on for this session only (no model call;
+  logs/.lean-off-<sid>). While off, every prompt gets a [normal] tag and nothing else below runs.
 - Status checks ("진행상황", "끝났어?" / "progress", "done yet?") are answered from logs/*.status without calling the model.
-- Plain information statements are queued in record/INBOX.md without calling the model, then
-  delivered together with the next instruction. Disable with STYLE_INBOX=0; end a message with
+- Plain information statements are queued in record/INBOX.md (one file per project, each line tagged with its session id)
+  without calling the model, then delivered together with the next instruction of the same session. Disable with STYLE_INBOX=0; end a message with
   "?" or "!" to send it to the model immediately.
 - Everything else gets a one-line tag so the main thread handles it with minimal thinking:
   [ack] approval, [retry] re-run, [frag] short refinement, [paste] long text saved to a file.
@@ -20,13 +20,14 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
-from _lean import lean_off, OFF_FLAG, pick, trigger, lang
+from _lean import lean_off, session_flag, pick, trigger, lang
 
 data = json.load(sys.stdin)
 prompt = (data.get("prompt") or "").strip()
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 rec = os.environ.get("HARNESS_RECORD_DIR") or os.path.join(root, "record")
 inbox = os.path.join(rec, "INBOX.md")
+sid = re.sub(r"[^\w-]", "", data.get("session_id") or "x")  # one switch and one inbox lane per session
 
 # Trigger keywords per language: one dict, every language key is matched (see trigger() in _lean.py).
 # Adding a language = adding one key with the same trigger names.
@@ -115,28 +116,37 @@ def tail(path, n):
         return []
 
 
+def inbox_owner(line):
+    """Session id of an INBOX line ("- MM-DD HH:MM [sid] text"); None for untagged legacy lines."""
+    m = re.match(r"- \d\d-\d\d \d\d:\d\d \[([\w-]*)\] ", line)
+    return m.group(1) if m else None
+
+
 # 0. Mode switch, zero model tokens. 일반모드: hooks stand down and Opus works directly; 절약모드: back on.
+def set_session_lean(state):
+    """Writes this session's switch ("off" | "on"); "on" is written explicitly so it overrides a project default of off."""
+    os.makedirs(os.path.dirname(session_flag(sid)), exist_ok=True)
+    open(session_flag(sid), "w").write(state)
+
+
 if re.fullmatch(trigger(KEYWORDS, "MODE_OFF"), prompt, re.I):
-    os.makedirs(os.path.dirname(OFF_FLAG), exist_ok=True)
-    open(OFF_FLAG, "w").close()
-    block(pick("일반 모드로 바꿨습니다 (모델 호출 없음). 다음 메시지부터 Opus가 직접 작업하고 절약 규칙이 꺼집니다.\n되돌리기: 절약모드",
-               "Switched to normal mode (no model call). From the next message Opus works directly and lean rules are off.\nTo undo: lean mode"))
+    set_session_lean("off")
+    block(pick("일반 모드로 바꿨습니다 (모델 호출 없음). 이 세션의 다음 메시지부터 Opus가 직접 작업하고 절약 규칙이 꺼집니다.\n되돌리기: 절약모드",
+               "Switched to normal mode for this session (no model call). From the next message Opus works directly and lean rules are off.\nTo undo: lean mode"))
 if re.fullmatch(trigger(KEYWORDS, "MODE_ON"), prompt, re.I):
-    if os.path.exists(OFF_FLAG):
-        os.remove(OFF_FLAG)
+    set_session_lean("on")
     msg = pick("절약 모드로 돌아왔습니다 (모델 호출 없음).", "Back in lean mode (no model call).")
     if os.environ.get("CLAUDE_LEAN") == "0":
         msg += pick("\n단, 이 세션은 CLAUDE_LEAN=0으로 시작해서 계속 일반 모드입니다. /exit 후 CLAUDE_LEAN 없이 claude로 다시 시작하세요.",
                     "\nThis session started with CLAUDE_LEAN=0, so it stays in normal mode. /exit, then restart claude without CLAUDE_LEAN.")
     block(msg)
 
-sid = re.sub(r"[^\w-]", "", data.get("session_id") or "x")
 mode_file = os.path.join(root, "logs", f".lean-{sid}")
 try:
     was_off = open(mode_file).read().strip() == "off"
 except OSError:
     was_off = False
-now_off = lean_off()
+now_off = lean_off(sid)
 if now_off != was_off:
     try:
         os.makedirs(os.path.dirname(mode_file), exist_ok=True)
@@ -175,8 +185,8 @@ if (os.environ.get("STYLE_INBOX", "1") != "0" and 8 <= len(prompt) <= 120 and "\
         and re.search(DECLARATIVE, prompt) and not last_reply_asks()):
     os.makedirs(rec, exist_ok=True)
     with open(inbox, "a", encoding="utf-8") as f:
-        f.write(f"- {time.strftime('%m-%d %H:%M')} {prompt}\n")
-    n = len(tail(inbox, 1000))
+        f.write(f"- {time.strftime('%m-%d %H:%M')} [{sid}] {prompt}\n")
+    n = sum(inbox_owner(l) == sid for l in tail(inbox, 100000))
     block(pick(f"메모 {n}건 보관 (모델 호출 없음). 다음 지시와 함께 전달됩니다.\n바로 답을 원하면 끝에 ? 또는 ! 를 붙여 다시 보내세요.",
                f"{n} note(s) kept (no model call). They go out with your next instruction.\nTo get an answer now, send it again with ? or ! at the end."))
 
@@ -187,7 +197,8 @@ if lang() != _spawn_lang:
     _live = lang()
     tags.append(f"[lang] live language is {_live}, not the spawn CHAUDE_LANG={_spawn_lang}: reply in {'English' if _live == 'en' else 'Korean'} "
                 f"and send `lang: {_live}` in every brief to haiku-output.")
-pending = tail(inbox, 1000)
+inbox_all = tail(inbox, 100000)
+pending = [l for l in inbox_all if inbox_owner(l) == sid]
 
 # 0b. Upgraded while this session was open: CLAUDE.md/agents/settings are read at launch, so don't inject the policy;
 # tell the user once to restart (the resumed session loads the new version and session-context.py reports it).
@@ -231,8 +242,14 @@ if installed and loaded and loaded != installed:
             pass
 
 if pending:
-    tags.append("[inbox] user notes since your last turn (apply them; facts → FACTS.md via agent):\n" + "\n".join(pending))
-    os.remove(inbox)
+    tags.append("[inbox] user notes since your last turn (apply them; facts → FACTS.md via agent):\n"
+                + "\n".join(l.replace(f"[{sid}] ", "", 1) for l in pending))
+    # Only this session's lines leave the shared file; other sessions' notes and untagged legacy lines stay.
+    keep = [l for l in inbox_all if inbox_owner(l) != sid]
+    if keep:
+        open(inbox, "w", encoding="utf-8").write("".join(l + "\n" for l in keep))
+    else:
+        os.remove(inbox)
 
 # 3. Long pasted text → file, so briefs carry a path instead of the text.
 # Notifications and wrapper text (same notion as correction-guard) are not pastes; the size is measured on the text after [original].

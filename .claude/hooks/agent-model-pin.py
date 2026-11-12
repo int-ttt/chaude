@@ -47,7 +47,7 @@ if data.get("tool_name") in ("Agent", "Task") and data.get("agent_id") and data.
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                           "permissionDecisionReason": "opus subagents may only call haiku-* agents (v0.8.2)."}}, ensure_ascii=False))
         sys.exit(0)
-if lean_off() or data.get("tool_name") not in ("Agent", "Task"):
+if lean_off(data.get("session_id")) or data.get("tool_name") not in ("Agent", "Task"):
     sys.exit(0)
 if os.environ.get("CHAUDE_ORCH", "").strip().lower() == "e" and not data.get("agent_id"):
     _ti = data.get("tool_input") or {}
