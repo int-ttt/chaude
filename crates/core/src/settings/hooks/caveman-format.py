@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PostToolUse hook (Agent|Task): checks that a caveman-format return (docs/claude-lean/CAVEMAN_FORMAT.md)
-has its required keys. Never blocks: always exit 0. CAVEMAN_GUARD: log (default, metrics row only) | warn (row + additionalContext) | off."""
+has its required keys. Never blocks: always exit 0. CAVEMAN_GUARD: log (metrics row only) | warn (default: row + additionalContext) | off."""
 import json, os, re, sys, time
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run 
 from _lean import lang
 
 # watched agents (plan:174; manage the list here only)
-TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "sonnet-writer", "opus-architect", "haiku-output", "haiku-prompter"}  # S4: extend here only
+TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "sonnet-writer", "opus-architect", "haiku-output", "haiku-prompter", "haiku-extractor", "haiku-test-lead"}  # S4: extend here only
 REQUIRED = {                                    # 3.2~3.4 keys (status header 3.6 is checked for every fmt)
     "R-read": ["claim", "searched", "not_found", "not_checked", "truncated"],
     "R-write": ["changed", "diffstat", "check", "ws"],
@@ -112,9 +112,9 @@ def main():
     else:
         fmt = m.group(1)
         missing = check(resp, fmt)
-    mode = os.environ.get("CAVEMAN_GUARD", "log")
+    mode = os.environ.get("CAVEMAN_GUARD", "warn")
     if mode not in ("log", "warn", "off"):
-        mode = "log"
+        mode = "warn"
     if mode == "off" or not missing:
         return
     root = os.environ.get("CLAUDE_PROJECT_DIR") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

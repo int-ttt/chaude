@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- caveman: guard hook warns by default and covers all 13 agents (S25). `CAVEMAN_GUARD` now defaults to `warn` (metrics row + additionalContext); `haiku-extractor` and `haiku-test-lead` join TARGETS. `log` and `off` still work.
+  - caveman: 가드 훅은 기본값이 warn이고 13개 에이전트 전체를 봅니다 (S25). `CAVEMAN_GUARD` 기본값이 `warn`(메트릭 행 + additionalContext)으로 바뀌었고, `haiku-extractor`와 `haiku-test-lead`가 TARGETS에 추가됐습니다. `log`와 `off`는 그대로 동작합니다.
 - caveman: drop summary_ko, relay only (S24). Every R-read, R-write and R-decide return ends with a 1-5 line English `relay:` field (docs/claude-lean/CAVEMAN_FORMAT.md 3.7). `summary_ko` is removed from the agents (both copies), the guard hook (every return now requires `relay`) and the resident prompt; haiku-output renders relay in the `lang:` language.
   - caveman: summary_ko 제거, relay만 사용 (S24). 모든 R-read, R-write, R-decide 반환은 끝에 1-5줄 영어 `relay:` 필드를 둡니다(docs/claude-lean/CAVEMAN_FORMAT.md 3.7). 에이전트(두 사본 모두), 가드 훅(모든 반환에 `relay` 필수), resident 프롬프트에서 `summary_ko`를 뺐고, `lang:` 언어 변환은 haiku-output이 합니다.
 - docs: lang follows system language. The default is the system language (`/lang` setting > `CHAUDE_LANG` > OS locale; no locale means en), no longer ko. CLAUDE.md, haiku-output, README.md and README.ko.md now match.

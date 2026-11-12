@@ -33,9 +33,9 @@ sources: docs/claude-lean/CAVEMAN_FORMAT.md (canonical formats), CLAUDE.md, .cla
 ## Guard hook (.claude/hooks/caveman-format.py)
 - Event: PostToolUse, matcher `Agent|Task` (.claude/settings.json:107-111, working tree).
 - Never blocks: always exit 0.
-- `CAVEMAN_GUARD`: `log` (default, writes a metrics row only), `warn` (row + additionalContext), `off`.
+- `CAVEMAN_GUARD`: `log` (writes a metrics row only), `warn` (default; row + additionalContext), `off`.
 - Rows go to record/metrics/<date>.jsonl (`HARNESS_RECORD_DIR` overrides the dir).
-- Targets: 11 agents (TARGETS, line 14): scout, researcher, coder, batch-worker, runner, checker, drafter, sonnet-writer, opus-architect, tui, prompter.
+- Targets: 13 agents (TARGETS, line 14): scout, researcher, coder, batch-worker, runner, checker, drafter, sonnet-writer, opus-architect, tui, prompter, extractor, test-lead.
 - Not targets: `haiku-test-lead`, `haiku-extractor`. 11 of 13 agent files.
 - Checks when the brief has `return: R-*`: status and reason present; status value valid; R-read: claim, searched, not_found, not_checked, truncated (yes|no), claim as `path:line |`; R-write: changed, diffstat, check, ws; R-decide: decision, why, rejected, risks, open_q, plan_path; summary_ko when prompt has `lang: ko`.
 - `haiku-output`: polite-form check and leak check (caveman keys in output).
@@ -53,6 +53,6 @@ sources: docs/claude-lean/CAVEMAN_FORMAT.md (canonical formats), CLAUDE.md, .cla
 ## Proposed (not decided)
 - One return shape: status / reason / body / relay, defined only in CAVEMAN_FORMAT.md. Per-agent R-* blocks become body types.
 - Drop summary_ko if haiku-output can translate from body. user confirmation needed (사용자 확인 필요).
-- Hook covers all 13 agents, and either warns (`CAVEMAN_GUARD=warn`) or is removed. user confirmation needed (사용자 확인 필요).
+- Hook covers all 13 agents and warns by default (`CAVEMAN_GUARD=warn`; decided 2026-11-12).
 - Policy for skipping prompter and haiku-output hops when the user asks for a fast path. user confirmation needed (사용자 확인 필요).
 - History: plan/archive/caveman-structure-history.md. Former section 15 is at the end of plan/rust-port.md. Former section 16 is at notes/research/subagent-usage.md.
