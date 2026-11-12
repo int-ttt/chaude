@@ -9,6 +9,7 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 // history.go maxHistory
 const MAX_HISTORY: usize = 500;
@@ -223,12 +224,10 @@ impl Editor {
     // to the previous one.
     pub fn take(&mut self) -> String {
         let text = self.text().trim().to_string();
-        if !text.is_empty() {
-            push_history(&mut self.history, text.clone());
-            if let Some(path) = &self.history_file {
-                // Best effort, like Go recordHistory: recall still works in memory.
-                let _ = write_history(path, &self.history);
-            }
+        let added = !text.is_empty() && push_history(&mut self.history, text.clone());
+        if added && let Some(path) = &self.history_file {
+            // Best effort, like Go recordHistory: recall still works in memory.
+            let _ = append_history(path, &text);
         }
         self.clear();
         self.draft.clear();
@@ -322,13 +321,16 @@ pub fn history_file_for(cwd: &Path) -> Option<PathBuf> {
 }
 
 // Go inputHistory.Add: blanks and a repeat of the last entry are skipped; only the newest MAX_HISTORY are kept.
-fn push_history(items: &mut Vec<String>, s: String) {
+// Returns whether the entry was added.
+fn push_history(items: &mut Vec<String>, s: String) -> bool {
     if !s.is_empty() && items.last() != Some(&s) {
         items.push(s);
         if items.len() > MAX_HISTORY {
             items.drain(..items.len() - MAX_HISTORY);
         }
+        return true;
     }
+    false
 }
 
 // Go loadInputHistory: one JSON string per line, oldest first. Lines that do not decode are skipped and the
@@ -346,7 +348,73 @@ fn read_history(path: &Path) -> Vec<String> {
     items
 }
 
-// Go saveInputHistory: writes every entry to <path>.tmp and renames it over <path>.
+// Appends one entry as one line (O_APPEND), so two TUIs in one project interleave their lines and never
+// overwrite each other. Only when the file has more than MAX_HISTORY lines is it trimmed, under the lock file.
+fn append_history(path: &Path, s: &str) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let mut line = encode_json_string(s);
+    line.push('\n');
+    let mut opts = fs::OpenOptions::new();
+    opts.append(true).create(true);
+    set_private(&mut opts);
+    opts.open(path)?.write_all(line.as_bytes())?;
+    if raw_line_count(path)? > MAX_HISTORY {
+        trim_history(path)?;
+    }
+    Ok(())
+}
+
+fn raw_line_count(path: &Path) -> io::Result<usize> {
+    Ok(fs::read(path)?.iter().filter(|&&b| b == b'\n').count())
+}
+
+// Trims <path> to the newest MAX_HISTORY entries while holding <path>.lock. If another TUI holds the lock the
+// trim is skipped; the next append tries again.
+fn trim_history(path: &Path) -> io::Result<()> {
+    let mut lock = path.as_os_str().to_owned();
+    lock.push(".lock");
+    let Some(_guard) = take_lock(Path::new(&lock)) else {
+        return Ok(());
+    };
+    // Re-read the disk, so lines other TUIs appended after this one loaded are kept.
+    let items = read_history(path);
+    write_history(path, &items)
+}
+
+// Removes the lock file when dropped.
+struct LockGuard(PathBuf);
+
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+// A lock file older than STALE_LOCK was left by a process that died while holding it; it is removed once.
+const STALE_LOCK: Duration = Duration::from_secs(30);
+
+fn take_lock(lock: &Path) -> Option<LockGuard> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    set_private(&mut opts);
+    if opts.open(lock).is_ok() {
+        return Some(LockGuard(lock.to_path_buf()));
+    }
+    let stale = fs::metadata(lock)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age > STALE_LOCK);
+    if !stale {
+        return None;
+    }
+    fs::remove_file(lock).ok()?;
+    opts.open(lock).ok().map(|_| LockGuard(lock.to_path_buf()))
+}
+
+// Go saveInputHistory: writes every entry to <path>.tmp and renames it over <path>. Used only by the trim.
 fn write_history(path: &Path, items: &[String]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
@@ -769,6 +837,56 @@ mod tests {
         let got = read_history(&path);
         assert_eq!(got.len(), MAX_HISTORY);
         assert_eq!(got.last(), many.last());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // Two TUIs in one project append at the same time: every line must survive.
+    #[test]
+    fn two_concurrent_writers_keep_every_line() {
+        let dir = temp_dir("two-writers");
+        let path = dir.join(".chaude").join("history.jsonl");
+        let writers: Vec<_> = ["a", "b"]
+            .into_iter()
+            .map(|tag| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..100 {
+                        append_history(&path, &format!("{tag}{i}")).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        let raw = fs::read_to_string(&path).unwrap();
+        assert_eq!(raw.lines().count(), 200, "one line per append, none lost");
+        let mut got: Vec<String> = read_history(&path);
+        got.sort();
+        let mut want: Vec<String> = (0..100)
+            .flat_map(|i| [format!("a{i}"), format!("b{i}")])
+            .collect();
+        want.sort();
+        assert_eq!(got, want);
+        assert!(!dir.join(".chaude").join("history.jsonl.lock").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // Appends past MAX_HISTORY trim the file under the lock to the newest entries.
+    #[test]
+    fn appends_past_the_cap_trim_to_the_newest() {
+        let dir = temp_dir("trim");
+        let path = dir.join("history.jsonl");
+        for i in 0..MAX_HISTORY + 5 {
+            append_history(&path, &format!("e{i}")).unwrap();
+        }
+        assert_eq!(raw_line_count(&path).unwrap(), MAX_HISTORY);
+        let got = read_history(&path);
+        assert_eq!(got.first().map(String::as_str), Some("e5"));
+        assert_eq!(
+            got.last().map(String::as_str),
+            Some(format!("e{}", MAX_HISTORY + 4).as_str())
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
