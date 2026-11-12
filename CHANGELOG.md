@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- engine: a pure acknowledgement (`ㅇㅇ`, `ok`, `응`, `네`, `좋아`, `계속`, `thanks`, and similar one-word replies) skips the prompter summary and goes straight to the main model. Any other input, including short ones like `go` or `hello`, still goes through the prompter (S26). `is_pure_ack` in api.rs covers it.
+  - engine: 순수 확인 응답(`ㅇㅇ`, `ok`, `응`, `네`, `좋아`, `계속`, `thanks` 등 한 단어 응답)은 프롬프터 요약을 건너뛰고 메인 모델로 바로 갑니다. `go`나 `hello`처럼 짧아도 그 밖의 입력은 모두 프롬프터를 거칩니다 (S26). api.rs의 `is_pure_ack`이 이를 처리합니다.
 - docs: one final-reply owner (haiku-output), one agent count (13), one main-model rule (Haiku main only with `--model haiku`) across README, guide, CLAUDE.md and APPLY_GUIDE (S30). `tests/hooks/test_doc_contradictions.py` guards it.
   - docs: 최종 답변 주체는 haiku-output 하나, 에이전트 수는 13개, Haiku 메인은 `--model haiku`로만 시작하는 규칙으로 README, 가이드, CLAUDE.md, APPLY_GUIDE를 맞췄습니다 (S30). `tests/hooks/test_doc_contradictions.py`가 이를 확인합니다.
 - engine: a coder turn that fails with a 429 or overloaded API error, or whose child dies, is sent again with the same task up to 3 times with 2/4/8 s backoff and at most 60 s in total; "coder exited" is reported only after the retries end (S21). `coder_retries_429_twice_then_completes` covers it.

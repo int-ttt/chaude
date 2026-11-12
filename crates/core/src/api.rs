@@ -116,6 +116,32 @@ struct QueuedTask {
     duration_ms: Option<u64>,
 }
 
+// Pure acknowledgements that skip the prompter summary (S26). Only the whole input counts, no other words.
+const ACK_WORDS: &[&str] = &[
+    "ㅇㅇ",
+    "ㅇ",
+    "ok",
+    "okay",
+    "응",
+    "네",
+    "좋아",
+    "계속",
+    "thanks",
+    "thank you",
+    "고마워",
+    "감사",
+];
+
+// True when the input is one pure ack word, ignoring case, surrounding spaces and trailing "." or "!".
+fn is_pure_ack(text: &str) -> bool {
+    let t = text
+        .trim()
+        .trim_end_matches(['.', '!'])
+        .trim()
+        .to_lowercase();
+    ACK_WORDS.contains(&t.as_str())
+}
+
 // Sums per-message usage into (input, output, cache). None when all are zero.
 fn sum_turn_counts<'a>(usages: impl Iterator<Item = &'a Usage>) -> Option<(u64, u64, u64)> {
     let (mut input, mut output, mut cache) = (0u64, 0u64, 0u64);
@@ -1735,9 +1761,9 @@ impl State {
         self.begin_turn(text);
     }
 
-    // Go viaPrompter: with residents on, the prompt goes through the prompter first.
+    // Go viaPrompter: with residents on, the prompt goes through the prompter first (S26: pure acks skip it).
     fn begin_turn(&mut self, text: String) {
-        if self.cfg.residents {
+        if self.cfg.residents && !is_pure_ack(&text) {
             self.start_prompter(text);
         } else {
             self.dispatch(&text);
@@ -5684,6 +5710,27 @@ mod tests {
     use super::*;
     use crate::clients::idle_deadline;
     use crate::testutil::{TempDir, isolated};
+
+    #[test]
+    fn pure_ack_skips_prompter_but_short_instructions_do_not() {
+        for ack in ["ㅇㅇ", "OK", " 응 ", "좋아.", "계속!", "thanks", "네"] {
+            assert!(is_pure_ack(ack), "{ack:?} should be an ack");
+        }
+        for not_ack in [
+            "go",
+            "hello",
+            "plain",
+            "one",
+            "ok, fix it",
+            "응 그래서 어떻게?",
+            "",
+        ] {
+            assert!(
+                !is_pure_ack(not_ack),
+                "{not_ack:?} should reach the prompter"
+            );
+        }
+    }
 
     // A restored row keeps its saved final status: done stays done, failed shows failed, and only interrupted or
     // still-running (at shutdown) rows are marked interrupted. The saved model is kept; an empty one stays empty.
