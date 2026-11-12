@@ -6,7 +6,7 @@
 
 기본 모델은 Opus입니다. 대화를 맡는 메인 세션이 Opus로 돌아가며, 판단하고 일을 나눕니다. Opus 메인은 파일을 직접 읽거나 쓰지 않고, 웹을 검색하거나 Bash를 실행하지도 않습니다. 이 제한은 훅이 강제합니다. 실제 작업은 모두 Haiku 에이전트가 합니다.
 
-Haiku를 메인으로 쓰고 싶으면 `--model haiku`로 시작하거나, 대화 중에 "haiku로"라고 말씀하시면 됩니다. 이 경우 흐름이 달라집니다. 사용자의 말을 그대로 `opus-architect`에 넘기면, 설계 결과를 `haiku-output`가 한국어로 옮겨 답합니다. 기본 흐름에서는 Sonnet을 쓰지 않습니다. 다만 설정 피커의 `main_model`을 sonnet 또는 fable로 고르면 그 모델이 메인이 됩니다. 라우터도 없습니다. 언제든 "opus로"라고 말씀하시면 Opus 메인으로 돌아갑니다.
+Haiku를 메인으로 쓰고 싶으면 `--model haiku`로 시작합니다. 대화 중에는 바꾸지 않습니다. 이 경우 흐름이 달라집니다. 사용자의 말을 그대로 `opus-architect`에 넘기면, 설계 결과를 `haiku-output`가 한국어로 옮겨 답합니다. 기본 흐름에서는 Sonnet을 쓰지 않습니다. 다만 설정 피커의 `main_model`을 sonnet 또는 fable로 고르면 그 모델이 메인이 됩니다. 라우터도 없습니다. 언제든 "opus로"라고 말씀하시면 Opus 메인으로 돌아갑니다.
 
 ## 2. 이름 규칙
 
@@ -16,7 +16,7 @@ Haiku를 메인으로 쓰고 싶으면 `--model haiku`로 시작하거나, 대�
 
 ## 3. 에이전트 표
 
-에이전트는 모두 11개입니다. 역할 묶음은 조회, 작성, 검증, 실행, 설계, 대화 순서로 나눴습니다.
+에이전트는 모두 13개입니다. 역할 묶음은 조회, 작성, 검증, 실행, 설계, 대화 순서로 나눴습니다.
 
 | 에이전트 | 모델 | 역할 묶음 | 언제 씁니까 | 도구 |
 |---|---|---|---|---|
@@ -28,6 +28,8 @@ Haiku를 메인으로 쓰고 싶으면 `--model haiku`로 시작하거나, 대�
 | haiku-coder | Haiku | 작성 | 범위가 좁은 코드 수정과 버그 수정을 할 때 | Read, Write, Edit, Bash, Grep, Glob |
 | haiku-checker | Haiku | 검증 | 바꾼 내용이 맞는지 읽기 전용으로 확인할 때 | Read, Grep, Glob, Bash |
 | haiku-runner | Haiku | 실행 | 오래 걸리는 작업을 백그라운드로 돌리고 진행 상황을 볼 때 | Read, Write, Edit, Bash, Grep, Glob |
+| haiku-test-lead | Haiku | 검증 | 게이트 전체를 한 번 돌리고 PASS/FAIL 표 하나를 받을 때 | Agent, Read, Bash, Grep, Glob |
+| sonnet-writer | Sonnet | 작성 | 이야기, 게임, 중요한 글처럼 사용자가 지정했거나 맥락이 그런 글일 때만 | Read, Write, Edit, Bash, Grep, Glob |
 | haiku-prompter | Haiku | 대화 | 반복, 재귀, N번, "될 때까지" 같은 루프를 맡을 때 | Agent, Read, Bash |
 | haiku-output | Haiku | 대화 | 에이전트 결과를 한국어 존댓말 답변으로 바꿀 때 | Read |
 | opus-architect | Opus | 설계 | 설계와 판단을 하고, 작업을 `haiku-*`에 나눠 줄 때 | Agent |
@@ -54,7 +56,7 @@ Opus 메인은 요청을 받으면 아래 표에 따라 `haiku-*`에 일을 나�
 
 ## 5. 한 번의 위임 흐름
 
-사용자가 요청을 보내면 한 번의 위임 라운드가 돕니다. 필요한 에이전트 호출은 한 메시지에 모두 담고, 포그라운드로 실행합니다. 에이전트끼리 메인을 거치지 않고 체인을 잇지 않습니다. 결과를 받으면 메인이 답을 한 번 씁니다. 그다음 다시 대기합니다.
+사용자가 요청을 보내면 한 번의 위임 라운드가 돕니다. 필요한 에이전트 호출은 한 메시지에 모두 담고, 포그라운드로 실행합니다. 에이전트끼리 메인을 거치지 않고 체인을 잇지 않습니다. 결과를 받으면 메인이 정리해 `haiku-output`에 넘기고, `haiku-output`가 최종 답을 한 번 씁니다. 그다음 다시 대기합니다.
 
 답변은 어떤 경로를 탔는지 밝히는 태그로 시작합니다. 예를 들면 `[haiku-scout]`처럼 씁니다.
 
@@ -65,7 +67,7 @@ flowchart TD
     M -- Haiku 메인 --> A[opus-architect 설계 R-decide]
     A --> T[haiku-output가 한국어로 전달]
     R --> W[haiku-* 결과 caveman 형식]
-    W --> F[메인이 최종 답 한 번]
+    W --> F[haiku-output가 최종 답 한 번]
     T --> F
 ```
 

@@ -31,7 +31,7 @@ chmod +x install.sh fresh_start.sh
 | 백업 | 기존 `CLAUDE.md`, `.claude/settings.json` → `.claude-backup-<시각>/` |
 | CLAUDE.md | 정책을 맨 위에 추가, 기존 내용은 아래에 유지 (재실행해도 중복 없음) |
 | settings.json | 모델·생각 강도·압축 설정과 env, 훅 10개를 **병합** (기존 훅 유지) |
-| 에이전트 11개 · 스킬 7개 · 훅 파일 10개 | `.claude/` 아래 복사 |
+| 에이전트 13개 · 스킬 7개 · 훅 파일 10개 | `.claude/` 아래 복사 |
 | 폴더 | `logs/` |
 | 문서 | `docs/claude-lean/` (이 가이드, FRESH_START, README, 이전 프롬프트) |
 

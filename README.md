@@ -33,7 +33,7 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 
 ## How it works
 
-Opus is the main session. It reads your request, decides the plan, and writes the final answer. It does not read or edit files itself. Hooks enforce this. Haiku agents do the actual work, such as searching, editing, and checking.
+Opus is the main session. It reads your request, decides the plan, and delegates the work. `haiku-output` writes the final reply. Opus does not read or edit files itself. Hooks enforce this. Haiku agents do the actual work, such as searching, editing, and checking.
 
 | Agent | Model | Used for |
 |---|---|---|
@@ -47,6 +47,7 @@ Opus is the main session. It reads your request, decides the plan, and writes th
 | `haiku-coder` | Haiku | Small, scoped code and bug fixes |
 | `haiku-checker` | Haiku | Read-only checks of the changes |
 | `haiku-runner` | Haiku | Long jobs in the background |
+| `haiku-test-lead` | Haiku | Runs the gate set once and returns one PASS/FAIL table |
 | `haiku-prompter` | Haiku | Repeated or looped tasks (main thread only) |
 | `haiku-output` | Haiku | Turns agent results into a polite Korean reply |
 

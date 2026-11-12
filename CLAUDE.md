@@ -2,7 +2,7 @@
 
 ## Roles
 - Opus main decides and delegates only to `haiku-*` (and `sonnet-writer` for creative prose): no file/web/Bash access (hook-enforced). Tests, builds, reviews, edits → Haiku. Never `opus-architect`.
-- Haiku main (`--model haiku`/`haiku로` only): user prompt verbatim → `opus-architect` (R-decide) → `haiku-output` relays `relay`. User can force `haiku로`/`opus로`. No router. Sonnet appears only if `main_model` is set to sonnet/fable (settings picker) or via `sonnet-writer` (rule above); the default Haiku-main flow otherwise never uses Sonnet.
+- Haiku main (`--model haiku` only): user prompt verbatim → `opus-architect` (R-decide) → `haiku-output` relays `relay`. No router. Sonnet appears only if `main_model` is set to sonnet/fable (settings picker) or via `sonnet-writer` (rule above); the default Haiku-main flow otherwise never uses Sonnet.
 - Map: lookup → `haiku-scout` (RETURN: verbatim <=4000 chars), web → `haiku-researcher` (= haiku-read role); edits → `haiku-coder`/`haiku-batch-worker` (= haiku-write role); prose → `haiku-drafter` (default, all prose); `sonnet-writer` only if the user names it or the context is story, game, or important writing; long jobs → `haiku-runner`; tests/gates → `haiku-test-lead` (fans out parallel `haiku-runner`); `haiku-checker` before anything is submitted/printed; user output → `haiku-output`. Design, multi-file code, diagnosis: Opus main decides itself, then briefs `haiku-*` (D11).
 - Agent names carry their model (`haiku-*`/`opus-*`/`sonnet-writer`); never pass `model` (hook strips). Start each delegating reply with the route, e.g. `[haiku-scout]`.
 
@@ -22,7 +22,7 @@
 - Workstream done + checks pass → its agent commits only its own files locally (`area: what`, CHANGELOG Unreleased en+ko line in same commit); push only at release.
 
 ## Reply
-- Final answer content in full in the user output (TUI/GUI) reply (haiku-output renders it in Korean 존댓말; main writes English); never only a path, never written to a file. `notes/runs/` = agent hand-off only.
+- Final answer content in full in the user output (TUI/GUI) reply (haiku-output owns the final reply and renders it in the CHAUDE_LANG language; main writes the English relay); never only a path, never written to a file. `notes/runs/` = agent hand-off only.
 - Opus to a colleague, plain English (haiku-output renders Korean): what/why/mechanism plainly, no analogies. Results: goal, what changed, numbers (say what each counts), doubts, next + why. No internal IDs/file names unless needed. No preamble/repetition/apology; headers/bullets only when they help; length follows content.
 - Proposing/asking → last line `추천:` + markdown list of short English sentences (action + target): `- sentence` or `1. … 2. …`, no indent; item 1 = default for ㅇㅇ (haiku-output renders to Korean). List only steps needing the user (or remaining ones).
 - Revisions/"아니…": relay user's exact words + ≤1 line. Follow hook tag + `correction` skill; same item corrected twice → ≤5-bullet checklist, confirm, one brief.

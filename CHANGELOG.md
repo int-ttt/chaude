@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- docs: one final-reply owner (haiku-output), one agent count (13), one main-model rule (Haiku main only with `--model haiku`) across README, guide, CLAUDE.md and APPLY_GUIDE (S30). `tests/hooks/test_doc_contradictions.py` guards it.
+  - docs: 최종 답변 주체는 haiku-output 하나, 에이전트 수는 13개, Haiku 메인은 `--model haiku`로만 시작하는 규칙으로 README, 가이드, CLAUDE.md, APPLY_GUIDE를 맞췄습니다 (S30). `tests/hooks/test_doc_contradictions.py`가 이를 확인합니다.
 - tests: the hook language fallback matches the rule order (`/lang` setting > `CHAUDE_LANG` > OS locale, en when undetectable). `_lean.spawn_lang()` is the spawn-time version used by `style-adapter.py`, so a missing `CHAUDE_LANG` no longer defaults to ko. `tests/hooks/test_lang.py` controls the locale explicitly.
   - tests: 훅 언어 대체 순서를 규칙에 맞췄습니다 (`/lang` 설정 > `CHAUDE_LANG` > OS 로캘, 감지 안 되면 en). `_lean.spawn_lang()`이 시작 시점 언어를 맡고 `style-adapter.py`가 이를 씁니다. 그래서 `CHAUDE_LANG`이 없어도 ko가 기본이 아닙니다. `tests/hooks/test_lang.py`는 로캘을 직접 지정합니다.
 - docs: stale context-alert and reset-notice references removed (automatic notice dropped in S20). APPLY_GUIDE and claude-lean README now say to reset by hand (`/exit`, then `claude`). The threshold table is the single source for the 80k/100k/150k/200k/400k values. `LEAN_RESET_AT` rows removed.
