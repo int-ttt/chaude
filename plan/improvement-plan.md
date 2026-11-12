@@ -85,6 +85,15 @@ Applied by the docs consolidation step. Table rows above show pre-move paths. No
 - Not done, user confirmation needed: merge of docs/claude-lean/FRESH_START.md and MIGRATE_NOW_PROMPT.md; delete of archived files; status of docs/claude-lean/CHANGELOG.md.
 - Not changed: notes/FACTS.md, notes/OPEN.md, CHANGELOG.md, README*.md, CLAUDE.md, record/.
 
+## 1a. User field experience (2026-11-12)
+
+- User report (2026-11-12), compared with plain Opus 5.5: usage difference is large, quality loss is almost none, speed is only slightly slower. User is satisfied.
+- Evidence level: user impression. No bench or log was run for it. Quality side is unmeasured (see V(b)).
+- Consequences:
+  - No Opus-only comparison bench is planned.
+  - S12 (main read access / conditional delegation) is deferred until a problem is felt.
+  - The operating model itself stays.
+
 ## 2. Findings
 
 ### A. Release and CI
@@ -174,6 +183,23 @@ Applied by the docs consolidation step. Table rows above show pre-move paths. No
 - `crates/core/src/haiku_pool.rs` worker map has no cap, TTL, or eviction.
 - Fix: cap the map and add an idle TTL.
 
+### V. Operating model as documented (docs-only review)
+- (a) Savings evidence is weak.
+  - Short bench: cost -42.7% but total tokens +73.0%; n=2 per setting; the same setting differs by about 15% between runs (docs/pingpong-bench.md:39-40, :84).
+  - README 69.9% comes from ratio R=1.73 of a 3-prompt run, applied to 229 sessions. The Opus-only baseline is computed, not measured (README.md:241-263).
+  - -80% is labelled a prediction (docs/claude-lean/README.md:70-75).
+- (b) Quality side is unmeasured. The decider sees only Haiku summaries; verification is also Haiku; notes/LESSONS.md has no Haiku-error entries.
+- (c) Fixed per-turn stages: 3 Claude processes per turn (plan/rust-port.md:7). The one-round rule fits investigate-then-decide tasks poorly (docs/guide/models-and-agents.md:57).
+- (d) Cache and rotation premises are unverified.
+  - Thresholds differ across docs: 150k, 200k, 80k, 100k, 400k. Auto-compact 150k is below rotate 200k (Opus) (docs/claude-lean/README.md:44; plan/rust-port.md:66; docs/guide/cli.md:99).
+  - Idle 3570 s assumes the 1h TTL (docs/guide/cli.md:120; notes/DECISIONS.md:58). plan/interactive-child-resident-sessions.md:26 and :55 suspect 5m for -p children.
+  - "handoff cost net ~0" is computed; inputs not verified.
+- (e) Doc contradictions.
+  - Final-reply owner: docs/guide/models-and-agents.md:57 (main writes the answer) vs :52 (haiku-tui sends the answer).
+  - Agent count: 11 vs 12 (locations to confirm; .claude/agents has 13 files).
+  - Main-model rule: notes/DECISIONS.md:40 (Opus main only for design turns) vs :50 (default main = opus). Status of :40 to confirm.
+  - Name haiku-prompter is used for two things: the loop agent (README.md:50) and the per-input summary hop (Finding P, S26).
+
 ## 3. Steps
 
 Order = dependency order. Each step: own commit, gate through haiku-test-lead, TUI behaviour unchanged unless stated.
@@ -202,7 +228,11 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 - [ ] S23 Haiku pool: cap the worker map and add an idle TTL; evict and stop idle workers. Accept: after cap+1 workers and the idle TTL, the map size stays at the cap and no idle worker child is left alive.
 - [ ] S24 Caveman return shape: one shape (status / reason / body / relay) defined only in docs/claude-lean/CAVEMAN_FORMAT.md; per-agent R-* blocks become body types; apply to the 13 agents in .claude/agents, the embedded copies in crates/core/src/settings/agents, and the hook. Drop summary_ko only if user decides so (user confirmation needed). Accept: `grep -rn "changed: <" .claude/agents crates/core/src/settings/agents` shows one wording; the hook REQUIRED list matches CAVEMAN_FORMAT.md; `cargo test -p chaude-core` passes for the embedded agent copies.
 - [ ] S25 Caveman guard hook: cover all 13 agents (TARGETS in .claude/hooks/caveman-format.py), or remove the hook. Mode (warn vs remove) needs user decision. Accept: each of the 13 agent names is in TARGETS or the hook is absent from .claude/settings.json; a fake agent output with a missing R-write field yields a row (and additionalContext when CAVEMAN_GUARD=warn).
-- [ ] S26 Hop-skip policy: decide whether the prompter hop and the haiku-tui hop may be skipped on a fast path, and fix RULE_B in crates/core/src/orch.rs:32 to match. Needs user decision. Accept: the decision is written in notes/DECISIONS.md; RULE_B text and the policy agree; one test covers the skip (or the no-skip) path.
+- [ ] S26 Hop-skip policy: direction chosen by user 2026-11-12 = skip the prompter summary for short follow-up inputs (ack words, one-line instructions). Accept: such inputs reach main without summary; measured latency drop.
+- [ ] S27 Measure real cache TTL of child processes once. Accept: observed cache_read vs cache_creation after 6 min and after 50 min idle; notes/DECISIONS.md updated.
+- [ ] S28 One context-threshold table as the single source (150k, 200k, 80k, 100k, 400k); other docs point to it. Accept: each threshold value appears only in that table; other docs link to it.
+- [ ] S29 Fix stale section refs to the old caveman-structure numbering in CLAUDE.md:11 and docs/claude-lean/CAVEMAN_FORMAT.md:3, :32. Accept: each ref points to a section that exists in plan/caveman-structure.md.
+- [ ] S30 Resolve the doc contradictions in V(e). Final-reply owner and main-model rule need user confirmation. Accept: one final-reply owner, one agent count, one main-model rule across docs.
 
 ## 4. Not verified
 
