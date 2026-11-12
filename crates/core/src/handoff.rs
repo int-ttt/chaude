@@ -233,6 +233,20 @@ pub fn live_handoff_file(exit_path: &Path) -> PathBuf {
     exit_path.with_file_name(live)
 }
 
+// The live marker of the run whose main session is main_sid. Nothing is written without a usable session id:
+// the shared base name is never a marker target, so two runs in one cwd cannot share one file.
+pub fn write_live_marker(base: &Path, main_sid: &str, h: &ExitHandoff) -> io::Result<()> {
+    if safe_sid(main_sid).is_empty() {
+        return Ok(());
+    }
+    write_exit_handoff(&live_handoff_file(&exit_write_path(base, main_sid)), h)
+}
+
+// True for the shared legacy marker name and for any per-session marker name.
+pub fn is_live_marker_name(name: &str) -> bool {
+    name == LIVE_HANDOFF_FILE || (name.starts_with(LIVE_PREFIX) && name.ends_with(LIVE_SUFFIX))
+}
+
 // The record of the previous run and whether it was killed. A live marker means the run never reached its
 // clean exit, so it is newer than the exit handoff and wins. None when neither file parses.
 pub fn previous_run(exit_path: &Path) -> Option<(ExitHandoff, bool)> {
@@ -679,6 +693,27 @@ mod tests {
         remove_live_handoff(&a);
         assert!(!live_handoff_file(&a).exists());
         assert!(!live_handoff_file(&base).exists());
+    }
+
+    #[test]
+    fn live_marker_is_never_written_under_the_shared_name() {
+        let dir = TempDir::new("handoff-live-no-shared");
+        let base = handoff_file(dir.path());
+        // Session id unknown yet, or with no safe characters left: nothing is written.
+        write_live_marker(&base, "", &sample()).unwrap();
+        write_live_marker(&base, "../", &sample()).unwrap();
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        write_live_marker(&base, "aaa", &sample()).unwrap();
+        write_live_marker(&base, "bbb", &sample()).unwrap();
+        let mut names: Vec<String> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, [".live-handoff-aaa.json", ".live-handoff-bbb.json"]);
+        assert!(is_live_marker_name(LIVE_HANDOFF_FILE));
+        assert!(is_live_marker_name(".live-handoff-aaa.json"));
+        assert!(!is_live_marker_name(".exit-handoff-aaa.json"));
     }
 
     #[test]

@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::handoff::{
-    EXIT_HANDOFF_FILE, LIVE_HANDOFF_FILE, SESSIONS_FILE, pid_alive, read_exit_handoff,
+    EXIT_HANDOFF_FILE, LIVE_HANDOFF_FILE, SESSIONS_FILE, is_live_marker_name, pid_alive,
+    read_exit_handoff,
 };
 use crate::record;
 
@@ -138,7 +139,7 @@ fn live_peer(path: &Path, name: &OsStr) -> bool {
     let Some(name) = name.to_str() else {
         return false;
     };
-    if name == LIVE_HANDOFF_FILE {
+    if is_live_marker_name(name) {
         return read_exit_handoff(path).is_some_and(|h| h.owner_pid != 0 && pid_alive(h.owner_pid));
     }
     let owner = name.strip_prefix(USAGE_PREFIX).unwrap_or(name);
@@ -299,18 +300,24 @@ mod tests {
         fs::create_dir_all(test.join("usage-4294967295")).unwrap();
         let marker = long.join(LIVE_HANDOFF_FILE);
         fs::write(&marker, format!("{{\"owner_pid\":{me}}}")).unwrap();
+        // The per-session marker of a live peer is kept the same way.
+        let per_sid = long.join(".live-handoff-abc.json");
+        fs::write(&per_sid, format!("{{\"owner_pid\":{me}}}")).unwrap();
         let two_days = at(SystemTime::now(), 2);
 
-        // Own pid is alive: its usage dir and marker stay. The dead pid's usage dir goes.
+        // Own pid is alive: its usage dir and markers stay. The dead pid's usage dir goes.
         assert_eq!(startup_t(cwd, two_days), 1);
         assert!(test.join(format!("usage-{me}")).is_dir());
         assert!(!test.join("usage-4294967295").exists());
         assert!(marker.exists());
+        assert!(per_sid.exists());
 
-        // Marker owner gone: the stale marker is removed too.
+        // Marker owners gone: the stale markers are removed too.
         fs::write(&marker, "{\"owner_pid\":4294967295}").unwrap();
-        // long/ keeps entries 30 days, so the marker must be older than that.
-        assert_eq!(startup_t(cwd, at(SystemTime::now(), 31)), 1);
+        fs::write(&per_sid, "{\"owner_pid\":4294967295}").unwrap();
+        // long/ keeps entries 30 days, so the markers must be older than that.
+        assert_eq!(startup_t(cwd, at(SystemTime::now(), 31)), 2);
         assert!(!marker.exists());
+        assert!(!per_sid.exists());
     }
 }

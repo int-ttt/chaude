@@ -2295,11 +2295,8 @@ impl State {
     // Only with a handoff path (the TUI sets one).
     fn persist_live(&self) {
         if let Some(path) = &self.cfg.handoff_path {
-            let exit = handoff::exit_write_path(path, &self.sid);
-            let _ = handoff::write_exit_handoff(
-                &handoff::live_handoff_file(&exit),
-                &self.exit_handoff(),
-            );
+            // No session id yet (startup, after /clear): write_live_marker writes nothing, never the shared name.
+            let _ = handoff::write_live_marker(path, &self.sid, &self.exit_handoff());
         }
     }
 
