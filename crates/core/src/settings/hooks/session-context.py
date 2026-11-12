@@ -94,19 +94,35 @@ def head(rel, n, skip_comments=True):
     return ls[:n]
 
 
-def tail(rel, n):
+def own_predecessor(sid):
+    """Transcript of the session that ran before `sid` in this cwd, read from the sid chain in
+    notes/tmp/long/.sessions.jsonl. "" when unsure: sid not in the chain, no predecessor, no transcript,
+    or the candidate is live (transcript modified within 15 min: another instance may still be running it)."""
+    import time
+    from _lean import history_dir
+    hdir = history_dir(root)
+    if not hdir or not sid:
+        return ""
+    chain = []
     try:
-        with open(os.path.join(root, rel), encoding="utf-8") as f:
-            return [l.rstrip() for l in f if l.strip()][-n:]
+        with open(os.path.join(root, "notes", "tmp", "long", ".sessions.jsonl"), encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except Exception:
+                    continue
+                if e.get("role") == "main" and e.get("session_id"):
+                    chain.append(e["session_id"])
     except OSError:
-        return []
-
-
-def pick(rel_new, rel_old):
-    """record/ file if it exists (absolute HARNESS_RECORD_DIR wins when set), else the legacy notes/ file."""
-    rec = os.environ.get("HARNESS_RECORD_DIR")
-    new = os.path.abspath(os.path.join(rec, os.path.basename(rel_new))) if rec else rel_new
-    return new if os.path.exists(os.path.join(root, new)) else rel_old
+        return ""
+    if sid not in chain:
+        return ""
+    before = chain[:len(chain) - 1 - chain[::-1].index(sid)]        # entries before this session's last record
+    prev = next((s for s in reversed(before) if s != sid), "")
+    path = os.path.join(hdir, prev + ".jsonl") if prev else ""
+    if not path or not os.path.isfile(path) or time.time() - os.path.getmtime(path) < 15 * 60:
+        return ""
+    return path
 
 
 if data.get("source", "startup") == "startup":       # storage: per-agent/session hook state older than 3 days
@@ -118,23 +134,16 @@ if data.get("source", "startup") == "startup":       # storage: per-agent/sessio
         except OSError:
             pass
 
-out = [f"[session:{data.get('source', 'start')}] snapshot of notes/ + record/ (state lives in files; don't re-read them unless needed):"]
+out = [f"[session:{data.get('source', 'start')}] snapshot of notes/OPEN.md (state lives in files; don't re-read them unless needed):"]
 open_items = head("notes/OPEN.md", 20)
 if open_items:
     out += ["OPEN:"] + open_items
-recent = tail(pick("record/LEDGER.md", "notes/LEDGER.md"), 5)
-if recent:
-    out += ["Recent agent results (LEDGER):"] + recent
 if data.get("source", "startup") in ("startup", "clear"):
-    # Carry over the tail of the previous session (plain text, no model): the newest other transcript.
-    # On /clear the previous session is the transcript just cleared (a new session id, new transcript file).
+    # Carry over the tail of the previous session (plain text, no model): only this instance's own predecessor
+    # (sid chain), never a live transcript. Unsure -> nothing.
     try:
-        import glob as _g
-        from _lean import history_dir, is_ping
-        hdir = history_dir(root)
-        cur = os.path.basename(data.get("transcript_path") or "")
-        prev = sorted((p for p in _g.glob(os.path.join(hdir, "*.jsonl")) if os.path.basename(p) != cur),
-                      key=os.path.getmtime)[-1:] if hdir else []
+        from _lean import is_ping
+        prev = [p for p in [own_predecessor(data.get("session_id") or "")] if p]
         msgs = []
         for p in prev:
             with open(p, encoding="utf-8", errors="ignore") as fh:
@@ -158,9 +167,6 @@ if data.get("source", "startup") in ("startup", "clear"):
             out += ["Previous session, last messages:"] + msgs[-6:]
     except Exception:
         pass
-inbox = tail(pick("record/INBOX.md", "notes/INBOX.md"), 50)
-if inbox:
-    out.append(f"INBOX: {len(inbox)} queued user notes (delivered with the next instruction).")
 if upd:
     out.append(f"[update] {upd} Mention nothing; the user was already told.")
 if len(out) > 1 or upd:

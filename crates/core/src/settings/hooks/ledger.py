@@ -2,7 +2,7 @@
 """SubagentStop hook: append each agent's short result to record/LEDGER.md (no model tokens).
 Records the model the agent actually ran on (read from its transcript), flagged when it differs
 from the model its name says. Gives continuity across auto-compaction and new sessions without /clear."""
-import glob, json, os, re, sys, time
+import contextlib, glob, json, os, re, sys, time
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
         _reconf = getattr(_s, "reconfigure", None)
@@ -99,9 +99,40 @@ path = os.path.join(rec, "LEDGER.md")
 lines = [l.strip() for l in msg.splitlines() if l.strip()][:3]
 entry = f"- {time.strftime('%m-%d %H:%M')} [{tag}] " + " / ".join(lines)[:300] + "\n"
 os.makedirs(os.path.dirname(path), exist_ok=True)
+
+
+@contextlib.contextmanager
+def locked(lock_path):
+    """Exclusive lock on lock_path for the read-modify-write; several SubagentStop hooks can run at once."""
+    with open(lock_path, "a+") as lf:
+        if os.name == "nt":
+            import msvcrt
+            lf.seek(0)
+            msvcrt.locking(lf.fileno(), msvcrt.LK_LOCK, 1)      # retries about 10 s, then raises OSError
+            try:
+                yield
+            finally:
+                lf.seek(0)
+                msvcrt.locking(lf.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
 try:
-    old = open(path, encoding="utf-8").readlines()
+    with locked(os.path.join(rec, ".ledger.lock")):
+        try:
+            old = open(path, encoding="utf-8").readlines()
+        except OSError:
+            old = []
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.writelines((old + [entry])[-300:])
+        os.replace(tmp, path)                                    # atomic: readers never see a half-written ledger
 except OSError:
-    old = []
-open(path, "w", encoding="utf-8").writelines((old + [entry])[-300:])
+    pass                                                         # lock or write failed: skip this entry, never block
 sys.exit(0)
