@@ -7,7 +7,7 @@
 - Agent names carry their model (`haiku-*`/`opus-*`/`sonnet-writer`); never pass `model` (hook strips). Start each delegating reply with the route, e.g. `[haiku-scout]`.
 
 ## Language
-- All sessions (main and every agent) think, brief, return and write in English. Only haiku-output writes user-facing text (L0), in the `CHAUDE_LANG` language (`ko`: polite 존댓말 Korean, `en`: plain English; default `ko`); main's user-visible reply = haiku-output output.
+- All sessions (main and every agent) think, brief, return and write in English. Only haiku-output writes user-facing text (L0), in the `CHAUDE_LANG` language (`ko`: polite 존댓말 Korean, `en`: plain English; default: system language); main's user-visible reply = haiku-output output.
 - Briefs/returns: English caveman (docs/claude-lean/CAVEMAN_FORMAT.md). Returns (R-read, R-write `changed: <path>: <what>`, `check -> PASS|FAIL`) go as relay to haiku-output; caveman lines hidden (plan/caveman-structure.md Channels).
 
 ## Flow

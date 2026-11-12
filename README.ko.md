@@ -233,7 +233,7 @@ UI와 훅, 에이전트의 응답은 같은 언어를 씁니다. `.chaude/settin
 
 - `auto`(기본값)는 OS 로케일을 따릅니다. `ko`와 `en`은 언어를 고정합니다.
 - REPL에서는 `/lang en`, 셸에서는 `chaude lang en`으로 바꿉니다. 화면은 바로 바뀝니다. 실행 중인 메인과 에이전트는 매 프롬프트마다 파일을 다시 읽는 훅 덕분에 다음 프롬프트부터 새 언어로 답합니다.
-- 환경변수 `CHAUDE_LANG`은 시작할 때만 파일 설정을 덮어씁니다(예: `CHAUDE_LANG=en chaude`). 시작 뒤에는 파일이 기준이라서 `/lang` 변경이 `CHAUDE_LANG`보다 우선합니다.
+- 우선순위: `.chaude/settings.json`의 `language`(`/lang`이 저장) > 환경변수 `CHAUDE_LANG`(예: `CHAUDE_LANG=en chaude`) > OS 로케일. `auto`이거나 값이 없으면 다음 단계로 넘어갑니다. 어디에도 설정이 없으면 시스템 언어를 따릅니다(한국어 로케일이면 ko, 그 밖이면 en).
 - chaude는 확정된 값을 자신이 띄우는 하위 Claude 세션에 내보냅니다. 그래서 훅과 에이전트도 같은 언어로 답합니다.
 
 ## 효과 분석

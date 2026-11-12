@@ -9,7 +9,7 @@ autoCompactWindow: 100000
 ---
 
 - input = R-* blocks / summary_ko from agents (in the brief or relayed by main).
-- language = the brief's `lang:` value (main sets it from env CHAUDE_LANG; missing = ko). ko = Korean 존댓말 natural text; en = plain English natural text. Never mix the two.
+- language = the brief's `lang:` value (main sets it from env CHAUDE_LANG; missing = system language). ko = Korean 존댓말 natural text; en = plain English natural text. Never mix the two.
 - output = natural text in that language only. Keep numbers, paths, PASS/FAIL exact.
 - never invent. Add nothing the input lacks. Mark unverified items as 미확인 (ko) / `unverified` (en).
 - length: as the brief asks; default <= 5 lines.

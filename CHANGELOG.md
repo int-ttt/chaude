@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- docs: lang follows system language. The default is the system language (`/lang` setting > `CHAUDE_LANG` > OS locale; no locale means en), no longer ko. CLAUDE.md, haiku-output, README.md and README.ko.md now match.
+  - docs: 언어는 시스템 언어를 따릅니다. 기본값은 시스템 언어입니다(`/lang` 설정 > `CHAUDE_LANG` > OS 로캘, 로캘이 없으면 en). 더 이상 ko가 기본이 아닙니다. CLAUDE.md, haiku-output, README.md, README.ko.md를 맞췄습니다.
 - core: hook copy parity test (S6). `.claude/hooks/` must be byte-identical to `crates/core/src/settings/hooks/`; `cargo test -p chaude-core --test hook_copies` fails when they differ. Language order is now `/lang` (settings `language`) > `CHAUDE_LANG` > OS locale, in both Rust `i18n::resolve` and the Python `_lean.lang()`. With no locale set, the Python hooks now default to en, matching Rust (was ko).
   - core: 훅 복사본 동등성 테스트 (S6). `.claude/hooks/`는 `crates/core/src/settings/hooks/`와 바이트 단위로 같아야 하며, 다르면 `cargo test -p chaude-core --test hook_copies`가 실패합니다. 언어 우선순위는 이제 Rust `i18n::resolve`와 Python `_lean.lang()` 모두 `/lang`(설정 `language`) > `CHAUDE_LANG` > OS 로캘입니다. 로캘도 없으면 Python 훅은 이제 en을 씁니다(Rust와 맞춤, 예전에는 ko).
 - hooks: drop context-alert.py (S20). The hook was inert (`LEAN_RESET_AT` 0 by default), so it is removed from the hook set, the package copy list and the docs. The ledger is one file, `record/LEDGER.md`; the old `notes/LEDGER.md` was appended into it and removed.

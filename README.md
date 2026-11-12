@@ -233,7 +233,7 @@ The UI and the replies from hooks and agents use one language. Set it in `.chaud
 
 - `auto` (default) follows the OS locale. `ko` and `en` force a language.
 - Change it with `/lang en` in the REPL or `chaude lang en` in a shell. The screen switches at once. A running main or agent replies in the new language from its next prompt, because a per-prompt hook re-reads the file.
-- At startup the `CHAUDE_LANG` environment variable overrides the file (`CHAUDE_LANG=en chaude`). After startup the file is what counts, so a `/lang` change wins over `CHAUDE_LANG`.
+- Order: the `language` value in `.chaude/settings.json` (saved by `/lang`) > the `CHAUDE_LANG` environment variable (`CHAUDE_LANG=en chaude`) > the OS locale. `auto` or no value falls through to the next step. With no setting anywhere, the language follows the system language (Korean locale: ko, others: en).
 - chaude exports the resolved value to the child Claude sessions it starts, so hooks and agents reply in the same language.
 
 ## Effect analysis
