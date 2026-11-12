@@ -6,6 +6,7 @@ pub mod agentview;
 pub mod bar;
 pub mod commands;
 pub mod edit;
+mod keyburst;
 pub mod lang;
 pub mod overlay;
 pub mod records;
@@ -973,6 +974,12 @@ impl App {
         {
             self.copy_note = None;
         }
+    }
+
+    // Bracketed paste: the text goes into the input as typed, newlines included. It is never submitted.
+    pub fn paste(&mut self, text: &str) {
+        self.editor.insert_str(text);
+        self.sugg_sel = 0;
     }
 
     // Maps one key press to an action.
@@ -3684,7 +3691,17 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     {
         let tx = wake_tx.clone();
         thread::spawn(move || {
+            // Enter inside a burst of keys (a paste without bracketed paste) becomes a newline; see keyburst.rs.
+            let mut burst = keyburst::Burst::default();
             while let Ok(ev) = event::read() {
+                let ev = match ev {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        Event::Key(burst.filter(key, Instant::now(), || {
+                            event::poll(Duration::ZERO).unwrap_or(false)
+                        }))
+                    }
+                    other => other,
+                };
                 if tx.send(Wake::Term(ev)).is_err() {
                     return;
                 }
@@ -3781,7 +3798,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                         engine.install_import(imp);
                     }
                 }
-                Wake::Term(Event::Paste(text)) => app.editor.insert_str(&text),
+                Wake::Term(Event::Paste(text)) => app.paste(&text),
                 Wake::Term(Event::Mouse(m)) if app.mouse => match m.kind {
                     MouseEventKind::ScrollUp if app.overlay_wheel(true, m.row as usize) => {}
                     MouseEventKind::ScrollDown if app.overlay_wheel(false, m.row as usize) => {}
@@ -4072,6 +4089,33 @@ mod tests {
             modifiers: mods,
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
+        }
+    }
+
+    #[test]
+    fn paste_with_newlines_stays_in_the_input() {
+        let mut app = App::new(80, 24);
+        app.paste("first\nsecond\n");
+        assert_eq!(app.editor.text(), "first\nsecond\n");
+        assert!(app.transcript.is_empty());
+    }
+
+    #[test]
+    fn burst_enter_is_a_newline_and_lone_enter_submits() {
+        let mut app = App::new(80, 24);
+        for c in "ab".chars() {
+            app.on_key(key(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        // A key typed as part of a paste reaches on_key as Alt+Enter (see keyburst::Burst).
+        assert!(matches!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::ALT)),
+            Action::Continue
+        ));
+        assert_eq!(app.editor.text(), "ab\n");
+        app.on_key(key(KeyCode::Char('c'), KeyModifiers::NONE));
+        match app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)) {
+            Action::Submit(text) => assert_eq!(text, "ab\nc"),
+            _ => panic!("a lone Enter must submit"),
         }
     }
 
