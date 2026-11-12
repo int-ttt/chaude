@@ -17,7 +17,11 @@ pub const EXIT_HANDOFF_FILE: &str = ".exit-handoff.json";
 const EXIT_PREFIX: &str = ".exit-handoff-";
 const EXIT_SUFFIX: &str = ".json";
 // Written while a run is live and removed on clean exit. Still present at the next start = the run was killed.
+// Per session like the exit file: LIVE_PREFIX + sid + LIVE_SUFFIX (see live_handoff_file). LIVE_HANDOFF_FILE is
+// the shared marker old runs wrote; it is read only for the base record.
 pub const LIVE_HANDOFF_FILE: &str = ".live-handoff.json";
+const LIVE_PREFIX: &str = ".live-handoff-";
+const LIVE_SUFFIX: &str = ".json";
 // ctx_tokens key of the main child; residents use their role name.
 pub const MAIN_ROLE: &str = "main";
 
@@ -215,9 +219,18 @@ fn newest_session_file(base: &Path) -> Option<PathBuf> {
         .map(|(_, path)| path)
 }
 
-// The live marker next to an exit handoff file (same folder, LIVE_HANDOFF_FILE).
+// The live marker of the record at exit_path, in the same folder: the marker of the same session
+// (".exit-handoff-<sid>.json" -> ".live-handoff-<sid>.json"). The base record keeps LIVE_HANDOFF_FILE.
 pub fn live_handoff_file(exit_path: &Path) -> PathBuf {
-    exit_path.with_file_name(LIVE_HANDOFF_FILE)
+    let name = exit_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let live = match name
+        .strip_prefix(EXIT_PREFIX)
+        .and_then(|s| s.strip_suffix(EXIT_SUFFIX))
+    {
+        Some(sid) => format!("{LIVE_PREFIX}{sid}{LIVE_SUFFIX}"),
+        None => LIVE_HANDOFF_FILE.to_string(),
+    };
+    exit_path.with_file_name(live)
 }
 
 // The record of the previous run and whether it was killed. A live marker means the run never reached its
@@ -259,9 +272,11 @@ pub fn resume_mode(prev: &ExitHandoff, role: &str, killed: bool, threshold: u64)
     }
 }
 
-// Clean exit: the live marker is no longer needed. A missing file is fine.
+// Clean exit: the live marker is no longer needed. A missing file is fine. The shared legacy marker goes too,
+// so an old run's leftover is consumed once a run exits cleanly and is not read as killed again.
 pub fn remove_live_handoff(exit_path: &Path) {
     let _ = fs::remove_file(live_handoff_file(exit_path));
+    let _ = fs::remove_file(exit_path.with_file_name(LIVE_HANDOFF_FILE));
 }
 
 // Go writeExitHandoff: version 1 and saved_at now, written to a temp file then renamed.
@@ -638,6 +653,32 @@ mod tests {
             previous_run(&exit).map(|(h, k)| (h.main_session, k)),
             Some(("old".to_string(), false))
         );
+    }
+
+    #[test]
+    fn live_marker_is_per_session() {
+        let dir = TempDir::new("handoff-live-sid");
+        let base = handoff_file(dir.path());
+        let a = exit_write_path(&base, "aaa");
+        let b = exit_write_path(&base, "bbb");
+        assert_eq!(
+            live_handoff_file(&a).file_name().unwrap(),
+            ".live-handoff-aaa.json"
+        );
+        // Session a is live (its marker, no exit file); session b exited cleanly.
+        write_exit_handoff(&live_handoff_file(&a), &main_only("aaa")).unwrap();
+        write_exit_handoff(&b, &main_only("bbb")).unwrap();
+        // a's marker is not a kill for b, and b's clean exit does not hide a's kill.
+        assert_eq!(killed_main_session(&b), None);
+        assert_eq!(killed_main_session(&a), Some("aaa".to_string()));
+        // The shared base marker is read only for the base record.
+        write_exit_handoff(&live_handoff_file(&base), &main_only("legacy")).unwrap();
+        assert_eq!(killed_main_session(&base), Some("legacy".to_string()));
+        assert_eq!(killed_main_session(&b), None);
+        // Any clean exit consumes the legacy base marker too.
+        remove_live_handoff(&a);
+        assert!(!live_handoff_file(&a).exists());
+        assert!(!live_handoff_file(&base).exists());
     }
 
     #[test]

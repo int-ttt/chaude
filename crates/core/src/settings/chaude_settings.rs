@@ -226,6 +226,8 @@ pub fn prune_records_at_startup(cwd: &Path, s: &Settings, now: SystemTime) -> us
 }
 
 // Go saveChaudeSettings: writes the clamped settings through a tmp file and a rename, keys in Go's order.
+// The file-only "lean" key (project default on|off, read by hooks/_lean.py) is carried over from the file being
+// replaced, as language is for save_language; it is not part of Settings, so it is never written from here.
 pub fn save(path: &Path, s: &Settings) -> io::Result<()> {
     let s = s.clone().clamp();
     if let Some(dir) = path.parent() {
@@ -233,8 +235,19 @@ pub fn save(path: &Path, s: &Settings) -> io::Result<()> {
     }
     let model = serde_json::to_string(&s.main_model).map_err(io::Error::other)?;
     let language = serde_json::to_string(&s.language).map_err(io::Error::other)?;
+    let lean = fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v.get("lean").cloned());
+    let lean = match lean {
+        Some(v) => format!(
+            ",\n  \"lean\": {}",
+            serde_json::to_string(&v).map_err(io::Error::other)?
+        ),
+        None => String::new(),
+    };
     let body = format!(
-        "{{\n  \"session_retention_days\": {},\n  \"extra_coders\": {},\n  \"main_model\": {},\n  \"language\": {}\n}}\n",
+        "{{\n  \"session_retention_days\": {},\n  \"extra_coders\": {},\n  \"main_model\": {},\n  \"language\": {}{lean}\n}}\n",
         s.session_retention_days, s.extra_coders, model, language
     );
     let tmp = PathBuf::from(format!("{}.tmp", path.display()));
@@ -286,6 +299,24 @@ mod tests {
         assert_eq!(language_from_json(r#"{"main_model":"opus"}"#), None);
         assert_eq!(language_from_json(r#"{"language":3}"#), None);
         assert_eq!(language_from_json("not json"), None);
+    }
+
+    #[test]
+    fn save_keeps_the_lean_key() {
+        let dir = std::env::temp_dir().join(format!("chaude-save-lean-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join(".chaude").join("settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, r#"{"lean":"off","main_model":"sonnet"}"#).unwrap();
+        save(&path, &Settings::default()).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains(r#""lean": "off""#), "{text}");
+        assert_eq!(main_model_from_json(&text), "claude-opus-5-5");
+        // A file without the key gets none.
+        fs::write(&path, r#"{"main_model":"sonnet"}"#).unwrap();
+        save(&path, &Settings::default()).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("lean"));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

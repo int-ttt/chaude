@@ -84,7 +84,7 @@ echo '{"tool_name":"Read"}' | python3 .claude/hooks/main-thread-guard.py  # deny
 | 오래 쉬었다 돌아올 때 | `claude`(새 세션)로 시작. `claude -c`보다 훨씬 쌈 (아래 참고) |
 | 맡길 모델을 직접 정하기 | 프롬프트에 `haiku로` / `sonnet으로` / `opus로`. 없으면 Opus가 정하고 응답 첫머리에 `[haiku-scout]`처럼 표시 |
 | 어려운 설계를 Opus에게 | Sonnet이 어렵다고 보면 `ESCALATE`로 자동 전환, 처음부터는 `opus로`. 계획서가 나오면 "ㅇㅇ"으로 Sonnet 구현 진행, 바로 끝까지 하려면 "opus로 설계하고 바로 구현까지" |
-| 일반 모드로 쓰기 (Opus가 직접 작업) | `일반모드` 입력 (모델 호출 없음). 되돌리기는 `절약모드`. 이 프로젝트에서 되돌릴 때까지 유지 |
+| 일반 모드로 쓰기 (Opus가 직접 작업) | `일반모드` 입력 (모델 호출 없음). 되돌리기는 `절약모드`. 이 세션(창)에서만 바뀌고 `logs/.lean-off-<sid>`에 저장됨. 새 세션의 기본값은 `.chaude/settings.json`의 `"lean": "on" | "off"` |
 | 에이전트가 어떤 모델로 돌았는지 | 이름 앞부분(`haiku-*`, `sonnet-*`)이 모델. 모델별 사용량은 `/usage` |
 | 예전 대화 읽기 (사람) | `logs/history/*.txt` 를 아무 편집기로 열기 (가볍게 저장되어 바로 열림) |
 | 대화 중간에 모델·MCP 바꾸기 | 피하세요. 바꾸면 캐시가 식어 그 뒤 첫 요청이 비싸집니다. 필요하면 새 세션에서 바꾸세요 |
@@ -116,7 +116,7 @@ echo '{"tool_name":"Read"}' | python3 .claude/hooks/main-thread-guard.py  # deny
 | `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | `2` | 메인 → Sonnet/Opus → Haiku 연계 깊이. `1`이면 연계 끔 (메인이 `[haiku] steps`를 대신 배분) |
 | `env.STYLE_INBOX` | (없음 = 켜짐) | 메모 기능이 불편하면 `"0"` |
 | `env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS` | `8000` | 큰 파일을 자주 다루면 `12000` |
-| 입력 `일반모드` / `절약모드` | 절약 | 절약 규칙을 끄고 켬. `.claude/lean-off` 파일로 상태 저장, 모델 호출 없음 |
+| 입력 `일반모드` / `절약모드` | 절약 | 절약 규칙을 끄고 켬. 현재 세션만 바뀌며 `logs/.lean-off-<sid>`(off/on)에 저장, 모델 호출 없음. 프로젝트 기본값은 `.chaude/settings.json`의 `"lean"` (예전 `.claude/lean-off`는 기본값으로만 읽음) |
 | 실행 시 `CLAUDE_LEAN=0 claude` | — | 그 세션만 일반 모드로 시작 (프로젝트 상태는 그대로) |
 
 프로젝트 성격별 권장:

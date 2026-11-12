@@ -1562,11 +1562,9 @@ fn actor(
         }
     }
     if let Some(path) = st.cfg.handoff_path.clone() {
-        let _ = handoff::write_exit_handoff(
-            &handoff::exit_write_path(&path, &st.sid),
-            &st.exit_handoff(),
-        );
-        handoff::remove_live_handoff(&path);
+        let exit = handoff::exit_write_path(&path, &st.sid);
+        let _ = handoff::write_exit_handoff(&exit, &st.exit_handoff());
+        handoff::remove_live_handoff(&exit);
     }
     // Go markInterrupted on exit: this process's running agents are stored as interrupted.
     if let Some(store) = &st.agent_store {
@@ -2297,8 +2295,9 @@ impl State {
     // Only with a handoff path (the TUI sets one).
     fn persist_live(&self) {
         if let Some(path) = &self.cfg.handoff_path {
+            let exit = handoff::exit_write_path(path, &self.sid);
             let _ = handoff::write_exit_handoff(
-                &handoff::live_handoff_file(path),
+                &handoff::live_handoff_file(&exit),
                 &self.exit_handoff(),
             );
         }
