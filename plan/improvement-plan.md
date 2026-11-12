@@ -121,6 +121,25 @@ Applied by the docs consolidation step. Table rows above show pre-move paths. No
 - Token display: turn line empty after `/resume`; no recorded real stream fixture; `/resume` session selection to check.
 - Generated settings lack the lang hook wiring; doctor detection of versions below 0.12.0 untested; stale "not wired" headers in `tui/agentview.rs` and `tui/rewind.rs`.
 
+### J. Structure: logic duplicated between cli and core
+- Session listing exists twice: `crates/cli/src/tui/sessview.rs:123 list_sessions` and `crates/core/src/resume_group.rs:237 list_sessions`; `project_dir` twice (`sessview.rs:182`, `core/src/record_folder.rs:42`).
+- `crates/cli/src/tui/records.rs` has 12 fns (parse_header, scan_headers, unescape, parse_entries, is_legacy, sorted_entries, migrate_root, list_files, list_projects, load_project, filter_projects, pick) with name-matched counterparts in core `record.rs`, `record_folder.rs`, `record_turn.rs` (bodies not diffed).
+- cli-only logic a second front end needs: input history (`tui/edit.rs`), startup record pruning (`cli/src/main.rs:172-173`).
+- Hypothesis, not verified: the `/resume` wrong-session observation comes from the two listing implementations disagreeing.
+
+### K. Structure: engine state is an implicit state machine
+- `api.rs` `State` has 97 fields; `UiEvent` 48 variants; `Cmd` 11; `Input` 5.
+- "What the engine is doing" is spread over `busy`, `hold_notice_turn`, `proc: Option`, `turn_started: Option`, `opus_agents`, `pending_end`, `usage_poll_at`; invalid combinations are not excluded by types. Largest match: `on_event` 220 lines (2839-3059).
+
+### L. Structure: process and thread lifetime
+- `ClaudeProc` has no `Drop`; a dropped value leaves its `claude` child running (`proc.rs:283-297` kills only in `finish`/`kill`).
+- `EngineHandle::drop` (`api.rs:717-721`) sends `Cmd::Shutdown` without joining; child kill and exit handoff happen at actor exit (`api.rs:1559-1586`), so they may not complete if the process exits first. Explicit `shutdown()` (`api.rs:709-714`) joins.
+- stdout reader threads (`proc.rs:215-227`) and MCP connection threads (`mcp.rs:161`, `:322`) are not joined. Actor panic path not checked.
+- `ClaudeProc::finish` polls every 20 ms up to 5 s on the actor thread (`proc.rs:290`, via `api.rs:2449 exit_idle_coder`); other commands wait meanwhile. All three engine channels are unbounded (`api.rs:748-750`).
+
+### M. Repo leftovers
+- `tests/e2e-rebuild` holds Go files; `tests/chaude-soak` is a separate workspace with a 0.11.9 snapshot; 11 `core/tests/parity_*` files cite removed Go tests in header comments.
+
 ## 3. Steps
 
 Order = dependency order. Each step: own commit, gate through haiku-test-lead, TUI behaviour unchanged unless stated.
@@ -136,6 +155,10 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 - [ ] S10 Docs: apply section 1 "Proposed doc layout"; fix CLAUDE.md main-model wording, README agent table, `plan/tui-parity.md` header, agentview/rewind headers. Partly done 2026-11-12: doc-layout moves and tui-parity/rust-port status fixes applied (section 1, "Applied doc layout"). Still open: CLAUDE.md main-model wording, README agent table, agentview/rewind headers.
 - [ ] S11 Proposed scope for 0.13.0: S1 to S4 plus GUI output pane, input box, status bar; remaining GUI features in 0.13.x. Needs user decision (current order is "all TUI features in 0.13.0").
 - [ ] S12 Needs user decision: read-only (Read/Grep) access for the main session.
+- [ ] S13 One implementation for sessions and records: cli `sessview.rs`/`records.rs` call core; delete the cli copies after diffing behaviour; move input history and record pruning to core. Do with S4. Accept: a test lists the same sessions through the single core fn that both `/resume` and the session view use.
+- [ ] S14 Process lifetime: `Drop` for `ClaudeProc` (kill + wait); `EngineHandle::drop` joins with a timeout; actor wrapped so a panic still kills children; non-blocking coder exit (no 5 s poll on the actor thread). Accept: test that drops the handle and finds no live child pid; Interrupt is handled within 100 ms while a coder is exiting.
+- [ ] S15 Engine phase enum: replace the busy/hold/proc/turn_started flag set with one `Phase` enum plus per-phase data; do during S5. Accept: no pub API change, tests pass.
+- [ ] S16 Remove or archive `tests/e2e-rebuild` (Go) and decide on `tests/chaude-soak`; update parity test header comments. Needs user decision for deletion.
 
 ## 4. Not verified
 
@@ -143,3 +166,4 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 - Non-test counts are heuristic; cfg counts include test code.
 - Duplication between update/clean/scripts beyond `home_dir` not confirmed.
 - Thread/sync primitive counts in core not measured.
+- cli/core record fn bodies not diffed; update/clean/scripts vs core duplication, install overwrite behaviour, python3 runtime check, version sync mechanism not checked.
