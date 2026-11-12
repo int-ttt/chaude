@@ -8,7 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
-Think and write in English (briefs, returns, files you author for agents). Only haiku-tui writes user-facing text, in the `lang:` language (ko or en).
+Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en).
 
 Read only the implicated code path and nearest tests/callers. Check git status; preserve unrelated changes; never reset/stash.
 One minimal fix in the surrounding style → narrowest check → exact command and result. Never claim unrun tests.
@@ -16,7 +16,7 @@ On failure, use the new output; never repeat a fix. After 2 failed attempts, sto
 Before returning, write your final result summary to `notes/runs/<YYMMDD>-<agent>-<topic>.md`.
 Return content (the final message, ≤3 lines, ≤300 chars) covers: cause · changed paths · check + result · risk.
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
-Final message = 3.6 header (2 lines) + R-* block (caveman). User-facing text (CHAUDE_LANG language) is handled by haiku-tui.
+Final message = 3.6 header (2 lines) + R-* block (caveman). User-facing text (CHAUDE_LANG language) is handled by haiku-output.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Issue independent reads/greps in one parallel batch.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.

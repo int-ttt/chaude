@@ -48,7 +48,7 @@ Opus is the main session. It reads your request, decides the plan, and writes th
 | `haiku-checker` | Haiku | Read-only checks of the changes |
 | `haiku-runner` | Haiku | Long jobs in the background |
 | `haiku-prompter` | Haiku | Repeated or looped tasks (main thread only) |
-| `haiku-tui` | Haiku | Turns agent results into a polite Korean reply |
+| `haiku-output` | Haiku | Turns agent results into a polite Korean reply |
 
 The full list, tools, and routing rules are in [Models and agents](docs/guide/models-and-agents.md) (Korean).
 
@@ -208,7 +208,7 @@ Main REPL flags (`chaude repl`):
 |---|---|---|
 | `--model` | `opus` | Main model |
 | `--cwd` | see `chaude repl -h` | Project folder |
-| `--threshold` | `80000` | Rotation threshold for models other than Opus. Opus is fixed at `200000` |
+| `--threshold` | see [threshold table](docs/claude-lean/README.md#맥락-임계값-표) | Rotation threshold for models other than Opus. Opus is fixed at [200k](docs/claude-lean/README.md#맥락-임계값-표) |
 | `--rotate-defer-timeout` | `10m` | How long a due rotation waits for background agents before it runs anyway |
 | `--show-rotation` | see `chaude repl -h` | Print a one-line rotation marker |
 | `--metrics-dir` | see `chaude repl -h` | Folder for per-turn metrics (JSONL) |

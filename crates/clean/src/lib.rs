@@ -36,7 +36,7 @@ const PKG_FILES: &[&str] = &[
     ".claude/agents/haiku-runner.md",
     ".claude/agents/haiku-scout.md",
     ".claude/agents/haiku-test-lead.md",
-    ".claude/agents/haiku-tui.md",
+    ".claude/agents/haiku-output.md",
     ".claude/agents/opus-architect.md",
     ".claude/agents/sonnet-writer.md",
     ".claude/hooks/_lean.py",

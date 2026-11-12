@@ -4,7 +4,7 @@
 - GUI support (eframe/egui) sharing one core with the terminal UI.
 - Safer data handling (serde enums for stream-json events, exhaustive match).
 - Drop Charm (Bubble Tea) full-screen TUI; inline output + bottom input line. (Code note 2026-11-12: the current TUI uses the alternate screen, crates/cli/src/tui/mod.rs:1.)
-- Memory: wrapper 11.2MB (Go) -> 2.2MB (Rust prototype). The 3 Claude processes per turn (prompter, main, haiku-tui) stay concurrent by user decision; no direct Anthropic API calls.
+- Memory: wrapper 11.2MB (Go) -> 2.2MB (Rust prototype). The 3 Claude processes per turn (prompter, main, haiku-output) stay concurrent by user decision; no direct Anthropic API calls.
 
 ## Fixed constraints
 - Binary names chaude / chaude.exe; asset names chaude_<ver>_<os>_<arch>.tar.gz / windows .zip; checksums.txt; targets darwin/arm64, linux/amd64, linux/arm64, windows/amd64. install.sh, install.ps1, `chaude update` keep working unchanged.

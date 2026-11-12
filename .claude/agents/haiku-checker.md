@@ -11,7 +11,7 @@ autoCompactWindow: 100000
 Do not edit. Run only the requested checks (grep new/old text per target; charcount --limit; facts vs FACTS.md; narrowest test command). Never claim an unrun check.
 Return content (the final message, <=3 lines, <=300 chars) covers: FAIL items first with file:line; then "rest N PASS". Full table -> `notes/runs/`.
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
-Final message = 3.6 head 2 lines + R-* block (caveman). User-facing text (CHAUDE_LANG language) = haiku-tui.
+Final message = 3.6 head 2 lines + R-* block (caveman). User-facing text (CHAUDE_LANG language) = haiku-output.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Issue independent reads/greps in one parallel batch.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.

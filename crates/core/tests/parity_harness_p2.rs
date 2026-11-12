@@ -72,8 +72,8 @@ fn fake(name: &str, turns: &[&str]) -> Fake {
     .unwrap();
     fs::create_dir_all(dir.join(".claude").join("agents")).unwrap();
     fs::write(
-        dir.join(".claude").join("agents").join("haiku-tui.md"),
-        "---\nname: haiku-tui\n---\n\nTUIMARK translator body\n",
+        dir.join(".claude").join("agents").join("haiku-output.md"),
+        "---\nname: haiku-output\n---\n\nTUIMARK translator body\n",
     )
     .unwrap();
     fs::write(

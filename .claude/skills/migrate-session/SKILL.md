@@ -5,7 +5,7 @@ description: Migrate an already very large Claude Code session (hundreds of turn
 
 # Migrate an oversized session
 
-Think and write in English. Only haiku-tui writes user-facing text, in the CHAUDE_LANG language (ko or en).
+Think and write in English. Only haiku-output writes user-facing text, in the CHAUDE_LANG language (ko or en).
 
 The session is ALREADY large. Every extra turn here re-processes the whole context, so finish the migration in as few turns as possible and start no new work.
 

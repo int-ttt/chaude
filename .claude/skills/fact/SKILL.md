@@ -8,7 +8,7 @@ model: haiku
 background: false
 ---
 
-Think and write in English. Only haiku-tui writes user-facing text, in the CHAUDE_LANG language (ko or en).
+Think and write in English. Only haiku-output writes user-facing text, in the CHAUDE_LANG language (ko or en).
 
 Fact correction: $ARGUMENTS
 1. Update or add the line in `notes/FACTS.md` (format: `- [area] fact (source: user)`).

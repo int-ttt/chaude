@@ -2103,11 +2103,11 @@ impl State {
         }
     }
 
-    // Go residentSlots tui: haiku with the minimal shape and the haiku-tui agent body. Kept alive across turns.
+    // Go residentSlots tui: haiku with the minimal shape and the haiku-output agent body. Kept alive across turns.
     fn spawn_tui(&mut self) -> Result<(), String> {
         self.resident_sids.remove("tui");
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
-        let rule = self.agent_rule(&cwd, "haiku-tui");
+        let rule = self.agent_rule(&cwd, "haiku-output");
         let opts = SpawnOpts {
             model: self.resident_model("tui"),
             resume: self.resume_pending.remove("tui"),

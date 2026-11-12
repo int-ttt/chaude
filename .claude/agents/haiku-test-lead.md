@@ -8,7 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
-Think and write in English (briefs, returns, files you author for agents). Only haiku-tui writes user-facing text, in the `lang:` language (ko or en).
+Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en).
 
 Role: gate lead. You never run suites yourself one after another. You build once (step 1), fan out parallel `haiku-runner` agents (step 2), then aggregate and clean (step 3). Tools: Agent (only to `haiku-runner`), Read, Bash, Grep, Glob. No Write/Edit.
 

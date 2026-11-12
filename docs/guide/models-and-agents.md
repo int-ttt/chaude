@@ -6,7 +6,7 @@
 
 기본 모델은 Opus입니다. 대화를 맡는 메인 세션이 Opus로 돌아가며, 판단하고 일을 나눕니다. Opus 메인은 파일을 직접 읽거나 쓰지 않고, 웹을 검색하거나 Bash를 실행하지도 않습니다. 이 제한은 훅이 강제합니다. 실제 작업은 모두 Haiku 에이전트가 합니다.
 
-Haiku를 메인으로 쓰고 싶으면 `--model haiku`로 시작하거나, 대화 중에 "haiku로"라고 말씀하시면 됩니다. 이 경우 흐름이 달라집니다. 사용자의 말을 그대로 `opus-architect`에 넘기면, 설계 결과를 `haiku-tui`가 한국어로 옮겨 답합니다. 기본 흐름에서는 Sonnet을 쓰지 않습니다. 다만 설정 피커의 `main_model`을 sonnet 또는 fable로 고르면 그 모델이 메인이 됩니다. 라우터도 없습니다. 언제든 "opus로"라고 말씀하시면 Opus 메인으로 돌아갑니다.
+Haiku를 메인으로 쓰고 싶으면 `--model haiku`로 시작하거나, 대화 중에 "haiku로"라고 말씀하시면 됩니다. 이 경우 흐름이 달라집니다. 사용자의 말을 그대로 `opus-architect`에 넘기면, 설계 결과를 `haiku-output`가 한국어로 옮겨 답합니다. 기본 흐름에서는 Sonnet을 쓰지 않습니다. 다만 설정 피커의 `main_model`을 sonnet 또는 fable로 고르면 그 모델이 메인이 됩니다. 라우터도 없습니다. 언제든 "opus로"라고 말씀하시면 Opus 메인으로 돌아갑니다.
 
 ## 2. 이름 규칙
 
@@ -29,7 +29,7 @@ Haiku를 메인으로 쓰고 싶으면 `--model haiku`로 시작하거나, 대�
 | haiku-checker | Haiku | 검증 | 바꾼 내용이 맞는지 읽기 전용으로 확인할 때 | Read, Grep, Glob, Bash |
 | haiku-runner | Haiku | 실행 | 오래 걸리는 작업을 백그라운드로 돌리고 진행 상황을 볼 때 | Read, Write, Edit, Bash, Grep, Glob |
 | haiku-prompter | Haiku | 대화 | 반복, 재귀, N번, "될 때까지" 같은 루프를 맡을 때 | Agent, Read, Bash |
-| haiku-tui | Haiku | 대화 | 에이전트 결과를 한국어 존댓말 답변으로 바꿀 때 | Read |
+| haiku-output | Haiku | 대화 | 에이전트 결과를 한국어 존댓말 답변으로 바꿀 때 | Read |
 | opus-architect | Opus | 설계 | 설계와 판단을 하고, 작업을 `haiku-*`에 나눠 줄 때 | Agent |
 
 `haiku-prompter`는 메인 스레드에서만 부를 수 있습니다. 에이전트가 다른 에이전트를 재귀로 부르는 것을 막기 위해서입니다. `opus-architect`도 Opus 에이전트를 부르지 않습니다. 설계와 위임만 하고, 파일에 직접 접근하지 않습니다.
@@ -49,7 +49,7 @@ Opus 메인은 요청을 받으면 아래 표에 따라 `haiku-*`에 일을 나�
 | 코드 | haiku-coder |
 | 설계, 판단 | Opus 메인이 직접 결정 (Haiku 메인이면 opus-architect) |
 | 최종 확인 | haiku-checker |
-| 사용자에게 보내는 답 | haiku-tui |
+| 사용자에게 보내는 답 | haiku-output |
 | 반복, 루프 | haiku-prompter (메인 스레드에서만) |
 
 ## 5. 한 번의 위임 흐름
@@ -63,7 +63,7 @@ flowchart TD
     U[사용자 요청] --> M{메인 모델}
     M -- Opus 메인 --> R[라우팅 표에 따라 haiku-* 호출]
     M -- Haiku 메인 --> A[opus-architect 설계 R-decide]
-    A --> T[haiku-tui가 한국어로 전달]
+    A --> T[haiku-output가 한국어로 전달]
     R --> W[haiku-* 결과 caveman 형식]
     W --> F[메인이 최종 답 한 번]
     T --> F
@@ -86,7 +86,7 @@ flowchart TD
 
 ## 8. 언어 정책
 
-모든 에이전트 정의, 규칙, 반환 값은 영어로 씁니다. 한국어로 말하는 곳은 `haiku-tui` 하나뿐입니다. `haiku-tui`는 caveman 결과를 한국어 존댓말 답으로 바꾸고, 사실을 더하지 않습니다. 불확실한 표현은 `[likely]`는 "(추정)", `[unsure]`는 "(불확실)"로 옮깁니다.
+모든 에이전트 정의, 규칙, 반환 값은 영어로 씁니다. 한국어로 말하는 곳은 `haiku-output` 하나뿐입니다. `haiku-output`는 caveman 결과를 한국어 존댓말 답으로 바꾸고, 사실을 더하지 않습니다. 불확실한 표현은 `[likely]`는 "(추정)", `[unsure]`는 "(불확실)"로 옮깁니다.
 
 ## 9. 재개 상주 코더
 
@@ -94,7 +94,7 @@ flowchart TD
 
 - **main**: 활성 대화 세션입니다. 메인 모델로 돕니다.
 - **prompter**: 루프 규칙을 내장한 Haiku 세션입니다. 도구가 없습니다.
-- **tui**: `haiku-tui` 역할을 맡습니다. 도구, MCP, 스킬이 없습니다.
+- **tui**: `haiku-output` 역할을 맡습니다. 도구, MCP, 스킬이 없습니다.
 - **coder**: `haiku-coder` 역할을 맡습니다. 도구는 Read, Edit, Write, Bash, Grep, Glob입니다.
 
 중요한 파일을 고칠 때는 메인이 `resident_coder` 도구로 코더를 부릅니다. 코더가 바쁠 때만 목록에 보입니다. 코더가 더 필요하면 coder2부터 coder9까지 필요할 때 띄우며, 3570초 동안 쉬면 내립니다. 상주 슬롯이 꺼지면 한 번 다시 띄웁니다.

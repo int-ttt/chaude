@@ -5,7 +5,7 @@ description: Handle user corrections and pushback (messages starting with 아니
 
 # Handling corrections (아니 / 근데 / 아 … · no / but / oh …)
 
-Think and write in English. Only haiku-tui writes user-facing text, in the CHAUDE_LANG language (ko or en).
+Think and write in English. Only haiku-output writes user-facing text, in the CHAUDE_LANG language (ko or en).
 
 Never open with an apology or a recap. Never redo the whole output. Opus classifies and routes; subagents do all fixing (the main thread has no work tools).
 

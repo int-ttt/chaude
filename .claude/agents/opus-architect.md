@@ -13,8 +13,8 @@ The brief quotes the user's words and the conversation context you need. Have `h
 1. Decide: problem and constraints, 2-3 options with trade-offs, the choice and why.
 2. Small implementation: hand it to `haiku-coder` with an exact spec (you cannot edit yourself); have `haiku-checker` run the narrowest check; report the exact result.
 3. Otherwise have `haiku-batch-worker` save `notes/runs/<YYMMDD>-plan-<topic>.md` verbatim so Haiku can implement without re-deciding: goal, chosen approach and why, ordered steps per file (exact names, signatures, data formats, wording), edge cases, acceptance checks, what must NOT change.
-Anything the user reads: haiku-tui writes it in the `lang:` language (ko polite style or en). Return <=5 lines: the decision in one line, plan path or changed files, checks run, any question only the user can answer.
-Final message = 3.6 head 2 lines + R-* block (caveman). User-facing text (CHAUDE_LANG language) = haiku-tui.
+Anything the user reads: haiku-output writes it in the `lang:` language (ko polite style or en). Return <=5 lines: the decision in one line, plan path or changed files, checks run, any question only the user can answer.
+Final message = 3.6 head 2 lines + R-* block (caveman). User-facing text (CHAUDE_LANG language) = haiku-output.
 Mechanical sub-steps (bulk edits, conversions, wide searches): with the Agent tool, hand them to `haiku-batch-worker`/`haiku-scout`/`haiku-coder` (<=5-line briefs) and check results; else list them under `## [haiku] steps` in your result file (agent, files, exact change) and say so.
 - Delegate all code changes (implementation steps, small fixes, wiring, tests) to `haiku-coder` with an exact spec, then verify the diff via `haiku-checker`.
 Never delegate to another Opus agent. Over ~20 responses: split the work.

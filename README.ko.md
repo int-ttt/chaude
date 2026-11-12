@@ -48,7 +48,7 @@ Opus가 메인 세션입니다. 요청을 읽고, 계획을 정하고, 최종 �
 | `haiku-checker` | Haiku | 바뀐 내용을 읽기 전용으로 검증 |
 | `haiku-runner` | Haiku | 오래 걸리는 작업을 백그라운드로 실행 |
 | `haiku-prompter` | Haiku | 반복, 루프 작업 (메인 스레드에서만 호출) |
-| `haiku-tui` | Haiku | 에이전트 결과를 한국어 존댓말 답변으로 바꿈 |
+| `haiku-output` | Haiku | 에이전트 결과를 한국어 존댓말 답변으로 바꿈 |
 
 전체 목록, 도구, 배분 규칙은 [모델과 에이전트](docs/guide/models-and-agents.md)에 있습니다.
 

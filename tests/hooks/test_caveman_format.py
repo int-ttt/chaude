@@ -155,32 +155,32 @@ class CavemanFormatHookTest(unittest.TestCase):
         self.run_hook(payload(response={"content": [{"type": "text", "text": RESP_READ.replace("status: done\n", "")}]}))
         self.assertEqual(self.rows()[0]["missing"], ["status"])
 
-    # --- new: 존댓말 (haiku-tui) and B형식 brief (haiku-prompter) ---
+    # --- new: 존댓말 (haiku-output) and B형식 brief (haiku-prompter) ---
 
     def test_j_tui_informal_one_row(self):
-        self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response="작업 완료했다."))
+        self.run_hook(payload(agent="haiku-output", prompt="작업 요청", response="작업 완료했다."))
         rows = self.rows()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["fmt"], "tui")
         self.assertEqual(rows[0]["missing"], ["존댓말"])
 
     def test_j2_tui_polite_no_row(self):
-        self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response="작업을 완료했습니다."))
+        self.run_hook(payload(agent="haiku-output", prompt="작업 요청", response="작업을 완료했습니다."))
         self.assertEqual(self.rows(), [])
 
     def test_j3_tui_code_block_ignored(self):
         resp = "```\n이것은 있다.\n```\n작업을 완료했습니다.\n"
-        self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response=resp))
+        self.run_hook(payload(agent="haiku-output", prompt="작업 요청", response=resp))
         self.assertEqual(self.rows(), [])
 
     def test_j4_tui_caveman_leak_one_row(self):
-        self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response="읽기 결과입니다.\nclaim: a.go:1 | x"))
+        self.run_hook(payload(agent="haiku-output", prompt="작업 요청", response="읽기 결과입니다.\nclaim: a.go:1 | x"))
         rows = self.rows()
         self.assertEqual(len(rows), 1)
         self.assertIn("caveman_leak", rows[0]["missing"])
 
     def test_j5_tui_polite_list_no_row(self):
-        self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response="확인했습니다.\n- a.go:1 — 내용입니다."))
+        self.run_hook(payload(agent="haiku-output", prompt="작업 요청", response="확인했습니다.\n- a.go:1 — 내용입니다."))
         self.assertEqual(self.rows(), [])
 
     def test_k_prompter_missing_lang(self):
@@ -196,7 +196,7 @@ class CavemanFormatHookTest(unittest.TestCase):
         self.assertEqual(self.rows(), [])
 
     def test_l_warn_tui_violation_exit0_with_context(self):
-        out = self.run_hook(payload(agent="haiku-tui", prompt="작업 요청", response="작업 완료했다."), guard="warn")
+        out = self.run_hook(payload(agent="haiku-output", prompt="작업 요청", response="작업 완료했다."), guard="warn")
         ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
         self.assertIn("missing required fields", ctx)
         self.assertIn("존댓말", ctx)

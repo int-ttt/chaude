@@ -186,7 +186,7 @@ _spawn_lang = "en" if os.environ.get("CHAUDE_LANG", "ko").strip().lower() == "en
 if lang() != _spawn_lang:
     _live = lang()
     tags.append(f"[lang] live language is {_live}, not the spawn CHAUDE_LANG={_spawn_lang}: reply in {'English' if _live == 'en' else 'Korean'} "
-                f"and send `lang: {_live}` in every brief to haiku-tui.")
+                f"and send `lang: {_live}` in every brief to haiku-output.")
 pending = tail(inbox, 1000)
 
 # 0b. Upgraded while this session was open: CLAUDE.md/agents/settings are read at launch, so don't inject the policy;

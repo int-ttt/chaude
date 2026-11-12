@@ -174,9 +174,9 @@ Applied by the docs consolidation step. Table rows above show pre-move paths. No
 - Fix: return partial output and changed files on timeout; make the timeout configurable.
 ### U. Caveman channel: return formats conflict (plan/caveman-structure.md "Known conflicts")
 - U-a: R-write shape differs: CLAUDE.md:11 `changed: <path>: <what>` vs CAVEMAN_FORMAT.md 3.3 `changed: <path list>`; `changed` wording differs per agent file; hook REQUIRED omits summary_ko that 3.3 lists; prompter relay return has no changed/diffstat/check/ws.
-- U-b: `relay` is read by crates/core/src/resident.rs:56 and named in CLAUDE.md:5, but not defined in CAVEMAN_FORMAT.md or haiku-tui.md; prompter.md:38 uses the word for its own call.
-- U-c: summary_ko overlaps the haiku-tui Korean translation; language is English in opus-architect.md:45, unspecified in 3.3.
-- U-d: orch.rs:32 RULE_B says "no relay hop", but the prompter hop and the haiku-tui hop are both in the flow.
+- U-b: `relay` is read by crates/core/src/resident.rs:56 and named in CLAUDE.md:5, but not defined in CAVEMAN_FORMAT.md or haiku-output.md; prompter.md:38 uses the word for its own call.
+- U-c: summary_ko overlaps the haiku-output Korean translation; language is English in opus-architect.md:45, unspecified in 3.3.
+- U-d: orch.rs:32 RULE_B says "no relay hop", but the prompter hop and the haiku-output hop are both in the flow.
 - U-e: haiku-test-lead and haiku-extractor are outside hook TARGETS and use their own formats; extractor.md:23 and :25 contradict each other.
 
 ### T. Haiku pool worker map is unbounded
@@ -195,7 +195,7 @@ Applied by the docs consolidation step. Table rows above show pre-move paths. No
   - Idle 3570 s assumes the 1h TTL (docs/guide/cli.md:120; notes/DECISIONS.md:58). plan/interactive-child-resident-sessions.md:26 and :55 suspect 5m for -p children.
   - "handoff cost net ~0" is computed; inputs not verified.
 - (e) Doc contradictions.
-  - Final-reply owner: docs/guide/models-and-agents.md:57 (main writes the answer) vs :52 (haiku-tui sends the answer).
+  - Final-reply owner: docs/guide/models-and-agents.md:57 (main writes the answer) vs :52 (haiku-output sends the answer).
   - Agent count: 11 vs 12 (locations to confirm; .claude/agents has 13 files).
   - Main-model rule: notes/DECISIONS.md:40 (Opus main only for design turns) vs :50 (default main = opus). Status of :40 to confirm.
   - Name haiku-prompter is used for two things: the loop agent (README.md:50) and the per-input summary hop (Finding P, S26).
@@ -238,7 +238,7 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 
 Arranges the existing steps S1-S30 into phases. Step text in section 3 is not changed.
 Run phases in order. Each phase exit criterion must pass before the next phase starts.
-Every step ID appears once in the phase, Deferred or Unplaced lists below. "Needs user decision" repeats IDs as a cross-reference.
+Every step ID appears once in the phase, Deferred or Unplaced lists below. "Decided 2026-11-12" repeats IDs as a cross-reference.
 
 ### P1. Per-prompt hooks
 - Reason: smallest change; these hooks run on every prompt.
@@ -300,17 +300,19 @@ Every step ID appears once in the phase, Deferred or Unplaced lists below. "Need
 ### Unplaced
 - S3 haiku-prompter loop (foreground sub-agents, coder reuse, log write). Fits no phase: it is an agent-loop change, not a hook, GUI, engine or hygiene item. Not forced into a phase; can join P4 if user decides.
 
-### Needs user decision
-- S11 (P3): 0.13.0 scope.
-- S6 (P2): language precedence; proposed `/lang` > `CHAUDE_LANG` > OS locale; confirm.
-- S24 (P2): drop summary_ko or keep.
-- S25 (P2): warn mode or remove the caveman guard hook.
-- S30 (P2): final-reply owner and main-model rule.
-- S20 (P1): which ledger to keep (record/LEDGER.md or notes/LEDGER.md).
-- S21 (P4): retry count, max wait, auto-retry allowed.
-- S9 (P5): allowlisting of the release step.
-- S16 (P5): delete tests/e2e-rebuild; decide tests/chaude-soak.
-- S12 (Deferred): read-only main session access.
+### Decided 2026-11-12
+- S11 (P3): all TUI features in 0.13.0 (current order kept).
+- S6 (P2): language precedence `/lang` > `CHAUDE_LANG` > OS locale.
+- S24 (P2): drop summary_ko; relay only.
+- S25 (P2): warn mode; cover all 13 agents in TARGETS.
+- S30 (P2): final reply owner = haiku-output; main model = Opus by default; Haiku main only with `--model haiku`.
+- S20 (P1): keep record/LEDGER.md as the ledger.
+- S21 (P4): auto-retry max 3 times with backoff; total wait <= 60 s.
+- S9 (P5): retry with backoff plus CI-artifact fallback; no allowlist.
+- S16 (P5): delete tests/e2e-rebuild; keep tests/chaude-soak.
+- S26: skip the prompter summary for pure ack words only.
+- S19: one paid 5-turn dry run allowed.
+- S12 (Deferred): not decided on 2026-11-12; stays deferred.
 
 ## 4. Not verified
 

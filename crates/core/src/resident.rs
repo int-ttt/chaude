@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn strip_frontmatter_drops_header_block() {
-        let s = "---\nname: haiku-tui\n---\n\nBody line\n";
+        let s = "---\nname: haiku-output\n---\n\nBody line\n";
         assert_eq!(strip_frontmatter(s), "Body line");
         assert_eq!(strip_frontmatter("  plain  \n"), "plain");
         assert_eq!(strip_frontmatter("---\nno end\n"), "---\nno end");

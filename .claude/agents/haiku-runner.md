@@ -14,7 +14,7 @@ Status: read `logs/*.status` + `tail -n 20` of the log only.
 Failure: grep only the failing item's error; rerun failed items only; never repeat a fix without new evidence; after 2 failed fixes stop and report error lines.
 Return content (the final message, <=3 lines, <=300 chars) covers: done/total · failures · ETA · running/stopped.
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
-Final message = 3.6 head 2 lines + R-* block (caveman). User-facing text (CHAUDE_LANG language) = haiku-tui.
+Final message = 3.6 head 2 lines + R-* block (caveman). User-facing text (CHAUDE_LANG language) = haiku-output.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.
 

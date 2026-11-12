@@ -8,7 +8,7 @@ model: haiku
 background: false
 ---
 
-Think and write in English. Only haiku-tui writes user-facing text, in the CHAUDE_LANG language (ko or en).
+Think and write in English. Only haiku-output writes user-facing text, in the CHAUDE_LANG language (ko or en).
 
 Verify: $ARGUMENTS
 If targets are not named, find every file that should contain this content with `grep -rl` over the document folders (exclude .git, logs) and check each.

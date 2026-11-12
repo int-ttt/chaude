@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Agents: `haiku-tui` is renamed `haiku-output` (user output owner for TUI and GUI). The embedded agent, the registry, the caveman hook targets and the docs use the new name. An old `haiku-tui.md` already in a project's `.claude/agents` is kept, so delete it by hand.
+  - 에이전트: `haiku-tui`의 이름을 `haiku-output`으로 바꿨습니다(TUI와 GUI의 사용자 출력 담당). 내장 에이전트, 등록 목록, caveman 훅 대상, 문서 모두 새 이름을 씁니다. 프로젝트의 `.claude/agents`에 남아 있던 `haiku-tui.md`는 자동으로 지워지지 않으니 직접 삭제하세요.
 - GUI: new `chaude-gui` app (eframe) that opens an empty window. Skeleton only; no chat features yet.
   - GUI: eframe 기반 `chaude-gui` 앱을 추가했습니다. 지금은 빈 창만 열리며 채팅 기능은 아직 없습니다.
 - Internal: slash commands, doctor checks and the settings data model moved into chaude-core, so the GUI can share them. TUI behaviour is unchanged.

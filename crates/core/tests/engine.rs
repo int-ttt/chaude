@@ -73,8 +73,8 @@ fn fake(name: &str, turns: &[&str]) -> Fake {
     .unwrap();
     fs::create_dir_all(dir.join(".claude").join("agents")).unwrap();
     fs::write(
-        dir.join(".claude").join("agents").join("haiku-tui.md"),
-        "---\nname: haiku-tui\n---\n\nTUIMARK translator body\n",
+        dir.join(".claude").join("agents").join("haiku-output.md"),
+        "---\nname: haiku-output\n---\n\nTUIMARK translator body\n",
     )
     .unwrap();
     // The coder reply: status and changed lines, which summarize_reply keeps. Its agent body carries CODERMARK.
@@ -3307,7 +3307,7 @@ fn tui_exit_keeps_main_reply_and_reports_notice() {
     let evs = until_idle(&rx);
     assert!(
         evs.contains(&UiEvent::Notice {
-            text: "haiku-tui 실패(오류: exited): 메인 원문 표시".into(),
+            text: "haiku-output 실패(오류: exited): 메인 원문 표시".into(),
         }),
         "{evs:?}"
     );
@@ -3326,7 +3326,7 @@ fn tui_exit_keeps_main_reply_and_reports_notice() {
 }
 
 // Go TestViaTUIFailureNotice (resident_pipeline_test.go:63): a tui that exits and a tui that never answers both
-// keep the main reply and show the haiku-tui notice; the silent one ends at tui_timeout with the timeout notice.
+// keep the main reply and show the haiku-output notice; the silent one ends at tui_timeout with the timeout notice.
 #[test]
 fn go_via_tui_failure_notice() {
     let _g = lock();
@@ -3346,7 +3346,7 @@ fn go_via_tui_failure_notice() {
     assert!(
         evs.iter().any(|e| matches!(
             e,
-            UiEvent::Notice { text } if text.starts_with("haiku-tui 실패(오류")
+            UiEvent::Notice { text } if text.starts_with("haiku-output 실패(오류")
         )),
         "{evs:?}"
     );
@@ -3357,7 +3357,7 @@ fn go_via_tui_failure_notice() {
     assert!(
         evs.iter().any(|e| matches!(
             e,
-            UiEvent::Notice { text } if text.starts_with("haiku-tui 실패(") && text.contains("시간초과")
+            UiEvent::Notice { text } if text.starts_with("haiku-output 실패(") && text.contains("시간초과")
         )),
         "{evs:?}"
     );
@@ -3563,7 +3563,7 @@ fn residents_without_agent_files_notice_and_start_default_session() {
     // The temp dir stands in for HOME: no process env is mutated, so parallel tests never see it.
     cfg.home = Some(empty.clone());
     let (h, rx) = Engine::start(cfg);
-    let want = "에이전트 규칙 없음(haiku-tui): 기본 세션으로 시작";
+    let want = "에이전트 규칙 없음(haiku-output): 기본 세션으로 시작";
     let mut notices = Vec::new();
     let found = loop {
         match rx.recv_timeout(Duration::from_secs(10)) {

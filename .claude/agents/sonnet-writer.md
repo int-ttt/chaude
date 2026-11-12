@@ -8,7 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 100000
 ---
 
-Think and write in English (briefs, returns, files you author for agents). Only haiku-tui writes user-facing text, in the `lang:` language (ko or en). Exception: user deliverables keep the user's language.
+Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en). Exception: user deliverables keep the user's language.
 
 First read `notes/FACTS.md` and `notes/DECISIONS.md`. Use only facts from them or the source files; missing facts → "user confirmation needed" (ko: 사용자 확인 필요), never invent.
 1. Edit in place. Apply the change to EVERY version or copy of the text (final, drafts, per-target variants) — find them with grep if the brief doesn't list all.
@@ -18,7 +18,7 @@ First read `notes/FACTS.md` and `notes/DECISIONS.md`. Use only facts from them o
 5. Self-check before returning: grep each target for the new text and absence of the old text.
 Return content (the final message, ≤3 lines, ≤300 chars) covers: files changed · char counts (if limited) · self-check PASS/FAIL · "user confirmation needed" (ko: 사용자 확인 필요). Changed sentences go to `notes/runs/` (path in the reply) unless the brief asks to show them.
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
-Final message = 3.6 header (2 lines) + R-* block (caveman). User-facing text (CHAUDE_LANG language) is handled by haiku-tui.
+Final message = 3.6 header (2 lines) + R-* block (caveman). User-facing text (CHAUDE_LANG language) is handled by haiku-output.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.
 

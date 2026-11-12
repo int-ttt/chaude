@@ -29,7 +29,7 @@ summary_ko: <required only when lang: ko, 1-5 lines>
 
 - not_found and not_checked are never merged ("confirmed absent" vs "not looked at", read-review.md:15).
 - When the return cap is hit, always write truncated: yes and the omitted list (C12).
-- Brief and R-read values are English only (claim, reason, searched, not_found, not_checked). Korean appears only inside quoted source text. Rendering the output in the CHAUDE_LANG language (ko summary + item translation, or en) is done by haiku-tui (plan/caveman-structure.md Channels, 261101).
+- Brief and R-read values are English only (claim, reason, searched, not_found, not_checked). Korean appears only inside quoted source text. Rendering the output in the CHAUDE_LANG language (ko summary + item translation, or en) is done by haiku-output (plan/caveman-structure.md Channels, 261101).
 
 ## 3.3 Write return R-write
 
