@@ -2,19 +2,27 @@
 //! long/: exit and resume data (the /resume digest <session>.md, killed-session markers), kept 30 days.
 //! test/: short-lived scratch (the MCP config and socket dirs, the /usage run dir), kept 24 hours.
 //! Startup moves the old notes/tmp/*.md digests into long/ and removes expired entries. Errors never fail startup.
+//! Startup never removes an entry of a live peer: one touched in the last 15 minutes, a "<pid>-..." or
+//! "usage-<pid>" entry whose pid runs, or the live marker whose owner pid runs.
 
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use crate::handoff::{EXIT_HANDOFF_FILE, LIVE_HANDOFF_FILE, SESSIONS_FILE, pid_alive};
+use crate::handoff::{
+    EXIT_HANDOFF_FILE, LIVE_HANDOFF_FILE, SESSIONS_FILE, pid_alive, read_exit_handoff,
+};
 use crate::record;
 
 pub const LONG_DIR: &str = "long";
 pub const TEST_DIR: &str = "test";
 pub const LONG_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 pub const TEST_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+// An entry touched this recently may still belong to a peer that is starting or idle.
+const PEER_GRACE: Duration = Duration::from_secs(15 * 60);
+// Scratch dir name of the /usage run: "usage-<pid>".
+const USAGE_PREFIX: &str = "usage-";
 
 // <cwd>/notes/tmp
 pub fn tmp_root(cwd: &Path) -> PathBuf {
@@ -45,8 +53,7 @@ pub fn startup_at(cwd: &Path, now: SystemTime) -> usize {
 fn startup_in(cwd: &Path, old_record: &Path, now: SystemTime) -> usize {
     migrate_md(cwd);
     migrate_handoff(old_record, cwd);
-    clean_dir(&test_dir(cwd), TEST_MAX_AGE, now, true)
-        + clean_dir(&long_dir(cwd), LONG_MAX_AGE, now, false)
+    clean_dir(&test_dir(cwd), TEST_MAX_AGE, now) + clean_dir(&long_dir(cwd), LONG_MAX_AGE, now)
 }
 
 // The exit handoff, live marker and session log used to sit in the record folder. Each one is copied into long/
@@ -91,16 +98,16 @@ fn migrate_md(cwd: &Path) {
     }
 }
 
-// Removes the entries of dir whose mtime is older than max_age. With skip_live, an entry named "<pid>-..."
-// whose process is alive is kept (a running session's MCP dir). Returns the count removed. Errors are skipped.
-fn clean_dir(dir: &Path, max_age: Duration, now: SystemTime, skip_live: bool) -> usize {
+// Removes the entries of dir whose mtime is older than max_age. Live peers' entries are kept (see live_peer) and
+// so is anything touched within PEER_GRACE. Returns the count removed. Errors are skipped.
+fn clean_dir(dir: &Path, max_age: Duration, now: SystemTime) -> usize {
     let Ok(ents) = fs::read_dir(dir) else {
         return 0;
     };
     let mut removed = 0;
     for ent in ents.flatten() {
         let path = ent.path();
-        if skip_live && owner_alive(&ent.file_name()) {
+        if live_peer(&path, &ent.file_name()) {
             continue;
         }
         let Ok(meta) = fs::symlink_metadata(&path) else {
@@ -109,7 +116,8 @@ fn clean_dir(dir: &Path, max_age: Duration, now: SystemTime, skip_live: bool) ->
         let Ok(mtime) = meta.modified() else {
             continue;
         };
-        if now.duration_since(mtime).unwrap_or_default() <= max_age {
+        let age = now.duration_since(mtime).unwrap_or_default();
+        if age <= max_age || age < PEER_GRACE {
             continue;
         }
         let res = if meta.is_dir() {
@@ -124,10 +132,19 @@ fn clean_dir(dir: &Path, max_age: Duration, now: SystemTime, skip_live: bool) ->
     removed
 }
 
-// Scratch entries are named "<pid>-<seq>" by their owner; true when that pid is alive.
-fn owner_alive(name: &OsStr) -> bool {
-    name.to_str()
-        .and_then(|s| s.split('-').next())
+// True when the entry belongs to a running chaude: a "<pid>-<seq>" or "usage-<pid>" scratch entry whose pid is
+// alive, or the live marker whose owner pid is alive. A file that does not parse is not a live marker.
+fn live_peer(path: &Path, name: &OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    if name == LIVE_HANDOFF_FILE {
+        return read_exit_handoff(path).is_some_and(|h| h.owner_pid != 0 && pid_alive(h.owner_pid));
+    }
+    let owner = name.strip_prefix(USAGE_PREFIX).unwrap_or(name);
+    owner
+        .split('-')
+        .next()
         .and_then(|p| p.parse::<u32>().ok())
         .is_some_and(pid_alive)
 }
@@ -268,5 +285,32 @@ mod tests {
         assert_eq!(startup_t(cwd, SystemTime::now()), 0);
         // A cwd that does not exist.
         assert_eq!(startup_t(&cwd.join("missing"), SystemTime::now()), 0);
+    }
+
+    #[test]
+    fn live_peer_scratch_and_marker_survive_expiry() {
+        let tmp = TempDir::new("tmp-layout-peers");
+        let cwd = tmp.path();
+        let (test, long) = (test_dir(cwd), long_dir(cwd));
+        fs::create_dir_all(&test).unwrap();
+        fs::create_dir_all(&long).unwrap();
+        let me = std::process::id();
+        fs::create_dir_all(test.join(format!("usage-{me}"))).unwrap();
+        fs::create_dir_all(test.join("usage-4294967295")).unwrap();
+        let marker = long.join(LIVE_HANDOFF_FILE);
+        fs::write(&marker, format!("{{\"owner_pid\":{me}}}")).unwrap();
+        let two_days = at(SystemTime::now(), 2);
+
+        // Own pid is alive: its usage dir and marker stay. The dead pid's usage dir goes.
+        assert_eq!(startup_t(cwd, two_days), 1);
+        assert!(test.join(format!("usage-{me}")).is_dir());
+        assert!(!test.join("usage-4294967295").exists());
+        assert!(marker.exists());
+
+        // Marker owner gone: the stale marker is removed too.
+        fs::write(&marker, "{\"owner_pid\":4294967295}").unwrap();
+        // long/ keeps entries 30 days, so the marker must be older than that.
+        assert_eq!(startup_t(cwd, at(SystemTime::now(), 31)), 1);
+        assert!(!marker.exists());
     }
 }

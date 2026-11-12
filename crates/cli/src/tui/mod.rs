@@ -1462,11 +1462,13 @@ impl App {
 
     // The /view list itself, also reopened after SessionResumed so the switch is visible.
     fn open_sessions(&mut self, arg: &str) {
-        let mut owned: HashSet<String> = handoff::read_exit_handoff(&handoff::handoff_file(
-            &chaude_core::tmp_layout::long_dir(std::path::Path::new(&self.welcome.cwd)),
-        ))
-        .map(|h| h.prev_owned().into_iter().collect())
-        .unwrap_or_default();
+        let base = handoff::handoff_file(&chaude_core::tmp_layout::long_dir(std::path::Path::new(
+            &self.welcome.cwd,
+        )));
+        let mut owned: HashSet<String> =
+            handoff::read_exit_handoff(&handoff::read_path(&base, None))
+                .map(|h| h.prev_owned().into_iter().collect())
+                .unwrap_or_default();
         owned.extend(self.this_run.iter().cloned());
         let result = sessview::session_list(&self.welcome.cwd)
             .and_then(|all| sessview::own_sessions(all, &owned))
@@ -3611,7 +3613,7 @@ fn session_mode_note(
     if explicit {
         return None;
     }
-    let (prev, killed) = handoff::previous_run(handoff_path?)?;
+    let (prev, killed) = handoff::previous_run(&handoff::read_path(handoff_path?, None))?;
     let threshold = chaude_core::rotate::threshold_for(model, rotate);
     Some(
         match handoff::resume_mode(&prev, handoff::MAIN_ROLE, killed, threshold) {
@@ -3652,7 +3654,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     let killed_sid = cfg
         .handoff_path
         .as_deref()
-        .and_then(handoff::killed_main_session);
+        .and_then(|p| handoff::killed_main_session(&handoff::read_path(p, None)));
     let start_mode = cfg.perm_mode;
     let (engine, rx) = Engine::try_start(cfg).unwrap_or_else(|e| start_failed(&e));
     let _guard = TermGuard::enter()?;

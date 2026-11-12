@@ -1309,7 +1309,11 @@ fn actor(
     let mut main_resume = cfg.resume.clone();
     let mut resume_pending = BTreeMap::new();
     let mut orphans = Vec::new();
-    if let Some((prev, killed)) = cfg.handoff_path.as_deref().and_then(handoff::previous_run) {
+    let prev_file = cfg
+        .handoff_path
+        .as_deref()
+        .map(|p| handoff::read_path(p, cfg.resume.as_deref()));
+    if let Some((prev, killed)) = prev_file.as_deref().and_then(handoff::previous_run) {
         if killed {
             orphans = handoff::orphans(&prev, handoff::pid_alive)
                 .into_iter()
@@ -1558,7 +1562,10 @@ fn actor(
         }
     }
     if let Some(path) = st.cfg.handoff_path.clone() {
-        let _ = handoff::write_exit_handoff(&path, &st.exit_handoff());
+        let _ = handoff::write_exit_handoff(
+            &handoff::exit_write_path(&path, &st.sid),
+            &st.exit_handoff(),
+        );
         handoff::remove_live_handoff(&path);
     }
     // Go markInterrupted on exit: this process's running agents are stored as interrupted.

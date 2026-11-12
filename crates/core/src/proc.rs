@@ -6,6 +6,7 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -156,8 +157,12 @@ fn apply_env(cmd: &mut Command, compact_window: u32, cache_ttl: &str) {
 
 // Go /usage (usageRaw): a separate `claude -p /usage --output-format json` run in cwd's notes/tmp/test dir, so it
 // never touches the session. Returns the JSON `result` text. Not charged to the budget (Go never calls chargeOneShot).
+// The run dir is test/usage-<pid>, removed after the run. Both callers share this pid, so runs take USAGE_RUN in turn.
+static USAGE_RUN: Mutex<()> = Mutex::new(());
+
 pub fn one_shot_usage(claude_bin: &str, cwd: &Path) -> Result<String, String> {
-    let run_dir = tmp_layout::test_dir(cwd);
+    let _turn = USAGE_RUN.lock().unwrap_or_else(|e| e.into_inner());
+    let run_dir = tmp_layout::test_dir(cwd).join(format!("usage-{}", std::process::id()));
     fs::create_dir_all(&run_dir).map_err(|e| format!("usage: {}: {e}", run_dir.display()))?;
     let mut cmd = Command::new(claude_bin);
     cmd.args([
@@ -167,11 +172,13 @@ pub fn one_shot_usage(claude_bin: &str, cwd: &Path) -> Result<String, String> {
         "json",
         "--no-session-persistence",
     ])
-    .current_dir(run_dir)
+    .current_dir(&run_dir)
     .stdin(Stdio::null())
     .stderr(Stdio::null());
     apply_env(&mut cmd, 0, "");
-    let out = cmd.output().map_err(|e| format!("usage: {e}"))?;
+    let out = cmd.output();
+    let _ = fs::remove_dir_all(&run_dir);
+    let out = out.map_err(|e| format!("usage: {e}"))?;
     let v: Value =
         serde_json::from_slice(&out.stdout).map_err(|e| format!("usage: bad json: {e}"))?;
     v.get("result")
@@ -580,5 +587,32 @@ mod tests {
                 .iter()
                 .any(|(k, _)| k == "CLAUDE_CODE_PROMPT_CACHE_TTL")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn one_shot_usage_runs_in_its_own_dir_and_removes_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = crate::testutil::TempDir::new("proc-usage");
+        let cwd = tmp.path();
+        let bin = cwd.join("fake-claude");
+        let seen = cwd.join("seen.txt");
+        let script = format!(
+            "#!/bin/sh\npwd > '{}'\necho '{{\"result\":\"ok\"}}'\n",
+            seen.display()
+        );
+        fs::write(&bin, script).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let got = one_shot_usage(bin.to_str().unwrap(), cwd);
+
+        assert_eq!(got.as_deref(), Ok("ok"));
+        let dir = format!("usage-{}", std::process::id());
+        let ran_in = fs::read_to_string(&seen).unwrap();
+        assert!(
+            ran_in.trim_end().ends_with(&format!("test/{dir}")),
+            "ran in {ran_in}"
+        );
+        assert!(!tmp_layout::test_dir(cwd).join(&dir).exists());
     }
 }

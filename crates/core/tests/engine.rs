@@ -4031,7 +4031,9 @@ fn exit_handoff_records_main_session_on_shutdown() {
     h.submit("go");
     until_idle(&rx);
     h.shutdown();
-    let text = fs::read_to_string(&path).expect("handoff written");
+    // Each session writes its own file: the main session s1 goes to .exit-handoff-s1.json.
+    let own = handoff::exit_write_path(&path, "s1");
+    let text = fs::read_to_string(&own).expect("handoff written");
     let v: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(v["version"], 1, "{text}");
     assert_eq!(v["main_session"], "s1", "{text}");
@@ -4245,7 +4247,8 @@ fn exit_handoff_lists_resident_coder_and_owned_sessions() {
     until_coder_reply(&rx);
     // The coder stays alive (idle) until shutdown, so its session is live in the handoff.
     h.shutdown();
-    let got = handoff::read_exit_handoff(&path).expect("handoff readable");
+    let got =
+        handoff::read_exit_handoff(&handoff::read_path(&path, None)).expect("handoff readable");
     assert_eq!(got.version, 1);
     assert_eq!(
         got.resident_sessions.get("coder").map(String::as_str),

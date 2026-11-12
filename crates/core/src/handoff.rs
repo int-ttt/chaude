@@ -9,8 +9,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-// File name in <cwd>/notes/tmp/long (tmp_layout). Not .md, so the record listing ignores it.
+// Base name in <cwd>/notes/tmp/long (tmp_layout). Not .md, so the record listing ignores it. Exits write
+// per-session files next to it (see exit_write_path); this name is the fallback for old runs and for exits
+// without a session id.
 pub const EXIT_HANDOFF_FILE: &str = ".exit-handoff.json";
+// Per-session exit handoff: EXIT_PREFIX + sid + EXIT_SUFFIX.
+const EXIT_PREFIX: &str = ".exit-handoff-";
+const EXIT_SUFFIX: &str = ".json";
 // Written while a run is live and removed on clean exit. Still present at the next start = the run was killed.
 pub const LIVE_HANDOFF_FILE: &str = ".live-handoff.json";
 // ctx_tokens key of the main child; residents use their role name.
@@ -157,9 +162,57 @@ pub fn pid_alive(pid: u32) -> bool {
     }
 }
 
-// <cwd>/notes/tmp/long/.exit-handoff.json
+// <cwd>/notes/tmp/long/.exit-handoff.json (the base file; per-session files sit next to it).
 pub fn handoff_file(project_dir: &Path) -> PathBuf {
     project_dir.join(EXIT_HANDOFF_FILE)
+}
+
+// Session id as a file-name part: only [A-Za-z0-9_-] survives, so no path separator gets in. Empty when none is left.
+fn safe_sid(sid: &str) -> String {
+    sid.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect()
+}
+
+// Where an exit writes its record: the file of its main session, so two runs in one cwd never overwrite each
+// other. Without a session id it is the base file.
+pub fn exit_write_path(base: &Path, main_sid: &str) -> PathBuf {
+    let safe = safe_sid(main_sid);
+    if safe.is_empty() {
+        return base.to_path_buf();
+    }
+    base.with_file_name(format!("{EXIT_PREFIX}{safe}{EXIT_SUFFIX}"))
+}
+
+// The file a start reads. With the session being resumed: its own file, else the base file (old runs).
+// Without one (a bare start): the newest per-session file, else the base file. The result may not exist.
+pub fn read_path(base: &Path, resume_sid: Option<&str>) -> PathBuf {
+    if let Some(sid) = resume_sid.map(safe_sid).filter(|s| !s.is_empty()) {
+        let own = exit_write_path(base, &sid);
+        return if own.is_file() {
+            own
+        } else {
+            base.to_path_buf()
+        };
+    }
+    newest_session_file(base).unwrap_or_else(|| base.to_path_buf())
+}
+
+// The per-session exit file in base's folder with the latest mtime.
+fn newest_session_file(base: &Path) -> Option<PathBuf> {
+    let ents = fs::read_dir(base.parent()?).ok()?;
+    ents.flatten()
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with(EXIT_PREFIX) && name.ends_with(EXIT_SUFFIX)
+        })
+        .filter_map(|e| {
+            let mtime = e.metadata().ok()?.modified().ok()?;
+            Some((mtime, e.path()))
+        })
+        .max_by_key(|(mtime, _)| *mtime)
+        .map(|(_, path)| path)
 }
 
 // The live marker next to an exit handoff file (same folder, LIVE_HANDOFF_FILE).
@@ -252,6 +305,24 @@ pub fn sessions_file(exit_path: &Path) -> PathBuf {
     exit_path.with_file_name(SESSIONS_FILE)
 }
 
+// Exclusive advisory lock for a log append, held until the file closes. Two runs appending to one log never
+// interleave their lines. Windows appends without the lock.
+#[cfg(unix)]
+fn lock_for_append(f: &fs::File) -> io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    // SAFETY: flock takes a descriptor and no pointers; f stays open for the call.
+    if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(unix))]
+fn lock_for_append(_f: &fs::File) -> io::Result<()> {
+    Ok(())
+}
+
 // Appends one session id. Empty ids are ignored.
 pub fn append_session(exit_path: &Path, role: &str, session_id: &str) -> io::Result<()> {
     use std::io::Write;
@@ -266,7 +337,8 @@ pub fn append_session(exit_path: &Path, role: &str, session_id: &str) -> io::Res
             .map(|d| d.as_secs())
             .unwrap_or(0),
     };
-    let line = serde_json::to_string(&row).map_err(io::Error::other)?;
+    let mut line = serde_json::to_string(&row).map_err(io::Error::other)?;
+    line.push('\n');
     if let Some(dir) = exit_path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -274,7 +346,8 @@ pub fn append_session(exit_path: &Path, role: &str, session_id: &str) -> io::Res
         .create(true)
         .append(true)
         .open(sessions_file(exit_path))?;
-    writeln!(f, "{line}")
+    lock_for_append(&f)?;
+    f.write_all(line.as_bytes())
 }
 
 // The session log, oldest first, each session id once (its first row). Unparsable lines are skipped.
@@ -309,6 +382,93 @@ mod tests {
             .map(|r| (r.session_id.as_str(), r.role.as_str()))
             .collect();
         assert_eq!(ids, vec![("s1", MAIN_ROLE), ("c1", "coder")]);
+    }
+
+    fn main_only(sid: &str) -> ExitHandoff {
+        ExitHandoff {
+            main_session: sid.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn each_session_writes_its_own_exit_file() {
+        let dir = TempDir::new("handoff-per-sid");
+        let base = handoff_file(dir.path());
+        write_exit_handoff(&exit_write_path(&base, "aaa"), &main_only("aaa")).unwrap();
+        write_exit_handoff(&exit_write_path(&base, "bbb"), &main_only("bbb")).unwrap();
+        assert!(!base.exists(), "a session exit never writes the base file");
+        assert_eq!(
+            exit_write_path(&base, "aaa").file_name().unwrap(),
+            ".exit-handoff-aaa.json"
+        );
+        let got = |sid: &str| {
+            previous_run(&read_path(&base, Some(sid)))
+                .map(|(h, _)| h.main_session)
+                .unwrap_or_default()
+        };
+        assert_eq!(got("aaa"), "aaa");
+        assert_eq!(got("bbb"), "bbb");
+        // An unknown session has no file and no base file to fall back on.
+        assert!(previous_run(&read_path(&base, Some("zzz"))).is_none());
+    }
+
+    #[test]
+    fn bare_start_reads_the_newest_session_file() {
+        let dir = TempDir::new("handoff-newest");
+        let base = handoff_file(dir.path());
+        write_exit_handoff(&exit_write_path(&base, "old"), &main_only("old")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        write_exit_handoff(&exit_write_path(&base, "new"), &main_only("new")).unwrap();
+        let (h, _) = previous_run(&read_path(&base, None)).expect("a previous run");
+        assert_eq!(h.main_session, "new");
+    }
+
+    #[test]
+    fn base_file_is_the_read_only_fallback() {
+        let dir = TempDir::new("handoff-legacy");
+        let base = handoff_file(dir.path());
+        write_exit_handoff(&base, &main_only("legacy")).unwrap();
+        assert_eq!(read_path(&base, None), base);
+        assert_eq!(read_path(&base, Some("other")), base);
+        let (h, _) = previous_run(&read_path(&base, Some("other"))).expect("legacy record");
+        assert_eq!(h.main_session, "legacy");
+        // An exit without a session id still writes the base file.
+        assert_eq!(exit_write_path(&base, ""), base);
+    }
+
+    #[test]
+    fn session_ids_are_sanitized_for_the_file_name() {
+        let base = Path::new("/proj/notes/tmp/long/.exit-handoff.json");
+        let p = exit_write_path(base, "../x y/z");
+        assert_eq!(p, Path::new("/proj/notes/tmp/long/.exit-handoff-xyz.json"));
+        assert_eq!(exit_write_path(base, "./.."), base);
+    }
+
+    #[test]
+    fn concurrent_session_appends_keep_every_line_whole() {
+        let dir = TempDir::new("handoff-append-lock");
+        let path = handoff_file(dir.path());
+        let handles: Vec<_> = (0..8)
+            .map(|t| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..50 {
+                        append_session(&path, "coder", &format!("s-{t}-{i}")).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let text = fs::read_to_string(sessions_file(&path)).unwrap();
+        let rows: Vec<SessionRef> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("each line is one whole JSON row"))
+            .collect();
+        assert_eq!(rows.len(), 400);
+        assert_eq!(read_sessions(&path).len(), 400);
     }
 
     fn sample() -> ExitHandoff {
