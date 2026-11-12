@@ -55,3 +55,24 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
 
 ## Open
 - Which Charm-era features to keep: agent view, session list view, mouse selection/clipboard.
+
+## Archived design: session load and screen refresh (from caveman-structure, 2026-11-12)
+
+## 15. Session load and screen refresh (Rust)
+
+### 15.1 Session load: resume vs fresh
+- Rule: loading a previous session (main or resident) → `claude --resume <session_id>` when
+  - (a) session was force-killed mid-run (no clean exit handoff / exit marker), or
+  - (b) last context tokens < rotation threshold for its model (Opus main 200k, Haiku main 80k).
+- Else (clean exit and context ≥ threshold) → fresh session + exit handoff (current path).
+- One decision fn in core (`resume_mode(handoff, ctx_tokens, cfg) -> Resume | Fresh`); every load path (/resume, /view, startup, resident agents) calls it.
+- Session id + last context tokens persisted during the run, so the decision works after a crash.
+- Scope: crates/core only; Go (deprecated/) unchanged.
+
+### 15.2 Screen refresh: per input/output event
+- No fixed-interval redraw. TUI loop blocks on: key / resize / UiEvent channel.
+- On wake: drain all pending events, then draw once (coalesce bursts).
+- Keypress → immediate draw.
+- Slow timer only while something animates (spinner, elapsed clock); off when idle.
+- Scroll rules kept: typing keeps output scroll position; output while at bottom follows tail (notes/runs/scroll-bottom.md).
+- Scope: crates/cli/src/tui only; Go unchanged.

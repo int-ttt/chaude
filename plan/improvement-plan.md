@@ -12,7 +12,7 @@ Git date = `git log -1 --format=%ad --date=short -- <path>`.
 
 | path | lines | topic | status | evidence |
 |---|---|---|---|---|
-| plan/caveman-structure.md | 338 | caveman-based new structure design | planned-only | L3 `status: 설계안 v7 (구현 코드·측정 절차 미포함)`; L14 and L38 carry inline "SUPERSEDED 2611" notes; git 2026-11-01; uncommitted edit |
+| plan/caveman-structure.md | 58 | caveman channel format: current design (as implemented) | current | L3 `status: current design, as implemented 2026-11-12`; history in plan/archive/caveman-structure-history.md (339 lines, old design v7 and decisions) |
 | plan/gui-basic.md | 40 | GUI basic design (Tauri) | superseded | L1 `> Superseded 2026-11-12 by plan/gui-parity.md (egui instead of Tauri).`; git 2026-11-11; uncommitted edit |
 | plan/gui-parity.md | 46 | GUI parity plan (egui, 0.13.0) | current | L1 `# GUI parity plan (2026-11-12)`; L5 `## Decisions`; untracked (no git date) |
 | plan/interactive-child-resident-sessions.md | 98 | resident sessions and interactive child feasibility | planned-only | L3 `status: 계획만 작성됨. 구현·측정 미실행. 버전: v2`; git 2026-10-31 |
@@ -66,7 +66,7 @@ Status counts (34 files): current 22, done 3, superseded 4, stale 2, planned-onl
 - Contradiction: docs/claude-lean/CHANGELOG.md newest entry 0.5.3 vs release 0.12.5.
 - Contradiction: plan/tui-parity.md and plan/rust-test-parity*.md cite `deprecated/` Go sources; deprecated/ is absent (notes/OPEN.md L6 "deprecated/ deleted"); last git commit touching it is 5de4d12 (2026-11-06).
 - Contradiction: notes/DECISIONS.md L12-14 cite internal/harness (Go) paths that no longer exist.
-- Contradiction: plan/caveman-structure.md L3 says design v7 (planned), but L14 and L38 mark parts SUPERSEDED.
+- Resolved 2026-11-12: plan/caveman-structure.md no longer says design v7; the old text is in plan/archive/caveman-structure-history.md. Conflicts now listed in that file under "Known conflicts".
 
 ### Applied doc layout (2026-11-12)
 
@@ -81,8 +81,9 @@ Applied by the docs consolidation step. Table rows above show pre-move paths. No
 - plan/rust-test-parity-p1.md, plan/rust-test-parity-p2.md, plan/rust-test-parity-p3.md -> NOT moved: crates/core/tests/parity_p12_harness.rs:1 and parity_harness_p3*.rs:1 cite them in code comments. First line "> Source of truth: plan/rust-test-parity.md" added.
 - plan/rust-parity-checklist.md -> kept; first line marks deprecated/ paths historical (Go source at tag v0.11.2).
 - notes/DECISIONS.md L12-14 -> "(historical, Go code removed)" appended; text not rewritten.
+- plan/caveman-structure.md -> rewritten as the current design only (58 lines; sections: Scope, Channels, Brief format, Return formats, Guard hook, Known conflicts, Proposed). Old working-tree text (339 lines with header line) moved, not deleted: plan/archive/caveman-structure-history.md. Former section 15 (session load, screen refresh) -> end of plan/rust-port.md. Former section 16 (session count, usage) -> notes/research/subagent-usage.md.
 - Not done, user confirmation needed: merge of docs/claude-lean/FRESH_START.md and MIGRATE_NOW_PROMPT.md; delete of archived files; status of docs/claude-lean/CHANGELOG.md.
-- Not changed: plan/caveman-structure.md (uncommitted edits kept, not staged), notes/FACTS.md, notes/OPEN.md, CHANGELOG.md, README*.md, CLAUDE.md, record/.
+- Not changed: notes/FACTS.md, notes/OPEN.md, CHANGELOG.md, README*.md, CLAUDE.md, record/.
 
 ## 2. Findings
 
@@ -162,6 +163,13 @@ Applied by the docs consolidation step. Table rows above show pre-move paths. No
 ### S. Coder timeout drops partial work
 - `CODER_TIMEOUT` is fixed at 30 min (`crates/core/src/resident.rs:13`). On expiry the child is dropped and only "coder timed out" is returned; partial work is lost.
 - Fix: return partial output and changed files on timeout; make the timeout configurable.
+### U. Caveman channel: return formats conflict (plan/caveman-structure.md "Known conflicts")
+- U-a: R-write shape differs: CLAUDE.md:11 `changed: <path>: <what>` vs CAVEMAN_FORMAT.md 3.3 `changed: <path list>`; `changed` wording differs per agent file; hook REQUIRED omits summary_ko that 3.3 lists; prompter relay return has no changed/diffstat/check/ws.
+- U-b: `relay` is read by crates/core/src/resident.rs:56 and named in CLAUDE.md:5, but not defined in CAVEMAN_FORMAT.md or haiku-tui.md; prompter.md:38 uses the word for its own call.
+- U-c: summary_ko overlaps the haiku-tui Korean translation; language is English in opus-architect.md:45, unspecified in 3.3.
+- U-d: orch.rs:32 RULE_B says "no relay hop", but the prompter hop and the haiku-tui hop are both in the flow.
+- U-e: haiku-test-lead and haiku-extractor are outside hook TARGETS and use their own formats; extractor.md:23 and :25 contradict each other.
+
 ### T. Haiku pool worker map is unbounded
 - `crates/core/src/haiku_pool.rs` worker map has no cap, TTL, or eviction.
 - Fix: cap the map and add an idle TTL.
@@ -192,6 +200,9 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 - [ ] S21 API retry: classify 429, overloaded, and child-death errors; retry with bounded backoff; show "coder exited" only after retries end. Needs user decision (retry count, max wait, whether auto-retry is allowed). Accept: a fake-claude test that returns 429 twice and then succeeds completes the turn; a permanent error shows its classified message.
 - [ ] S22 Coder timeout: on `CODER_TIMEOUT`, return partial output and the changed-file list; make the timeout configurable. Accept: an engine test where the coder times out returns partial output and changed files; the timeout value is read from config in a test.
 - [ ] S23 Haiku pool: cap the worker map and add an idle TTL; evict and stop idle workers. Accept: after cap+1 workers and the idle TTL, the map size stays at the cap and no idle worker child is left alive.
+- [ ] S24 Caveman return shape: one shape (status / reason / body / relay) defined only in docs/claude-lean/CAVEMAN_FORMAT.md; per-agent R-* blocks become body types; apply to the 13 agents in .claude/agents, the embedded copies in crates/core/src/settings/agents, and the hook. Drop summary_ko only if user decides so (user confirmation needed). Accept: `grep -rn "changed: <" .claude/agents crates/core/src/settings/agents` shows one wording; the hook REQUIRED list matches CAVEMAN_FORMAT.md; `cargo test -p chaude-core` passes for the embedded agent copies.
+- [ ] S25 Caveman guard hook: cover all 13 agents (TARGETS in .claude/hooks/caveman-format.py), or remove the hook. Mode (warn vs remove) needs user decision. Accept: each of the 13 agent names is in TARGETS or the hook is absent from .claude/settings.json; a fake agent output with a missing R-write field yields a row (and additionalContext when CAVEMAN_GUARD=warn).
+- [ ] S26 Hop-skip policy: decide whether the prompter hop and the haiku-tui hop may be skipped on a fast path, and fix RULE_B in crates/core/src/orch.rs:32 to match. Needs user decision. Accept: the decision is written in notes/DECISIONS.md; RULE_B text and the policy agree; one test covers the skip (or the no-skip) path.
 
 ## 4. Not verified
 

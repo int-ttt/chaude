@@ -7,6 +7,8 @@
   - 내부 변경: 슬래시 명령, doctor 점검, 설정 데이터 모델을 chaude-core로 옮겨 GUI가 함께 쓸 수 있게 했습니다. TUI 동작은 그대로입니다.
 - Docs: the improvement plan adds algorithm findings (N-T) and steps (S17-S23).
   - 문서: 개선 계획에 알고리즘 점검 결과(N-T)와 단계(S17-S23)를 추가했습니다.
+- Docs: caveman-structure is now the current design only (58 lines); the old design history is archived in plan/archive/caveman-structure-history.md.
+  - 문서: caveman-structure는 현재 설계만 남겼습니다(58줄). 이전 설계 기록은 plan/archive/caveman-structure-history.md에 보관했습니다.
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.
