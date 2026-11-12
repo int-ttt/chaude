@@ -2,166 +2,20 @@
 //! The picker edits a working copy. Esc, ctrl+c or q saves it and closes; the caller appends the returned note.
 //! Changes to extra_coders and main_model apply at the next session start; session_retention_days too.
 
-use std::fs;
-use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 use chaude_core::i18n::{Msg, t, tf};
-use chaude_core::record::dir_for;
-use chaude_core::record_folder::prune_record_files;
+use chaude_core::settings::chaude_settings::{MAX_EXTRA_CODERS, MODEL_CHOICES, RETAIN_CHOICES};
+pub use chaude_core::settings::chaude_settings::{
+    Settings, file_for, load, prune_records_at_startup, save,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use serde_json::Value;
 
 use super::bar::clip;
 use super::render::{FG_OFF, GREY_ON, ORANGE_ON};
 
-// Go chaude_settings.go constants.
-pub const MAX_EXTRA_CODERS: i64 = 8;
-pub const DEFAULT_RETAIN: i64 = 30;
-pub const DEFAULT_EXTRA_CODERS: i64 = 4;
-pub const DEFAULT_MODEL: &str = "opus";
-
-// Go settingsRetainChoices / settingsModelChoices / settingsRows.
-pub const RETAIN_CHOICES: [i64; 5] = [0, 7, 30, 90, 365];
-pub const MODEL_CHOICES: [&str; 3] = ["opus", "sonnet", "fable"];
+// Picker rows (the settings picker and its key handling live here; the data model is in chaude_core).
 pub const ROWS: usize = 3;
-
-// Go chaudeSettings: the three keys of .chaude/settings.json.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Settings {
-    pub session_retention_days: i64, // 0 = keep forever
-    pub extra_coders: i64,           // extra haiku coders (coder2...) on a 3570s idle TTL, 0-8
-    pub main_model: String,          // opus | sonnet | fable
-    pub language: String,            // auto | ko | en (file-only key; no picker row, kept on save)
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        Settings {
-            session_retention_days: DEFAULT_RETAIN,
-            extra_coders: DEFAULT_EXTRA_CODERS,
-            main_model: DEFAULT_MODEL.to_string(),
-            language: "auto".to_string(),
-        }
-    }
-}
-
-impl Settings {
-    // Go clamp: retention >= 0, extra coders 0-8, unknown main model -> opus.
-    pub fn clamp(mut self) -> Self {
-        self.session_retention_days = self.session_retention_days.max(0);
-        self.extra_coders = self.extra_coders.clamp(0, MAX_EXTRA_CODERS);
-        if model_id(&self.main_model).is_none() {
-            self.main_model = DEFAULT_MODEL.to_string();
-        }
-        if !matches!(self.language.as_str(), "auto" | "ko" | "en") {
-            self.language = "auto".to_string();
-        }
-        self
-    }
-
-    // Go modelID: the claude model id for MainModel (after clamp).
-    pub fn model_id(&self) -> &'static str {
-        model_id(&self.clone().clamp().main_model).unwrap_or("claude-opus-5-5")
-    }
-}
-
-// Go mainModelIDs.
-fn model_id(alias: &str) -> Option<&'static str> {
-    match alias {
-        "opus" => Some("claude-opus-5-5"),
-        "sonnet" => Some("claude-sonnet-5-5"),
-        "fable" => Some("claude-fable-5-1"),
-        _ => None,
-    }
-}
-
-// Go settingsFileFor: <cwd>/.chaude/settings.json. None when the cwd is unknown (an empty cwd means the
-// process working directory, as in Go).
-pub fn file_for(cwd: Option<&Path>) -> Option<PathBuf> {
-    let base = match cwd {
-        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
-        _ => std::env::current_dir().ok()?,
-    };
-    Some(base.join(".chaude").join("settings.json"))
-}
-
-// Go loadChaudeSettings: a missing or unreadable file yields the defaults; absent fields keep their
-// defaults; the result is clamped. The legacy key coder_slots is read when extra_coders is absent.
-pub fn load(path: Option<&Path>) -> Settings {
-    let mut s = Settings::default();
-    let Some(path) = path else {
-        return s;
-    };
-    let Ok(text) = fs::read_to_string(path) else {
-        return s;
-    };
-    let Ok(v) = serde_json::from_str::<Value>(&text) else {
-        return s.clamp();
-    };
-    if let Some(n) = v.get("session_retention_days").and_then(Value::as_i64) {
-        s.session_retention_days = n;
-    }
-    if let Some(n) = v.get("extra_coders").and_then(Value::as_i64) {
-        s.extra_coders = n;
-    } else if let Some(n) = v.get("coder_slots").and_then(Value::as_i64) {
-        s.extra_coders = n;
-    }
-    if let Some(m) = v.get("main_model").and_then(Value::as_str) {
-        s.main_model = m.to_string();
-    }
-    if let Some(l) = v.get("language").and_then(Value::as_str) {
-        s.language = l.to_string();
-    }
-    s.clamp()
-}
-
-// Go repl.go:1357 pruneRecordFiles(recordDir(cwd), SessionRetentionDays, time.Now()): the startup prune of
-// old records. Errors are ignored, as in Go (`_, _ =`). Returns the removed count.
-pub fn prune_records_at_startup(cwd: &Path, s: &Settings, now: SystemTime) -> usize {
-    prune_record_files(&dir_for(cwd), s.session_retention_days, now).unwrap_or(0)
-}
-
-// Go saveChaudeSettings: writes the clamped settings through a tmp file and a rename, keys in Go's order.
-pub fn save(path: &Path, s: &Settings) -> io::Result<()> {
-    let s = s.clone().clamp();
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let model = serde_json::to_string(&s.main_model).map_err(io::Error::other)?;
-    let language = serde_json::to_string(&s.language).map_err(io::Error::other)?;
-    let body = format!(
-        "{{\n  \"session_retention_days\": {},\n  \"extra_coders\": {},\n  \"main_model\": {},\n  \"language\": {}\n}}\n",
-        s.session_retention_days, s.extra_coders, model, language
-    );
-    let tmp = PathBuf::from(format!("{}.tmp", path.display()));
-    {
-        let mut f = open_private(&tmp)?;
-        f.write_all(body.as_bytes())?;
-    }
-    fs::rename(&tmp, path)
-}
-
-#[cfg(unix)]
-fn open_private(path: &Path) -> io::Result<fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-}
-
-#[cfg(not(unix))]
-fn open_private(path: &Path) -> io::Result<fs::File> {
-    fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(path)
-}
 
 // Go settingsPick: the open picker. `path` is None when the cwd is unknown (Go "").
 pub struct Picker {
@@ -286,6 +140,8 @@ impl Picker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chaude_core::record::dir_for;
+    use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // A fresh directory under the system temp dir, unique per call.
