@@ -30,6 +30,11 @@ def lang():
             return v
     except Exception:
         pass
+    return spawn_lang()
+
+
+def spawn_lang():
+    """Language fixed at spawn: env CHAUDE_LANG (ko|en) > OS locale (same order as lang() after settings)."""
     env = os.environ.get("CHAUDE_LANG", "").strip().lower().split("-")[0].split("_")[0].split(".")[0]
     if env in ("ko", "en"):
         return env

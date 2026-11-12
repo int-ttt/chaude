@@ -20,7 +20,7 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
-from _lean import lean_off, session_flag, pick, trigger, lang
+from _lean import lean_off, session_flag, pick, trigger, lang, spawn_lang
 
 data = json.load(sys.stdin)
 prompt = (data.get("prompt") or "").strip()
@@ -192,7 +192,7 @@ if (os.environ.get("STYLE_INBOX", "1") != "0" and 8 <= len(prompt) <= 120 and "\
 
 tags = ["[lean] claude-lean is back on: delegate per policy."] if was_off else []
 # /lang changed the reply language after this session started: the env (CHAUDE_LANG) is fixed at spawn, so say it here.
-_spawn_lang = "en" if os.environ.get("CHAUDE_LANG", "ko").strip().lower() == "en" else "ko"
+_spawn_lang = spawn_lang()
 if lang() != _spawn_lang:
     _live = lang()
     tags.append(f"[lang] live language is {_live}, not the spawn CHAUDE_LANG={_spawn_lang}: reply in {'English' if _live == 'en' else 'Korean'} "

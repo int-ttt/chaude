@@ -13,8 +13,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 HOOKS = os.path.join(ROOT, ".claude", "hooks")
 
 
-def live_lang(settings, env_lang):
-    """Runs _lean.lang() in a fresh process with the given settings text (None = no file) and CHAUDE_LANG."""
+def live_lang(settings, env_lang, locale=None):
+    """Runs _lean.lang() in a fresh process with the given settings text (None = no file), CHAUDE_LANG and OS locale (LANG)."""
     with tempfile.TemporaryDirectory() as d:
         if settings is not None:
             os.makedirs(os.path.join(d, ".chaude"))
@@ -22,8 +22,12 @@ def live_lang(settings, env_lang):
                 f.write(settings)
         env = dict(os.environ, CLAUDE_PROJECT_DIR=d)
         env.pop("CHAUDE_LANG", None)
+        for k in ("LC_ALL", "LC_MESSAGES", "LANG"):
+            env.pop(k, None)
         if env_lang is not None:
             env["CHAUDE_LANG"] = env_lang
+        if locale is not None:
+            env["LANG"] = locale
         code = "import sys; sys.path.insert(0, sys.argv[1]); from _lean import lang; print(lang())"
         proc = subprocess.run([sys.executable, "-I", "-c", code, HOOKS], env=env, capture_output=True, text=True)
         if proc.returncode != 0:
@@ -36,13 +40,19 @@ class LangTest(unittest.TestCase):
         self.assertEqual(live_lang(json.dumps({"language": "en"}), "ko"), "en")
         self.assertEqual(live_lang(json.dumps({"language": "ko"}), "en"), "ko")
 
-    def test_auto_missing_or_broken_falls_back_to_env_then_ko(self):
+    def test_auto_missing_or_broken_falls_back_to_env_then_os_locale(self):
         self.assertEqual(live_lang(json.dumps({"language": "auto"}), "en"), "en")
         self.assertEqual(live_lang(json.dumps({"main_model": "opus"}), "en"), "en")
         self.assertEqual(live_lang("not json", "en"), "en")
         self.assertEqual(live_lang(None, "en"), "en")
-        self.assertEqual(live_lang(None, None), "ko")
-        self.assertEqual(live_lang(json.dumps({"language": "fr"}), None), "ko")
+        self.assertEqual(live_lang(None, None, "ko_KR.UTF-8"), "ko")
+        self.assertEqual(live_lang(json.dumps({"language": "fr"}), None, "ko_KR.UTF-8"), "ko")
+        self.assertEqual(live_lang(None, "en", "ko_KR.UTF-8"), "en")
+
+    def test_undetectable_locale_falls_back_to_en(self):
+        self.assertEqual(live_lang(None, None), "en")
+        self.assertEqual(live_lang(json.dumps({"language": "fr"}), None), "en")
+        self.assertEqual(live_lang(None, None, "en_US.UTF-8"), "en")
 
 
 class StyleAdapterLangTagTest(unittest.TestCase):
@@ -54,6 +64,8 @@ class StyleAdapterLangTagTest(unittest.TestCase):
                     f.write(settings)
             env = dict(os.environ, CLAUDE_PROJECT_DIR=d, HARNESS_RECORD_DIR=os.path.join(d, "record"), CLAUDE_LEAN="1")
             env.pop("CHAUDE_LANG", None)
+            for k in ("LC_ALL", "LC_MESSAGES", "LANG"):
+                env.pop(k, None)
             env.pop("STYLE_INBOX", None)
             if env_lang is not None:
                 env["CHAUDE_LANG"] = env_lang
