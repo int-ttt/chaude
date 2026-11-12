@@ -158,7 +158,7 @@ diff ~/usage-before.txt ~/usage-after.txt
 ```bash
 cd <프로젝트 폴더>
 cp .claude-backup-<시각>/CLAUDE.md . ; cp .claude-backup-<시각>/.claude/settings.json .claude/
-rm -f .claude/hooks/{correction-guard,style-adapter,main-thread-guard,haiku-context-guard,agent-model-pin,ledger,session-context,context-alert,history-export,_lean}.py
+rm -f .claude/hooks/{correction-guard,style-adapter,main-thread-guard,haiku-context-guard,agent-model-pin,ledger,session-context,history-export,_lean}.py
 ```
 (백업이 없던 프로젝트는 `CLAUDE.md`와 `.claude/settings.json`을 삭제)
 

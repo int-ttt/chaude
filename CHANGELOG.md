@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- hooks: drop context-alert.py (S20). The hook was inert (`LEAN_RESET_AT` 0 by default), so it is removed from the hook set, the package copy list and the docs. The ledger is one file, `record/LEDGER.md`; the old `notes/LEDGER.md` was appended into it and removed.
+  - hooks: context-alert.py 삭제 (S20). 이 훅은 `LEAN_RESET_AT` 기본값 0이라 아무 일도 하지 않았으므로 훅 목록, 패키지 복사 목록, 문서에서 뺐습니다. 기록장은 `record/LEDGER.md` 한 파일이며, 예전 `notes/LEDGER.md`는 그 뒤에 이어 붙인 뒤 지웠습니다.
 - core: per-session live handoff for all writers. The live marker is written only as `notes/tmp/long/.live-handoff-<sid>.json`, once the session id is known. Startup and `/clear` no longer write the shared `.live-handoff.json`, so two chaude instances in one project do not share it. Startup cleanup also skips a live peer's per-session marker.
   - core: 모든 쓰기 경로에서 세션별 live handoff. live 마커는 세션 ID를 알게 된 뒤에만 `notes/tmp/long/.live-handoff-<sid>.json`으로 씁니다. 시작 시와 `/clear` 때 공유 파일 `.live-handoff.json`을 더 이상 쓰지 않으므로, 같은 프로젝트의 두 chaude 인스턴스가 이 파일을 공유하지 않습니다. 시작 시 정리는 살아 있는 peer의 세션별 마커도 건너뜁니다.
 - hooks: per-session lean toggle and inbox. 일반모드 / 절약모드 now switch only the current session (`logs/.lean-off-<sid>`, "off" or "on"), so one chaude instance no longer switches another. The project default comes from `.chaude/settings.json` `"lean": "on" | "off"`. The old `.claude/lean-off` is still read as the project default but is never written. `record/INBOX.md` stays one file per project, each line is tagged `[sid]`, and a session injects and removes only its own lines; untagged legacy lines are kept. `session-context.py` still reads the project default only until it passes `session_id` too.

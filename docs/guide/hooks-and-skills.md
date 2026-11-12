@@ -12,7 +12,6 @@
 |---|---|---|
 | correction-guard.py | UserPromptSubmit | 사용자의 정정 유형을 나누고, 같은 실수가 두 번 이어지면 점검표를 강제합니다 |
 | style-adapter.py | UserPromptSubmit | 일반모드와 절약모드를 바꾸고, 상태 질문에 로그를 읽어 답하며, 짧은 정보는 INBOX에 쌓습니다 |
-| context-alert.py | UserPromptSubmit | 토큰이 `LEAN_RESET_AT`을 넘으면 `/exit` 후 `claude`를 다시 하라고 알립니다 |
 | agent-model-pin.py | PreToolUse (Agent, Task) | 에이전트 호출을 검사합니다. 모델 값을 지우고, 메인 전용 에이전트를 막고, Opus 에이전트가 `haiku-*`만 부르게 합니다 |
 | main-thread-guard.py | PreToolUse (Read, Write, Edit, MultiEdit, NotebookEdit, Bash, PowerShell, Grep, Glob, WebSearch, WebFetch) | Opus 메인이 파일, 웹, Bash를 직접 쓰면 막고, 맞는 `haiku-*`를 알려 줍니다 |
 | haiku-context-guard.py | PreToolUse (Read, Write, Edit, MultiEdit, NotebookEdit, Grep, Glob, Bash, PowerShell) | 비 Haiku 에이전트의 파일과 셸 접근을 막습니다. 검사 중 오류가 나면 막는 쪽으로 실패합니다 |
@@ -29,7 +28,7 @@
 
 `.claude/settings.json`에 등록된 값은 다음과 같습니다.
 
-- `UserPromptSubmit`: correction-guard, style-adapter, context-alert (각 5초)
+- `UserPromptSubmit`: correction-guard, style-adapter (각 5초)
 - `PreToolUse` (Agent|Task): agent-model-pin (5초)
 - `PreToolUse` (도구 목록): main-thread-guard (5초)
 - `PreToolUse` (파일과 셸 도구): haiku-context-guard (5초)
@@ -38,8 +37,6 @@
 - `SessionStart` (startup|resume|compact|clear): session-context (5초)
 - `SessionEnd`: history-export (60초)
 - `PreCompact`: history-export (60초)
-
-`context-alert.py`는 `LEAN_RESET_AT` 값이 `0`이라서 기본으로 꺼져 있습니다.
 
 ## 3. 정정 유형
 

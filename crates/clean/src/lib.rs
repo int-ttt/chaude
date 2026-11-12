@@ -43,7 +43,6 @@ const PKG_FILES: &[&str] = &[
     ".claude/hooks/agent-model-pin.py",
     ".claude/hooks/bash-py-guard.py",
     ".claude/hooks/caveman-format.py",
-    ".claude/hooks/context-alert.py",
     ".claude/hooks/correction-guard.py",
     ".claude/hooks/haiku-context-guard.py",
     ".claude/hooks/history-export.py",

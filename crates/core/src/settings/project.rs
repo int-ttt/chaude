@@ -112,7 +112,6 @@ pub const HOOKS: &[(&str, &[u8])] = &[
         include_bytes!("hooks/caveman-format.py"),
     ),
     ("bash-py-guard.py", include_bytes!("hooks/bash-py-guard.py")),
-    ("context-alert.py", include_bytes!("hooks/context-alert.py")),
     (
         "correction-guard.py",
         include_bytes!("hooks/correction-guard.py"),
