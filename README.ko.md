@@ -53,7 +53,7 @@ Opus가 메인 세션입니다. 요청을 읽고, 계획을 정하고, 작업을
 
 전체 목록, 도구, 배분 규칙은 [모델과 에이전트](docs/guide/models-and-agents.md)에 있습니다.
 
-**문맥과 세션 교체.** 문맥이 기준값에 도달하면 `chaude`가 인수인계 노트와 함께 새 세션으로 넘어갑니다. 상태 줄의 `rot N`은 이 일이 몇 번 일어났는지 보여 줍니다. 기준값은 Opus에서 200,000 토큰입니다. 다른 모델은 기본 80,000이며 `--threshold`로 바꿀 수 있습니다. 세션을 넘길 때 백그라운드 에이전트가 아직 돌고 있으면 최대 10분(`--rotate-defer-timeout`) 기다린 뒤 넘어갑니다.
+**문맥과 세션 교체.** 문맥이 기준값에 도달하면 `chaude`가 인수인계 노트와 함께 새 세션으로 넘어갑니다. 상태 줄의 `rot N`은 이 일이 몇 번 일어났는지 보여 줍니다. Opus의 기준값은 고정이고, 다른 모델의 기본값은 [임계값 표](docs/claude-lean/README.md#맥락-임계값-표)를 보며 `--threshold`로 바꿀 수 있습니다. 세션을 넘길 때 백그라운드 에이전트가 아직 돌고 있으면 최대 10분(`--rotate-defer-timeout`) 기다린 뒤 넘어갑니다.
 
 **Claude Code 세션.** `/import [ID|latest]` 또는 `/resume claude`를 쓰거나, `chaude --from-claude latest`를 실행하면 Claude Code 대화를 이어서 쓸 수 있습니다. 가져오기 화면에는 생각, 도구 호출과 결과, 하위 에이전트 메시지를 포함한 전체 대화가 나옵니다.
 
@@ -209,7 +209,7 @@ REPL 주요 플래그(`chaude repl`):
 |---|---|---|
 | `--model` | `opus` | 메인 모델 |
 | `--cwd` | `chaude repl -h` 참고 | 프로젝트 폴더 |
-| `--threshold` | `80000` | Opus 이외 모델의 세션 교체 기준값. Opus는 `200000`으로 고정됩니다 |
+| `--threshold` | [임계값 표](docs/claude-lean/README.md#맥락-임계값-표) 참고 | Opus 이외 모델의 세션 교체 기준값. Opus는 고정입니다 |
 | `--rotate-defer-timeout` | `10m` | 세션 교체가 필요할 때 백그라운드 에이전트를 기다리는 최대 시간. 그 뒤에는 기다리지 않고 넘어갑니다 |
 | `--show-rotation` | `chaude repl -h` 참고 | 세션 교체 표시를 한 줄로 출력합니다 |
 | `--metrics-dir` | `chaude repl -h` 참고 | 턴별 지표(JSONL)를 저장할 폴더 |

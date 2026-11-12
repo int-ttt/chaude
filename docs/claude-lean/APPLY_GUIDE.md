@@ -79,7 +79,7 @@ echo '{"tool_name":"Read"}' | python3 .claude/hooks/main-thread-guard.py  # deny
 | 조사 | `/research <질문>` |
 | 깊게 판단해야 할 때 | 프롬프트에 `ultrathink` 포함 |
 | 예전 대화 내용 찾기 | "예전에 마감 언제라고 했지?"처럼 그냥 물어보기 → Haiku `haiku-scout`가 대화 기록 검색 (보관한 기록 포함). 터미널에서 직접: `python3 scripts/search_history.py "<단어>"` |
-| 다른 작업으로 넘어갈 때 | 그냥 이어서 입력 (`/clear` 불필요. 메인 대화가 [150k](README.md#맥락-임계값-표) 창 가까이 차면 자동 압축) |
+| 다른 작업으로 넘어갈 때 | 그냥 이어서 입력 (`/clear` 불필요. 메인 대화가 [임계값 표](README.md#맥락-임계값-표)의 자동 압축 창 가까이 차면 자동 압축) |
 | 맥락이 커졌을 때 (자동 안내는 없음. 직접 판단) | `/exit` → 같은 터미널에서 `claude`. 압축 없이 가벼워지고, 대화는 화면에 남으며 직전 대화가 자동으로 이어짐 |
 | 오래 쉬었다 돌아올 때 | `claude`(새 세션)로 시작. `claude -c`보다 훨씬 쌈 (아래 참고) |
 | 맡길 모델을 직접 정하기 | 프롬프트에 `haiku로` / `sonnet으로` / `opus로`. 없으면 Opus가 정하고 응답 첫머리에 `[haiku-scout]`처럼 표시 |
@@ -94,7 +94,7 @@ echo '{"tool_name":"Read"}' | python3 .claude/hooks/main-thread-guard.py  # deny
 `/clear`와 압축은 쓰지 않습니다. 압축은 대화 전체를 한 번 더 보내는 요청이라 사용량이 크기 때문입니다.
 - **리셋 방법:** `/exit` → **같은 터미널 창**에서 `claude`. 이전 대화는 터미널 스크롤에 그대로 남습니다 (기본 화면 모드 기준).
 - **흐름 잇기 (모델 호출 없음):** 새 세션을 시작할 때 **직전 세션의 마지막 대화 15개**가 자동으로 들어갑니다.
-- **언제:** 자동 안내는 없습니다 (context-alert 훅은 S20에서 제거). 메인 맥락이 [150k](README.md#맥락-임계값-표)(`autoCompactWindow`)에 이르면 Claude Code가 자동으로 압축하므로, 그 전에 리셋하려면 직접 `/exit` 후 `claude`를 실행합니다.
+- **언제:** 자동 안내는 없습니다 (context-alert 훅은 S20에서 제거). 메인 맥락이 [임계값 표](README.md#맥락-임계값-표)의 자동 압축 창(`autoCompactWindow`)에 이르면 Claude Code가 자동으로 압축하므로, 그 전에 리셋하려면 직접 `/exit` 후 `claude`를 실행합니다.
 - **대화 기록 파일:** 세션이 끝날 때와 압축 직전에 `logs/history/<날짜>-<세션>-NN.txt`로 자동 저장됩니다. 사용자 메시지와 답변만 남기고, 120자 줄바꿈, 약 500KB 단위로 나눠서 PyCharm·Obsidian·VS Code에서 바로 열립니다. 직접 만들려면 `python3 scripts/export_history.py`.
 - **터미널 스크롤 길이:** 화면에 남는 양은 터미널 설정으로 정해집니다. 크게 늘려 두세요.
 
@@ -111,7 +111,7 @@ echo '{"tool_name":"Read"}' | python3 .claude/hooks/main-thread-guard.py  # deny
 | 설정 | 기본값 | 바꾸는 경우 |
 |---|---|---|
 | `effortLevel` | `medium` | 비용을 더 줄이려면 `low` |
-| `autoCompactWindow` | `150000` | 비용을 더 줄이려면 `100000` (압축이 더 잦아짐) |
+| `autoCompactWindow` | [임계값 표](README.md#맥락-임계값-표) 참고 | 비용을 더 줄이려면 창을 더 작게 (압축이 더 잦아짐) |
 | `env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` | `2` | 메인 → Sonnet/Opus → Haiku 연계 깊이. `1`이면 연계 끔 (메인이 `[haiku] steps`를 대신 배분) |
 | `env.STYLE_INBOX` | (없음 = 켜짐) | 메모 기능이 불편하면 `"0"` |
 | `env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS` | `8000` | 큰 파일을 자주 다루면 `12000` |

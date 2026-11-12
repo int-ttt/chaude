@@ -63,7 +63,7 @@ Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates
 ### 15.1 Session load: resume vs fresh
 - Rule: loading a previous session (main or resident) → `claude --resume <session_id>` when
   - (a) session was force-killed mid-run (no clean exit handoff / exit marker), or
-  - (b) last context tokens < rotation threshold for its model (Opus main 200k, Haiku main 80k).
+  - (b) last context tokens < rotation threshold for its model (see [threshold table](../docs/claude-lean/README.md#맥락-임계값-표)).
 - Else (clean exit and context ≥ threshold) → fresh session + exit handoff (current path).
 - One decision fn in core (`resume_mode(handoff, ctx_tokens, cfg) -> Resume | Fresh`); every load path (/resume, /view, startup, resident agents) calls it.
 - Session id + last context tokens persisted during the run, so the decision works after a crash.

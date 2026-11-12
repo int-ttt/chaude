@@ -53,7 +53,7 @@ Opus is the main session. It reads your request, decides the plan, and delegates
 
 The full list, tools, and routing rules are in [Models and agents](docs/guide/models-and-agents.md) (Korean).
 
-**Context and rotation.** When the context reaches the threshold, `chaude` moves to a new session with a handoff note. The `rot N` count in the status line shows how many times this happened. The threshold is 200,000 tokens for Opus. Other models use 80,000 by default, set with `--threshold`. If background agents are still running when a rotation is due, it waits up to 10 minutes (`--rotate-defer-timeout`) and then rotates.
+**Context and rotation.** When the context reaches the threshold, `chaude` moves to a new session with a handoff note. The `rot N` count in the status line shows how many times this happened. The threshold for Opus is fixed; other models use the default in the [threshold table](docs/claude-lean/README.md#맥락-임계값-표), set with `--threshold`. If background agents are still running when a rotation is due, it waits up to 10 minutes (`--rotate-defer-timeout`) and then rotates.
 
 **Claude Code sessions.** You can continue a Claude Code conversation with `/import [ID|latest]` or `/resume claude`, or run `chaude --from-claude latest`. The import view shows the whole transcript, including thinking, tool calls and results, and subagent messages.
 
@@ -209,7 +209,7 @@ Main REPL flags (`chaude repl`):
 |---|---|---|
 | `--model` | `opus` | Main model |
 | `--cwd` | see `chaude repl -h` | Project folder |
-| `--threshold` | see [threshold table](docs/claude-lean/README.md#맥락-임계값-표) | Rotation threshold for models other than Opus. Opus is fixed at [200k](docs/claude-lean/README.md#맥락-임계값-표) |
+| `--threshold` | see [threshold table](docs/claude-lean/README.md#맥락-임계값-표) | Rotation threshold for models other than Opus. Opus is fixed (see the table) |
 | `--rotate-defer-timeout` | `10m` | How long a due rotation waits for background agents before it runs anyway |
 | `--show-rotation` | see `chaude repl -h` | Print a one-line rotation marker |
 | `--metrics-dir` | see `chaude repl -h` | Folder for per-turn metrics (JSONL) |

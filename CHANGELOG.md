@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- docs: the context-threshold values (80k, 100k, 150k, 200k, 400k) now live only in one table in the claude-lean README; CLAUDE.md, README, the repl guide, APPLY_GUIDE and the rust plan link to it instead of repeating the numbers (S28).
+  - docs: 맥락 임계값(80k, 100k, 150k, 200k, 400k)은 claude-lean README의 표 하나에만 둡니다. CLAUDE.md, README, repl 가이드, APPLY_GUIDE, Rust 계획은 숫자를 반복하지 않고 이 표로 링크합니다 (S28).
 - engine: a pure acknowledgement (`ㅇㅇ`, `ok`, `응`, `네`, `좋아`, `계속`, `thanks`, and similar one-word replies) skips the prompter summary and goes straight to the main model. Any other input, including short ones like `go` or `hello`, still goes through the prompter (S26). `is_pure_ack` in api.rs covers it.
   - engine: 순수 확인 응답(`ㅇㅇ`, `ok`, `응`, `네`, `좋아`, `계속`, `thanks` 등 한 단어 응답)은 프롬프터 요약을 건너뛰고 메인 모델로 바로 갑니다. `go`나 `hello`처럼 짧아도 그 밖의 입력은 모두 프롬프터를 거칩니다 (S26). api.rs의 `is_pure_ack`이 이를 처리합니다.
 - docs: one final-reply owner (haiku-output), one agent count (13), one main-model rule (Haiku main only with `--model haiku`) across README, guide, CLAUDE.md and APPLY_GUIDE (S30). `tests/hooks/test_doc_contradictions.py` guards it.
