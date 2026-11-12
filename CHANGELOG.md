@@ -13,6 +13,8 @@
   - 문서: 개선 계획에 사용자 현장 평가(1a절), 운영 모델 점검(V), 단계 S27-S30을 추가했습니다. S26은 사용자가 고른 방향으로 다시 썼습니다.
 - Docs: the improvement plan adds an execution order (section 3a) that groups steps S1-S30 into five phases, plus a list of steps that need a user decision.
   - 문서: 개선 계획에 실행 순서(3a절)를 추가했습니다. 단계 S1-S30을 5개 단계로 묶었고, 사용자 결정이 필요한 단계 목록도 넣었습니다.
+- Correction guard: task notifications and wrapper text (`<system-reminder>`, `<task-notification>`, `<command-…>`) no longer count as corrections, and the `말고` and `…라고` patterns only match at sentence start.
+  - 정정 감지 훅: 작업 알림과 래퍼 텍스트(`<system-reminder>`, `<task-notification>`, `<command-…>`)는 정정으로 세지 않으며, `말고`와 `…라고` 패턴은 문장 시작에서만 맞습니다.
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.

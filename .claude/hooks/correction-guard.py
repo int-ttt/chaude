@@ -21,6 +21,10 @@ except Exception:
     sys.exit(0)
 prompt = (data.get("prompt") or "").strip()
 sid = re.sub(r"[^\w-]", "", data.get("session_id") or "default")
+# Task notifications and wrapper text (<task-notification>, <system-reminder>, <command-name>, ...) are not user prompts:
+# no hit, and the counter is left as it is.
+if re.search(r"<(task-notification|system-reminder|command-[\w-]+|local-command-[\w-]+|pasted_content)[\s>]", prompt):
+    sys.exit(0)
 
 # Trigger keywords per language (one dict; every language key is matched). Classes: C fact, D missing change,
 # F direction, A misread, E pushback, B question, G preference/tone; "generic" = untyped 아니 / no.
@@ -30,7 +34,7 @@ KEYWORDS = {
         "C": [r"(이|가)? ?아니라 .+(이다|야|이야|거든|였어|이고)", r"^아 .*(이다|이야|거든)[.!]?$"],
         "D": [r"안 ?바뀐|안 ?바꼈|바꾼 ?거 ?맞|했어\?|했지\?|어디 ?갔|빠졌"],
         "F": [r"^(아니면|그냥|[AB]로 가자|[AB]안)"],
-        "A": [r"그거 ?말고|그게 ?아니(라|고)|라니(깐|까)|(하|이|으)라고[.!]?$|말고"],
+        "A": [r"그거 ?말고|그게 ?아니(라|고)|라니(깐|까)|(?:^|[.!?] ?)(?:그|이|저)(?:거|게|렇게|건|것)[^.!?]{0,6}(하|이|으)라고[.!]?$|(?:^|[.!?] ?)말고"],
         "E": [r"^근데|같은데[?.]?$|이상한데|아니야\?$|않아\?$"],
         "B": [r"(수 ?있|가능하|되)(나|니|냐|어|지)\?|어때\??$"],
         "G": [r"너무 어려워|딱딱하게|내가 쓴 것처럼"],
