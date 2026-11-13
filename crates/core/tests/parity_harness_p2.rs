@@ -389,6 +389,7 @@ fn agent_prompt_body_loads_from_cwd_without_frontmatter() {
 fn agent_prompt_missing_gives_korean_notice_and_default_session() {
     let cwd = temp_cwd("agent-missing");
     let err = resident::agent_body(&cwd, "haiku-missing", None).expect_err("missing agent");
+    let err = err.to_string();
     assert!(err.contains("에이전트 규칙 없음"), "{err}");
 }
 

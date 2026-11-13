@@ -23,7 +23,7 @@ impl State {
         thread::spawn(move || {
             let ev = match proc::one_shot_usage(&bin, &cwd) {
                 Ok(text) => UiEvent::Usage { text },
-                Err(e) => UiEvent::Error(e),
+                Err(e) => UiEvent::Error(e.to_string()),
             };
             let _ = ui.send(ev);
         });
@@ -52,7 +52,7 @@ impl State {
         let metrics = Arc::clone(&self.metrics);
         let polling = Arc::clone(&self.usage_polling);
         thread::spawn(move || {
-            let text = proc::one_shot_usage(&bin, &cwd);
+            let text = proc::one_shot_usage(&bin, &cwd).map_err(|e| e.to_string());
             let _ = log_usage(&metrics, text.as_deref().map_err(|e| e.as_str()));
             polling.store(false, Ordering::SeqCst);
         });

@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
+use crate::error::Error;
 use crate::i18n::{Msg, tf};
 
 /// Default cap on concurrent live worker sessions (Go DefaultMaxWorkers).
@@ -151,7 +152,7 @@ pub fn admit<S: Close>(
     active: bool,
     limit: usize,
     mut retire: impl FnMut(Parked<S>),
-) -> Result<(), String> {
+) -> Result<(), Error> {
     let limit = if limit == 0 {
         DEFAULT_MAX_WORKERS
     } else {
@@ -169,8 +170,8 @@ pub fn admit<S: Close>(
 }
 
 /// Go workerCapErr: user-facing refusal when the worker cap is reached.
-pub fn worker_cap_err(max: usize) -> String {
-    tf(Msg::WorkerCap, &[&max])
+pub fn worker_cap_err(max: usize) -> Error {
+    Error::Msg(tf(Msg::WorkerCap, &[&max]))
 }
 
 #[cfg(test)]

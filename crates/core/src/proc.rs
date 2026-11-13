@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
+use crate::error::Error;
 use crate::tmp_layout;
 
 // Same value as claudePermissionMode in core.go: chaude always launches claude in auto mode.
@@ -160,10 +161,11 @@ fn apply_env(cmd: &mut Command, compact_window: u32, cache_ttl: &str) {
 // The run dir is test/usage-<pid>, removed after the run. Both callers share this pid, so runs take USAGE_RUN in turn.
 static USAGE_RUN: Mutex<()> = Mutex::new(());
 
-pub fn one_shot_usage(claude_bin: &str, cwd: &Path) -> Result<String, String> {
+pub fn one_shot_usage(claude_bin: &str, cwd: &Path) -> Result<String, Error> {
     let _turn = USAGE_RUN.lock().unwrap_or_else(|e| e.into_inner());
     let run_dir = tmp_layout::test_dir(cwd).join(format!("usage-{}", std::process::id()));
-    fs::create_dir_all(&run_dir).map_err(|e| format!("usage: {}: {e}", run_dir.display()))?;
+    fs::create_dir_all(&run_dir)
+        .map_err(|e| Error::Msg(format!("usage: {}: {e}", run_dir.display())))?;
     let mut cmd = Command::new(claude_bin);
     cmd.args([
         "-p",
@@ -178,13 +180,13 @@ pub fn one_shot_usage(claude_bin: &str, cwd: &Path) -> Result<String, String> {
     apply_env(&mut cmd, 0, "");
     let out = cmd.output();
     let _ = fs::remove_dir_all(&run_dir);
-    let out = out.map_err(|e| format!("usage: {e}"))?;
-    let v: Value =
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("usage: bad json: {e}"))?;
+    let out = out.map_err(|e| Error::Msg(format!("usage: {e}")))?;
+    let v: Value = serde_json::from_slice(&out.stdout)
+        .map_err(|e| Error::Msg(format!("usage: bad json: {e}")))?;
     v.get("result")
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| "usage: no result".to_string())
+        .ok_or_else(|| Error::Msg("usage: no result".to_string()))
 }
 
 pub struct ClaudeProc {
@@ -606,7 +608,7 @@ mod tests {
 
         let got = one_shot_usage(bin.to_str().unwrap(), cwd);
 
-        assert_eq!(got.as_deref(), Ok("ok"));
+        assert_eq!(got.as_deref().ok(), Some("ok"));
         let dir = format!("usage-{}", std::process::id());
         let ran_in = fs::read_to_string(&seen).unwrap();
         assert!(

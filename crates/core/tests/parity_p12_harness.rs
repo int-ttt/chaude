@@ -195,7 +195,7 @@ fn idle_spend_live_replay() {
 // and fake coder session (serveMCPConn, spawnCoderSlot) are not pub in Rust.
 #[test]
 fn mcp_round_trip_reply_level() {
-    let run = |task: &str| -> Result<String, String> {
+    let run = |task: &str| -> Result<String, chaude_core::error::Error> {
         assert_eq!(task, "add docs");
         Ok("status: done\nchanged: README.md: add usage".to_string())
     };

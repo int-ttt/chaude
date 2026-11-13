@@ -5,6 +5,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use super::windows;
+use crate::error::Error;
 use crate::osenv;
 use serde_json::{Map, Value};
 
@@ -329,22 +330,23 @@ pub fn hook_python_in(dirs: &[PathBuf]) -> &'static str {
 /// Adds the guard PreToolUse groups from `guard` to an existing settings body. Keys and order of `old` are kept; a
 /// group is added only when no group with the same matcher already runs the guard script. None when nothing was
 /// added. Text that is not a JSON object (or whose hooks/PreToolUse have the wrong shape) is an error.
-fn merge_guard(old: &[u8], guard: &str) -> Result<Option<String>, String> {
-    let mut cfg: Value = serde_json::from_slice(old).map_err(|e| e.to_string())?;
-    let guard_cfg: Value = serde_json::from_str(guard).map_err(|e| e.to_string())?;
+fn merge_guard(old: &[u8], guard: &str) -> Result<Option<String>, Error> {
+    let msg = |m: &str| Error::Msg(m.to_string());
+    let mut cfg: Value = serde_json::from_slice(old).map_err(|e| msg(&e.to_string()))?;
+    let guard_cfg: Value = serde_json::from_str(guard).map_err(|e| msg(&e.to_string()))?;
     let obj = cfg
         .as_object_mut()
-        .ok_or("settings.json: top level is not an object")?;
+        .ok_or_else(|| msg("settings.json: top level is not an object"))?;
     let hooks = obj
         .entry("hooks")
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
-        .ok_or("settings.json: hooks is not an object")?;
+        .ok_or_else(|| msg("settings.json: hooks is not an object"))?;
     let pre = hooks
         .entry("PreToolUse")
         .or_insert_with(|| Value::Array(Vec::new()))
         .as_array_mut()
-        .ok_or("settings.json: hooks.PreToolUse is not an array")?;
+        .ok_or_else(|| msg("settings.json: hooks.PreToolUse is not an array"))?;
     let mut changed = false;
     for group in guard_cfg["hooks"]["PreToolUse"]
         .as_array()
@@ -362,7 +364,7 @@ fn merge_guard(old: &[u8], guard: &str) -> Result<Option<String>, String> {
     if !changed {
         return Ok(None);
     }
-    let mut text = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    let mut text = serde_json::to_string_pretty(&cfg).map_err(|e| Error::Msg(e.to_string()))?;
     text.push('\n');
     Ok(Some(text))
 }

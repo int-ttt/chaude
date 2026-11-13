@@ -17,13 +17,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
+use crate::error::Error;
 use crate::tmp_layout;
 use serde_json::{Value, json};
 
 pub const TOOL: &str = "resident_coder";
 
 // Runs one resident_coder task: Ok is the coder summary, Err the reason (sent back as isError).
-pub type CoderFn = dyn Fn(&str) -> Result<String, String> + Send + Sync;
+pub type CoderFn = dyn Fn(&str) -> Result<String, Error> + Send + Sync;
 
 // Go mcpReply: answers one JSON-RPC line. None for notifications (no id) and lines that do not parse.
 pub fn reply(line: &str, run: &CoderFn) -> Option<String> {
@@ -60,7 +61,7 @@ pub fn reply(line: &str, run: &CoderFn) -> Option<String> {
             let result = match run(task) {
                 Ok(text) => json!({"content": [{"type": "text", "text": text}]}),
                 Err(reason) => {
-                    json!({"content": [{"type": "text", "text": reason}], "isError": true})
+                    json!({"content": [{"type": "text", "text": reason.to_string()}], "isError": true})
                 }
             };
             resp["result"] = result;
@@ -335,7 +336,7 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    fn ok_run(task: &str) -> Result<String, String> {
+    fn ok_run(task: &str) -> Result<String, Error> {
         Ok(format!("status: done ({task})"))
     }
 
@@ -366,7 +367,7 @@ mod tests {
         let got = parse(reply(line, &ok_run));
         assert_eq!(got["result"]["content"][0]["text"], "status: done (rename)");
         assert!(got["result"].get("isError").is_none());
-        let fail = |_: &str| -> Result<String, String> { Err("coder busy".to_string()) };
+        let fail = |_: &str| -> Result<String, Error> { Err(Error::Msg("coder busy".to_string())) };
         let got = parse(reply(line, &fail));
         assert_eq!(got["result"]["isError"], true);
         assert_eq!(got["result"]["content"][0]["text"], "coder busy");

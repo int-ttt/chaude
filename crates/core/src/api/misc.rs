@@ -551,8 +551,11 @@ impl State {
                 tx: self.self_tx.clone(),
             };
             let cwd = self.engine_cwd();
-            self.mcp_cfg =
-                mcp::start_owned(&cwd, Arc::new(move |task: &str| caller.call(task))).ok();
+            self.mcp_cfg = mcp::start_owned(
+                &cwd,
+                Arc::new(move |task: &str| caller.call(task).map_err(crate::error::Error::Msg)),
+            )
+            .ok();
         }
         self.mcp_cfg.as_ref().map(|c| c.path().to_path_buf())
     }

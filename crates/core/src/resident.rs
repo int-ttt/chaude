@@ -4,6 +4,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::error::Error;
 use crate::i18n::{Lang, Msg, t, tf};
 
 // The prompter's system prompt: the Go resident-prompter rules, copied so the engine does not depend on the removed Go tree.
@@ -60,7 +61,7 @@ pub fn tui_prompt(reply: &str, lang: Lang) -> String {
 
 // Go agentBody: the agent file under cwd, then under the home directory. Frontmatter is dropped.
 // home is passed in (Config.home), never read from the environment, so tests cannot touch the real ~/.claude.
-pub fn agent_body(cwd: &Path, name: &str, home: Option<&Path>) -> Result<String, String> {
+pub fn agent_body(cwd: &Path, name: &str, home: Option<&Path>) -> Result<String, Error> {
     let file = format!("{name}.md");
     let mut paths = vec![cwd.join(".claude").join("agents").join(&file)];
     if let Some(home) = home {
@@ -74,7 +75,7 @@ pub fn agent_body(cwd: &Path, name: &str, home: Option<&Path>) -> Result<String,
             }
         }
     }
-    Err(tf(Msg::AgentRuleMissing, &[&name]))
+    Err(Error::Msg(tf(Msg::AgentRuleMissing, &[&name])))
 }
 
 // Go stripFrontmatter: when the first line is `---`, drops the lines up to and including the second `---`.
@@ -122,9 +123,9 @@ impl Prompter {
     }
 
     // Go viaPrompter: starts a summary of input. Err while an earlier summary is still pending.
-    pub fn start(&mut self, input: &str) -> Result<StagePhase, String> {
+    pub fn start(&mut self, input: &str) -> Result<StagePhase, Error> {
         if self.pending.is_some() {
-            return Err("prompter busy".to_string());
+            return Err(Error::Msg("prompter busy".to_string()));
         }
         self.pending = Some(input.to_string());
         Ok(StagePhase::Working)

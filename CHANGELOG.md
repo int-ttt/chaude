@@ -99,10 +99,12 @@
   - core: 저장 메서드(세션, 라이브 표식, 에이전트, 작업과 턴 기록, 이어받을 맥락, handoff 스냅샷)를 `api.rs`에서 `api/persist.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다 (S5, 저장 모듈).
 - core: the remaining `api.rs` methods (rotation, drain, session and child lifecycle) moved to `api/misc.rs`, with no logic change. This completes the `api` split (S5, misc module).
   - core: 남은 `api.rs` 메서드(회전, 드레인, 세션과 자식 수명 주기)를 `api/misc.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다. 이것으로 `api` 분할이 끝납니다 (S5, 기타 모듈).
-- core: the core error type `chaude_core::error::Error` (`Msg` or `Io`) starts replacing `Result<_, String>`; `import_claude` is the first module on it. `home_dir` is one shared function (`osenv::try_home_dir`); the cli copy now delegates to it, so on windows it reads only USERPROFILE (it used to try HOME first) (S8, first slice).
-  - core: 핵심 오류 타입 `chaude_core::error::Error`(`Msg` 또는 `Io`)가 `Result<_, String>`을 대체하기 시작했습니다. 첫 모듈은 `import_claude`입니다. `home_dir`은 하나의 함수(`osenv::try_home_dir`)로 모았고, cli 쪽 복사본은 이것을 씁니다. 그래서 Windows에서는 USERPROFILE만 읽습니다 (이전에는 HOME을 먼저 읽었습니다) (S8, 첫 단계).
+- core: the core error type `chaude_core::error::Error` (`Msg` or `Io`) starts replacing `Result<_, String>`; `import_claude` is the first module on it. `home_dir` is one shared function (`osenv::try_home_dir`); the cli copy now delegates to it (S8, first slice).
+  - core: 핵심 오류 타입 `chaude_core::error::Error`(`Msg` 또는 `Io`)가 `Result<_, String>`을 대체하기 시작했습니다. 첫 모듈은 `import_claude`입니다. `home_dir`은 하나의 함수(`osenv::try_home_dir`)로 모았고, cli 쪽 복사본은 이것을 씁니다 (S8, 첫 단계).
 - core: `osenv::try_home_dir` reads HOME first, then USERPROFILE, on Windows only; on mac and linux it reads HOME only (no USERPROFILE fallback). Unit tests lock both orders on any host.
   - core: `osenv::try_home_dir`는 Windows에서만 HOME을 먼저, 그다음 USERPROFILE을 읽습니다. mac과 linux에서는 HOME만 읽고 USERPROFILE로 넘어가지 않습니다. 단위 테스트가 두 순서를 어느 호스트에서든 고정합니다.
+- core: `child_set`, `settings`, `mcp`, `resident` and `proc` return `chaude_core::error::Error` instead of `Result<_, String>`; the API glue (`api/misc.rs`, `api/events.rs`) converts at the boundary. `api.rs` keeps `String` until after S15 (S8, rest of core).
+  - core: `child_set`, `settings`, `mcp`, `resident`, `proc`은 `Result<_, String>` 대신 `chaude_core::error::Error`를 반환합니다. API 연결부(`api/misc.rs`, `api/events.rs`)가 경계에서 변환합니다. `api.rs`는 S15 이후까지 `String`을 유지합니다 (S8, core 나머지).
 - core: `orch::parse` and `cache_ttl::parse_cache_ttl` return `chaude_core::error::Error` instead of `String`; the cli maps the error to text at the one call site, so the messages are unchanged (S8, sweep).
   - core: `orch::parse`와 `cache_ttl::parse_cache_ttl`은 `String` 대신 `chaude_core::error::Error`를 돌려줍니다. cli는 호출 한 곳에서 문구로 바꾸므로 메시지는 그대로입니다 (S8, 일괄 정리).
 - core: `resume_note::write` returns `chaude_core::error::Error`; its callers already ignore the message or take it as the digest hint, so nothing else changes (S8, sweep).

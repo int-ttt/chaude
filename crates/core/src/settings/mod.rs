@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
+use crate::error::Error;
 use crate::lean::{self, ParseError};
 use crate::osenv;
 
@@ -101,8 +102,8 @@ fn insert_after(obj: &mut Map<String, Value>, after: &str, key: &str, val: Value
 
 /// Converts the posix settings text to the windows form. `py` is the interpreter command line (e.g. "py -3",
 /// "python", or a full path with spaces); it is split on whitespace unless it names an existing file.
-pub fn windows(src: &[u8], py: &str) -> Result<String, String> {
-    let mut cfg: Value = serde_json::from_slice(src).map_err(|e| e.to_string())?;
+pub fn windows(src: &[u8], py: &str) -> Result<String, Error> {
+    let mut cfg: Value = serde_json::from_slice(src).map_err(|e| Error::Msg(e.to_string()))?;
     let mut py_parts: Vec<String> = if is_file(Path::new(py)) {
         vec![py.to_string()]
     } else {
@@ -165,7 +166,7 @@ pub fn windows(src: &[u8], py: &str) -> Result<String, String> {
         }
     }
 
-    let mut text = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    let mut text = serde_json::to_string_pretty(&cfg).map_err(|e| Error::Msg(e.to_string()))?;
     text.push('\n');
     Ok(text)
 }
