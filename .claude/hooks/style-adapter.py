@@ -20,9 +20,16 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
+try:
+    from _lean import hook_log
+except Exception:  # logging is optional: a missing or broken _lean must not break the hook
+    def hook_log(*_a, **_k):
+        pass
 from _lean import lean_off, session_flag, pick, trigger, lang, spawn_lang
+hook_log("style-adapter")
 
 data = json.load(sys.stdin)
+hook_log(data=data)
 prompt = (data.get("prompt") or "").strip()
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 rec = os.environ.get("HARNESS_RECORD_DIR") or os.path.join(root, "record")
@@ -78,6 +85,7 @@ KEYWORDS = {
 
 
 def block(msg):
+    hook_log(decision="block")
     print(json.dumps({"decision": "block", "reason": msg,
                       "hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "suppressOriginalPrompt": True}},
                      ensure_ascii=False))
@@ -154,6 +162,7 @@ if now_off != was_off:
     except OSError:
         pass
 if now_off:
+    hook_log(decision="inject")
     print("[normal] claude-lean is off: work directly with tools, normal-length replies, no `추천:` / `Recommended:` line.")
     sys.exit(0)
 
@@ -275,5 +284,6 @@ elif len(p) < 30 and not re.search(QUESTION, prompt) and not re.match(CORRECTION
     tags.append("[frag] answers your last question, else relay verbatim to the active agent.")
 
 if tags:
+    hook_log(decision="inject")
     print("\n".join(tags))
 sys.exit(0)

@@ -14,7 +14,13 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
+try:
+    from _lean import hook_log
+except Exception:  # logging is optional: a missing or broken _lean must not break the hook
+    def hook_log(*_a, **_k):
+        pass
 from _lean import lean_off
+hook_log("main-thread-guard")
 
 WORK_TOOLS = {"Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Grep", "Glob", "WebSearch", "WebFetch"}
 AGENT_TOOLS = {"Agent", "Task"}
@@ -54,6 +60,7 @@ try:
     data = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
+hook_log(data=data)
 if os.environ.get("CHAUDE_ORCH", "").strip().lower() == "e":
     sys.exit(0)  # E main works inline
 if lean_off(data.get("session_id")) or os.environ.get("CLAUDE_ALLOW_MAIN_TOOLS") == "1" or data.get("agent_id"):
@@ -63,6 +70,7 @@ if tool in AGENT_TOOLS:
     kind = str((data.get("tool_input") or {}).get("subagent_type") or "")
     if main_model(data) == "haiku":
         if kind not in HAIKU_MAIN_AGENTS:
+            hook_log(decision="deny")
             print(json.dumps({"hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
@@ -70,6 +78,7 @@ if tool in AGENT_TOOLS:
             }}, ensure_ascii=False))
         sys.exit(0)
     if not (kind.startswith("haiku-") or kind in MAIN_AGENTS):
+        hook_log(decision="deny")
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
@@ -77,6 +86,7 @@ if tool in AGENT_TOOLS:
         }}, ensure_ascii=False))
     sys.exit(0)
 if tool in WORK_TOOLS:
+    hook_log(decision="deny")
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",

@@ -11,12 +11,19 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
+try:
+    from _lean import hook_log
+except Exception:  # logging is optional: a missing or broken _lean must not break the hook
+    def hook_log(*_a, **_k):
+        pass
 from _lean import lean_off, pick, trigger
+hook_log("correction-guard")
 
 try:
     data = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
+hook_log(data=data)
 prompt = (data.get("prompt") or "").strip()
 sid = re.sub(r"[^\w-]", "", data.get("session_id") or "default")
 if lean_off(sid):
@@ -91,5 +98,6 @@ elif generic:
 if n >= 2:
     out.append(f"[corr x{n}] stop: <=5-bullet checklist in user's words, confirm, then one brief")
 if out:
+    hook_log(decision="inject")
     print("\n".join(out))
 sys.exit(0)

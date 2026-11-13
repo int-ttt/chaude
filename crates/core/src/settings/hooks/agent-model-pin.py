@@ -19,7 +19,13 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
+try:
+    from _lean import hook_log
+except Exception:  # logging is optional: a missing or broken _lean must not break the hook
+    def hook_log(*_a, **_k):
+        pass
 from _lean import lean_off
+hook_log("agent-model-pin")
 
 BUILTIN = {"claude-code-guide"}
 BLOCKED = {"general-purpose", "Explore", "Plan"}
@@ -29,21 +35,25 @@ try:
     data = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
+hook_log(data=data)
 if data.get("tool_name") in ("Agent", "Task") and data.get("agent_id"):
     _target = str((data.get("tool_input") or {}).get("subagent_type") or "")
     if _target == "haiku-prompter":
+        hook_log(decision="deny")
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                           "permissionDecisionReason": "haiku-prompter can only be called from the main thread (no recursion)."}}, ensure_ascii=False))
         sys.exit(0)
     if data.get("agent_type") == "haiku-prompter":
         if _target == "opus-architect" or (_target.startswith("haiku-") and _target != "haiku-prompter"):
             sys.exit(0)
+        hook_log(decision="deny")
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                           "permissionDecisionReason": "haiku-prompter may only call opus-architect or haiku-*."}}, ensure_ascii=False))
         sys.exit(0)
 if data.get("tool_name") in ("Agent", "Task") and data.get("agent_id") and data.get("agent_type") in SUB_CALLERS:
     target = str((data.get("tool_input") or {}).get("subagent_type") or "")
     if not target.startswith("haiku-"):
+        hook_log(decision="deny")
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                           "permissionDecisionReason": "opus subagents may only call haiku-* agents (v0.8.2)."}}, ensure_ascii=False))
         sys.exit(0)
@@ -54,6 +64,7 @@ if os.environ.get("CHAUDE_ORCH", "").strip().lower() == "e" and not data.get("ag
     _st = str(_ti.get("subagent_type") or "")
     _prompt = str(_ti.get("prompt") or "")
     if _st.startswith("opus-") and "ESCALATE" not in _prompt:
+        hook_log(decision="deny")
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                           "permissionDecisionReason": "E gate: Opus only on escalation after 2 Haiku failures (put ESCALATE in the brief)"}}, ensure_ascii=False))
         sys.exit(0)
@@ -66,17 +77,20 @@ if os.environ.get("CHAUDE_ORCH", "").strip().lower() == "e" and not data.get("ag
     _m = re.search(r'RETURN[^\n]*?<=\s*(\d+)\s*chars', _prompt)
     _cap = int(_m.group(1)) if _m else None
     if _raw > 0 and (_cap is None or _cap > 0.25 * _raw):
+        hook_log(decision="deny")
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                           "permissionDecisionReason": f"E gate: RETURN cap {_cap} > 0.25 x raw {_raw} bytes (or no cap); do it inline with your own tools"}}, ensure_ascii=False))
         sys.exit(0)
 inp = dict(data.get("tool_input") or {})
 kind = inp.get("subagent_type") or "general-purpose"
 if data.get("agent_id") and not kind.startswith("haiku-"):
+    hook_log(decision="deny")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                       "permissionDecisionReason": f"Subagents may only hand work to haiku-* agents, not {kind}. "
                                                   "For anything else, finish or return ESCALATE / [haiku] steps to the main thread."}}))
     sys.exit(0)
 if kind in BLOCKED:
+    hook_log(decision="deny")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                       "permissionDecisionReason": f"Built-in {kind} agent is blocked (large default prompt). Use haiku-scout "
                                                   "(search), haiku-coder / haiku-batch-worker (edits), "
@@ -93,6 +107,7 @@ elif kind in BUILTIN and asked != "haiku":
     why = f"{kind} pinned to haiku" + (f" (asked '{asked}')" if asked else "")
 else:
     sys.exit(0)
+hook_log(decision="allow")
 print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                          "permissionDecisionReason": why, "updatedInput": inp}}, ensure_ascii=False))
 sys.exit(0)

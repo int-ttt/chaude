@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- hooks: each hook run appends one line `{ts, hook, event, decision}` to `logs/hooks.jsonl` (D5). Logging is fail-safe: a missing or broken `_lean` or a log write error never changes a hook's output (live matrix item 5).
+  - hooks: 훅이 실행될 때마다 `logs/hooks.jsonl`에 `{ts, hook, event, decision}` 한 줄을 추가합니다 (D5). 로깅은 실패해도 안전합니다. `_lean`이 없거나 깨져도, 로그 쓰기가 실패해도 훅의 출력은 바뀌지 않습니다 (라이브 매트릭스 5번).
 - docs: CLAUDE.md Flow has a rule for a pure ack with no pending `추천:`: one-line reply, no delegation (live matrix D1).
   - docs: CLAUDE.md 흐름에 규칙을 추가했습니다. 보류 중인 `추천:`이 없는 순수 확인 응답은 한 줄로 답하고 위임하지 않습니다 (라이브 매트릭스 D1).
 - hooks: with a Haiku main (`--model haiku`), main-thread-guard allows only `opus-architect` and `haiku-output` as agents; the main model is read from the main transcript's newest assistant entry (live matrix D2).

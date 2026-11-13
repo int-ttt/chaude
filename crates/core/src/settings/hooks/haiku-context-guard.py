@@ -29,7 +29,15 @@ ALLOW_IO = ("haiku-", "sonnet-writer")
 DENY_MSG = "Opus/non-haiku agents may not access files or shell directly (v0.8.2). Delegate to haiku-scout (read), haiku-batch-worker (write), or haiku-coder (code)."
 
 
+try:
+    from _lean import hook_log
+except Exception:  # logging is optional: a missing or broken _lean must not break the hook
+    def hook_log(*_a, **_k):
+        pass
+
+
 def deny(reason):
+    hook_log(decision="deny")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                       "permissionDecisionReason": reason}}, ensure_ascii=False))
     sys.exit(0)
@@ -38,10 +46,12 @@ def deny(reason):
 raw = ""
 try:
     from _lean import lean_off
+    hook_log("haiku-context-guard")
     raw = sys.stdin.read()
     data = json.loads(raw)
     if not isinstance(data, dict):
         data = {}
+    hook_log(data=data)
     kind = data.get("agent_type") or ""
     tool = data.get("tool_name") or ""
     tin = data.get("tool_input") or {}
@@ -68,6 +78,10 @@ except SystemExit:
     raise
 except Exception:
     if '"agent_id"' in raw and not re.search(r'"agent_type"\s*:\s*"haiku-', raw):
+        try:
+            hook_log(decision="deny")
+        except Exception:
+            pass
         print(DENY_MSG, file=sys.stderr)
         sys.exit(2)
     sys.exit(0)

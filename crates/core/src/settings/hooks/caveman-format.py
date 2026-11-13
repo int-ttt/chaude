@@ -8,7 +8,13 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
     except Exception:
         pass
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
+try:
+    from _lean import hook_log
+except Exception:  # logging is optional: a missing or broken _lean must not break the hook
+    def hook_log(*_a, **_k):
+        pass
 from _lean import lang
+hook_log("caveman-format")
 
 # watched agents (plan:174; manage the list here only)
 TARGETS = {"haiku-scout", "haiku-researcher", "haiku-coder", "haiku-batch-worker", "haiku-runner", "haiku-checker", "haiku-drafter", "sonnet-writer", "opus-architect", "haiku-output", "haiku-prompter", "haiku-extractor", "haiku-test-lead"}  # S4: extend here only
@@ -90,6 +96,7 @@ def check_brief(prompt):
 
 def main():
     data = json.load(sys.stdin)
+    hook_log(data=data)
     if not isinstance(data, dict) or data.get("tool_name") not in ("Agent", "Task"):
         return
     tin = data.get("tool_input") or {}
@@ -131,6 +138,7 @@ def main():
     if mode == "warn":
         out = {"hookSpecificOutput": {"hookEventName": "PostToolUse",
                "additionalContext": f"missing required fields: {', '.join(missing)}, re-request"}}
+        hook_log(decision="inject")
         print(json.dumps(out, ensure_ascii=False))
 
 

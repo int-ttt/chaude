@@ -10,9 +10,16 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
     except Exception:
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
+try:
+    from _lean import hook_log
+except Exception:  # logging is optional: a missing or broken _lean must not break the hook
+    def hook_log(*_a, **_k):
+        pass
 from _lean import lean_off
+hook_log("session-context")
 
 data = json.load(sys.stdin) if not sys.stdin.isatty() else {}
+hook_log(data=data)
 root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 upd = ""
 _NOTE = ("CLAUDE.md and agents apply only when Claude Code starts. If this session was reached via /resume, "
@@ -38,6 +45,7 @@ def emit(text):
     msg: dict[str, object] = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
     if upd:
         msg["systemMessage"] = upd
+    hook_log(decision="inject")
     print(json.dumps(msg, ensure_ascii=False))
 
 

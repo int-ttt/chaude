@@ -63,7 +63,14 @@ def first_input(path):
     return ""                         # unknown: caller falls back to the agent's own message
 
 
+try:
+    from _lean import hook_log
+except Exception:  # logging is optional: a missing or broken _lean must not break the hook
+    def hook_log(*_a, **_k):
+        pass
+hook_log("ledger")
 data = json.load(sys.stdin)
+hook_log(data=data)
 msg = (data.get("last_assistant_message") or "").strip()
 if not msg:
     sys.exit(0)

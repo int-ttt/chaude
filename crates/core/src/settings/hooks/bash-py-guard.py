@@ -9,7 +9,7 @@ stay allowed.
 Also denied: unbounded wait loops (until, or while that is not a `while read` over a file) with no bound in the
 command (alarm / timeout / numeric compare / (( )) ). A background poll that never ends can hang the agent.
 Fail-open on unreadable input."""
-import json, re, sys
+import json, os, re, sys
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
         _reconf = getattr(_s, "reconfigure", None)
@@ -18,6 +18,13 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
     except Exception:
         pass
 sys.dont_write_bytecode = True  # keep .claude/hooks free of __pycache__
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also when run with python -I
+try:
+    from _lean import hook_log
+except Exception:  # logging is optional: a missing or broken _lean must not break the hook
+    def hook_log(*_a, **_k):
+        pass
+hook_log("bash-py-guard")
 
 DENY_MSG = "Edit files with the Edit/Write tools, not Python. Use Read + Edit (replace_all for bulk)."
 WAIT_MSG = ("Unbounded wait loop denied: bound it (perl -e 'alarm shift; exec @ARGV' <secs> <cmd>, or a counter "
@@ -46,6 +53,7 @@ QUOTED = re.compile(r"\"((?:[^\"\\]|\\.)*)\"|'([^']*)'", re.S)
 
 
 def deny(reason):
+    hook_log(decision="deny")
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                       "permissionDecisionReason": reason}}, ensure_ascii=False))
     sys.exit(0)
@@ -119,6 +127,7 @@ def unbounded_wait(cmd):
 
 try:
     data = json.loads(sys.stdin.read())
+    hook_log(data=data)
     if not isinstance(data, dict) or (data.get("tool_name") or "") != "Bash":
         sys.exit(0)
     cmd = (data.get("tool_input") or {}).get("command") or ""

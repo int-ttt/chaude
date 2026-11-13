@@ -115,3 +115,36 @@ def history_dir(project):
             except OSError:
                 pass
     return ""
+
+
+# --- hook log (D5): one JSON line per hook run in <ROOT>/logs/hooks.jsonl, appended at process exit ---
+import atexit as _atexit
+import time as _time
+_HOOK = {"hook": "", "event": "", "decision": "pass", "on": False}
+
+
+def hook_log(name=None, data=None, decision=None):
+    """Hooks call hook_log("name") at the top, hook_log(data=data) once stdin is parsed (event = hook_event_name),
+    and hook_log(decision=...) where they deny/block/inject/allow. The record {ts, hook, event, decision} is appended
+    once at exit (atexit covers every sys.exit path). Default decision "pass". Logging never raises."""
+    if name and not _HOOK["on"]:
+        _HOOK.update(hook=name, on=True)
+        _atexit.register(_hook_flush)
+    if isinstance(data, dict):
+        _HOOK["event"] = str(data.get("hook_event_name") or "")
+    if decision:
+        _HOOK["decision"] = decision
+
+
+def _hook_flush():
+    if not _HOOK["on"]:
+        return
+    try:
+        import json
+        os.makedirs(os.path.join(ROOT, "logs"), exist_ok=True)
+        rec = {"ts": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()), "hook": _HOOK["hook"],
+               "event": _HOOK["event"], "decision": _HOOK["decision"]}
+        with open(os.path.join(ROOT, "logs", "hooks.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
+    except Exception:
+        pass
