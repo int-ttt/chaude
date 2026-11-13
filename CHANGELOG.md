@@ -116,6 +116,9 @@
 - core: `record_turn::resume` returns `chaude_core::error::Error`; the cli turns it into text where it shows the message, so the messages are unchanged (S8, sweep).
   - core: `record_turn::resume`는 `chaude_core::error::Error`를 돌려줍니다. cli는 메시지를 보여주는 곳에서 문구로 바꾸므로 메시지는 그대로입니다 (S8, 일괄 정리).
 
+- core: the coder and tui reply paths in `api/route.rs` and `api/retry.rs` (spawn, write, finish) return `chaude_core::error::Error`; the public `try_start`, `resolve_max_workers` and `CoderCaller::call` and the MCP waiter still return `String`, so the API is unchanged and messages are the same (S8, api sweep).
+  - core: `api/route.rs`와 `api/retry.rs`의 코더·tui 응답 경로(생성, 쓰기, 종료)는 `chaude_core::error::Error`를 돌려줍니다. 공개 `try_start`, `resolve_max_workers`, `CoderCaller::call`과 MCP 대기 채널은 여전히 `String`을 씁니다. 그래서 공개 API와 메시지는 그대로입니다 (S8, api 일괄 정리).
+
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.
   - 토큰 사용량: 대기 상태의 바 줄에 마지막 턴의 입력·출력·캐시 토큰을 표시하고, 작업 목록의 Task/Agent 행에는 도구 결과가 알려주는 토큰과 소요 시간(예: "12.3k 토큰 · 45s")을 표시합니다.

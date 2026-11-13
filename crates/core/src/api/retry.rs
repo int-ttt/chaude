@@ -1,6 +1,7 @@
 //! Retry and timeout handling on State: coder, tui and prompter timeouts, wait budgets, idle exit timers.
 
 use super::*;
+use crate::error::Error;
 
 impl State {
     // The prompter gave up waiting. Its child is replaced, so late lines are dropped by epoch.
@@ -70,24 +71,24 @@ impl State {
                 self.resume_pending.insert(role, sid);
             }
             if let Err(e) = self.spawn_coder(i) {
-                self.finish_coder(i, Err(format!("coder spawn failed: {e}")));
+                self.finish_coder(i, Err(Error::Msg(format!("coder spawn failed: {e}"))));
                 return;
             }
         }
         let wrote = match self.coders[i].proc.as_mut() {
-            Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
-            None => Err("coder not running".to_string()),
+            Some(p) => p.write_user(&text).map_err(Error::from),
+            None => Err(Error::Msg("coder not running".to_string())),
         };
         if let Err(e) = wrote {
             self.drop_coder(i);
-            self.finish_coder(i, Err(format!("coder write failed: {e}")));
+            self.finish_coder(i, Err(Error::Msg(format!("coder write failed: {e}"))));
         }
     }
 
     // The coder gave up waiting (Go residentCoderTimeout). The child is replaced.
     pub(super) fn coder_timeout(&mut self, i: usize) {
         self.drop_coder(i);
-        self.finish_coder(i, Err("coder timed out".to_string()));
+        self.finish_coder(i, Err(Error::Msg("coder timed out".to_string())));
     }
 
     // The tui gave up waiting. Its child is replaced, so late lines are dropped by epoch.
@@ -96,10 +97,10 @@ impl State {
             p.kill();
         }
         self.tui_epoch += 1;
-        self.finish_tui(Err(tf(
+        self.finish_tui(Err(Error::Msg(tf(
             Msg::TimedOut,
             &[&self.cfg.tui_timeout.as_secs_f64()],
-        )));
+        ))));
     }
 
     // Time left in the running tui wait. None when no wait is running.

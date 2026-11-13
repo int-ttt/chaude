@@ -1,6 +1,7 @@
 //! Routing on State: user text to the main child, haiku prompter, tui and coder workers; switch and resident handling.
 
 use super::*;
+use crate::error::Error;
 
 impl State {
     pub(super) fn submit(&mut self, text: String) {
@@ -343,8 +344,8 @@ impl State {
         self.prompter_deadline = Some(Instant::now() + self.cfg.prompter_timeout);
         self.resident_busy("prompter", true, &text);
         let wrote = match self.prompter_proc.as_mut() {
-            Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
-            None => Err("prompter not running".to_string()),
+            Some(p) => p.write_user(&text).map_err(Error::from),
+            None => Err(Error::Msg("prompter not running".to_string())),
         };
         if let Err(e) = wrote {
             self.prompter_proc = None;
@@ -355,7 +356,7 @@ impl State {
     }
 
     // Go residentSlots prompter: haiku with the minimal shape and the prompter rule. Kept alive across prompts.
-    pub(super) fn spawn_prompter(&mut self) -> Result<(), String> {
+    pub(super) fn spawn_prompter(&mut self) -> Result<(), Error> {
         self.resident_sids.remove("prompter");
         let opts = SpawnOpts {
             model: self.resident_model("prompter"),
@@ -372,8 +373,7 @@ impl State {
         let epoch = self.prompter_epoch;
         let p = proc::spawn(&opts, self.self_tx.clone(), move |m| {
             Input::Prompter(epoch, m)
-        })
-        .map_err(|e| e.to_string())?;
+        })?;
         self.prompter_proc = Some(p);
         Ok(())
     }
@@ -421,7 +421,7 @@ impl State {
         if self.tui_proc.is_none()
             && let Err(e) = self.spawn_tui()
         {
-            self.finish_tui(Err(tf(Msg::Error, &[&e])));
+            self.finish_tui(Err(Error::Msg(tf(Msg::Error, &[&e]))));
             return;
         }
         self.stage("tui", StagePhase::Working);
@@ -430,17 +430,20 @@ impl State {
         let wrote = match self.tui_proc.as_mut() {
             Some(p) => p
                 .write_user(&tui_prompt(&reply, crate::i18n::current()))
-                .map_err(|e| e.to_string()),
-            None => Err("tui not running".to_string()),
+                .map_err(Error::from),
+            None => Err(Error::Msg("tui not running".to_string())),
         };
         if let Err(e) = wrote {
             self.tui_proc = None;
-            self.finish_tui(Err(tf(Msg::Error, &[&format!("write failed: {e}")])));
+            self.finish_tui(Err(Error::Msg(tf(
+                Msg::Error,
+                &[&format!("write failed: {e}")],
+            ))));
         }
     }
 
     // Go residentSlots tui: haiku with the minimal shape and the haiku-output agent body. Kept alive across turns.
-    pub(super) fn spawn_tui(&mut self) -> Result<(), String> {
+    pub(super) fn spawn_tui(&mut self) -> Result<(), Error> {
         self.resident_sids.remove("tui");
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
         let rule = self.agent_rule(&cwd, "haiku-output");
@@ -457,8 +460,7 @@ impl State {
         };
         self.tui_epoch += 1;
         let epoch = self.tui_epoch;
-        let p = proc::spawn(&opts, self.self_tx.clone(), move |m| Input::Tui(epoch, m))
-            .map_err(|e| e.to_string())?;
+        let p = proc::spawn(&opts, self.self_tx.clone(), move |m| Input::Tui(epoch, m))?;
         self.tui_proc = Some(p);
         Ok(())
     }
@@ -508,12 +510,12 @@ impl State {
         let text = format!("{task}{CODER_REPLY_FORMAT}");
         self.coders[i].task = Some(text.clone());
         let wrote = match self.coders[i].proc.as_mut() {
-            Some(p) => p.write_user(&text).map_err(|e| e.to_string()),
-            None => Err("coder not running".to_string()),
+            Some(p) => p.write_user(&text).map_err(Error::from),
+            None => Err(Error::Msg("coder not running".to_string())),
         };
         if let Err(e) = wrote {
             self.drop_coder(i);
-            self.finish_coder(i, Err(format!("coder write failed: {e}")));
+            self.finish_coder(i, Err(Error::Msg(format!("coder write failed: {e}"))));
         }
     }
 
@@ -543,7 +545,7 @@ impl State {
     }
 
     // Go residentSlots coder: haiku with the haiku-coder agent body, the coder tools, strict MCP and no slash commands.
-    pub(super) fn spawn_coder(&mut self, i: usize) -> Result<(), String> {
+    pub(super) fn spawn_coder(&mut self, i: usize) -> Result<(), Error> {
         self.resident_sids.remove(&coder_role(i));
         let cwd = self.opts.cwd.clone().unwrap_or_else(|| ".".into());
         let rule = self.agent_rule(&cwd, "haiku-coder");
@@ -566,8 +568,7 @@ impl State {
         self.coders[i].epoch = epoch;
         let p = proc::spawn(&opts, self.self_tx.clone(), move |m| {
             Input::Coder(i, epoch, m)
-        })
-        .map_err(|e| e.to_string())?;
+        })?;
         self.coders[i].proc = Some(p);
         // The idle timers run from spawn: the base coder starts at boot, before any task.
         self.coders[i].idle_since = Some(Instant::now());
@@ -642,13 +643,13 @@ impl State {
         let raw = r.result.unwrap_or_default();
         if r.is_error == Some(true) && retryable_api_error(&raw) {
             if !self.coder_retry(i) {
-                self.finish_coder(i, Err(raw));
+                self.finish_coder(i, Err(Error::Msg(raw)));
             }
             return;
         }
         let text = summarize_reply(&raw);
         if text.is_empty() {
-            self.finish_coder(i, Err("coder empty reply".to_string()));
+            self.finish_coder(i, Err(Error::Msg("coder empty reply".to_string())));
         } else {
             self.finish_coder(i, Ok(text));
         }
@@ -680,12 +681,12 @@ impl State {
         self.coders[i].proc = None;
         self.emit_coder_contexts();
         if self.coders[i].deadline.is_some() && !self.coder_retry(i) {
-            self.finish_coder(i, Err("coder exited".to_string()));
+            self.finish_coder(i, Err(Error::Msg("coder exited".to_string())));
         }
     }
 
     // Ends a coder task: its stage row, then the reply (or the failure reason) goes to the UI.
-    pub(super) fn finish_coder(&mut self, i: usize, out: Result<String, String>) {
+    pub(super) fn finish_coder(&mut self, i: usize, out: Result<String, Error>) {
         self.coders[i].task = None;
         self.coders[i].retries = 0;
         self.coders[i].retry_started = None;
@@ -696,7 +697,7 @@ impl State {
         self.coders[i].idle_since = Some(Instant::now());
         let waiter = self.coders[i].waiter.take();
         let role = coder_role(i);
-        answer(waiter, out.clone());
+        answer(waiter, out.as_ref().cloned().map_err(|e| e.to_string()));
         // Every turn end is a handback: a failed task still sends its reason as the reply, so main never sees silence.
         match out {
             Ok(text) => {
@@ -708,7 +709,7 @@ impl State {
                     role: role.clone(),
                     text: tf(Msg::Error, &[&reason]),
                 });
-                self.stage(&role, StagePhase::Failed(reason));
+                self.stage(&role, StagePhase::Failed(reason.to_string()));
             }
         }
     }
@@ -731,7 +732,7 @@ impl State {
         self.role_context("tui", r.usage.as_ref());
         let text = r.result.unwrap_or_default().trim().to_string();
         if text.is_empty() {
-            self.finish_tui(Err(t(Msg::EmptyResponse).to_string()));
+            self.finish_tui(Err(Error::Msg(t(Msg::EmptyResponse).to_string())));
         } else {
             self.finish_tui(Ok(text));
         }
@@ -740,7 +741,7 @@ impl State {
     pub(super) fn on_tui_eof(&mut self) {
         self.tui_proc = None;
         if self.tui_deadline.is_some() {
-            self.finish_tui(Err(tf(Msg::Error, &[&"exited"])));
+            self.finish_tui(Err(Error::Msg(tf(Msg::Error, &[&"exited"]))));
         }
     }
 
@@ -760,7 +761,7 @@ impl State {
     }
 
     // Ends the tui wait: the answer (or its failure row), then the turn is over.
-    pub(super) fn finish_tui(&mut self, out: Result<String, String>) {
+    pub(super) fn finish_tui(&mut self, out: Result<String, Error>) {
         if self.tui_deadline.take().is_some() {
             self.resident_busy("tui", false, "");
         }
@@ -779,7 +780,7 @@ impl State {
                     });
                     self.emit(UiEvent::MessageDone { role: Role::Main });
                 }
-                self.notice(tui_notice(&detail));
+                self.notice(tui_notice(&detail.to_string()));
             }
         }
         self.after_turn();
