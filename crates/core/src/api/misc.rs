@@ -46,10 +46,10 @@ impl State {
     // Go runDeferredRotation: the held handoff runs while the child is idle, so the turn is marked busy.
     pub(super) fn run_deferred_rotation(&mut self) {
         self.clear_deferral();
-        self.busy = true;
+        self.set_busy(true);
         self.emit(UiEvent::Busy(true));
         if !self.start_handoff(self.ctx_reason()) {
-            self.busy = false;
+            self.set_busy(false);
             self.emit(UiEvent::Busy(false));
         }
     }
@@ -57,11 +57,11 @@ impl State {
     // Go idle rotation: the child has no API response for idle_deadline, so the handoff runs now.
     pub(super) fn run_idle_rotation(&mut self) {
         self.idle_fired_for = self.last_api;
-        self.busy = true;
+        self.set_busy(true);
         self.emit(UiEvent::Busy(true));
         let reason = format!("idle {}s", self.idle_deadline().as_secs());
         if !self.start_handoff(reason) {
-            self.busy = false;
+            self.set_busy(false);
             self.emit(UiEvent::Busy(false));
         }
     }
@@ -98,7 +98,7 @@ impl State {
 
     // Ends the hidden handoff turn (Go makeSnapshotN): retries once when invalid, then rotates or holds.
     pub(super) fn finish_handoff(&mut self) {
-        self.turn_started = None;
+        self.clear_turn_clock();
         self.interrupted_at = None;
         self.open_tools.clear();
         let Some(h) = self.handoff.take() else {
@@ -288,14 +288,14 @@ impl State {
         // A timed-out drain keeps the notice for the next user message (Go).
         if done
             && !self.notices.is_empty()
-            && !self.busy
+            && !self.busy()
             && !self.prompter.waiting()
             && self.proc.is_some()
         {
-            self.busy = true;
+            self.set_busy(true);
             self.emit(UiEvent::Busy(true));
             if !self.send_turn("") {
-                self.busy = false;
+                self.set_busy(false);
                 self.emit(UiEvent::Busy(false));
             }
         }
@@ -409,10 +409,10 @@ impl State {
 
     // Go /rotate (repl.go rotate("manual")): the same handoff as a context rotation, reason "manual".
     pub(super) fn manual_rotate(&mut self) {
-        self.busy = true;
+        self.set_busy(true);
         self.emit(UiEvent::Busy(true));
         if !self.start_handoff("manual".to_string()) {
-            self.busy = false;
+            self.set_busy(false);
             self.emit(UiEvent::Busy(false));
         }
     }
@@ -420,7 +420,7 @@ impl State {
     // Go /clear in the TUI (clearWithHandoff): the snapshot is taken first when there is a conversation to carry.
     // A pending snapshot is dropped, as in Go (clear() resets pendingSnapshot before the new one is set).
     pub(super) fn clear_session(&mut self) {
-        self.busy = true;
+        self.set_busy(true);
         self.emit(UiEvent::Busy(true));
         if self.recent.is_empty() || !self.pending_snapshot.is_empty() {
             self.finish_clear(String::new());
@@ -482,7 +482,7 @@ impl State {
     // Go applyImport: the imported turns, files and recommendation become this session's history, and the
     // snapshot built from them goes in front of the next prompt (send_turn). Turns beyond tail_turns are dropped.
     pub(super) fn install_import(&mut self, imp: ClaudeImport) {
-        if self.busy || self.prompter.waiting() {
+        if self.busy() || self.prompter.waiting() {
             self.emit(UiEvent::Error(
                 "cannot import while a turn is running".to_string(),
             ));
@@ -511,7 +511,7 @@ impl State {
             self.emit(UiEvent::Error("resume needs a session id".to_string()));
             return;
         }
-        if self.busy || self.prompter.waiting() {
+        if self.busy() || self.prompter.waiting() {
             self.emit(UiEvent::Error(
                 "cannot resume while a turn is running".to_string(),
             ));

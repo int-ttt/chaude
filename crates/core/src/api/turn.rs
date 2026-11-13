@@ -3,6 +3,42 @@
 use super::*;
 
 impl State {
+    // Whether a turn runs (Phase::Busy).
+    pub(super) fn busy(&self) -> bool {
+        matches!(self.phase, Phase::Busy { .. })
+    }
+
+    // Busy on or off. Going busy keeps a running turn's clock; going idle drops it.
+    pub(super) fn set_busy(&mut self, on: bool) {
+        self.phase = match (on, self.phase) {
+            (true, Phase::Idle) => Phase::Busy { started: None },
+            (true, busy) => busy,
+            (false, _) => Phase::Idle,
+        };
+    }
+
+    // The running turn's start, None while idle or before the clock starts.
+    pub(super) fn turn_started(&self) -> Option<Instant> {
+        match self.phase {
+            Phase::Busy { started } => started,
+            Phase::Idle => None,
+        }
+    }
+
+    // Starts the turn clock as the send writes the user frame. The send is what makes the phase busy.
+    pub(super) fn start_turn_clock(&mut self) {
+        self.phase = Phase::Busy {
+            started: Some(Instant::now()),
+        };
+    }
+
+    // The turn ends its clock but stays busy until the next turn or the tui answer.
+    pub(super) fn clear_turn_clock(&mut self) {
+        if let Phase::Busy { started } = &mut self.phase {
+            *started = None;
+        }
+    }
+
     // Go viaPrompter: with residents on, the prompt goes through the prompter first (S26: pure acks skip it).
     pub(super) fn begin_turn(&mut self, text: String) {
         if self.cfg.residents && !is_pure_ack(&text) {
@@ -61,7 +97,7 @@ impl State {
             Instant::now(),
         );
         self.log_turn(duration_ms, None);
-        self.turn_started = None;
+        self.clear_turn_clock();
         self.interrupted_at = None;
         self.open_tools.clear();
         self.stage("main", StagePhase::Done);
@@ -114,7 +150,7 @@ impl State {
     // Go doneMsg / mergePrompts: everything queued meanwhile goes out as ONE turn, joined by a blank line.
     pub(super) fn next_turn(&mut self) {
         if self.queue.is_empty() {
-            self.busy = false;
+            self.set_busy(false);
             self.emit(UiEvent::Busy(false));
             return;
         }
@@ -122,7 +158,7 @@ impl State {
         self.emit(UiEvent::Queued(0));
         self.emit_queue();
         if !self.send_turn(&next) {
-            self.busy = false;
+            self.set_busy(false);
             self.emit(UiEvent::Busy(false));
         }
     }

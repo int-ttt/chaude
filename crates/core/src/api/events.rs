@@ -160,7 +160,7 @@ impl State {
             self.cancel_wait();
             return;
         }
-        let busy = self.busy;
+        let busy = self.busy();
         let mut sent = false;
         // While the tui translates, the main child is idle: there is nothing to interrupt.
         if busy
@@ -206,9 +206,9 @@ impl State {
         }
         self.queue.clear();
         self.emit_queue();
-        if self.busy {
-            self.busy = false;
-            self.turn_started = None;
+        if self.busy() {
+            self.set_busy(false);
+            self.clear_turn_clock();
             self.emit(UiEvent::Busy(false));
         }
     }
@@ -286,7 +286,7 @@ impl State {
                     StreamInner::ContentBlockDelta {
                         delta: Delta::TextDelta { text },
                     } => {
-                        if matches!(role, Role::Main) && !self.busy {
+                        if matches!(role, Role::Main) && !self.busy() {
                             self.idle_started();
                         }
                         // The raw reply keeps the [cat: X] marker for category_rotation; the screen gets it filtered.
@@ -298,7 +298,7 @@ impl State {
                         };
                         // With residents the pane shows only the tui answer (Go runTurn routed): hold main text back.
                         // An idle reply (agent handback) has no tui wait to drain it, so it shows at once (Go idleText).
-                        if self.cfg.residents && self.busy && matches!(role, Role::Main) {
+                        if self.cfg.residents && self.busy() && matches!(role, Role::Main) {
                             self.routed_text.push_str(&shown);
                         } else if self.handoff.is_none() && !shown.is_empty() {
                             self.emit(UiEvent::TextDelta { role, text: shown });
@@ -307,7 +307,7 @@ impl State {
                     StreamInner::MessageStop if self.handoff.is_none() => {
                         if matches!(role, Role::Main) {
                             let rest = self.mark.flush();
-                            if self.cfg.residents && self.busy {
+                            if self.cfg.residents && self.busy() {
                                 self.routed_text.push_str(&rest);
                             } else if !rest.is_empty() {
                                 self.emit(UiEvent::TextDelta {
@@ -328,7 +328,7 @@ impl State {
                     return;
                 }
                 self.note_held_turn();
-                if !self.busy {
+                if !self.busy() {
                     self.idle_started();
                 }
                 // The server-reported model of the reply: the label follows it when it differs from the init model.
@@ -407,7 +407,7 @@ impl State {
                 }
                 self.result_usage = r.usage.clone();
                 self.result_model_usage = r.model_usage.clone();
-                if !self.busy {
+                if !self.busy() {
                     self.idle_result();
                     return;
                 }
@@ -426,7 +426,7 @@ impl State {
                 }
                 let duration_ms = r
                     .duration_ms
-                    .unwrap_or_else(|| elapsed_ms(self.turn_started));
+                    .unwrap_or_else(|| elapsed_ms(self.turn_started()));
                 self.emit_status(self.cost_usd);
                 if let Some(b) = &self.budget {
                     self.emit(UiEvent::BudgetStatus {
@@ -453,7 +453,7 @@ impl State {
                     Verdict::Ask if self.cfg.auto_allow => {
                         self.respond_permission(&c.request_id, true, input, "")
                     }
-                    Verdict::Ask if self.cfg.no_ui && !self.busy => {
+                    Verdict::Ask if self.cfg.no_ui && !self.busy() => {
                         let note = format!(
                             "[permission denied while idle] {tool} {} (use /mode auto or acceptEdits)",
                             crate::import_view::trunc(&input.to_string(), 120)
@@ -805,7 +805,7 @@ impl State {
     }
 
     pub(super) fn emit_agent_rows(&self) {
-        self.emit_agent_rows_at(self.busy);
+        self.emit_agent_rows_at(self.busy());
     }
 
     // busy: the state the picked child's row shows (running while busy, done otherwise).
@@ -980,7 +980,7 @@ impl State {
             self.emit_agent_rows();
         }
         // The last background agent finished while the child is idle: the deferred rotation runs now.
-        if !self.busy && self.deferred_due() {
+        if !self.busy() && self.deferred_due() {
             self.run_deferred_rotation();
         }
     }
@@ -1123,7 +1123,7 @@ impl State {
     // answers its own notification, so the notices wait for the next user message instead (no second reply).
     pub(super) fn send_notice_turn(&mut self) {
         if self.notices.is_empty()
-            || self.busy
+            || self.busy()
             || self.hold_notice_turn
             || self.idle_turn.active
             || self.prompter.waiting()
@@ -1131,10 +1131,10 @@ impl State {
         {
             return;
         }
-        self.busy = true;
+        self.set_busy(true);
         self.emit(UiEvent::Busy(true));
         if !self.send_turn("") {
-            self.busy = false;
+            self.set_busy(false);
             self.emit(UiEvent::Busy(false));
         }
     }
@@ -1147,7 +1147,7 @@ impl State {
     // A user text (string content or text block) that carries a notice (Go onUserEvent). While no turn runs,
     // a seen notice is recorded for the idle turn (Go idleEvent sawNotif).
     pub(super) fn on_user_notice(&mut self, text: &str) {
-        let idle = !self.busy;
+        let idle = !self.busy();
         self.hold_notice_turn = idle;
         let found = self.on_task_notification(text);
         self.hold_notice_turn = false;
@@ -1305,7 +1305,7 @@ impl State {
         );
         self.continuation = true;
         if !self.send_turn(&text) {
-            self.busy = false;
+            self.set_busy(false);
             self.emit(UiEvent::Busy(false));
         }
     }

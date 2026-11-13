@@ -824,16 +824,23 @@ impl Engine {
     }
 }
 
+// Turn phase of the main child (S15): one value in place of the busy flag and the turn start time. Busy carries the
+// start of the running turn; it is None while a turn runs but its clock is not started (handoff, notice turn).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    Idle,
+    Busy { started: Option<Instant> },
+}
+
 struct State {
     cfg: Config,
     // Shared with EngineHandle::agent_rows; written by emit_agent_rows.
     agent_rows: Arc<Mutex<Vec<AgentRow>>>,
     proc: Option<ClaudeProc>,
     ui: Sender<UiEvent>,
-    busy: bool,
+    phase: Phase,
     // Set while an idle <task-notification> completes agents: its child-initiated reply answers them, so no notice turn.
     hold_notice_turn: bool,
-    turn_started: Option<Instant>,
     queue: VecDeque<String>,
     model: String,
     // Go orch mode f: workspace routing of each turn (inert in other modes).
@@ -1454,9 +1461,8 @@ fn actor(
         agent_rows,
         proc: None,
         ui,
-        busy: false,
+        phase: Phase::Idle,
         hold_notice_turn: false,
-        turn_started: None,
         queue: VecDeque::new(),
         model,
         router: orch::Router::new(&std::env::var(orch::ENV_KEY).unwrap_or_default()),

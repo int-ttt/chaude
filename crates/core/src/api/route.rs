@@ -18,7 +18,7 @@ impl State {
         // Go /clear and /rotate are session commands, not turns: they run here and never reach the child as text.
         let cmd = text.trim();
         if cmd == "/clear" || cmd == "/rotate" {
-            if self.busy || self.prompter.waiting() {
+            if self.busy() || self.prompter.waiting() {
                 self.emit(UiEvent::Error(format!("{cmd} needs an idle session")));
                 return;
             }
@@ -33,7 +33,7 @@ impl State {
         if let Some(model) = cmd.strip_prefix("/model ").map(str::trim)
             && !model.is_empty()
         {
-            if self.busy || self.prompter.waiting() {
+            if self.busy() || self.prompter.waiting() {
                 self.emit(UiEvent::Error("/model needs an idle session".to_string()));
                 return;
             }
@@ -45,21 +45,21 @@ impl State {
         if let Some(code) = cmd.strip_prefix("/lang ").map(str::trim)
             && !code.is_empty()
         {
-            if self.busy || self.prompter.waiting() {
+            if self.busy() || self.prompter.waiting() {
                 self.emit(UiEvent::Error(
                     "language saved; the running session switches on the next /rotate".to_string(),
                 ));
                 return;
             }
-            self.busy = true;
+            self.set_busy(true);
             self.emit(UiEvent::Busy(true));
             if !self.start_handoff(format!("lang {code}")) {
-                self.busy = false;
+                self.set_busy(false);
                 self.emit(UiEvent::Busy(false));
             }
             return;
         }
-        if self.busy || self.prompter.waiting() {
+        if self.busy() || self.prompter.waiting() {
             self.queue.push_back(text);
             self.emit(UiEvent::Queued(self.queue.len()));
             self.emit_queue();
@@ -91,7 +91,7 @@ impl State {
         }
         self.cur_task = routed.text.clone();
         if self.send_turn(&routed.text) {
-            self.busy = true;
+            self.set_busy(true);
             self.emit(UiEvent::Busy(true));
         }
     }
@@ -182,13 +182,13 @@ impl State {
             return false;
         }
         self.switch_to = Some((model.to_string(), text.to_string()));
-        self.busy = true;
+        self.set_busy(true);
         self.emit(UiEvent::Busy(true));
         if self.start_handoff(format!("route {model}")) {
             return true;
         }
         self.switch_to = None;
-        self.busy = false;
+        self.set_busy(false);
         self.emit(UiEvent::Busy(false));
         false
     }
@@ -203,7 +203,7 @@ impl State {
         self.pending_snapshot = snapshot;
         self.cur_task = text.clone();
         if !self.send_turn(&text) {
-            self.busy = false;
+            self.set_busy(false);
             self.emit(UiEvent::Busy(false));
         }
     }
@@ -745,7 +745,7 @@ impl State {
     // With residents the main text waits for the tui answer. Text written before a tool call is the work plan: it is
     // shown when that tool call arrives, so it stays above the tools and the final reply still comes from the tui.
     pub(super) fn release_routed_text(&mut self) {
-        if self.cfg.residents && self.busy && self.handoff.is_none() {
+        if self.cfg.residents && self.busy() && self.handoff.is_none() {
             let text = std::mem::take(&mut self.routed_text);
             if !text.is_empty() {
                 self.emit(UiEvent::TextDelta {
@@ -821,7 +821,7 @@ impl State {
                 self.turn_reply.clear();
                 self.routed_text.clear();
                 self.mark = MarkerFilter::default();
-                self.turn_started = Some(Instant::now());
+                self.start_turn_clock();
                 self.stage("main", StagePhase::Working);
                 self.last_activity = Instant::now();
                 self.turn_cost_base = self.cost_usd;
@@ -843,10 +843,10 @@ impl State {
         self.end_parked(&model);
         self.model = model.clone();
         self.opts.model = model.clone();
-        self.busy = true;
+        self.set_busy(true);
         self.emit(UiEvent::Busy(true));
         if !self.start_handoff(format!("model {model}")) {
-            self.busy = false;
+            self.set_busy(false);
             self.emit(UiEvent::Busy(false));
         }
     }

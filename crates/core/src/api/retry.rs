@@ -189,7 +189,7 @@ impl State {
         if let Some(left) = self.tui_left() {
             return Some(left.max(Duration::from_millis(1)));
         }
-        if !self.busy {
+        if !self.busy() {
             // Idle with a held rotation: poll it, or wake for the idle rotation, whichever is nearer.
             let poll =
                 (self.rotate_deferred.pending() && self.rotation_wanted()).then_some(DEFER_POLL);
@@ -240,7 +240,7 @@ impl State {
         if self.tui_deadline.is_some() {
             return;
         }
-        if !self.busy {
+        if !self.busy() {
             // A deferred rotation waits out a prompter wait: it would send its handoff while the prompter runs.
             if !self.prompter.waiting() && self.deferred_due() {
                 self.run_deferred_rotation();
@@ -301,7 +301,7 @@ impl State {
             }
         }
         self.emit_agent_rows();
-        let duration_ms = elapsed_ms(self.turn_started);
+        let duration_ms = elapsed_ms(self.turn_started());
         // The abandoned turn's prompts can no longer be answered by the child; drop them.
         self.pending_perm.clear();
         self.stray_results += 1;
