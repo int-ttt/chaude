@@ -161,6 +161,20 @@ pub const HOOKS: &[(&str, &[u8])] = &[
     ("style-adapter.py", include_bytes!("hooks/style-adapter.py")),
 ];
 
+/// Tool scripts the agent definitions call as `python3 scripts/<name>` from the project root. Written to `<cwd>/scripts`
+/// with the same keep-or-overwrite rules as the shipped hooks, so an installed project has them. Read from the repo
+/// directly, so there is no second copy to drift.
+pub const SCRIPTS: &[(&str, &[u8])] = &[
+    (
+        "squeeze-run.py",
+        include_bytes!("../../../../scripts/squeeze-run.py"),
+    ),
+    (
+        "fixed-cost-audit.py",
+        include_bytes!("../../../../scripts/fixed-cost-audit.py"),
+    ),
+];
+
 /// Package copy of a hook script (file name only, e.g. "ledger.py").
 pub fn embedded_hook(name: &str) -> Option<&'static [u8]> {
     HOOKS
@@ -170,7 +184,8 @@ pub fn embedded_hook(name: &str) -> Option<&'static [u8]> {
 }
 
 /// Makes a project runnable outside this repo: writes the agent definitions into `<cwd>/.claude/agents` and the guard
-/// hook scripts into `<cwd>/.claude/hooks` (existing files are kept, never overwritten), then creates
+/// hook scripts into `<cwd>/.claude/hooks` and the SCRIPTS into `<cwd>/scripts` (existing files are kept, never
+/// overwritten), then creates
 /// `<cwd>/.claude/settings.json` or merges the guard into an existing one (user keys and hooks kept, guard groups
 /// appended only when missing, so a second run changes nothing). cwd == home is skipped (that is the user-global
 /// .claude). Returns true when settings.json was created.
@@ -189,6 +204,9 @@ pub fn ensure_project_settings(cwd: &Path, home: Option<&Path>) -> io::Result<bo
         let body = embedded_hook(name)
             .ok_or_else(|| io::Error::other(format!("chaude: embedded hook missing: {name}")))?;
         copy_new(body, &claude.join("hooks").join(name))?;
+    }
+    for (name, body) in SCRIPTS {
+        copy_new(body, &cwd.join("scripts").join(name))?;
     }
     let text = guard_settings_text()?;
     let dst = claude.join("settings.json");
@@ -240,16 +258,17 @@ pub fn refresh_on_version_change(
     if project {
         let claude = cwd.join(".claude");
         reset_guard_settings(&claude.join("settings.json"), guard)?;
-        overwrite_shipped(&claude)?;
+        overwrite_shipped(cwd)?;
     }
     fs::create_dir_all(state)?;
     fs::write(&record, format!("{current}\n"))?;
     Ok(project)
 }
 
-/// Overwrites each shipped file under `claude` (the AGENTS and GUARD_FILES set that `ensure_project_settings` copies)
-/// whose content differs from the embedded copy. Files outside that set are never touched.
-fn overwrite_shipped(claude: &Path) -> io::Result<()> {
+/// Overwrites each shipped file under `cwd` (the AGENTS, GUARD_FILES and SCRIPTS set that `ensure_project_settings`
+/// copies) whose content differs from the embedded copy. Files outside that set are never touched.
+fn overwrite_shipped(cwd: &Path) -> io::Result<()> {
+    let claude = cwd.join(".claude");
     for (name, body) in AGENTS {
         overwrite_if_differs(body, &claude.join("agents").join(name))?;
     }
@@ -257,6 +276,9 @@ fn overwrite_shipped(claude: &Path) -> io::Result<()> {
         let body = embedded_hook(name)
             .ok_or_else(|| io::Error::other(format!("chaude: embedded hook missing: {name}")))?;
         overwrite_if_differs(body, &claude.join("hooks").join(name))?;
+    }
+    for (name, body) in SCRIPTS {
+        overwrite_if_differs(body, &cwd.join("scripts").join(name))?;
     }
     Ok(())
 }
@@ -583,6 +605,43 @@ mod tests {
         let got = fs::read(cwd.join(".claude").join("agents").join("opus-architect.md"))
             .expect("opus-architect written");
         assert_eq!(got.as_slice(), *body);
+    }
+
+    #[test]
+    fn tool_scripts_written_and_existing_kept() {
+        let root = TempDir::new("guard-scripts");
+        let cwd = root.path().join("cwd");
+        let mine = cwd.join("scripts").join("squeeze-run.py");
+        fs::create_dir_all(mine.parent().expect("parent")).expect("mkdir");
+        fs::write(&mine, "mine").expect("write");
+        assert!(ensure_project_settings(&cwd, None).expect("ensure"));
+        assert_eq!(fs::read_to_string(&mine).expect("read"), "mine");
+        let (_, body) = SCRIPTS
+            .iter()
+            .find(|(n, _)| *n == "fixed-cost-audit.py")
+            .expect("fixed-cost-audit embedded");
+        let got = fs::read(cwd.join("scripts").join("fixed-cost-audit.py")).expect("written");
+        assert_eq!(got.as_slice(), *body);
+    }
+
+    #[test]
+    fn stale_script_overwritten_on_version_change() {
+        let root = TempDir::new("refresh-scripts");
+        let cwd = root.path().join("cwd");
+        let state = root.path().join("state");
+        let script = cwd.join("scripts").join("squeeze-run.py");
+        fs::create_dir_all(script.parent().expect("parent")).expect("mkdir scripts");
+        fs::create_dir_all(&state).expect("mkdir state");
+        fs::write(&script, "old script").expect("write");
+        fs::write(state.join(VERSION_FILE), "0.12.5\n").expect("record");
+        assert!(
+            refresh_on_version_change(&state, &cwd, None, "0.12.6", GUARD_HOOKS).expect("refresh")
+        );
+        let (_, body) = SCRIPTS
+            .iter()
+            .find(|(n, _)| *n == "squeeze-run.py")
+            .expect("squeeze-run embedded");
+        assert_eq!(fs::read(&script).expect("read").as_slice(), *body);
     }
 
     #[test]
