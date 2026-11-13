@@ -263,6 +263,10 @@ One small build (a ping-pong game in 3 prompts), chaude compared with plain Opus
 
 Source: [docs/pingpong-bench.md](docs/pingpong-bench.md).
 
+### Fixed context: what a session pays before the first prompt
+
+`python3 scripts/fixed-cost-audit.py` estimates the tokens (bytes / 4) of the CLAUDE.md files, the agent and skill descriptions, and the MEMORY.md index, sorted largest first. With `--hooks` it also counts SessionStart hook output (the hooks run, so use it knowingly). Use it to find what to trim.
+
 ## Documentation
 
 The user guide is written in Korean.

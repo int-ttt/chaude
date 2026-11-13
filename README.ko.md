@@ -263,6 +263,10 @@ Rust 포트 기간 동안 장기 프로젝트를 실제로 쓴 양입니다. 메
 
 출처: [docs/pingpong-bench.md](docs/pingpong-bench.md).
 
+### 고정 컨텍스트: 첫 프롬프트 전에 드는 비용
+
+`python3 scripts/fixed-cost-audit.py`는 CLAUDE.md 파일, 에이전트와 스킬 설명, MEMORY.md 색인의 토큰 수(바이트 / 4)를 추정해 큰 순서로 보여 줍니다. `--hooks`를 주면 SessionStart 훅 출력도 더합니다(훅을 실제로 실행하므로 알고 쓰세요). 줄일 곳을 찾을 때 씁니다.
+
 ## 문서
 
 사용 설명서는 한국어로 되어 있습니다.
