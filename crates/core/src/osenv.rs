@@ -69,18 +69,23 @@ fn is_exec(p: &Path) -> bool {
     p.is_file()
 }
 
-/// $HOME, then %USERPROFILE% (the old cli order on every OS); None when both are unset or empty.
+/// Windows: $HOME, then %USERPROFILE%. Other OSes: $HOME only. None when unset or empty.
 pub fn try_home_dir() -> Option<PathBuf> {
-    pick_home(env::var_os("HOME"), env::var_os("USERPROFILE"))
+    pick_home(
+        is_windows(),
+        env::var_os("HOME"),
+        env::var_os("USERPROFILE"),
+    )
 }
 
-fn pick_home(home: Option<OsString>, profile: Option<OsString>) -> Option<PathBuf> {
+fn pick_home(windows: bool, home: Option<OsString>, profile: Option<OsString>) -> Option<PathBuf> {
+    let profile = if windows { profile } else { None };
     home.filter(|h| !h.is_empty())
         .or_else(|| profile.filter(|h| !h.is_empty()))
         .map(PathBuf::from)
 }
 
-/// $HOME, then %USERPROFILE%; "." when both are unset.
+/// `try_home_dir`, or "." when no home is set.
 pub fn home_dir() -> PathBuf {
     try_home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
@@ -112,14 +117,31 @@ mod tests {
     }
 
     #[test]
-    fn home_reads_home_first_then_userprofile() {
-        assert_eq!(pick_home(os("/h"), os("C:\\u")), Some(PathBuf::from("/h")));
+    fn windows_reads_home_then_userprofile() {
         assert_eq!(
-            pick_home(Some(OsString::new()), os("C:\\u")),
+            pick_home(true, os("/h"), os("C:\\u")),
+            Some(PathBuf::from("/h"))
+        );
+        assert_eq!(
+            pick_home(true, Some(OsString::new()), os("C:\\u")),
             Some(PathBuf::from("C:\\u"))
         );
-        assert_eq!(pick_home(None, os("C:\\u")), Some(PathBuf::from("C:\\u")));
-        assert_eq!(pick_home(None, Some(OsString::new())), None);
-        assert_eq!(pick_home(None, None), None);
+        assert_eq!(
+            pick_home(true, None, os("C:\\u")),
+            Some(PathBuf::from("C:\\u"))
+        );
+        assert_eq!(pick_home(true, None, Some(OsString::new())), None);
+        assert_eq!(pick_home(true, None, None), None);
+    }
+
+    #[test]
+    fn unix_reads_home_only() {
+        assert_eq!(
+            pick_home(false, os("/h"), os("C:\\u")),
+            Some(PathBuf::from("/h"))
+        );
+        assert_eq!(pick_home(false, Some(OsString::new()), os("C:\\u")), None);
+        assert_eq!(pick_home(false, None, os("C:\\u")), None);
+        assert_eq!(pick_home(false, None, None), None);
     }
 }
