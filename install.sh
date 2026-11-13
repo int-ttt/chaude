@@ -81,20 +81,31 @@ fetch_release() {
   json="$(api_get "$rel" 2>/dev/null)"
 }
 
-if [ "$VERSION" = latest ]; then rel="${API}/repos/${REPO}/releases/latest"; else rel="${API}/repos/${REPO}/releases/tags/${VERSION}"; fi
-fetch_release || { echo "error: cannot read release ${VERSION} of ${REPO}. Check the version name and your network. If GitHub rate-limited you (HTTP 403), set GH_TOKEN and run again." >&2; exit 1; }
-tag="$(printf '%s\n' "$json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)"
-[ -n "$tag" ] || { echo "error: could not resolve release tag of ${REPO}" >&2; exit 1; }
+# run "$@" up to 3 times, waiting 2 s then 4 s: the release job publishes the release before its assets, so a read can come too early
+retry() {
+  for wait in 0 2 4; do
+    [ "$wait" -eq 0 ] || { echo "retrying in ${wait} s..." >&2; sleep "$wait"; }
+    "$@" && return 0
+  done
+  return 1
+}
+# read the release, its tag and the urls of the tar and checksums assets for this OS/arch (sets tag, name, tar_url, sums_url)
+read_release() {
+  fetch_release || return 1
+  tag="$(printf '%s\n' "$json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)"
+  [ -n "$tag" ] || return 1
+  name="chaude_${tag#v}_${os}_${arch}.tar.gz"
+  tar_url="$(asset_url "$name")"
+  sums_url="$(asset_url checksums.txt)"
+  [ -n "$tar_url" ] && [ -n "$sums_url" ]
+}
 
-name="chaude_${tag#v}_${os}_${arch}.tar.gz"
-tar_url="$(asset_url "$name")"
-[ -n "$tar_url" ] || { echo "error: ${name} not found in release ${tag} (no prebuilt binary for ${os}/${arch})" >&2; exit 1; }
-sums_url="$(asset_url checksums.txt)"
-[ -n "$sums_url" ] || { echo "error: checksums.txt not found in release ${tag}; refusing to install" >&2; exit 1; }
+if [ "$VERSION" = latest ]; then rel="${API}/repos/${REPO}/releases/latest"; else rel="${API}/repos/${REPO}/releases/tags/${VERSION}"; fi
+retry read_release || { echo "error: release ${VERSION} of ${REPO} is incomplete after 3 tries: the release, its chaude_*_${os}_${arch}.tar.gz or checksums.txt is missing. Check the version name and your network; if GitHub rate-limited you (HTTP 403), set GH_TOKEN. If the release is complete but has no ${os}/${arch} archive, there is no prebuilt binary. Fallback: docs/guide/cli.md (install failures)." >&2; exit 1; }
 
 echo "downloading ${name} (${tag})"
-api_asset "$tar_url" "${tmp}/${name}" || { echo "error: download failed: ${name}" >&2; exit 1; }
-api_asset "$sums_url" "${tmp}/checksums.txt" || { echo "error: download failed: checksums.txt" >&2; exit 1; }
+retry api_asset "$tar_url" "${tmp}/${name}" || { echo "error: download failed: ${name}" >&2; exit 1; }
+retry api_asset "$sums_url" "${tmp}/checksums.txt" || { echo "error: download failed: checksums.txt" >&2; exit 1; }
 
 # checksums.txt is required: never install an unverified binary
 want="$(awk -v f="$name" '$2 == f {print $1; exit}' "${tmp}/checksums.txt")"

@@ -66,6 +66,8 @@
 - Hooks: the paste hook measures only the text after `[original]` and no longer saves task notifications or wrapper text as pastes, on both hook copies.
   - 훅: 붙여넣기 훅은 `[original]` 뒤의 텍스트만 크기로 재며, 작업 알림과 래퍼 텍스트는 붙여넣기로 저장하지 않습니다. 두 훅 사본 모두 적용했습니다.
 - Docs: stale caveman-structure section refs in CLAUDE.md and docs/claude-lean/CAVEMAN_FORMAT.md now point to the current section names (S29).
+- install: the macOS installer retries the release read and the asset downloads up to 3 times (waits 2 s, then 4 s); docs/guide/cli.md gives a CI-artifact fallback whose checksum is checked against the release job log (S9).
+  - install: macOS 설치 스크립트는 릴리스 조회와 에셋 다운로드를 최대 3번(2초, 4초 대기) 다시 시도합니다. `docs/guide/cli.md`에 CI 아티팩트 대체 설치 방법을 추가했습니다. 체크섬은 릴리스 작업 로그와 맞춰 확인합니다 (S9).
   - 문서: CLAUDE.md와 docs/claude-lean/CAVEMAN_FORMAT.md의 오래된 caveman-structure 절 참조를 현재 절 이름으로 고쳤습니다(S29).
 - repo: the unused `tests/e2e-rebuild` Go scratch directory is deleted and its `.gitignore` entries are removed; `tests/chaude-soak` is kept (S16).
   - 저장소: 쓰지 않는 Go 임시 디렉터리 `tests/e2e-rebuild`를 삭제하고 `.gitignore` 항목을 뺐습니다. `tests/chaude-soak`는 그대로 둡니다 (S16).

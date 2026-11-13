@@ -38,6 +38,18 @@ curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | 
 - 설치 폴더가 PATH에 없으면 경고만 출력합니다. rc 파일은 바꾸지 않습니다.
 - 필요한 도구는 `curl`, `tar`, `sha256sum` 또는 `shasum`입니다. 없으면 어떤 도구가 없는지 알려 주고 멈춥니다. `git`과 `go`는 필요 없습니다.
 - `claude`가 PATH에 없으면 경고를 출력합니다. `chaude` 실행에는 Claude Code가 필요합니다.
+- 릴리스 정보나 아카이브를 읽지 못하면 3번까지 2초, 4초 간격으로 다시 시도합니다. 릴리스는 에셋보다 먼저 만들어지므로 잠깐 기다리면 되는 경우가 많습니다.
+
+macOS에서 릴리스가 3번 시도 뒤에도 불완전하면(에셋 업로드가 아직 안 끝났거나 실패한 경우) CI 아티팩트로 직접 설치할 수 있습니다. 아티팩트에는 `checksums.txt`가 없으므로, 체크섬은 같은 실행의 `release` 작업 로그에서 확인합니다.
+
+```sh
+gh run list --workflow release.yml --limit 5                  # 해당 태그의 실행 번호 확인
+gh run download <실행번호> -n chaude-rust-darwin-arm64 -D "$(mktemp -d)"   # 빈 폴더에 받기
+shasum -a 256 <받은 폴더>/chaude_<버전>_darwin_arm64.tar.gz     # 값을 적어 둡니다
+gh run view <실행번호> --log | grep 'chaude_<버전>_darwin_arm64.tar.gz'   # Checksums 단계의 같은 값과 비교
+```
+
+두 값이 같을 때만 `tar -xzf`로 풀고 `install -m 755 chaude ~/.local/bin/chaude`로 설치합니다. 값이 다르면 설치하지 마세요. 아티팩트 내려받기는 `gh auth login`이 필요합니다.
 
 ### Windows
 
