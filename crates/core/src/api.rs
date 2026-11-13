@@ -439,6 +439,8 @@ const DEFER_POLL: Duration = Duration::from_secs(1);
 const NEVER_COLD: Duration = Duration::from_secs(24 * 365 * 3600);
 // How long an idle resident child gets to exit after its stdin closes, before ClaudeProc::finish kills it.
 const CODER_EXIT_WAIT: Duration = Duration::from_secs(5);
+// How long dropping the EngineHandle waits for the actor to kill its children; past it the thread is detached.
+const ENGINE_JOIN_WAIT: Duration = Duration::from_secs(2);
 // S21: a coder turn that fails with a transient API error (429, overloaded) or a dead child is sent again,
 // at most RETRY_MAX times with the backoff below, and not past RETRY_TOTAL after the first failure.
 const RETRY_MAX: u32 = 3;
@@ -675,6 +677,8 @@ enum Input {
 pub struct EngineHandle {
     tx: Sender<Input>,
     join: Option<JoinHandle<()>>,
+    // Disconnects when the actor thread ends, normally or by panic.
+    done: Receiver<()>,
     agent_rows: Arc<Mutex<Vec<AgentRow>>>,
 }
 
@@ -757,8 +761,16 @@ impl EngineHandle {
 }
 
 impl Drop for EngineHandle {
+    // Stops the actor and waits up to ENGINE_JOIN_WAIT for it to kill its children. A slower actor is detached.
     fn drop(&mut self) {
         let _ = self.tx.send(Input::Cmd(Cmd::Shutdown));
+        if !matches!(
+            self.done.recv_timeout(ENGINE_JOIN_WAIT),
+            Err(RecvTimeoutError::Timeout)
+        ) && let Some(j) = self.join.take()
+        {
+            let _ = j.join();
+        }
     }
 }
 
@@ -793,11 +805,17 @@ impl Engine {
         let self_tx = in_tx.clone();
         let agent_rows = Arc::new(Mutex::new(Vec::new()));
         let shared = Arc::clone(&agent_rows);
-        let join = thread::spawn(move || actor(cfg, self_tx, in_rx, ui_tx, boot_tx, shared));
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        // done_tx is dropped when the closure ends, including by panic, so the handle never waits on a dead actor.
+        let join = thread::spawn(move || {
+            let _done = done_tx;
+            actor(cfg, self_tx, in_rx, ui_tx, boot_tx, shared)
+        });
         (
             EngineHandle {
                 tx: in_tx,
                 join: Some(join),
+                done: done_rx,
                 agent_rows,
             },
             ui_rx,

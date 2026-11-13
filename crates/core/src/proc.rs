@@ -195,6 +195,14 @@ pub struct ClaudeProc {
     stdin: Option<ChildStdin>,
 }
 
+// Every drop path reaps the child (quit, panic unwind, a dropped slot). After finish() or kill() the child is
+// already reaped, so this second kill is a no-op.
+impl Drop for ClaudeProc {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
 // Spawns claude and a thread that forwards each stdout line as wrap(ProcMsg::Line), then wrap(ProcMsg::Eof).
 // The caller picks T so the forwarded messages can share the engine's input channel.
 pub fn spawn<T: Send + 'static>(
@@ -512,6 +520,32 @@ mod tests {
             "denied: session is draining"
         );
         p.kill();
+    }
+
+    // S14: a ClaudeProc dropped during a panic unwind still reaps its child.
+    #[cfg(unix)]
+    #[test]
+    fn drop_during_panic_reaps_child() {
+        let mut child = Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let stdin = child.stdin.take().unwrap();
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let _p = ClaudeProc {
+                child,
+                stdin: Some(stdin),
+            };
+            panic!("unwind with a live child");
+        }));
+        assert!(res.is_err());
+        assert!(
+            !crate::handoff::pid_alive(pid),
+            "child {pid} outlived its ClaudeProc"
+        );
     }
 
     // Quit path: finish() closes stdin so a child that flushes on EOF writes its transcript before it is killed.

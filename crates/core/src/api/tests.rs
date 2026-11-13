@@ -1415,3 +1415,44 @@ done
         );
     }
 }
+
+// S14: dropping the handle stops the actor and kills its main child; no claude child outlives the engine.
+#[cfg(unix)]
+#[test]
+fn dropping_engine_handle_kills_main_child() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("drop-kills");
+    let pid_file = dir.path().join("main.pid");
+    // Main child (argv has --mcp-config) records its own pid, then holds stdin open until the engine closes it.
+    let script = format!(
+        "#!/bin/sh\ncase \"$*\" in\n  *--mcp-config*) echo $$ > '{}' ;;\nesac\ncat > /dev/null\n",
+        pid_file.display()
+    );
+    let bin = dir.path().join("claude");
+    std::fs::write(&bin, script).expect("write fake claude");
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let cfg = Config {
+        claude_bin: bin.display().to_string(),
+        model: "haiku".into(),
+        ..isolated(dir.path())
+    };
+    let (h, _rx) = Engine::try_start(cfg).expect("engine boots");
+    let mut pid = None;
+    for _ in 0..200 {
+        if let Some(p) = std::fs::read_to_string(&pid_file)
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+        {
+            pid = Some(p);
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let pid = pid.expect("main child wrote its pid");
+    assert!(crate::handoff::pid_alive(pid), "main child not running");
+    drop(h);
+    assert!(
+        !crate::handoff::pid_alive(pid),
+        "main child {pid} still alive after the engine handle dropped"
+    );
+}

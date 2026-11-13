@@ -604,8 +604,12 @@ impl State {
     // Ends an idle resident child with ClaudeProc::finish. Its session id stays in resume_pending, so the next
     // task respawns it with --resume on the same session.
     pub(super) fn exit_idle_coder(&mut self, i: usize) {
-        if let Some(mut p) = self.coders[i].proc.take() {
-            p.finish(CODER_EXIT_WAIT);
+        if let Some(p) = self.coders[i].proc.take() {
+            // The stdin close and the wait run off the actor thread, so an Interrupt is not held up by a 5 s exit.
+            thread::spawn(move || {
+                let mut p = p;
+                p.finish(CODER_EXIT_WAIT);
+            });
         }
         let role = coder_role(i);
         if let Some(sid) = self.resident_sids.get(&role).cloned() {

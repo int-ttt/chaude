@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: a claude child process is killed and reaped whenever its owner drops (quit, panic unwind), and dropping the engine handle waits up to 2 s for the actor before detaching. A coder exit no longer blocks the actor for up to 5 s, so Interrupt is not held up (S14).
+  - core: claude 자식 프로세스는 소유자가 드롭될 때(종료, 패닉 되감기) 항상 종료되고 회수됩니다. 엔진 핸들을 드롭하면 액터를 최대 2초 기다린 뒤 분리합니다. 코더 종료가 액터를 최대 5초 막지 않으므로 Interrupt가 지연되지 않습니다 (S14).
 - hooks: each hook run appends one line `{ts, hook, event, decision}` to `logs/hooks.jsonl` (D5). Logging is fail-safe: a missing or broken `_lean` or a log write error never changes a hook's output (live matrix item 5).
   - hooks: 훅이 실행될 때마다 `logs/hooks.jsonl`에 `{ts, hook, event, decision}` 한 줄을 추가합니다 (D5). 로깅은 실패해도 안전합니다. `_lean`이 없거나 깨져도, 로그 쓰기가 실패해도 훅의 출력은 바뀌지 않습니다 (라이브 매트릭스 5번).
 - docs: CLAUDE.md Flow has a rule for a pure ack with no pending `추천:`: one-line reply, no delegation (live matrix D1).
