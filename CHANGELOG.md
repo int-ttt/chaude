@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- hooks: with a Haiku main (`--model haiku`), main-thread-guard allows only `opus-architect` and `haiku-output` as agents; the main model is read from the main transcript's newest assistant entry (live matrix D2).
+  - hooks: Haiku 메인(`--model haiku`)일 때 main-thread-guard는 에이전트로 `opus-architect`와 `haiku-output`만 허용합니다. 메인 모델은 메인 transcript의 가장 최근 assistant 항목에서 읽습니다 (라이브 매트릭스 D2).
 - core: a fable main model is checked against the configured rotation threshold, not the fixed Opus 200k; a test locks this and the full-id form (`claude-fable-5-2`).
   - core: fable 메인 모델은 고정 Opus 200k가 아니라 설정된 회전 기준으로 봅니다. 테스트가 이것과 전체 id 형태(`claude-fable-5-2`)를 고정합니다.
 - settings: the main model is one of `opus`, `sonnet`, `fable` (picker and `main_model`), passed to `claude --model` unchanged so the server resolves the latest version. A saved full id (e.g. `claude-sonnet-5-5`) migrates to its family alias on load and save; budget prices and rotation thresholds key on the family.
