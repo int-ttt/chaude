@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: on Windows the `~/.chaude` state files (agents.json, clients.json) are now guarded by an exclusive cross-process lock (`LockFileEx` on `<path>.lock`), so two chaude processes no longer lose each other's rows. Before this the lock was a no-op off unix.
+  - core: Windows에서 `~/.chaude` 상태 파일(agents.json, clients.json)에 프로세스 간 배타적 잠금(`<path>.lock`에 대한 `LockFileEx`)을 겁니다. 두 chaude 프로세스가 서로의 행을 잃지 않습니다. 이전에는 unix가 아닌 환경에서 잠금이 아무 일도 하지 않았습니다.
 - tui: prompt history appends and the trim to the newest 500 entries share one cross-process lock (`.chaude/history.jsonl.lock`), so a line appended by another TUI during a trim is no longer lost.
   - tui: 프롬프트 기록 추가와 최신 500개로 줄이는 작업이 하나의 프로세스 간 잠금(`.chaude/history.jsonl.lock`)을 함께 씁니다. 트림 중에 다른 TUI가 추가한 줄이 더 이상 유실되지 않습니다.
 - hooks: notes queued in `record/INBOX.md` from several sessions at once are no longer lost. Appends and rewrites take an exclusive lock (`record/.inbox.lock`), and a rewrite goes through a temp file and `os.replace`.
