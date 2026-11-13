@@ -51,6 +51,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # cargo test --workspace builds chaude-gui (eframe), which needs these on Linux.
+      - name: Linux GUI system deps
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libwayland-dev
       # A failing test fails this job, so the release job never publishes.
       - name: Test
         run: cargo test --locked --workspace

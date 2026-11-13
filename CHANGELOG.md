@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- ci: the Linux jobs (rust.yml, release.yml) install the system libraries chaude-gui needs (xkbcommon, GL, X11, Wayland) before building.
+  - ci: Linux 작업(rust.yml, release.yml)이 chaude-gui에 필요한 시스템 라이브러리(xkbcommon, GL, X11, Wayland)를 빌드 전에 설치합니다.
 
 ## 0.12.6 - 2026-11-13
 - agents: `haiku-runner` and `haiku-test-lead` note that on Windows `python3` is `py -3` (else `python`), the same interpreter choice the Windows hooks use.
