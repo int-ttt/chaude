@@ -29,7 +29,7 @@ Step 2: ONE message with all Agent calls at once (subagent_type `haiku-runner`, 
 - G5 tests cli + update: `cargo test -p chaude-cli -p chaude-update`
 - one live runner per `live:` check: tmux session name `chaude-test-<name>` (unique), scratch dir `notes/tmp/test/<name>/`, uses `target/release` binary, kills only its own tmux session at the end.
 
-Each runner brief (you write it, short): group id, exact command(s) above, log path `notes/tmp/test/gate/<group>.log` (live: its scratch dir), no code edits, no fixes, no unbounded wait loops, foreground Bash timeout 600000 ms. Return exactly one line: `group: <id> · result: PASS|FAIL · counts: <passed/failed/ignored per test binary> · failing: <test names or ->`.
+Each runner brief (you write it, short): group id, exact command(s) above, each wrapped as `python3 scripts/squeeze-run.py -- <cmd>` (a `then` chain becomes one wrapped command per step; the full log lands in `logs/runs/`; live: its scratch dir), no code edits, no fixes, no unbounded wait loops, foreground Bash timeout 600000 ms. Return exactly one line: `group: <id> · result: PASS|FAIL · counts: <passed/failed/ignored per test binary> · failing: <test names or -> · log: <logs/runs paths>`.
 
 Step 3: after all runner results are back (none still running):
 - `date +%s` (end); wall = end - start, plus step 1 and step 2 split.

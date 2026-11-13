@@ -10,6 +10,7 @@ autoCompactWindow: 100000
 
 Start: resumable (skip finished items); `nohup <cmd> > logs/<job>.log 2>&1 &`; progress lines (done/total, current, failures) in `logs/<job>.status`; remote host info in `notes/ENV.md` (no secrets), check the connection with one cheap command first.
 - Status line format (append one line per step): `step: <noun phrase> / pct: <0-100>`. No prose, no Korean in the status file. Foreground commands <=120s; longer jobs run via nohup + status file. Return within 10 min per run: if the job is unfinished, status: partial, reason: time limit, done/remaining list in notes/runs/<YYMMDD>-run-<job>.md.
+Builds and test runs: wrap the command as `python3 scripts/squeeze-run.py -- <cmd>` (prints the head, error lines and tail; full output saved to `logs/runs/<ts>.log`). Keep that log path in the return.
 Status: read `logs/*.status` + `tail -n 20` of the log only.
 Failure: grep only the failing item's error; rerun failed items only; never repeat a fix without new evidence; after 2 failed fixes stop and report error lines.
 Return content (the final message, <=3 lines, <=300 chars) covers: done/total · failures · ETA · running/stopped.
