@@ -11,8 +11,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-// history.go maxHistory
-const MAX_HISTORY: usize = 500;
+use chaude_core::ui_state::{MAX_HISTORY, push_history};
 
 #[derive(Debug, Default)]
 pub struct Editor {
@@ -318,19 +317,6 @@ pub fn history_file_for(cwd: &Path) -> Option<PathBuf> {
         cwd.to_path_buf()
     };
     Some(base.join(".chaude").join("history.jsonl"))
-}
-
-// Go inputHistory.Add: blanks and a repeat of the last entry are skipped; only the newest MAX_HISTORY are kept.
-// Returns whether the entry was added.
-fn push_history(items: &mut Vec<String>, s: String) -> bool {
-    if !s.is_empty() && items.last() != Some(&s) {
-        items.push(s);
-        if items.len() > MAX_HISTORY {
-            items.drain(..items.len() - MAX_HISTORY);
-        }
-        return true;
-    }
-    false
 }
 
 // Go loadInputHistory: one JSON string per line, oldest first. Lines that do not decode are skipped and the

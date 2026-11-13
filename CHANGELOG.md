@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: UI-neutral app state moved to `chaude_core::ui_state`: the `Action` enum, the status-bar data `BarInput`, and the prompt-history push rule. The TUI re-exports them, so behavior is unchanged (S4, first slice).
+  - core: UI 중립 앱 상태를 `chaude_core::ui_state`로 옮겼습니다: `Action` 열거형, 상태 줄 데이터 `BarInput`, 프롬프트 기록 추가 규칙. TUI는 같은 이름으로 다시 내보내므로 동작은 바뀌지 않습니다 (S4, 첫 단계).
 - tests: the test that switches the UI language (`/lang`) now holds one crate-wide lock, so it cannot leak a language change into another test running in parallel (S2).
   - tests: UI 언어를 바꾸는 테스트(`/lang`)는 크레이트 전체 잠금 하나를 잡습니다. 병렬로 도는 다른 테스트에 언어 변경이 새지 않습니다 (S2).
 - tests: the two key-press wake tests in the TUI loop no longer use fixed sleeps; the key is sent at once and the sender stays open until the test has read it (S2).

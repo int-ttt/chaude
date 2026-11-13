@@ -86,32 +86,7 @@ const AGENT_PREFIX: &str = "  │ ";
 const ASST_FIRST: &str = "\x1b[38;2;217;119;87m● \x1b[39m";
 const TOOL_ON: &str = "\x1b[38;2;95;175;135m";
 
-// What the event loop must do after a key press.
-#[derive(Debug, PartialEq)]
-pub enum Action {
-    Continue,
-    Submit(String),
-    Interrupt(InterruptSource),
-    Quit,
-    // Esc while a reply is held: abandon its queued-task wait (Engine::cancel_wait).
-    CancelWait,
-    // /usage: the caller asks the engine for the one-shot run (UiEvent::Usage). Never a turn.
-    Usage,
-    // /update: the caller runs the release check off the UI thread; the result returns as Wake::Note (tui.go:1166).
-    Update,
-    // /doctor: the caller runs doctor::checks_now() off the UI thread; the rendered lines return as Wake::Note.
-    Doctor,
-    // Answer to the open permission prompt (Go tui.go key(): y/Enter allow, n/Esc deny, Ctrl+C deny + interrupt).
-    Answer {
-        id: String,
-        allow: bool,
-        interrupt: bool,
-    },
-    // Shift+Tab: the engine cycles the permission mode (Go setMode(Next())); it answers with ModeChanged.
-    CycleMode,
-    // /mode <name>: the engine sets the permission mode and answers with ModeChanged.
-    SetMode(PermMode),
-}
+pub use chaude_core::ui_state::Action;
 
 // A tool row in the transcript: its index, tool name and head text, the wall-clock start and the Instant it started
 // (elapsed), and the finish (wall-clock end, elapsed seconds) once ToolEnd arrives.

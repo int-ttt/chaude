@@ -2,7 +2,6 @@
 // without a terminal. Every row is clipped to the given display width so it never wraps.
 // Helpers that need core data or hooks not wired yet carry a targeted #[allow(dead_code)] with the reason.
 
-use std::collections::BTreeMap;
 use std::time::Duration;
 
 use chaude_core::api::CoderContext;
@@ -52,35 +51,7 @@ impl AgentState {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct BarInput {
-    // Seconds since the current turn started; None while idle.
-    pub turn_secs: Option<u64>,
-    // Running subagents as (description, elapsed seconds).
-    pub agents: Vec<(String, u64)>,
-    pub model: String,
-    pub tokens: u64,
-    pub cost_usd: f64,
-    pub context_pct: u32,
-    pub queued: usize,
-    // Main-context limit in tokens (the welcome threshold); used by the idle Go-style status row.
-    pub limit: u64,
-    // Status line extras (Go statusLine): rate window text, rotations, permission mode ("default" or empty is
-    // hidden), and foreground / background agent counts.
-    pub rate: Option<String>,
-    pub rot: u32,
-    pub mode: String,
-    pub fg: usize,
-    pub bg: usize,
-    // Agents a held reply waits for (UiEvent::ReplyHeld pending); None when the reply is not held.
-    pub waiting: Option<usize>,
-    // Latest context tokens per role (UiEvent::RoleContext): P = prompter, T = tui, C = coder.
-    pub role_tokens: BTreeMap<String, u64>,
-    // Live resident coders in spawn order (UiEvent::CoderContexts); empty hides the coder line.
-    pub coders: Vec<CoderContext>,
-    // Main's token counts of the last finished turn as (input, output, cache) (UiEvent::TurnTokens); shown on the idle row.
-    pub turn_tokens: Option<(u64, u64, u64)>,
-}
+pub use chaude_core::ui_state::BarInput;
 
 // Per-role context limit shown in the Go ctx bar (haikuThreshold in repl.go).
 const ROLE_LIMIT: &str = "80k";
@@ -460,7 +431,7 @@ pub fn go_duration(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use std::collections::BTreeMap;
     #[test]
     fn scroll_range_text_is_one_based() {
         assert_eq!(

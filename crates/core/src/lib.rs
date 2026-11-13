@@ -40,6 +40,7 @@ pub mod settings;
 pub mod slash;
 pub mod tmp_layout;
 pub mod turn_spend;
+pub mod ui_state;
 pub mod usage_poll;
 
 #[cfg(test)]
