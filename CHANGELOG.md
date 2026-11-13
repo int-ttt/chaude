@@ -107,6 +107,8 @@
   - core: `orch::parse`와 `cache_ttl::parse_cache_ttl`은 `String` 대신 `chaude_core::error::Error`를 돌려줍니다. cli는 호출 한 곳에서 문구로 바꾸므로 메시지는 그대로입니다 (S8, 일괄 정리).
 - core: `resume_note::write` returns `chaude_core::error::Error`; its callers already ignore the message or take it as the digest hint, so nothing else changes (S8, sweep).
   - core: `resume_note::write`는 `chaude_core::error::Error`를 돌려줍니다. 호출하는 쪽은 이미 메시지를 버리거나 다이제스트 힌트로만 쓰므로 나머지는 바뀌지 않습니다 (S8, 일괄 정리).
+- core: `record_turn::resume` returns `chaude_core::error::Error`; the cli turns it into text where it shows the message, so the messages are unchanged (S8, sweep).
+  - core: `record_turn::resume`는 `chaude_core::error::Error`를 돌려줍니다. cli는 메시지를 보여주는 곳에서 문구로 바꾸므로 메시지는 그대로입니다 (S8, 일괄 정리).
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.
