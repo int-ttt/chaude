@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- release: the next release is 0.12.6; 0.13.0 waits until the GUI is implemented (plan S11).
+  - release: 다음 릴리스는 0.12.6입니다. 0.13.0은 GUI 구현 후에 냅니다(계획 S11).
 - installer: `scripts/squeeze-run.py` and `scripts/fixed-cost-audit.py` are carried in the chaude binary and written to `<cwd>/scripts` with the hooks (existing files kept; shipped copies overwritten on a version change, like the hooks), so the agents' `python3 scripts/squeeze-run.py` works in installed projects.
   - installer: `scripts/squeeze-run.py`와 `scripts/fixed-cost-audit.py`를 chaude 바이너리에 담아 훅과 함께 `<cwd>/scripts`에 씁니다(기존 파일은 유지, 배포본은 버전이 바뀌면 훅처럼 덮어씀). 설치된 프로젝트에서 에이전트의 `python3 scripts/squeeze-run.py`가 동작합니다.
 - tools: new `scripts/fixed-cost-audit.py` estimates the fixed context a session pays before the first prompt (tokens = bytes / 4): CLAUDE.md files, agent and skill descriptions, the MEMORY.md index, and with `--hooks` the SessionStart hook output. Prints a table sorted by tokens with a total.
