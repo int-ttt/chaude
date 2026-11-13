@@ -30,7 +30,9 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 - `chaude doctor` and `/doctor` check old binaries (below 0.12.0), PATH order, the install lock (macOS uchg), hook wiring, Claude login, and `target/` size. Each check prints OK, WARN, or FAIL with a fix hint.
 - `agent_wait` in `.chaude/settings.json` (default `true`): a main reply waits for its running Agent/Task calls before it finishes.
 - Agent replies are queued and shown in a Tasks list.
-
+- `scripts/squeeze-run.py -- <cmd>` runs a build or test and prints only the head, the error, warning, panic, and FAIL lines with context, and the tail; the full output goes to `logs/runs/<ts>.log`. The Haiku runner and test agents use it.
+- A PreToolUse read guard (`haiku-read-guard.py`, Read by `haiku-*` subagents only) denies a full read of a file over 400 lines and a repeat full read of an unchanged file in one session. Use Grep or Read with offset and limit. It fails open.
+- `python3 scripts/fixed-cost-audit.py` (see Effect analysis) is installed with the hooks into `<project>/scripts`.
 ## How it works
 
 Opus is the main session. It reads your request, decides the plan, and delegates the work. `haiku-output` writes the final reply. Opus does not read or edit files itself. Hooks enforce this. Haiku agents do the actual work, such as searching, editing, and checking.
@@ -79,7 +81,7 @@ An older install at `/usr/local/bin/chaude` is not removed by the installer. If 
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.5 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.6 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.

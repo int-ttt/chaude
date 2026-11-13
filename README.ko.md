@@ -30,7 +30,9 @@ Claude Code를 채팅 형식의 프롬프트로 쓸 수 있고, 반복 작업은
 - `chaude doctor`와 `/doctor`는 구버전 바이너리(0.12.0 미만), PATH 순서, 설치본 잠금(macOS uchg), 훅 연결, Claude 로그인, `target/` 크기를 점검합니다. 각 항목은 OK, WARN, FAIL 중 하나와 조치 안내를 보여 줍니다.
 - `.chaude/settings.json`의 `agent_wait`(기본값 `true`): 메인 답변은 실행 중인 Agent/Task 호출이 끝날 때까지 기다린 뒤 끝납니다.
 - 에이전트 응답은 큐에 쌓이고 Tasks 목록에 표시됩니다.
-
+- `scripts/squeeze-run.py -- <cmd>`는 빌드나 테스트를 실행해 앞부분, error, warning, panic, FAIL 줄과 문맥, 끝부분만 보여 줍니다. 전체 출력은 `logs/runs/<ts>.log`에 저장합니다. Haiku 러너와 테스트 에이전트가 씁니다.
+- PreToolUse 읽기 가드(`haiku-read-guard.py`, `haiku-*` 서브에이전트의 Read에만 적용)는 400줄을 넘는 파일의 전체 읽기와, 같은 세션에서 변경 없는 파일을 다시 전체 읽는 것을 막습니다. Grep이나 offset/limit을 주는 Read를 쓰세요. 오류가 나면 허용합니다.
+- `python3 scripts/fixed-cost-audit.py`(효과 분석 참고)는 훅과 함께 `<프로젝트>/scripts`에 설치됩니다.
 ## 작동 방식
 
 Opus가 메인 세션입니다. 요청을 읽고, 계획을 정하고, 작업을 나눠 맡깁니다. 최종 답변은 `haiku-output`가 씁니다. Opus는 파일을 직접 읽거나 고치지 않습니다. 이 제한은 훅이 강제합니다. 실제 작업(조회, 수정, 검증 등)은 Haiku 에이전트가 합니다.
@@ -79,7 +81,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.5 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.6 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
