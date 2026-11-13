@@ -388,7 +388,7 @@ mod tests {
         root: &Path,
         arg: &str,
     ) -> Result<(Vec<String>, Vec<chaude_core::record::Block>), String> {
-        chaude_core::record_turn::resume(root, arg, &list_date)
+        chaude_core::record_turn::resume(root, arg, &list_date).map_err(|e| e.to_string())
     }
     use std::time::Duration;
 

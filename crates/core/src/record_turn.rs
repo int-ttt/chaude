@@ -7,6 +7,7 @@ use std::time::SystemTime;
 
 use serde_json::{Map, Value};
 
+use crate::error::Error;
 use crate::i18n::{Msg, t, tf};
 use crate::record::{self, Block, Stamp};
 use crate::record_folder::{self, Project};
@@ -143,10 +144,10 @@ pub fn resume(
     root: &Path,
     arg: &str,
     date: &dyn Fn(SystemTime) -> String,
-) -> Result<(Vec<String>, Vec<Block>), String> {
-    let projects = record_folder::list_projects(root).map_err(|e| e.to_string())?;
+) -> Result<(Vec<String>, Vec<Block>), Error> {
+    let projects = record_folder::list_projects(root)?;
     if projects.is_empty() {
-        return Err(format!("no record in {}", root.display()));
+        return Err(Error::Msg(format!("no record in {}", root.display())));
     }
     if arg.is_empty() {
         let title = t(Msg::RecordTitle);
@@ -158,15 +159,14 @@ pub fn resume(
     let picked: Project = match arg.parse::<i64>() {
         Ok(n) => {
             if n < 1 || n as usize > projects.len() {
-                return Err(format!("no project {n} (1-{})", projects.len()));
+                return Err(Error::Msg(format!("no project {n} (1-{})", projects.len())));
             }
             projects[n as usize - 1].clone()
         }
         Err(_) => {
-            let matches =
-                record_folder::filter_projects(&projects, arg).map_err(|e| e.to_string())?;
+            let matches = record_folder::filter_projects(&projects, arg)?;
             match matches.len() {
-                0 => return Err(format!("no project matches {arg:?}")),
+                0 => return Err(Error::Msg(format!("no project matches {arg:?}"))),
                 1 => matches[0].clone(),
                 _ => {
                     let title = tf(Msg::RecordMatching, &[&arg]);
@@ -178,7 +178,7 @@ pub fn resume(
             }
         }
     };
-    let entries = record_folder::load_project(&picked.dir).map_err(|e| e.to_string())?;
+    let entries = record_folder::load_project(&picked.dir)?;
     let blocks = entries
         .into_iter()
         .map(|e| Block {
@@ -332,7 +332,7 @@ mod tests {
         let tmp = TempDir::new("rt-resume");
         let root = tmp.path().join("record");
         let date = |_: SystemTime| "2026-11-04".to_string();
-        let err = resume(&root, "", &date).unwrap_err();
+        let err = resume(&root, "", &date).unwrap_err().to_string();
         assert_eq!(err, format!("no record in {}", root.display()));
 
         let stamp = Stamp::new(2026, 11, 4, 9, 5, 7);
@@ -350,9 +350,12 @@ mod tests {
         assert!(lines[1].starts_with(" 1. "));
         assert!(blocks.is_empty());
 
-        assert_eq!(resume(&root, "9", &date).unwrap_err(), "no project 9 (1-2)");
         assert_eq!(
-            resume(&root, "zzz", &date).unwrap_err(),
+            resume(&root, "9", &date).unwrap_err().to_string(),
+            "no project 9 (1-2)"
+        );
+        assert_eq!(
+            resume(&root, "zzz", &date).unwrap_err().to_string(),
             "no project matches \"zzz\""
         );
 

@@ -1487,7 +1487,7 @@ impl App {
             Err(e) => self.note(&e),
             Ok(Some(ps)) => self.recs = Some(records::RecPicker::new(ps)),
             Ok(None) => match chaude_core::record_turn::resume(&root, &arg, &records::list_date) {
-                Err(e) => self.note(&e),
+                Err(e) => self.note(&e.to_string()),
                 Ok((lines, entries)) => {
                     for l in &lines {
                         self.note(l);
