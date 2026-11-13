@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- agents: `haiku-runner` and `haiku-test-lead` note that on Windows `python3` is `py -3` (else `python`), the same interpreter choice the Windows hooks use.
+  - agents: `haiku-runner`와 `haiku-test-lead`에 Windows에서는 `python3` 대신 `py -3`(없으면 `python`)를 쓴다고 적었습니다. Windows 훅이 고르는 인터프리터와 같습니다.
 - release: the next release is 0.12.6; 0.13.0 waits until the GUI is implemented (plan S11).
   - release: 다음 릴리스는 0.12.6입니다. 0.13.0은 GUI 구현 후에 냅니다(계획 S11).
 - installer: `scripts/squeeze-run.py` and `scripts/fixed-cost-audit.py` are carried in the chaude binary and written to `<cwd>/scripts` with the hooks (existing files kept; shipped copies overwritten on a version change, like the hooks), so the agents' `python3 scripts/squeeze-run.py` works in installed projects.
