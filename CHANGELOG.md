@@ -118,6 +118,8 @@
 
 - core: the coder and tui reply paths in `api/route.rs` and `api/retry.rs` (spawn, write, finish) return `chaude_core::error::Error`; the public `try_start`, `resolve_max_workers` and `CoderCaller::call` and the MCP waiter still return `String`, so the API is unchanged and messages are the same (S8, api sweep).
   - core: `api/route.rs`와 `api/retry.rs`의 코더·tui 응답 경로(생성, 쓰기, 종료)는 `chaude_core::error::Error`를 돌려줍니다. 공개 `try_start`, `resolve_max_workers`, `CoderCaller::call`과 MCP 대기 채널은 여전히 `String`을 씁니다. 그래서 공개 API와 메시지는 그대로입니다 (S8, api 일괄 정리).
+- core: a coder task that runs past its timeout (`CODER_TIMEOUT`, 30 min by default) replies with a partial result: `status: partial`, a reason, one `changed:` line per file the coder wrote or edited, then the tail of its text. The limit is `Config.coder_timeout` (no settings-file key yet). The default is unchanged (S22).
+  - core: 코더 작업이 제한 시간(`CODER_TIMEOUT`, 기본 30분)을 넘기면 부분 결과로 답합니다: `status: partial`, 사유, 쓰거나 수정한 파일마다 `changed:` 한 줄, 그리고 코더 텍스트의 끝부분. 제한 시간은 `Config.coder_timeout`에서 설정합니다(설정 파일 키는 아직 없습니다). 기본값은 바뀌지 않습니다 (S22).
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.

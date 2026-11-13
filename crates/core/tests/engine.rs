@@ -4191,6 +4191,37 @@ fn coder_retries_429_twice_then_completes() {
     assert_eq!(sends.trim(), "3", "one first send and two retries");
 }
 
+// S22: a coder that runs past coder_timeout replies with what it wrote: status partial, the edited file, its text.
+#[test]
+fn coder_timeout_returns_partial_output_and_changed_files() {
+    let _g = lock();
+    let f = fake("coder_timeout", &["text_turn.jsonl"]);
+    // Text and an Edit, then no result line: the coder never finishes its task.
+    fs::write(
+        f.dir.join("coder.jsonl"),
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"half way\"},{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"src/a.rs\"}}]}}\n",
+    )
+    .unwrap();
+    let mut cfg = config(&f);
+    cfg.residents = true;
+    cfg.cwd = Some(f.dir.clone());
+    cfg.coder_timeout = Duration::from_secs(2);
+    let (h, rx) = Engine::start(cfg);
+    h.coder("task");
+    let evs = until_coder_reply(&rx);
+    h.shutdown();
+    let reply = evs
+        .iter()
+        .find_map(|e| match e {
+            UiEvent::CoderReply { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .expect("coder reply");
+    assert!(reply.contains("status: partial"), "{reply}");
+    assert!(reply.contains("changed: src/a.rs"), "{reply}");
+    assert!(reply.contains("half way"), "{reply}");
+}
+
 #[test]
 fn idle_resident_exits_then_resumes_the_same_session() {
     let _g = lock();

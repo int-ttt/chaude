@@ -85,10 +85,28 @@ impl State {
         }
     }
 
-    // The coder gave up waiting (Go residentCoderTimeout). The child is replaced.
+    // The coder gave up waiting (Go residentCoderTimeout). The child is replaced. S22: the reply is partial: status,
+    // reason and the files it edited, then the tail of its text, so main can pick up from there.
     pub(super) fn coder_timeout(&mut self, i: usize) {
+        let secs = self.cfg.coder_timeout.as_secs_f64();
+        let progress = std::mem::take(&mut self.coders[i].progress);
+        let changed = std::mem::take(&mut self.coders[i].changed);
         self.drop_coder(i);
-        self.finish_coder(i, Err(Error::Msg("coder timed out".to_string())));
+        let mut lines = vec![
+            "status: partial".to_string(),
+            format!("reason: {}", tf(Msg::TimedOut, &[&secs])),
+        ];
+        if changed.is_empty() {
+            lines.push("changed: -".to_string());
+        }
+        lines.extend(changed.iter().map(|f| format!("changed: {f}")));
+        let body = tail(progress.trim(), CODER_PARTIAL_CHARS);
+        let text = if body.is_empty() {
+            lines.join("\n")
+        } else {
+            format!("{}\n\n{body}", lines.join("\n"))
+        };
+        self.finish_coder(i, Ok(text));
     }
 
     // The tui gave up waiting. Its child is replaced, so late lines are dropped by epoch.

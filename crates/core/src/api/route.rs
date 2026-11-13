@@ -503,7 +503,9 @@ impl State {
             return;
         }
         self.stage(&role, StagePhase::Working);
-        self.coders[i].deadline = Some(Instant::now() + CODER_TIMEOUT);
+        self.coders[i].deadline = Some(Instant::now() + self.cfg.coder_timeout);
+        self.coders[i].progress.clear();
+        self.coders[i].changed.clear();
         self.resident_busy(&role, true, &task);
         self.coders[i].idle_since = None;
         self.coders[i].waiter = waiter;
@@ -635,6 +637,11 @@ impl State {
         if self.coders[i].deadline.is_none() {
             return;
         }
+        // S22: a coder's text and file edits are kept while the task runs, for a partial reply on timeout.
+        if let Ok(Event::Assistant(env)) = parse_line(line) {
+            self.coder_progress(i, env);
+            return;
+        }
         let Ok(Event::Result(r)) = parse_line(line) else {
             return;
         };
@@ -652,6 +659,39 @@ impl State {
             self.finish_coder(i, Err(Error::Msg("coder empty reply".to_string())));
         } else {
             self.finish_coder(i, Ok(text));
+        }
+    }
+
+    // S22: keeps the text and the Write/Edit/NotebookEdit files of a coder task in flight. The text is cut to its tail.
+    pub(super) fn coder_progress(&mut self, i: usize, env: crate::event::MessageEnvelope) {
+        let Some(Content::Blocks(blocks)) = env.message.content else {
+            return;
+        };
+        for b in blocks {
+            match b {
+                Block::Text { text } => {
+                    let c = &mut self.coders[i];
+                    c.progress.push_str(&text);
+                    if c.progress.len() > CODER_PARTIAL_CHARS * 8 {
+                        c.progress = tail(&c.progress, CODER_PARTIAL_CHARS);
+                    }
+                }
+                Block::ToolUse { name, input, .. } => {
+                    let fp = input
+                        .as_ref()
+                        .and_then(|v| v.get("file_path"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    let c = &mut self.coders[i];
+                    if matches!(name.as_str(), "Write" | "Edit" | "NotebookEdit")
+                        && !fp.is_empty()
+                        && !c.changed.iter().any(|f| f == fp)
+                    {
+                        c.changed.push(fp.to_string());
+                    }
+                }
+                _ => {}
+            }
         }
     }
 

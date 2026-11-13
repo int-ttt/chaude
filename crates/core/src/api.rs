@@ -454,6 +454,9 @@ const RETRY_TOTAL: Duration = Duration::from_secs(60);
 // Idle limit of an extra coder and of the base coder (Go extraCoderTTL). The settings screen shows it.
 pub const CODER_IDLE_TTL_SECS: u64 = 3570;
 
+// S22: the most chars of a timed-out coder's text kept for its partial reply.
+const CODER_PARTIAL_CHARS: usize = 4_000;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     // Name or path of the claude binary; resolved on PATH like osenv::resolve_bin. Tests point this at a fake.
@@ -507,6 +510,9 @@ pub struct Config {
     pub coder_idle_ttl: Duration,
     // Idle time of the base coder before it exits on its own (3570 s), counted from its spawn. Zero = never exit.
     pub base_idle_exit_secs: u64,
+    // Go residentCoderTimeout: how long one coder task may run before it is cut (CODER_TIMEOUT, 30 min). On timeout
+    // the reply keeps the coder's partial text and the files it edited (S22).
+    pub coder_timeout: Duration,
     // Go tuiTimeout: how long the resident tui may take to translate the main reply. On timeout the main reply stays.
     pub tui_timeout: Duration,
     // Go prompterTimeout: how long the resident prompter may take to summarize. On timeout the input goes unchanged.
@@ -619,6 +625,7 @@ impl Default for Config {
             extra_coders: 4,
             coder_idle_ttl: Duration::from_secs(CODER_IDLE_TTL_SECS),
             base_idle_exit_secs: CODER_IDLE_TTL_SECS,
+            coder_timeout: CODER_TIMEOUT,
             tui_timeout: Duration::from_secs(120),
             prompter_timeout: Duration::from_secs(60),
             handoff_path: None,
@@ -1066,6 +1073,9 @@ struct Coder {
     retry_started: Option<Instant>,
     // When the next send of `task` is due.
     retry_at: Option<Instant>,
+    // S22: text and edited files of the task in flight, kept for a partial reply on timeout; reset per task.
+    progress: String,
+    changed: Vec<String>,
 }
 
 // A handoff turn in progress: the rotation reason and how many handoff prompts were sent (Go makeSnapshotN).
