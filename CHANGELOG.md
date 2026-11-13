@@ -79,6 +79,8 @@
   - 문서: CLAUDE.md와 docs/claude-lean/CAVEMAN_FORMAT.md의 오래된 caveman-structure 절 참조를 현재 절 이름으로 고쳤습니다(S29).
 - repo: the unused `tests/e2e-rebuild` Go scratch directory is deleted and its `.gitignore` entries are removed; `tests/chaude-soak` is kept (S16).
   - 저장소: 쓰지 않는 Go 임시 디렉터리 `tests/e2e-rebuild`를 삭제하고 `.gitignore` 항목을 뺐습니다. `tests/chaude-soak`는 그대로 둡니다 (S16).
+- core: the `api` module's unit tests moved from `api.rs` into `api/tests.rs` (S5, first step). No code or public API changed.
+  - core: `api` 모듈의 단위 테스트를 `api.rs`에서 `api/tests.rs`로 옮겼습니다 (S5, 첫 단계). 코드와 공개 API는 바뀌지 않았습니다.
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.
