@@ -45,6 +45,7 @@ const PKG_FILES: &[&str] = &[
     ".claude/hooks/caveman-format.py",
     ".claude/hooks/correction-guard.py",
     ".claude/hooks/haiku-context-guard.py",
+    ".claude/hooks/haiku-read-guard.py",
     ".claude/hooks/history-export.py",
     ".claude/hooks/ledger.py",
     ".claude/hooks/main-thread-guard.py",

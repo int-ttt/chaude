@@ -35,6 +35,16 @@ const GUARD_HOOKS: &str = r#"{
         ]
       },
       {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/haiku-read-guard.py\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Agent|Task",
         "hooks": [
           {
@@ -49,11 +59,21 @@ const GUARD_HOOKS: &str = r#"{
 }
 "#;
 
-/// Hook scripts the guard needs (main-thread-guard.py imports _lean.py; bash-py-guard.py is standalone).
-const GUARD_FILES: &[&str] = &["main-thread-guard.py", "bash-py-guard.py", "_lean.py"];
+/// Hook scripts the guard needs (main-thread-guard.py imports _lean.py; bash-py-guard.py is standalone;
+/// haiku-read-guard.py is the Haiku-only read guard).
+const GUARD_FILES: &[&str] = &[
+    "main-thread-guard.py",
+    "bash-py-guard.py",
+    "haiku-read-guard.py",
+    "_lean.py",
+];
 
 /// Scripts the merge looks for to tell that a PreToolUse group already runs a guard.
-const GUARD_SCRIPTS: &[&str] = &["main-thread-guard.py", "bash-py-guard.py"];
+const GUARD_SCRIPTS: &[&str] = &[
+    "main-thread-guard.py",
+    "bash-py-guard.py",
+    "haiku-read-guard.py",
+];
 
 /// Package copies of the repo's .claude/agents definitions (haiku-*.md and opus-architect.md). A first-opened
 /// folder gets them, so the main model can delegate to named agents. embedded_agents_match_repo keeps them equal.
@@ -120,6 +140,10 @@ pub const HOOKS: &[(&str, &[u8])] = &[
     (
         "haiku-context-guard.py",
         include_bytes!("hooks/haiku-context-guard.py"),
+    ),
+    (
+        "haiku-read-guard.py",
+        include_bytes!("hooks/haiku-read-guard.py"),
     ),
     (
         "history-export.py",

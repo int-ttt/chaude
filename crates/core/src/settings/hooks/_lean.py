@@ -117,6 +117,32 @@ def history_dir(project):
     return ""
 
 
+# --- exclusive file lock: INBOX appends/rewrites (style-adapter), hooks.jsonl appends, read-guard state ---
+import contextlib as _contextlib
+
+
+@_contextlib.contextmanager
+def locked(lock_path):
+    """Exclusive lock on lock_path for a read-modify-write or append; several sessions' hooks can run at once."""
+    with open(lock_path, "a+") as lf:
+        if os.name == "nt":
+            import msvcrt
+            lf.seek(0)
+            msvcrt.locking(lf.fileno(), msvcrt.LK_LOCK, 1)      # retries about 10 s, then raises OSError
+            try:
+                yield
+            finally:
+                lf.seek(0)
+                msvcrt.locking(lf.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
 # --- hook log (D5): one JSON line per hook run in <ROOT>/logs/hooks.jsonl, appended at process exit ---
 import atexit as _atexit
 import time as _time
@@ -144,7 +170,8 @@ def _hook_flush():
         os.makedirs(os.path.join(ROOT, "logs"), exist_ok=True)
         rec = {"ts": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()), "hook": _HOOK["hook"],
                "event": _HOOK["event"], "decision": _HOOK["decision"]}
-        with open(os.path.join(ROOT, "logs", "hooks.jsonl"), "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec) + "\n")
+        with locked(os.path.join(ROOT, "logs", ".hooks.lock")):
+            with open(os.path.join(ROOT, "logs", "hooks.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec) + "\n")
     except Exception:
         pass

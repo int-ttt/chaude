@@ -25,7 +25,7 @@ try:
 except Exception:  # logging is optional: a missing or broken _lean must not break the hook
     def hook_log(*_a, **_k):
         pass
-from _lean import lean_off, session_flag, pick, trigger, lang, spawn_lang
+from _lean import lean_off, session_flag, pick, trigger, lang, spawn_lang, locked
 hook_log("style-adapter")
 
 data = json.load(sys.stdin)
@@ -128,28 +128,6 @@ def inbox_owner(line):
     """Session id of an INBOX line ("- MM-DD HH:MM [sid] text"); None for untagged legacy lines."""
     m = re.match(r"- \d\d-\d\d \d\d:\d\d \[([\w-]*)\] ", line)
     return m.group(1) if m else None
-
-
-@contextlib.contextmanager
-def locked(lock_path):
-    """Exclusive lock on lock_path for the INBOX append and rewrite; several sessions' hooks can run at once."""
-    with open(lock_path, "a+") as lf:
-        if os.name == "nt":
-            import msvcrt
-            lf.seek(0)
-            msvcrt.locking(lf.fileno(), msvcrt.LK_LOCK, 1)      # retries about 10 s, then raises OSError
-            try:
-                yield
-            finally:
-                lf.seek(0)
-                msvcrt.locking(lf.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 
 # 0. Mode switch, zero model tokens. 일반모드: hooks stand down and Opus works directly; 절약모드: back on.

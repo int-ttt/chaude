@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- hooks: a new PreToolUse hook `haiku-read-guard.py` (Read, haiku-* subagents only) denies a full read of a file over 400 lines (use Grep or Read offset/limit) and a repeat full read of the same unchanged file in one session. Fails open. Registered in the installer template, not this repo's settings. `logs/hooks.jsonl` appends now take the shared hooks lock (`logs/.hooks.lock`), the same lock helper as the INBOX.
+  - hooks: 새 PreToolUse 훅 `haiku-read-guard.py`(Read, haiku-* 서브에이전트만)는 400줄을 넘는 파일의 전체 읽기(Grep이나 Read offset/limit을 쓰라고 안내)와 같은 세션에서 변경 없는 같은 파일을 다시 전체 읽는 것을 막습니다. 오류가 나면 허용합니다. 이 저장소 설정이 아니라 설치 템플릿에 등록합니다. `logs/hooks.jsonl` 추가도 INBOX와 같은 잠금 도구로 공유 훅 잠금(`logs/.hooks.lock`)을 잡습니다.
 - core: on Windows the `~/.chaude` state files (agents.json, clients.json) are now guarded by an exclusive cross-process lock (`LockFileEx` on `<path>.lock`), so two chaude processes no longer lose each other's rows. Before this the lock was a no-op off unix.
   - core: Windows에서 `~/.chaude` 상태 파일(agents.json, clients.json)에 프로세스 간 배타적 잠금(`<path>.lock`에 대한 `LockFileEx`)을 겁니다. 두 chaude 프로세스가 서로의 행을 잃지 않습니다. 이전에는 unix가 아닌 환경에서 잠금이 아무 일도 하지 않았습니다.
 - tui: prompt history appends and the trim to the newest 500 entries share one cross-process lock (`.chaude/history.jsonl.lock`), so a line appended by another TUI during a trim is no longer lost.
