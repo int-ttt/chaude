@@ -204,7 +204,7 @@ Applied by the docs consolidation step. Table rows above show pre-move paths. No
 
 Order = dependency order. Each step: own commit, gate through haiku-test-lead, TUI behaviour unchanged unless stated.
 - [x] S1 CI safety: add test + clippy to `release.yml` before build; run `cargo test --workspace` on push/PR so update/clean/scripts are covered. Accept: a tag push with a failing test produces no release asset.
-- [ ] S2 Flaky tests: run the two key-press tests 200 times; replace sleeps with a deterministic wake signal; serialize or remove the env-var test in `lang.rs`. Accept: 200/200 passes, full cli suite passes 5 times in a row.
+- [x] S2 Flaky tests: run the two key-press tests 200 times; replace sleeps with a deterministic wake signal; serialize or remove the env-var test in `lang.rs`. Accept: 200/200 passes, full cli suite passes 5 times in a row.
 - [ ] S3 Loop agent: haiku-prompter runs sub-agents foreground, may continue a coder via SendMessage, may write its log. Accept: one 3-round dry loop with a single coder ID and a written log.
 - [ ] S4 App state to core: move `App` state, `Action`, and `apply` into a UI-neutral core module; TUI keeps key mapping, rendering, terminal and signals. Accept: existing TUI tests pass unchanged; gui can construct the state and apply an action in a test. This replaces the start of G1b in `plan/gui-parity.md`.
 - [ ] S5 Split `api.rs` into modules (actor, event handling, agents, tokens) with no pub API change. Accept: `cargo public-api`-style diff of pub items is empty (or manual list equal), tests pass.

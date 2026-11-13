@@ -143,6 +143,7 @@ mod tests {
 
     #[test]
     fn apply_writes_setting_and_switches_language() {
+        let _lang = crate::test_support::lang_lock();
         let dir = env::temp_dir().join(format!("chaude-lang-apply-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

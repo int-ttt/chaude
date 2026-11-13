@@ -3,4 +3,6 @@
 pub mod doctor;
 pub mod mcp_resident;
 pub mod repl_args;
+#[cfg(test)]
+mod test_support;
 pub mod tui;

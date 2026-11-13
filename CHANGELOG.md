@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- tests: the test that switches the UI language (`/lang`) now holds one crate-wide lock, so it cannot leak a language change into another test running in parallel (S2).
+  - tests: UI 언어를 바꾸는 테스트(`/lang`)는 크레이트 전체 잠금 하나를 잡습니다. 병렬로 도는 다른 테스트에 언어 변경이 새지 않습니다 (S2).
 - tests: the two key-press wake tests in the TUI loop no longer use fixed sleeps; the key is sent at once and the sender stays open until the test has read it (S2).
   - tests: TUI 루프의 키 입력 깨우기 테스트 두 개는 고정 sleep을 쓰지 않습니다. 키를 바로 보내고, 테스트가 읽을 때까지 송신 측을 열어 둡니다 (S2).
 - ci: the release build runs `cargo test --locked --workspace` on each target before building, so a failing test stops the tag release before any asset is published (S1).
