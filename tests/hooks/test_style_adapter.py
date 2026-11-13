@@ -6,10 +6,12 @@ English imperatives need a sentence-initial verb or please/can you. Korean routi
 Run: cd <repo root> && python3 -I -m unittest discover -s tests/hooks -p 'test_*.py' -v
 """
 import json
+import glob
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -68,6 +70,52 @@ class KoreanRouting(unittest.TestCase):
 
     def test_instruction_is_not_inboxed(self):
         self.assertEqual(route("이거 확인해봐"), "frag")
+
+
+def run_hook(project_dir, prompt, sid):
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=project_dir, HARNESS_RECORD_DIR=os.path.join(project_dir, "record"), CLAUDE_LEAN="1")
+    env.pop("STYLE_INBOX", None)
+    proc = subprocess.run([sys.executable, "-I", ADAPTER],
+                          input=json.dumps({"prompt": prompt, "session_id": sid}),
+                          capture_output=True, text=True, env=env)
+    if proc.returncode != 0:
+        raise AssertionError(proc.stderr)
+
+
+class InboxConcurrentWriters(unittest.TestCase):
+    def test_two_sessions_appending_and_consuming_keep_every_note(self):
+        # Session "a" only queues notes; session "b" queues a note and then sends an instruction, which consumes
+        # its own note and rewrites the shared INBOX. Every rewrite must keep the notes "a" appended meanwhile.
+        with tempfile.TemporaryDirectory() as d:
+            errors = []
+
+            def writer_a():
+                try:
+                    for i in range(10):
+                        run_hook(d, f"The build is green now, note a{i}.", "a")
+                except Exception as e:  # surfaced below; a thread must not swallow it silently
+                    errors.append(e)
+
+            def writer_b():
+                try:
+                    for i in range(10):
+                        run_hook(d, f"The build is green now, note b{i}.", "b")
+                        run_hook(d, "Build it", "b")
+                except Exception as e:
+                    errors.append(e)
+
+            threads = [threading.Thread(target=writer_a), threading.Thread(target=writer_b)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(errors, [])
+            with open(os.path.join(d, "record", "INBOX.md"), encoding="utf-8") as f:
+                lines = [l.rstrip("\n") for l in f]
+            self.assertEqual(len(lines), 10, lines)
+            self.assertEqual([l.split("[a] ", 1)[1] for l in lines],
+                             [f"The build is green now, note a{i}." for i in range(10)])
+            self.assertEqual(glob.glob(os.path.join(d, "record", "*.tmp")), [])
 
 
 if __name__ == "__main__":

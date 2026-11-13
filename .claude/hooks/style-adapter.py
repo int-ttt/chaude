@@ -10,7 +10,7 @@
 - Everything else gets a one-line tag so the main thread handles it with minimal thinking:
   [ack] approval, [retry] re-run, [frag] short refinement, [paste] long text saved to a file.
 """
-import glob, hashlib, json, os, re, sys, time
+import contextlib, glob, hashlib, json, os, re, sys, time
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     try:
         _reconf = getattr(_s, "reconfigure", None)
@@ -130,6 +130,28 @@ def inbox_owner(line):
     return m.group(1) if m else None
 
 
+@contextlib.contextmanager
+def locked(lock_path):
+    """Exclusive lock on lock_path for the INBOX append and rewrite; several sessions' hooks can run at once."""
+    with open(lock_path, "a+") as lf:
+        if os.name == "nt":
+            import msvcrt
+            lf.seek(0)
+            msvcrt.locking(lf.fileno(), msvcrt.LK_LOCK, 1)      # retries about 10 s, then raises OSError
+            try:
+                yield
+            finally:
+                lf.seek(0)
+                msvcrt.locking(lf.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
 # 0. Mode switch, zero model tokens. 일반모드: hooks stand down and Opus works directly; 절약모드: back on.
 def set_session_lean(state):
     """Writes this session's switch ("off" | "on"); "on" is written explicitly so it overrides a project default of off."""
@@ -193,9 +215,10 @@ if (os.environ.get("STYLE_INBOX", "1") != "0" and 8 <= len(prompt) <= 120 and "\
         and not re.search(IMPERATIVE, prompt) and not re.search(QUESTION, prompt)
         and re.search(DECLARATIVE, prompt) and not last_reply_asks()):
     os.makedirs(rec, exist_ok=True)
-    with open(inbox, "a", encoding="utf-8") as f:
-        f.write(f"- {time.strftime('%m-%d %H:%M')} [{sid}] {prompt}\n")
-    n = sum(inbox_owner(l) == sid for l in tail(inbox, 100000))
+    with locked(os.path.join(rec, ".inbox.lock")):           # same lock as the rewrite below
+        with open(inbox, "a", encoding="utf-8") as f:
+            f.write(f"- {time.strftime('%m-%d %H:%M')} [{sid}] {prompt}\n")
+        n = sum(inbox_owner(l) == sid for l in tail(inbox, 100000))
     block(pick(f"메모 {n}건 보관 (모델 호출 없음). 다음 지시와 함께 전달됩니다.\n바로 답을 원하면 끝에 ? 또는 ! 를 붙여 다시 보내세요.",
                f"{n} note(s) kept (no model call). They go out with your next instruction.\nTo get an answer now, send it again with ? or ! at the end."))
 
@@ -254,11 +277,19 @@ if pending:
     tags.append("[inbox] user notes since your last turn (apply them; facts → FACTS.md via agent):\n"
                 + "\n".join(l.replace(f"[{sid}] ", "", 1) for l in pending))
     # Only this session's lines leave the shared file; other sessions' notes and untagged legacy lines stay.
-    keep = [l for l in inbox_all if inbox_owner(l) != sid]
-    if keep:
-        open(inbox, "w", encoding="utf-8").write("".join(l + "\n" for l in keep))
-    else:
-        os.remove(inbox)
+    # Re-read under the lock: another session may have appended since inbox_all was read.
+    try:
+        with locked(os.path.join(rec, ".inbox.lock")):
+            keep = [l for l in tail(inbox, 100000) if inbox_owner(l) != sid]
+            if keep:
+                tmp = f"{inbox}.{os.getpid()}.tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.writelines(l + "\n" for l in keep)
+                os.replace(tmp, inbox)                       # atomic: readers never see a half-written inbox
+            else:
+                os.remove(inbox)
+    except OSError:
+        pass                                                 # lock or write failed: notes stay for the next prompt
 
 # 3. Long pasted text → file, so briefs carry a path instead of the text.
 # Notifications and wrapper text (same notion as correction-guard) are not pastes; the size is measured on the text after [original].

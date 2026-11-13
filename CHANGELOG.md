@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- hooks: notes queued in `record/INBOX.md` from several sessions at once are no longer lost. Appends and rewrites take an exclusive lock (`record/.inbox.lock`), and a rewrite goes through a temp file and `os.replace`.
+  - hooks: 여러 세션이 동시에 남긴 `record/INBOX.md` 메모가 더 이상 유실되지 않습니다. 추가와 다시 쓰기가 배타적 잠금(`record/.inbox.lock`)을 잡고, 다시 쓰기는 임시 파일과 `os.replace`를 거칩니다.
 - core: a claude child process is killed and reaped whenever its owner drops (quit, panic unwind), and dropping the engine handle waits up to 2 s for the actor before detaching. A coder exit no longer blocks the actor for up to 5 s, so Interrupt is not held up (S14).
   - core: claude 자식 프로세스는 소유자가 드롭될 때(종료, 패닉 되감기) 항상 종료되고 회수됩니다. 엔진 핸들을 드롭하면 액터를 최대 2초 기다린 뒤 분리합니다. 코더 종료가 액터를 최대 5초 막지 않으므로 Interrupt가 지연되지 않습니다 (S14).
 - core: the engine's busy flag and turn start time are one `Phase` value (idle, or busy with the turn clock). No behaviour change; a send from idle that is not a turn start (release_held) keeps the phase idle (S15).
