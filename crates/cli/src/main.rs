@@ -309,32 +309,20 @@ mod tests {
 
     #[test]
     fn model_flag_given_wins_over_orch_and_settings() {
-        assert_eq!(
-            resolve_model("b", Some("sonnet".into()), "claude-fable-5-1"),
-            "sonnet"
-        );
-        assert_eq!(
-            resolve_model("e", Some("opus".into()), "claude-sonnet-5-5"),
-            "opus"
-        );
+        assert_eq!(resolve_model("b", Some("sonnet".into()), "fable"), "sonnet");
+        assert_eq!(resolve_model("e", Some("opus".into()), "sonnet"), "opus");
     }
 
     #[test]
     fn model_flag_absent_orch_default_overrides_settings() {
-        assert_eq!(resolve_model("b", None, "claude-sonnet-5-5"), "opus");
-        assert_eq!(resolve_model("e", None, "claude-opus-5-5"), "haiku");
+        assert_eq!(resolve_model("b", None, "sonnet"), "opus");
+        assert_eq!(resolve_model("e", None, "opus"), "haiku");
     }
 
     #[test]
     fn model_flag_absent_m0_uses_settings_value() {
-        assert_eq!(
-            resolve_model("m0", None, "claude-sonnet-5-5"),
-            "claude-sonnet-5-5"
-        );
-        assert_eq!(
-            resolve_model("m0", None, "claude-opus-5-5"),
-            "claude-opus-5-5"
-        );
+        assert_eq!(resolve_model("m0", None, "sonnet"), "sonnet");
+        assert_eq!(resolve_model("m0", None, "opus"), "opus");
     }
 
     #[test]

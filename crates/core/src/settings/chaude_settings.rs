@@ -11,20 +11,18 @@ use crate::i18n;
 use crate::record::dir_for;
 use crate::record_folder::prune_record_files;
 
-// Go settingsDefaultModel "opus": the id used when the file, the field, or the value is missing or unknown.
-const DEFAULT_ID: &str = "claude-opus-5-5";
-
-// Go mainModelIDs: settings alias -> claude model id.
-fn model_id(alias: &str) -> Option<&'static str> {
-    match alias {
-        "opus" => Some("claude-opus-5-5"),
-        "sonnet" => Some("claude-sonnet-5-5"),
-        "fable" => Some("claude-fable-5-1"),
-        _ => None,
-    }
+// The family alias of a main model value: sonnet | opus | fable. The alias itself is kept as is, so
+// `claude --model <alias>` lets the server resolve the latest version. An older full id
+// (claude-<family>-...) is reduced to its family. None for any other value.
+pub fn family_alias(value: &str) -> Option<&'static str> {
+    let v = value.trim().to_ascii_lowercase();
+    MODEL_CHOICES
+        .iter()
+        .copied()
+        .find(|f| v == *f || (v.starts_with("claude-") && v.contains(*f)))
 }
 
-// Pure: the main model id for settings JSON text. Invalid JSON, a missing field, or an unknown alias
+// Pure: the main model alias for settings JSON text. Invalid JSON, a missing field, or an unknown value
 // all fall back to the default alias (Go loadChaudeSettings + clamp).
 pub fn main_model_from_json(text: &str) -> &'static str {
     let alias = serde_json::from_str::<Value>(text)
@@ -35,10 +33,10 @@ pub fn main_model_from_json(text: &str) -> &'static str {
                 .map(str::to_owned)
         })
         .unwrap_or_default();
-    model_id(&alias).unwrap_or(DEFAULT_ID)
+    family_alias(&alias).unwrap_or(DEFAULT_MODEL)
 }
 
-// The main model id for a project folder. None means the process working directory (Go settingsFileFor).
+// The main model alias for a project folder. None means the process working directory (Go settingsFileFor).
 // A missing or unreadable file yields the default.
 pub fn main_model(cwd: Option<&Path>) -> &'static str {
     let dir = match cwd {
@@ -164,18 +162,14 @@ impl Settings {
     pub fn clamp(mut self) -> Self {
         self.session_retention_days = self.session_retention_days.max(0);
         self.extra_coders = self.extra_coders.clamp(0, MAX_EXTRA_CODERS);
-        if model_id(&self.main_model).is_none() {
-            self.main_model = DEFAULT_MODEL.to_string();
-        }
+        // A saved full id migrates to its family alias when the settings load or save.
+        self.main_model = family_alias(&self.main_model)
+            .unwrap_or(DEFAULT_MODEL)
+            .to_string();
         if !matches!(self.language.as_str(), "auto" | "ko" | "en") {
             self.language = "auto".to_string();
         }
         self
-    }
-
-    // Go modelID: the claude model id for MainModel (after clamp).
-    pub fn model_id(&self) -> &'static str {
-        model_id(&self.clone().clamp().main_model).unwrap_or("claude-opus-5-5")
     }
 }
 
@@ -311,7 +305,7 @@ mod tests {
         save(&path, &Settings::default()).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains(r#""lean": "off""#), "{text}");
-        assert_eq!(main_model_from_json(&text), "claude-opus-5-5");
+        assert_eq!(main_model_from_json(&text), "opus");
         // A file without the key gets none.
         fs::write(&path, r#"{"main_model":"sonnet"}"#).unwrap();
         save(&path, &Settings::default()).unwrap();
@@ -334,7 +328,7 @@ mod tests {
         save_language(&dir, "ko").unwrap();
         let text = fs::read_to_string(dir.join(".chaude").join("settings.json")).unwrap();
         assert_eq!(language_from_json(&text).as_deref(), Some("ko"));
-        assert_eq!(main_model_from_json(&text), "claude-sonnet-5-5");
+        assert_eq!(main_model_from_json(&text), "sonnet");
         assert!(!agent_wait_from_json(&text));
         assert!(save_language(&dir, "fr").is_err());
         assert_eq!(
@@ -353,47 +347,53 @@ mod tests {
     }
 
     #[test]
-    fn known_aliases_map_to_ids() {
+    fn aliases_pass_through_unchanged() {
+        for alias in ["opus", "sonnet", "fable"] {
+            let text = format!(r#"{{"main_model":"{alias}"}}"#);
+            assert_eq!(main_model_from_json(&text), alias);
+            assert_eq!(family_alias(alias), Some(alias));
+        }
+    }
+
+    #[test]
+    fn saved_full_ids_migrate_to_family_alias() {
+        assert_eq!(family_alias("claude-sonnet-5-5"), Some("sonnet"));
+        assert_eq!(family_alias("claude-opus-5-5"), Some("opus"));
+        assert_eq!(family_alias("claude-fable-5-2"), Some("fable"));
+        assert_eq!(family_alias(" Claude-Fable-5-1 "), Some("fable"));
         assert_eq!(
-            main_model_from_json(r#"{"main_model":"opus"}"#),
-            "claude-opus-5-5"
+            main_model_from_json(r#"{"main_model":"claude-fable-5-2"}"#),
+            "fable"
         );
-        assert_eq!(
-            main_model_from_json(r#"{"main_model":"sonnet"}"#),
-            "claude-sonnet-5-5"
-        );
-        assert_eq!(
-            main_model_from_json(r#"{"main_model":"fable"}"#),
-            "claude-fable-5-1"
-        );
+        let s = Settings {
+            main_model: "claude-sonnet-5-5".to_string(),
+            ..Settings::default()
+        }
+        .clamp();
+        assert_eq!(s.main_model, "sonnet");
     }
 
     #[test]
     fn missing_or_unknown_falls_back_to_opus() {
-        assert_eq!(
-            main_model_from_json(r#"{"extra_coders":2}"#),
-            "claude-opus-5-5"
-        );
-        assert_eq!(
-            main_model_from_json(r#"{"main_model":"gpt"}"#),
-            "claude-opus-5-5"
-        );
-        assert_eq!(main_model_from_json("not json"), "claude-opus-5-5");
-        assert_eq!(main_model_from_json(""), "claude-opus-5-5");
+        assert_eq!(main_model_from_json(r#"{"extra_coders":2}"#), "opus");
+        assert_eq!(main_model_from_json(r#"{"main_model":"gpt"}"#), "opus");
+        assert_eq!(main_model_from_json(r#"{"main_model":"haiku"}"#), "opus");
+        assert_eq!(main_model_from_json("not json"), "opus");
+        assert_eq!(main_model_from_json(""), "opus");
     }
 
     #[test]
     fn reads_project_file_and_defaults_when_absent() {
         let dir = std::env::temp_dir().join(format!("chaude-settings-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        assert_eq!(main_model(Some(&dir)), "claude-opus-5-5");
+        assert_eq!(main_model(Some(&dir)), "opus");
         fs::create_dir_all(dir.join(".chaude")).unwrap();
         fs::write(
             dir.join(".chaude").join("settings.json"),
             r#"{"main_model":"sonnet"}"#,
         )
         .unwrap();
-        assert_eq!(main_model(Some(&dir)), "claude-sonnet-5-5");
+        assert_eq!(main_model(Some(&dir)), "sonnet");
         let _ = fs::remove_dir_all(&dir);
     }
 }

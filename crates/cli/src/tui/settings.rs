@@ -285,20 +285,25 @@ mod tests {
         assert_eq!(load(Some(&both)).extra_coders, 5);
     }
 
-    // Go TestSettingsModelID.
+    // The main model stays an alias (the server resolves the latest version); a saved full id migrates.
     #[test]
-    fn model_ids_follow_alias() {
-        let id = |m: &str| {
-            Settings {
-                main_model: m.into(),
-                ..Settings::default()
-            }
-            .model_id()
-        };
-        assert_eq!(id("opus"), "claude-opus-5-5");
-        assert_eq!(id("sonnet"), "claude-sonnet-5-5");
-        assert_eq!(id("fable"), "claude-fable-5-1");
-        assert_eq!(id("gpt"), "claude-opus-5-5");
+    fn main_model_stays_alias_and_full_id_migrates() {
+        let dir = std::env::temp_dir().join(format!("chaude-model-alias-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        for (saved, want) in [
+            ("opus", "opus"),
+            ("sonnet", "sonnet"),
+            ("fable", "fable"),
+            ("claude-sonnet-5-5", "sonnet"),
+            ("claude-fable-5-2", "fable"),
+            ("gpt", "opus"),
+        ] {
+            fs::write(&path, format!(r#"{{"main_model":"{saved}"}}"#)).unwrap();
+            assert_eq!(load(Some(&path)).main_model, want, "saved {saved}");
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 
     // Go TestSettingsFileIsPerProject and TestSettingsFileEmptyCwdUsesWorkingDir.

@@ -117,11 +117,11 @@ fn price_table(alias: &str) -> Option<ModelPrice> {
     }
 }
 
-// Maps a full model id (claude-opus-5-5, claude-sonnet-5-5, ...) to its price alias. Other names are
-// returned as-is, so they find no price.
+// Maps a model name to its family key (opus, sonnet, haiku, fable), so an alias and a server-reported
+// full id (claude-opus-5-5, ...) price alike. Other names are returned as-is, so they find no price.
 fn price_key(model: &str) -> String {
     let m = model.to_lowercase();
-    for alias in ["opus", "sonnet", "haiku"] {
+    for alias in ["opus", "sonnet", "haiku", "fable"] {
         if m.contains(alias) {
             return alias.to_string();
         }

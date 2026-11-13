@@ -134,7 +134,7 @@ chaude -h | --help | help
 | `--max-workers` | 3 | 동시에 살아 있을 수 있는 워커 세션 수 상한. `CHAUDE_MAX_WORKERS`가 설정되어 있고 옵션이 없으면 그 값을 씁니다 |
 | `--orch` | `m0` | 오케스트레이션 모드. `m0`, `b`, `c`, `d`, `e`, `f` 중 하나입니다. 모드 `b`, `c`, `d`, `f`는 모델을 opus로, `e`는 haiku로 정합니다 |
 
-- `--model`에 주는 이름은 `claude`에 그대로 전달됩니다. 설정 화면의 메인 모델은 `opus`, `sonnet`, `fable` 중 하나입니다.
+- `--model`에 주는 이름은 `claude`에 그대로 전달됩니다. 설정 화면의 메인 모델은 `opus`, `sonnet`, `fable` 중 하나이고, `claude --model`에 그대로 전달되어 서버가 최신 버전으로 풉니다.
 - `--orch`는 A/B 테스트용 옵션입니다. 평소에는 `m0`을 씁니다.
 
 ### --from-claude

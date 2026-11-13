@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- settings: the main model is one of `opus`, `sonnet`, `fable` (picker and `main_model`), passed to `claude --model` unchanged so the server resolves the latest version. A saved full id (e.g. `claude-sonnet-5-5`) migrates to its family alias on load and save; budget prices and rotation thresholds key on the family.
+  - settings: 메인 모델은 `opus`, `sonnet`, `fable` 중 하나입니다 (설정 피커와 `main_model`). `claude --model`에 그대로 전달되어 서버가 최신 버전을 고릅니다. 저장된 전체 모델 이름(예: `claude-sonnet-5-5`)은 읽을 때와 저장할 때 같은 계열의 별칭으로 바뀝니다. 예산 단가와 세션 교체 기준은 계열 기준으로 봅니다.
 - tui: the busy row and the welcome box show the model name the Claude server reports (stream-json init, then each reply's model), not a settings alias, so a fable main model no longer shows "opus".
   - tui: 바쁨 줄과 환영 상자는 settings 별칭 대신 Claude 서버가 보고한 모델 이름을 보여 줍니다 (stream-json init, 이후 응답의 모델). 그래서 fable 메인 모델이 "opus"로 보이지 않습니다.
 - core: UI-neutral app state moved to `chaude_core::ui_state`: the `Action` enum, the status-bar data `BarInput`, and the prompt-history push rule. The TUI re-exports them, so behavior is unchanged (S4, first slice).
