@@ -95,6 +95,8 @@
   - core: 제출과 라우팅 메서드(사용자 입력을 메인 자식, 프롬프터, TUI와 코더 워커로 보내기, 전환과 상주 처리)를 `api.rs`에서 `api/route.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다 (S5, 라우트 모듈).
 - core: the persistence methods (session, live marker, agent, task and turn records, carried context, handoff snapshots) moved from `api.rs` to `api/persist.rs`, with no logic change (S5, persist module).
   - core: 저장 메서드(세션, 라이브 표식, 에이전트, 작업과 턴 기록, 이어받을 맥락, handoff 스냅샷)를 `api.rs`에서 `api/persist.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다 (S5, 저장 모듈).
+- core: the remaining `api.rs` methods (rotation, drain, session and child lifecycle) moved to `api/misc.rs`, with no logic change. This completes the `api` split (S5, misc module).
+  - core: 남은 `api.rs` 메서드(회전, 드레인, 세션과 자식 수명 주기)를 `api/misc.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다. 이것으로 `api` 분할이 끝납니다 (S5, 기타 모듈).
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.
