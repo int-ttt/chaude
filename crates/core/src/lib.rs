@@ -17,6 +17,7 @@ pub mod handoff;
 pub mod i18n;
 pub mod import_claude;
 pub mod import_view;
+pub mod input_history;
 pub mod lean;
 pub mod localtime;
 pub mod mcp;

@@ -31,6 +31,9 @@ pub struct ChaudeApp {
 impl ChaudeApp {
     pub fn new(ctx: egui::Context) -> Self {
         let mut state = GuiState::default();
+        if let Ok(cwd) = std::env::current_dir() {
+            state.load_history(&cwd);
+        }
         let (engine, rx) = match engine::start(ctx) {
             Ok((handle, rx)) => (Some(handle), Some(rx)),
             Err(e) => {

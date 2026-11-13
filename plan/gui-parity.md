@@ -52,7 +52,7 @@ Basis: crates/cli/src/tui/*.rs, crates/core/src/slash.rs (SLASH_CMDS, PASSTHROUG
 | feature | TUI source | core ready? | GUI status | size | phase |
 |---|---|---|---|---|---|
 | Output stream (text, tool blocks, markdown) | tui/render.rs, tui/records.rs, tui/sessview.rs | yes (event.rs, UiEvent) | partial: output pane with markdown and tail-follow (G1 commit 2); tool/agent rows are plain text, no tool blocks yet | L | G1 |
-| Multi-line input, Enter sends, history | tui/mod.rs (key handling ~1085-1290) | partial (history file path needs check) | partial: Enter sends, trailing-backslash and Shift/Alt+Enter newline, in-memory Up/Down history (G1 commit 2); history file and Shift/Alt+Enter not run in a GUI session yet | M | G1 |
+| Multi-line input, Enter sends, history | tui/mod.rs (key handling ~1085-1290) | partial (history file path needs check) | partial: Enter sends, trailing-backslash and Shift/Alt+Enter newline, Up/Down history loaded from and saved to `<cwd>/.chaude/history.jsonl` via core `input_history` (S4 commit 1); Shift/Alt+Enter not run in a GUI session yet | M | G1 |
 | Status bar M/P/T/C rows and turn token line | tui/bar.rs | partial: status bar from bar_at (G1 commit 3): model, ctx %, tokens, cost, turn timer, agents, queue, P/T/C role tokens, last-turn tokens as plain English; coder line, rate/rot/mode notices and bar.rs formatting not ported (S4 or i18n); orphan/budget/rotated/quiet notices hard-coded English (bar.rs:381-406), not i18n | not started | M | G1 |
 | Tasks panel (status, title, Nk tokens, Ns) | tui/mod.rs (UiEvent::TaskStats ~630) | yes | not started | M | G1 |
 | Edit and clipboard | tui/edit.rs, tui/mod.rs (~2927-3024) | n/a (toolkit side) | not started | M | G1 |

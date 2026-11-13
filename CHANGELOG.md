@@ -13,6 +13,8 @@
   - gui: GUI에 출력 창(마크다운, 스크롤을 올리지 않으면 끝을 따라감)과 여러 줄 입력창이 생겼습니다. Enter는 보내기, 끝의 `\` 또는 Shift/Alt+Enter는 줄바꿈, Up/Down은 이번 세션의 입력 기록을 불러옵니다.
 - gui: the GUI shows a status bar (model, context %, tokens, cost, turn timer, agents, queue) and a y/n permission dialog; Shift+Tab cycles the permission mode.
   - gui: GUI에 상태 막대(모델, 컨텍스트 %, 토큰, 비용, 턴 타이머, 에이전트, 대기열)와 y/n 권한 대화상자가 생겼습니다. Shift+Tab은 권한 모드를 순환합니다.
+- core: the prompt history file (`<cwd>/.chaude/history.jsonl`) moved from the TUI editor to `chaude_core::input_history`; the GUI now loads the same history at start and saves each prompt to it, so Up/Down recall survives a restart in both UIs. TUI behaviour is unchanged.
+  - core: 프롬프트 기록 파일(`<cwd>/.chaude/history.jsonl`)을 TUI 편집기에서 `chaude_core::input_history`로 옮겼습니다. GUI도 시작할 때 같은 기록을 읽고 보낸 프롬프트를 저장하므로, 두 UI 모두 재시작 후에도 Up/Down 기록 불러오기가 유지됩니다. TUI 동작은 그대로입니다.
 
 ## 0.12.6 - 2026-11-13
 - agents: `haiku-runner` and `haiku-test-lead` note that on Windows `python3` is `py -3` (else `python`), the same interpreter choice the Windows hooks use.
