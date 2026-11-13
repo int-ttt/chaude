@@ -87,6 +87,8 @@
   - core: `api` 모듈의 단위 테스트를 `api.rs`에서 `api/tests.rs`로 옮겼습니다 (S5, 첫 단계). 코드와 공개 API는 바뀌지 않았습니다.
 - core: the turn lifecycle methods (`begin_turn`, `end_turn`, `finish_turn`, `after_turn`, `next_turn`, `remember_turn`) moved from `api.rs` to `api/turn.rs`, with no logic change (S5, turn module).
   - core: 턴 수명 주기 메서드(`begin_turn`, `end_turn`, `finish_turn`, `after_turn`, `next_turn`, `remember_turn`)를 `api.rs`에서 `api/turn.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다 (S5, 턴 모듈).
+- core: the retry and timeout methods (prompter, coder idle, wait budget, idle exit timers) moved from `api.rs` to `api/retry.rs`, with no logic change (S5, retry module).
+  - core: 재시도와 시간 초과 메서드(프롬프터, 코더 유휴, 대기 예산, 유휴 종료 타이머)를 `api.rs`에서 `api/retry.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다 (S5, 재시도 모듈).
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.
