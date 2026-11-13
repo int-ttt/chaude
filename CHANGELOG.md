@@ -101,6 +101,8 @@
   - core: 남은 `api.rs` 메서드(회전, 드레인, 세션과 자식 수명 주기)를 `api/misc.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다. 이것으로 `api` 분할이 끝납니다 (S5, 기타 모듈).
 - core: the core error type `chaude_core::error::Error` (`Msg` or `Io`) starts replacing `Result<_, String>`; `import_claude` is the first module on it. `home_dir` is one shared function (`osenv::try_home_dir`); the cli copy now delegates to it, so on windows it reads only USERPROFILE (it used to try HOME first) (S8, first slice).
   - core: 핵심 오류 타입 `chaude_core::error::Error`(`Msg` 또는 `Io`)가 `Result<_, String>`을 대체하기 시작했습니다. 첫 모듈은 `import_claude`입니다. `home_dir`은 하나의 함수(`osenv::try_home_dir`)로 모았고, cli 쪽 복사본은 이것을 씁니다. 그래서 Windows에서는 USERPROFILE만 읽습니다 (이전에는 HOME을 먼저 읽었습니다) (S8, 첫 단계).
+- core: `osenv::try_home_dir` reads HOME first, then USERPROFILE, on every OS again (the old cli order); this undoes the windows-only regression from the S8 first slice. A unit test locks the order.
+  - core: `osenv::try_home_dir`가 모든 OS에서 다시 HOME을 먼저, 그다음 USERPROFILE을 읽습니다 (이전 cli 순서). S8 첫 단계의 Windows 전용 회귀를 되돌렸습니다. 단위 테스트가 이 순서를 고정합니다.
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.

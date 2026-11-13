@@ -1,6 +1,7 @@
 //! The only module that knows OS differences. Everything else stays OS-neutral.
 
 use std::env;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub fn is_windows() -> bool {
@@ -68,15 +69,18 @@ fn is_exec(p: &Path) -> bool {
     p.is_file()
 }
 
-/// Go's os.UserHomeDir: $HOME, or %USERPROFILE% on windows; None when unset or empty.
+/// $HOME, then %USERPROFILE% (the old cli order on every OS); None when both are unset or empty.
 pub fn try_home_dir() -> Option<PathBuf> {
-    let var = if is_windows() { "USERPROFILE" } else { "HOME" };
-    env::var_os(var)
-        .filter(|h| !h.is_empty())
+    pick_home(env::var_os("HOME"), env::var_os("USERPROFILE"))
+}
+
+fn pick_home(home: Option<OsString>, profile: Option<OsString>) -> Option<PathBuf> {
+    home.filter(|h| !h.is_empty())
+        .or_else(|| profile.filter(|h| !h.is_empty()))
         .map(PathBuf::from)
 }
 
-/// Go's os.UserHomeDir: $HOME, or %USERPROFILE% on windows; "." when unset.
+/// $HOME, then %USERPROFILE%; "." when both are unset.
 pub fn home_dir() -> PathBuf {
     try_home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
@@ -96,5 +100,26 @@ pub fn state_dir() -> PathBuf {
     match env::var_os("XDG_STATE_HOME") {
         Some(d) if !d.is_empty() => PathBuf::from(d).join("claude-harness"),
         _ => home.join(".local").join("state").join("claude-harness"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn os(s: &str) -> Option<OsString> {
+        Some(OsString::from(s))
+    }
+
+    #[test]
+    fn home_reads_home_first_then_userprofile() {
+        assert_eq!(pick_home(os("/h"), os("C:\\u")), Some(PathBuf::from("/h")));
+        assert_eq!(
+            pick_home(Some(OsString::new()), os("C:\\u")),
+            Some(PathBuf::from("C:\\u"))
+        );
+        assert_eq!(pick_home(None, os("C:\\u")), Some(PathBuf::from("C:\\u")));
+        assert_eq!(pick_home(None, Some(OsString::new())), None);
+        assert_eq!(pick_home(None, None), None);
     }
 }

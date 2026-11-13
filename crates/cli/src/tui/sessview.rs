@@ -187,7 +187,7 @@ pub fn project_dir(home: &Path, cwd: &str) -> PathBuf {
     home.join(".claude").join("projects").join(proj)
 }
 
-/// Go os.UserHomeDir, shared with the core (`osenv::try_home_dir`).
+/// HOME, then USERPROFILE; shared with the core (`osenv::try_home_dir`).
 pub fn home_dir() -> Option<PathBuf> {
     chaude_core::osenv::try_home_dir()
 }
