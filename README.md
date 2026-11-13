@@ -33,6 +33,7 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 - `scripts/squeeze-run.py -- <cmd>` runs a build or test and prints only the head, the error, warning, panic, and FAIL lines with context, and the tail; the full output goes to `logs/runs/<ts>.log`. The Haiku runner and test agents use it.
 - A PreToolUse read guard (`haiku-read-guard.py`, Read by `haiku-*` subagents only) denies a full read of a file over 400 lines and a repeat full read of an unchanged file in one session. Use Grep or Read with offset and limit. It fails open.
 - `python3 scripts/fixed-cost-audit.py` (see Effect analysis) is installed with the hooks into `<project>/scripts`.
+
 ## How it works
 
 Opus is the main session. It reads your request, decides the plan, and delegates the work. `haiku-output` writes the final reply. Opus does not read or edit files itself. Hooks enforce this. Haiku agents do the actual work, such as searching, editing, and checking.

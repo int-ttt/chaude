@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.12.6 (2026-11-13)
+## 0.12.6 - 2026-11-13
 - agents: `haiku-runner` and `haiku-test-lead` note that on Windows `python3` is `py -3` (else `python`), the same interpreter choice the Windows hooks use.
   - agents: `haiku-runner`와 `haiku-test-lead`에 Windows에서는 `python3` 대신 `py -3`(없으면 `python`)를 쓴다고 적었습니다. Windows 훅이 고르는 인터프리터와 같습니다.
 - release: the next release is 0.12.6; 0.13.0 waits until the GUI is implemented (plan S11).
