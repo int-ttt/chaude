@@ -7,6 +7,8 @@
   - gui: GUI용 `egui_commonmark`(마크다운)와 `notify-rust`(데스크톱 알림) 의존성을 추가합니다. 사용자에게 보이는 변화는 아직 없습니다.
 - plan: GUI parity table (G3) added to plan/gui-parity.md: every TUI feature and slash command, with core readiness, GUI status, size, and phase.
   - plan: plan/gui-parity.md에 GUI 기능 대조표(G3)를 추가했습니다. TUI 기능과 슬래시 명령 전체를 core 준비 상태, GUI 상태, 크기, 단계와 함께 적었습니다.
+- gui: the GUI starts the core engine and folds its events into a tested state reducer; the window shows a plain transcript for now, with no output pane or input yet.
+  - gui: GUI가 core 엔진을 시작하고 이벤트를 테스트된 상태 reducer에 반영합니다. 창에는 지금 평문 기록만 보이고, 출력 창과 입력창은 아직 없습니다.
 
 ## 0.12.6 - 2026-11-13
 - agents: `haiku-runner` and `haiku-test-lead` note that on Windows `python3` is `py -3` (else `python`), the same interpreter choice the Windows hooks use.

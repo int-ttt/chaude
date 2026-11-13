@@ -1,5 +1,13 @@
-//! chaude GUI entry point. Opens an empty window; the UI is added in later steps.
+//! chaude GUI entry point. Starts the core engine and opens the app window.
 
 fn main() -> eframe::Result {
-    eframe::run_ui_native("chaude", eframe::NativeOptions::default(), |_ui, _frame| {})
+    eframe::run_native(
+        "chaude",
+        eframe::NativeOptions::default(),
+        Box::new(|cc| {
+            Ok(Box::new(chaude_gui::app::ChaudeApp::new(
+                cc.egui_ctx.clone(),
+            )))
+        }),
+    )
 }

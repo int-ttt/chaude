@@ -1,5 +1,9 @@
 //! Helpers for the chaude GUI (eframe, see main.rs). Uses the chaude-core public API only.
 
+pub mod app;
+pub mod engine;
+pub mod state;
+
 /// Kind of one stream-json line from the Claude CLI, as the shared core names it.
 /// Returns None when the line is not valid JSON.
 pub fn event_kind(line: &str) -> Option<&'static str> {

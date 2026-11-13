@@ -51,7 +51,7 @@ Basis: crates/cli/src/tui/*.rs, crates/core/src/slash.rs (SLASH_CMDS, PASSTHROUG
 ### TUI features
 | feature | TUI source | core ready? | GUI status | size | phase |
 |---|---|---|---|---|---|
-| Output stream (text, tool blocks, markdown) | tui/render.rs, tui/records.rs, tui/sessview.rs | yes (event.rs, UiEvent) | not started | L | G1 |
+| Output stream (text, tool blocks, markdown) | tui/render.rs, tui/records.rs, tui/sessview.rs | yes (event.rs, UiEvent) | partial: engine wiring and reducer done (G1 commit 1); pane and markdown in G1 commit 2 | L | G1 |
 | Multi-line input, Enter sends, history | tui/mod.rs (key handling ~1085-1290) | partial (history file path needs check) | not started | M | G1 |
 | Status bar M/P/T/C rows and turn token line | tui/bar.rs | partial: orphan/budget/rotated/quiet notices hard-coded English (bar.rs:381-406), not i18n | not started | M | G1 |
 | Tasks panel (status, title, Nk tokens, Ns) | tui/mod.rs (UiEvent::TaskStats ~630) | yes | not started | M | G1 |
