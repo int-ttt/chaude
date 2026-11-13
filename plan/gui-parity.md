@@ -53,12 +53,12 @@ Basis: crates/cli/src/tui/*.rs, crates/core/src/slash.rs (SLASH_CMDS, PASSTHROUG
 |---|---|---|---|---|---|
 | Output stream (text, tool blocks, markdown) | tui/render.rs, tui/records.rs, tui/sessview.rs | yes (event.rs, UiEvent) | partial: output pane with markdown and tail-follow (G1 commit 2); tool/agent rows are plain text, no tool blocks yet | L | G1 |
 | Multi-line input, Enter sends, history | tui/mod.rs (key handling ~1085-1290) | partial (history file path needs check) | partial: Enter sends, trailing-backslash and Shift/Alt+Enter newline, in-memory Up/Down history (G1 commit 2); history file and Shift/Alt+Enter not run in a GUI session yet | M | G1 |
-| Status bar M/P/T/C rows and turn token line | tui/bar.rs | partial: orphan/budget/rotated/quiet notices hard-coded English (bar.rs:381-406), not i18n | not started | M | G1 |
+| Status bar M/P/T/C rows and turn token line | tui/bar.rs | partial: status bar from bar_at (G1 commit 3): model, ctx %, tokens, cost, turn timer, agents, queue, P/T/C role tokens, last-turn tokens as plain English; coder line, rate/rot/mode notices and bar.rs formatting not ported (S4 or i18n); orphan/budget/rotated/quiet notices hard-coded English (bar.rs:381-406), not i18n | not started | M | G1 |
 | Tasks panel (status, title, Nk tokens, Ns) | tui/mod.rs (UiEvent::TaskStats ~630) | yes | not started | M | G1 |
 | Edit and clipboard | tui/edit.rs, tui/mod.rs (~2927-3024) | n/a (toolkit side) | not started | M | G1 |
 | Agent view window (Ctrl+T) | tui/agentview.rs | yes (agent_rows) | not started | M | G2 |
 | Session view | tui/sessview.rs | yes (UiEvent stream) | not started | M | G2 |
-| Permission prompt (y/n) | tui/mod.rs (~968) | yes (answer_permission) | not started | S | G2 |
+| Permission prompt (y/n) | tui/mod.rs (~968) | yes (answer_permission) | partial: modal y/n dialog and buttons, Shift+Tab mode cycle (G1 commit 3); dialog strings are hard-coded English, not i18n; not run in a live GUI session yet | S | G2 |
 | agent_wait queue hold/release/cancel | tui/mod.rs | yes (cancel_wait) | not started | S | G2 |
 | Esc cancels wait, Esc Esc rewind | tui/mod.rs, tui/rewind.rs | partial (interrupt yes; rewind flow in TUI only) | not started | M | G2 |
 | Ctrl+C / Ctrl+D | tui/mod.rs | yes (interrupt) | not started | S | G2 |

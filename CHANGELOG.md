@@ -11,6 +11,8 @@
   - gui: GUI가 core 엔진을 시작하고 이벤트를 테스트된 상태 reducer에 반영합니다. 창에는 지금 평문 기록만 보이고, 출력 창과 입력창은 아직 없습니다.
 - gui: the GUI has an output pane (markdown, follows the tail unless scrolled up) and a multi-line input: Enter sends, a trailing `\` or Shift/Alt+Enter adds a newline, Up/Down recall prompt history for this session.
   - gui: GUI에 출력 창(마크다운, 스크롤을 올리지 않으면 끝을 따라감)과 여러 줄 입력창이 생겼습니다. Enter는 보내기, 끝의 `\` 또는 Shift/Alt+Enter는 줄바꿈, Up/Down은 이번 세션의 입력 기록을 불러옵니다.
+- gui: the GUI shows a status bar (model, context %, tokens, cost, turn timer, agents, queue) and a y/n permission dialog; Shift+Tab cycles the permission mode.
+  - gui: GUI에 상태 막대(모델, 컨텍스트 %, 토큰, 비용, 턴 타이머, 에이전트, 대기열)와 y/n 권한 대화상자가 생겼습니다. Shift+Tab은 권한 모드를 순환합니다.
 
 ## 0.12.6 - 2026-11-13
 - agents: `haiku-runner` and `haiku-test-lead` note that on Windows `python3` is `py -3` (else `python`), the same interpreter choice the Windows hooks use.
