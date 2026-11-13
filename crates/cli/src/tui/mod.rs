@@ -7993,15 +7993,15 @@ mod tests {
     #[test]
     fn a_key_press_wakes_the_loop_without_waiting_for_the_tick() {
         let (tx, wakes) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
         let sender = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(20));
             tx.send(Wake::Term(Event::Key(key(
                 KeyCode::Char('a'),
                 KeyModifiers::NONE,
             ))))
             .unwrap();
-            // Keep the channel open so the wait can only end by the key or the timeout.
-            thread::sleep(Duration::from_millis(200));
+            // Keep the channel open until the test has read the key, so the wait can only end by the key or the timeout.
+            let _ = done_rx.recv();
         });
         let start = Instant::now();
         // A 10 s timeout stands in for "the tick is far away": the key must end the wait first.
@@ -8012,6 +8012,7 @@ mod tests {
             start.elapsed()
         );
         assert!(matches!(batch.as_slice(), [Wake::Term(Event::Key(_))]));
+        done_tx.send(()).unwrap();
         sender.join().unwrap();
     }
 
@@ -8050,14 +8051,15 @@ mod tests {
     #[test]
     fn a_key_press_reaches_the_screen_without_waiting_for_the_tick() {
         let (tx, wakes) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
         let sender = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(20));
             tx.send(Wake::Term(Event::Key(key(
                 KeyCode::Char('z'),
                 KeyModifiers::NONE,
             ))))
             .unwrap();
-            thread::sleep(Duration::from_millis(200));
+            // Keep the channel open until the test has drawn the frame.
+            let _ = done_rx.recv();
         });
         let mut app = App::new(40, 6);
         let mut prev = Vec::new();
@@ -8079,6 +8081,7 @@ mod tests {
             start.elapsed()
         );
         assert!(String::from_utf8_lossy(&buf).contains('z'), "{buf:?}");
+        done_tx.send(()).unwrap();
         sender.join().unwrap();
     }
 

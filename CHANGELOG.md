@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- tests: the two key-press wake tests in the TUI loop no longer use fixed sleeps; the key is sent at once and the sender stays open until the test has read it (S2).
+  - tests: TUI 루프의 키 입력 깨우기 테스트 두 개는 고정 sleep을 쓰지 않습니다. 키를 바로 보내고, 테스트가 읽을 때까지 송신 측을 열어 둡니다 (S2).
 - ci: the release build runs `cargo test --locked --workspace` on each target before building, so a failing test stops the tag release before any asset is published (S1).
   - ci: 릴리스 빌드는 각 타깃에서 빌드 전에 `cargo test --locked --workspace`를 실행합니다. 테스트가 실패하면 태그 릴리스가 중단되어 에셋이 게시되지 않습니다 (S1).
 - docs: the TUI agent view and rewind picker headers no longer say they are unwired (both are wired into the TUI); their blanket dead-code allow is removed (S10).
