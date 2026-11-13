@@ -4,11 +4,13 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use crate::error::Error;
+
 // Go applyOrchEnv: the caller exports the mode under this name for child processes and hooks.
 pub const ENV_KEY: &str = "CHAUDE_ORCH";
 
 // Go parseOrch: normalizes an --orch value; empty means the baseline m0.
-pub fn parse(s: &str) -> Result<&'static str, String> {
+pub fn parse(s: &str) -> Result<&'static str, Error> {
     match s.trim().to_lowercase().as_str() {
         "" | "m0" => Ok("m0"),
         "b" => Ok("b"),
@@ -16,7 +18,9 @@ pub fn parse(s: &str) -> Result<&'static str, String> {
         "d" => Ok("d"),
         "e" => Ok("e"),
         "f" => Ok("f"),
-        _ => Err(format!("unknown orch mode {s:?} (m0|b|c|d|e|f)")),
+        _ => Err(Error::Msg(format!(
+            "unknown orch mode {s:?} (m0|b|c|d|e|f)"
+        ))),
     }
 }
 
@@ -235,12 +239,12 @@ mod tests {
 
     #[test]
     fn parse_mode_normalizes_and_rejects() {
-        assert_eq!(parse(""), Ok("m0"));
-        assert_eq!(parse("  "), Ok("m0"));
-        assert_eq!(parse("m0"), Ok("m0"));
-        assert_eq!(parse("B"), Ok("b"));
-        assert_eq!(parse(" c "), Ok("c"));
-        assert_eq!(parse("F"), Ok("f"));
+        assert_eq!(parse("").ok(), Some("m0"));
+        assert_eq!(parse("  ").ok(), Some("m0"));
+        assert_eq!(parse("m0").ok(), Some("m0"));
+        assert_eq!(parse("B").ok(), Some("b"));
+        assert_eq!(parse(" c ").ok(), Some("c"));
+        assert_eq!(parse("F").ok(), Some("f"));
         assert!(parse("x").is_err());
         assert!(parse("m1").is_err());
     }

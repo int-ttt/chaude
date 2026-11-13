@@ -33,7 +33,7 @@ const USAGE: &str = "usage: chaude <command> [args]
 // Go repl.go:1316 + applyOrchEnv: --orch <mode> (default m0) is normalized and exported as CHAUDE_ORCH for
 // child processes and hooks. Runs before any thread starts, so the environment write is sound.
 fn apply_orch(raw: &str) -> Result<&'static str, String> {
-    let mode = orch::parse(raw)?;
+    let mode = orch::parse(raw).map_err(|e| e.to_string())?;
     // SAFETY: called from main before any other thread is spawned.
     unsafe { env::set_var(orch::ENV_KEY, mode) };
     Ok(mode)

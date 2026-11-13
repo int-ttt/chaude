@@ -4,13 +4,17 @@
 
 use serde_json::Value;
 
+use crate::error::Error;
+
 const TTL_KEY: &str = "CLAUDE_CODE_PROMPT_CACHE_TTL=";
 
 // Go parseCacheTTL: --cache-ttl accepts exactly auto, 1h or 5m (case-sensitive).
-pub fn parse_cache_ttl(s: &str) -> Result<String, String> {
+pub fn parse_cache_ttl(s: &str) -> Result<String, Error> {
     match s {
         "auto" | "1h" | "5m" => Ok(s.to_string()),
-        _ => Err(format!("--cache-ttl must be auto, 1h or 5m (got {s:?})")),
+        _ => Err(Error::Msg(format!(
+            "--cache-ttl must be auto, 1h or 5m (got {s:?})"
+        ))),
     }
 }
 
@@ -51,7 +55,7 @@ mod tests {
     #[test]
     fn parse_cache_ttl_accepts_three_values_only() {
         for s in ["auto", "1h", "5m"] {
-            assert_eq!(parse_cache_ttl(s).as_deref(), Ok(s));
+            assert_eq!(parse_cache_ttl(s).ok().as_deref(), Some(s));
         }
         for s in ["", "10m", "1H", "AUTO"] {
             assert!(parse_cache_ttl(s).is_err(), "{s:?} must be rejected");
