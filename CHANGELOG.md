@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- ci: the release build runs `cargo test --locked --workspace` on each target before building, so a failing test stops the tag release before any asset is published (S1).
+  - ci: 릴리스 빌드는 각 타깃에서 빌드 전에 `cargo test --locked --workspace`를 실행합니다. 테스트가 실패하면 태그 릴리스가 중단되어 에셋이 게시되지 않습니다 (S1).
 - docs: the TUI agent view and rewind picker headers no longer say they are unwired (both are wired into the TUI); their blanket dead-code allow is removed (S10).
   - docs: TUI 에이전트 보기와 되감기 선택기의 헤더가 더 이상 연결되지 않았다고 말하지 않습니다 (둘 다 TUI에 연결되어 있습니다). 전체 dead-code 허용도 제거했습니다 (S10).
 - docs: the context-threshold values (80k, 100k, 150k, 200k, 400k) now live only in one table in the claude-lean README; CLAUDE.md, README, the repl guide, APPLY_GUIDE and the rust plan link to it instead of repeating the numbers (S28).

@@ -51,6 +51,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # A failing test fails this job, so the release job never publishes.
+      - name: Test
+        run: cargo test --locked --workspace
       - name: Build chaude
         run: cargo build --release --locked -p chaude-cli --target "${{ matrix.target }}"
       - name: Package (unix)
