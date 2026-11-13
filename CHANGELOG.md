@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- docs: CLAUDE.md Flow has a rule for a pure ack with no pending `추천:`: one-line reply, no delegation (live matrix D1).
+  - docs: CLAUDE.md 흐름에 규칙을 추가했습니다. 보류 중인 `추천:`이 없는 순수 확인 응답은 한 줄로 답하고 위임하지 않습니다 (라이브 매트릭스 D1).
 - hooks: with a Haiku main (`--model haiku`), main-thread-guard allows only `opus-architect` and `haiku-output` as agents; the main model is read from the main transcript's newest assistant entry (live matrix D2).
   - hooks: Haiku 메인(`--model haiku`)일 때 main-thread-guard는 에이전트로 `opus-architect`와 `haiku-output`만 허용합니다. 메인 모델은 메인 transcript의 가장 최근 assistant 항목에서 읽습니다 (라이브 매트릭스 D2).
 - core: a fable main model is checked against the configured rotation threshold, not the fixed Opus 200k; a test locks this and the full-id form (`claude-fable-5-2`).

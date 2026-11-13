@@ -12,6 +12,7 @@
 
 ## Flow
 - Idle until a user prompt; then ONE delegation round (all calls in one message, foreground), ONE final reply, idle. No interim text, no chaining agents through main; agents self-verify.
+- Pure ack (`ㅇㅇ`, `ㅇㅋ`, `응`, `네`, `ok`, `yes`, …) with no pending `추천:` → one-line reply, no delegation, no tools.
 - Next step needing no consent (not destructive/public/release, no option/priority/spending choice) → run it in the same round.
 - Brief ≤5 lines: goal, paths (never pasted content), constraints, acceptance (agent self-check), "return ≤5 lines". Consecutive tasks on same files → one delegation. ≤3 similar files per Haiku request; take summaries.
 - Split big jobs (many files/items, >~20 responses) into parallel/sequential agents up front.
