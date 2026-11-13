@@ -2,6 +2,7 @@
 //! and builds the pending handoff snapshot from it. Pure data: the caller installs the turns, files and snapshot
 //! into the session and logs the record (see import_record).
 
+use crate::error::Error;
 use crate::import_view::{Turn, ViewBuilder, bget, list, parse_event, sget, trunc};
 use crate::osenv::home_dir;
 use crate::rotate::{PREAMBLE, extract_reco, with_reco};
@@ -65,7 +66,7 @@ pub fn project_key(cwd: &str) -> String {
 }
 
 // Maps "latest", a session id or a path to a .jsonl file. A value with ".jsonl" or a separator is a path.
-pub fn resolve_claude_transcript(arg: &str, cwd: &str) -> Result<PathBuf, String> {
+pub fn resolve_claude_transcript(arg: &str, cwd: &str) -> Result<PathBuf, Error> {
     if arg.ends_with(".jsonl") || arg.contains(MAIN_SEPARATOR) {
         return Ok(PathBuf::from(arg));
     }
@@ -89,12 +90,12 @@ pub fn resolve_claude_transcript(arg: &str, cwd: &str) -> Result<PathBuf, String
         }
     }
     best.map(|(p, _)| p)
-        .ok_or_else(|| format!("no transcripts in {}", dir.display()))
+        .ok_or_else(|| Error::Msg(format!("no transcripts in {}", dir.display())))
 }
 
 // Resolves arg (one id/path/"latest", or a comma-separated list for a /resume group) and reads it.
 // Several files are merged in time order; the returned path is the newest file's.
-pub fn load_import_arg(arg: &str, cwd: &str) -> Result<(PathBuf, ClaudeImport), String> {
+pub fn load_import_arg(arg: &str, cwd: &str) -> Result<(PathBuf, ClaudeImport), Error> {
     let mut imps = Vec::new();
     for a in arg.split(',') {
         let path = resolve_claude_transcript(a, cwd)?;
@@ -135,8 +136,8 @@ pub fn load_import_arg(arg: &str, cwd: &str) -> Result<(PathBuf, ClaudeImport), 
 
 // Streams the file (lines can be over 100 KB) and extracts turns, edited files, the last recommendation,
 // the start time, the cwd, the summary title, and the /clear markers.
-pub fn read_claude_transcript(path: &Path) -> Result<ClaudeImport, String> {
-    let err = |e: std::io::Error| format!("{}: {e}", path.display());
+pub fn read_claude_transcript(path: &Path) -> Result<ClaudeImport, Error> {
+    let err = |e: std::io::Error| Error::Msg(format!("{}: {e}", path.display()));
     let f = File::open(path).map_err(err)?;
     let mut rd = BufReader::with_capacity(1 << 20, f);
     let mut imp = ClaudeImport {
@@ -227,7 +228,10 @@ pub fn read_claude_transcript(path: &Path) -> Result<ClaudeImport, String> {
     }
     flush_turn(&mut imp.turns, &mut cur_user, &mut asst);
     if imp.turns.is_empty() {
-        return Err(format!("no user/assistant turns in {}", path.display()));
+        return Err(Error::Msg(format!(
+            "no user/assistant turns in {}",
+            path.display()
+        )));
     }
     imp.view = vb.finish();
     imp.subagents = vb.n_sub;
@@ -513,7 +517,7 @@ mod tests {
             "e.jsonl",
             &[json!({"type": "summary", "summary": "x"})],
         );
-        let err = read_claude_transcript(&p).unwrap_err();
+        let err = read_claude_transcript(&p).unwrap_err().to_string();
         assert!(err.contains("no user/assistant turns"), "{err}");
     }
 

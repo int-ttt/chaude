@@ -99,6 +99,8 @@
   - core: 저장 메서드(세션, 라이브 표식, 에이전트, 작업과 턴 기록, 이어받을 맥락, handoff 스냅샷)를 `api.rs`에서 `api/persist.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다 (S5, 저장 모듈).
 - core: the remaining `api.rs` methods (rotation, drain, session and child lifecycle) moved to `api/misc.rs`, with no logic change. This completes the `api` split (S5, misc module).
   - core: 남은 `api.rs` 메서드(회전, 드레인, 세션과 자식 수명 주기)를 `api/misc.rs`로 옮겼습니다. 로직은 바뀌지 않았습니다. 이것으로 `api` 분할이 끝납니다 (S5, 기타 모듈).
+- core: the core error type `chaude_core::error::Error` (`Msg` or `Io`) starts replacing `Result<_, String>`; `import_claude` is the first module on it. `home_dir` is one shared function (`osenv::try_home_dir`); the cli copy now delegates to it, so on windows it reads only USERPROFILE (it used to try HOME first) (S8, first slice).
+  - core: 핵심 오류 타입 `chaude_core::error::Error`(`Msg` 또는 `Io`)가 `Result<_, String>`을 대체하기 시작했습니다. 첫 모듈은 `import_claude`입니다. `home_dir`은 하나의 함수(`osenv::try_home_dir`)로 모았고, cli 쪽 복사본은 이것을 씁니다. 그래서 Windows에서는 USERPROFILE만 읽습니다 (이전에는 HOME을 먼저 읽었습니다) (S8, 첫 단계).
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.

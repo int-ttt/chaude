@@ -68,13 +68,17 @@ fn is_exec(p: &Path) -> bool {
     p.is_file()
 }
 
+/// Go's os.UserHomeDir: $HOME, or %USERPROFILE% on windows; None when unset or empty.
+pub fn try_home_dir() -> Option<PathBuf> {
+    let var = if is_windows() { "USERPROFILE" } else { "HOME" };
+    env::var_os(var)
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+}
+
 /// Go's os.UserHomeDir: $HOME, or %USERPROFILE% on windows; "." when unset.
 pub fn home_dir() -> PathBuf {
-    let var = if is_windows() { "USERPROFILE" } else { "HOME" };
-    match env::var_os(var) {
-        Some(h) if !h.is_empty() => PathBuf::from(h),
-        _ => PathBuf::from("."),
-    }
+    try_home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// windows %LOCALAPPDATA%; linux XDG state; mac unchanged ~/.claude-harness (compat).

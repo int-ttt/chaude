@@ -1390,7 +1390,7 @@ impl App {
     // digest: a /resume writes notes/tmp/<session>.md and the engine gets its path with the first input.
     fn import_view(&mut self, arg: &str, digest: bool) {
         match import_claude::load_import_arg(arg, &self.welcome.cwd) {
-            Err(e) => self.note(&e),
+            Err(e) => self.note(&e.to_string()),
             Ok((_, mut imp)) => {
                 if digest {
                     let sids: Vec<String> = arg

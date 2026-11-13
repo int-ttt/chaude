@@ -8,6 +8,7 @@ pub mod category;
 pub mod child_set;
 pub mod clients;
 pub mod doctor;
+pub mod error;
 pub mod event;
 pub mod file_lock;
 pub mod forward;
