@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: a fable main model is checked against the configured rotation threshold, not the fixed Opus 200k; a test locks this and the full-id form (`claude-fable-5-2`).
+  - core: fable 메인 모델은 고정 Opus 200k가 아니라 설정된 회전 기준으로 봅니다. 테스트가 이것과 전체 id 형태(`claude-fable-5-2`)를 고정합니다.
 - settings: the main model is one of `opus`, `sonnet`, `fable` (picker and `main_model`), passed to `claude --model` unchanged so the server resolves the latest version. A saved full id (e.g. `claude-sonnet-5-5`) migrates to its family alias on load and save; budget prices and rotation thresholds key on the family.
   - settings: 메인 모델은 `opus`, `sonnet`, `fable` 중 하나입니다 (설정 피커와 `main_model`). `claude --model`에 그대로 전달되어 서버가 최신 버전을 고릅니다. 저장된 전체 모델 이름(예: `claude-sonnet-5-5`)은 읽을 때와 저장할 때 같은 계열의 별칭으로 바뀝니다. 예산 단가와 세션 교체 기준은 계열 기준으로 봅니다.
 - tui: the busy row and the welcome box show the model name the Claude server reports (stream-json init, then each reply's model), not a settings alias, so a fable main model no longer shows "opus".

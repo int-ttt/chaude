@@ -132,6 +132,14 @@ mod tests {
     }
 
     #[test]
+    fn fable_uses_configured_threshold_not_opus() {
+        // Only the Opus family is fixed at 200k (docs/claude-lean/README.md threshold table).
+        assert_eq!(threshold_for("fable", HAIKU_THRESHOLD), 80_000);
+        assert_eq!(threshold_for("claude-fable-5-2", HAIKU_THRESHOLD), 80_000);
+        assert_eq!(threshold_for("claude-sonnet-5-5", 150_000), 150_000);
+    }
+
+    #[test]
     fn should_rotate_fires_at_threshold() {
         assert!(!should_rotate(79_999, 80_000));
         assert!(should_rotate(80_000, 80_000));
