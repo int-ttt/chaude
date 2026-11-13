@@ -3014,6 +3014,16 @@ impl State {
                 if !self.busy {
                     self.idle_started();
                 }
+                // The server-reported model of the reply: the label follows it when it differs from the init model.
+                if let Some(m) = env
+                    .message
+                    .model
+                    .clone()
+                    .filter(|m| !m.is_empty() && *m != self.model)
+                {
+                    self.model = m;
+                    self.emit_status(self.cost_usd);
+                }
                 if let (Some(id), Some(u)) = (&env.message.id, &env.message.usage) {
                     self.turn_msg_usage
                         .entry(id.clone())

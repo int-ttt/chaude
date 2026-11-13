@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- tui: the busy row and the welcome box show the model name the Claude server reports (stream-json init, then each reply's model), not a settings alias, so a fable main model no longer shows "opus".
+  - tui: 바쁨 줄과 환영 상자는 settings 별칭 대신 Claude 서버가 보고한 모델 이름을 보여 줍니다 (stream-json init, 이후 응답의 모델). 그래서 fable 메인 모델이 "opus"로 보이지 않습니다.
 - core: UI-neutral app state moved to `chaude_core::ui_state`: the `Action` enum, the status-bar data `BarInput`, and the prompt-history push rule. The TUI re-exports them, so behavior is unchanged (S4, first slice).
   - core: UI 중립 앱 상태를 `chaude_core::ui_state`로 옮겼습니다: `Action` 열거형, 상태 줄 데이터 `BarInput`, 프롬프트 기록 추가 규칙. TUI는 같은 이름으로 다시 내보내므로 동작은 바뀌지 않습니다 (S4, 첫 단계).
 - tests: the test that switches the UI language (`/lang`) now holds one crate-wide lock, so it cannot leak a language change into another test running in parallel (S2).

@@ -586,6 +586,7 @@ impl App {
                 cost_usd,
                 context_pct,
             } => {
+                self.welcome.model = model.clone();
                 self.bar.model = model;
                 self.bar.tokens = tokens;
                 self.bar.cost_usd = cost_usd;
@@ -3613,12 +3614,8 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         let long = chaude_core::tmp_layout::long_dir(&cwd);
         cfg.handoff_path = Some(handoff::handoff_file(&long));
     }
-    let model = settings::Settings {
-        main_model: cfg.model.clone(),
-        ..settings::Settings::default()
-    }
-    .model_id()
-    .to_string();
+    // Before the first stream-json init event the label is the configured model, raw; the server's name replaces it.
+    let model = cfg.model.clone();
     let threshold = cfg.context_window;
     let session_mode = session_mode_note(
         cfg.handoff_path.as_deref(),
@@ -7313,6 +7310,30 @@ mod tests {
         );
         assert!(!thinking(&app), "finished resident: no indicator");
         assert_eq!(app.running_n(), 0, "runningN after finish");
+    }
+
+    // The busy row and the welcome box show the model the server reports in stream-json, not a settings alias.
+    #[test]
+    fn busy_row_shows_server_reported_model_name() {
+        let mut app = App::new(80, 30);
+        app.welcome.model = "claude-fable-5-1".into();
+        let init =
+            r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-fable-5-2"}"#;
+        let Ok(chaude_core::event::Event::System(s)) = chaude_core::event::parse_line(init) else {
+            panic!("init line must parse as a system event");
+        };
+        app.apply(UiEvent::Status {
+            model: s.model.unwrap_or_default(),
+            tokens: 0,
+            cost_usd: 0.0,
+            context_pct: 0,
+        });
+        assert_eq!(app.welcome.model, "claude-fable-5-2");
+        assert!(
+            app.busy_row(false).contains("claude-fable-5-2"),
+            "{}",
+            app.busy_row(false)
+        );
     }
 
     // Regression: a resident row showed the session (main, opus) model because the event carried no model.
