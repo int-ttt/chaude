@@ -1,4 +1,4 @@
-//! Placeholder for the GUI (phase 5). Uses the chaude-core public API only; no UI framework yet.
+//! Helpers for the chaude GUI (eframe, see main.rs). Uses the chaude-core public API only.
 
 /// Kind of one stream-json line from the Claude CLI, as the shared core names it.
 /// Returns None when the line is not valid JSON.
