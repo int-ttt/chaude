@@ -6,12 +6,11 @@
 // This is a binary crate, and mod.rs does not call every method here yet (delete_word, kill_to_start,
 // kill_to_end, move_row, backslash_newline, load_history are waiting for key wiring in mod.rs).
 
+use chaude_core::file_lock::FileLock;
+use chaude_core::ui_state::{MAX_HISTORY, push_history};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-
-use chaude_core::ui_state::{MAX_HISTORY, push_history};
 
 #[derive(Debug, Default)]
 pub struct Editor {
@@ -334,14 +333,16 @@ fn read_history(path: &Path) -> Vec<String> {
     items
 }
 
-// Appends one entry as one line (O_APPEND), so two TUIs in one project interleave their lines and never
-// overwrite each other. Only when the file has more than MAX_HISTORY lines is it trimmed, under the lock file.
+// Appends one entry as one line (O_APPEND) while holding <path>.lock, the lock the trim rewrites under. Two TUIs in
+// one project never overwrite each other, and a trim cannot drop a line appended during its read-rewrite.
+// Only when the file has more than MAX_HISTORY lines is it trimmed.
 fn append_history(path: &Path, s: &str) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
     let mut line = encode_json_string(s);
     line.push('\n');
+    let _lock = FileLock::acquire(path);
     let mut opts = fs::OpenOptions::new();
     opts.append(true).create(true);
     set_private(&mut opts);
@@ -356,48 +357,11 @@ fn raw_line_count(path: &Path) -> io::Result<usize> {
     Ok(fs::read(path)?.iter().filter(|&&b| b == b'\n').count())
 }
 
-// Trims <path> to the newest MAX_HISTORY entries while holding <path>.lock. If another TUI holds the lock the
-// trim is skipped; the next append tries again.
+// Trims <path> to the newest MAX_HISTORY entries. The caller holds <path>.lock (append_history).
 fn trim_history(path: &Path) -> io::Result<()> {
-    let mut lock = path.as_os_str().to_owned();
-    lock.push(".lock");
-    let Some(_guard) = take_lock(Path::new(&lock)) else {
-        return Ok(());
-    };
     // Re-read the disk, so lines other TUIs appended after this one loaded are kept.
     let items = read_history(path);
     write_history(path, &items)
-}
-
-// Removes the lock file when dropped.
-struct LockGuard(PathBuf);
-
-impl Drop for LockGuard {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-
-// A lock file older than STALE_LOCK was left by a process that died while holding it; it is removed once.
-const STALE_LOCK: Duration = Duration::from_secs(30);
-
-fn take_lock(lock: &Path) -> Option<LockGuard> {
-    let mut opts = fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    set_private(&mut opts);
-    if opts.open(lock).is_ok() {
-        return Some(LockGuard(lock.to_path_buf()));
-    }
-    let stale = fs::metadata(lock)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .is_some_and(|age| age > STALE_LOCK);
-    if !stale {
-        return None;
-    }
-    fs::remove_file(lock).ok()?;
-    opts.open(lock).ok().map(|_| LockGuard(lock.to_path_buf()))
 }
 
 // Go saveInputHistory: writes every entry to <path>.tmp and renames it over <path>. Used only by the trim.
@@ -854,7 +818,6 @@ mod tests {
             .collect();
         want.sort();
         assert_eq!(got, want);
-        assert!(!dir.join(".chaude").join("history.jsonl.lock").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -873,6 +836,39 @@ mod tests {
             got.last().map(String::as_str),
             Some(format!("e{}", MAX_HISTORY + 4).as_str())
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // Two TUIs append while the file sits at the cap, so every append also trims. A trim's read-rewrite must not
+    // drop a line another TUI appended meanwhile: all 200 new lines survive, and only prefill lines leave.
+    #[test]
+    fn appends_racing_a_trim_lose_no_appended_line() {
+        let dir = temp_dir("trim-race");
+        let path = dir.join(".chaude").join("history.jsonl");
+        let prefill: Vec<String> = (0..MAX_HISTORY).map(|i| format!("pre{i}")).collect();
+        write_history(&path, &prefill).unwrap();
+        let writers: Vec<_> = ["a", "b"]
+            .into_iter()
+            .map(|tag| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..100 {
+                        append_history(&path, &format!("{tag}{i}")).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        let got = read_history(&path);
+        assert_eq!(got.len(), MAX_HISTORY);
+        for tag in ["a", "b"] {
+            for i in 0..100 {
+                let line = format!("{tag}{i}");
+                assert!(got.contains(&line), "{line} was lost");
+            }
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

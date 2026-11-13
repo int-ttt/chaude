@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- tui: prompt history appends and the trim to the newest 500 entries share one cross-process lock (`.chaude/history.jsonl.lock`), so a line appended by another TUI during a trim is no longer lost.
+  - tui: 프롬프트 기록 추가와 최신 500개로 줄이는 작업이 하나의 프로세스 간 잠금(`.chaude/history.jsonl.lock`)을 함께 씁니다. 트림 중에 다른 TUI가 추가한 줄이 더 이상 유실되지 않습니다.
 - hooks: notes queued in `record/INBOX.md` from several sessions at once are no longer lost. Appends and rewrites take an exclusive lock (`record/.inbox.lock`), and a rewrite goes through a temp file and `os.replace`.
   - hooks: 여러 세션이 동시에 남긴 `record/INBOX.md` 메모가 더 이상 유실되지 않습니다. 추가와 다시 쓰기가 배타적 잠금(`record/.inbox.lock`)을 잡고, 다시 쓰기는 임시 파일과 `os.replace`를 거칩니다.
 - core: a claude child process is killed and reaped whenever its owner drops (quit, panic unwind), and dropping the engine handle waits up to 2 s for the actor before detaching. A coder exit no longer blocks the actor for up to 5 s, so Interrupt is not held up (S14).
