@@ -5,6 +5,8 @@
   - ci: Linux 작업(rust.yml, release.yml)이 chaude-gui에 필요한 시스템 라이브러리(xkbcommon, GL, X11, Wayland)를 빌드 전에 설치합니다.
 - gui: adds the `egui_commonmark` (markdown) and `notify-rust` (desktop notification) dependencies for the GUI; no user-visible change yet.
   - gui: GUI용 `egui_commonmark`(마크다운)와 `notify-rust`(데스크톱 알림) 의존성을 추가합니다. 사용자에게 보이는 변화는 아직 없습니다.
+- plan: GUI parity table (G3) added to plan/gui-parity.md: every TUI feature and slash command, with core readiness, GUI status, size, and phase.
+  - plan: plan/gui-parity.md에 GUI 기능 대조표(G3)를 추가했습니다. TUI 기능과 슬래시 명령 전체를 core 준비 상태, GUI 상태, 크기, 단계와 함께 적었습니다.
 
 ## 0.12.6 - 2026-11-13
 - agents: `haiku-runner` and `haiku-test-lead` note that on Windows `python3` is `py -3` (else `python`), the same interpreter choice the Windows hooks use.
