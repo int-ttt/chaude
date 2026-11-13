@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::agent_store::{AgentStore, SavedAgent};
+use crate::error::Error;
 use crate::import_claude::{ClaudeImport, session_stem};
 use crate::osenv::home_dir;
 use crate::tmp_layout;
@@ -102,7 +103,7 @@ pub fn agents_path() -> PathBuf {
 
 // Writes cwd/notes/tmp/long/<newest session id>.md and returns its path. Agent rows come from the parent sessions
 // in sids (every session of a group). Errors are text for the caller.
-pub fn write(cwd: &Path, imp: &ClaudeImport, sids: &[String]) -> Result<PathBuf, String> {
+pub fn write(cwd: &Path, imp: &ClaudeImport, sids: &[String]) -> Result<PathBuf, Error> {
     let store = AgentStore::new(&agents_path());
     let mut agents: Vec<SavedAgent> = Vec::new();
     for sid in sids.iter().filter(|s| !s.is_empty()) {
@@ -112,9 +113,9 @@ pub fn write(cwd: &Path, imp: &ClaudeImport, sids: &[String]) -> Result<PathBuf,
     agents.dedup_by(|a, b| a.id == b.id);
     let md = build(imp, &agents, RESUME_CAP);
     let dir = tmp_layout::long_dir(cwd);
-    fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    fs::create_dir_all(&dir).map_err(|e| Error::Msg(format!("{}: {e}", dir.display())))?;
     let path = dir.join(format!("{}.md", session_stem(&imp.path)));
-    fs::write(&path, md).map_err(|e| format!("{}: {e}", path.display()))?;
+    fs::write(&path, md).map_err(|e| Error::Msg(format!("{}: {e}", path.display())))?;
     Ok(path)
 }
 
