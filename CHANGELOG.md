@@ -67,6 +67,8 @@
   - 훅: 붙여넣기 훅은 `[original]` 뒤의 텍스트만 크기로 재며, 작업 알림과 래퍼 텍스트는 붙여넣기로 저장하지 않습니다. 두 훅 사본 모두 적용했습니다.
 - Docs: stale caveman-structure section refs in CLAUDE.md and docs/claude-lean/CAVEMAN_FORMAT.md now point to the current section names (S29).
   - 문서: CLAUDE.md와 docs/claude-lean/CAVEMAN_FORMAT.md의 오래된 caveman-structure 절 참조를 현재 절 이름으로 고쳤습니다(S29).
+- repo: the unused `tests/e2e-rebuild` Go scratch directory is deleted and its `.gitignore` entries are removed; `tests/chaude-soak` is kept (S16).
+  - 저장소: 쓰지 않는 Go 임시 디렉터리 `tests/e2e-rebuild`를 삭제하고 `.gitignore` 항목을 뺐습니다. `tests/chaude-soak`는 그대로 둡니다 (S16).
 
 ## 0.12.5 - 2026-11-12
 - Token usage: the idle bar row shows the last turn's input, output and cache tokens, and each Task/Agent row in the Tasks list shows its tokens and duration (for example "12.3k tok · 45s") when the tool result reports them.

@@ -5,15 +5,12 @@ bin/
 dist/
 .tools/
 
-tests/e2e-rebuild/*
-!tests/e2e-rebuild/.gitkeep
 /chaude
 /target
 
 .idea/
 notes/pastes/
 record/
-tests/e2e-rebuild/
 *.exe
 *.tar.gz
 *.zip
