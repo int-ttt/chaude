@@ -832,6 +832,33 @@ enum Phase {
     Busy { started: Option<Instant> },
 }
 
+impl Phase {
+    // Going busy keeps a running turn's clock; going idle drops it.
+    fn set_busy(self, on: bool) -> Phase {
+        match (on, self) {
+            (true, Phase::Idle) => Phase::Busy { started: None },
+            (true, busy) => busy,
+            (false, _) => Phase::Idle,
+        }
+    }
+
+    // The clock starts only while busy. A send from idle (release_held) leaves the phase Idle, as the old busy=false did.
+    fn start_clock(self, now: Instant) -> Phase {
+        match self {
+            Phase::Busy { .. } => Phase::Busy { started: Some(now) },
+            Phase::Idle => Phase::Idle,
+        }
+    }
+
+    // The turn ends its clock but stays busy until the next turn or the tui answer.
+    fn clear_clock(self) -> Phase {
+        match self {
+            Phase::Busy { .. } => Phase::Busy { started: None },
+            Phase::Idle => Phase::Idle,
+        }
+    }
+}
+
 struct State {
     cfg: Config,
     // Shared with EngineHandle::agent_rows; written by emit_agent_rows.

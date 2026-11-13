@@ -8,13 +8,9 @@ impl State {
         matches!(self.phase, Phase::Busy { .. })
     }
 
-    // Busy on or off. Going busy keeps a running turn's clock; going idle drops it.
+    // Busy on or off (see Phase::set_busy).
     pub(super) fn set_busy(&mut self, on: bool) {
-        self.phase = match (on, self.phase) {
-            (true, Phase::Idle) => Phase::Busy { started: None },
-            (true, busy) => busy,
-            (false, _) => Phase::Idle,
-        };
+        self.phase = self.phase.set_busy(on);
     }
 
     // The running turn's start, None while idle or before the clock starts.
@@ -25,18 +21,13 @@ impl State {
         }
     }
 
-    // Starts the turn clock as the send writes the user frame. The send is what makes the phase busy.
+    // Starts the turn clock as the send writes the user frame. Only a busy phase gets a clock (see Phase::start_clock).
     pub(super) fn start_turn_clock(&mut self) {
-        self.phase = Phase::Busy {
-            started: Some(Instant::now()),
-        };
+        self.phase = self.phase.start_clock(Instant::now());
     }
 
-    // The turn ends its clock but stays busy until the next turn or the tui answer.
     pub(super) fn clear_turn_clock(&mut self) {
-        if let Phase::Busy { started } = &mut self.phase {
-            *started = None;
-        }
+        self.phase = self.phase.clear_clock();
     }
 
     // Go viaPrompter: with residents on, the prompt goes through the prompter first (S26: pure acks skip it).

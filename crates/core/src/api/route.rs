@@ -91,7 +91,9 @@ impl State {
         }
         self.cur_task = routed.text.clone();
         if self.send_turn(&routed.text) {
+            // send_turn starts no clock from idle, so dispatch starts it once the phase is busy.
             self.set_busy(true);
+            self.start_turn_clock();
             self.emit(UiEvent::Busy(true));
         }
     }

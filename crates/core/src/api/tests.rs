@@ -1456,3 +1456,39 @@ fn dropping_engine_handle_kills_main_child() {
         "main child {pid} still alive after the engine handle dropped"
     );
 }
+
+// S15: a turn goes Idle -> Busy -> Idle; the turn clock lives only while busy and is dropped by the clear or the idle step.
+#[test]
+fn phase_turn_cycle_and_clock() {
+    let t0 = Instant::now();
+    let busy = Phase::Idle.set_busy(true);
+    assert_eq!(busy, Phase::Busy { started: None });
+    let running = busy.start_clock(t0);
+    assert_eq!(running, Phase::Busy { started: Some(t0) });
+    assert_eq!(
+        running.set_busy(true),
+        running,
+        "going busy keeps the clock"
+    );
+    let ended = running.clear_clock();
+    assert_eq!(
+        ended,
+        Phase::Busy { started: None },
+        "the turn ends its clock, stays busy"
+    );
+    assert_eq!(ended.set_busy(false), Phase::Idle);
+    assert_eq!(
+        running.set_busy(false),
+        Phase::Idle,
+        "going idle drops the clock"
+    );
+    assert_eq!(Phase::Idle.set_busy(false), Phase::Idle);
+}
+
+// S15 (release_held from idle): a continuation sent while idle starts no clock, so the phase stays Idle as the old busy=false did.
+#[test]
+fn idle_send_clock_keeps_phase_idle() {
+    let now = Instant::now();
+    assert_eq!(Phase::Idle.start_clock(now), Phase::Idle);
+    assert_eq!(Phase::Idle.clear_clock(), Phase::Idle);
+}
