@@ -4094,6 +4094,25 @@ mod tests {
         }
     }
 
+    // The reported bug: one key, then Enter 1 ms later (IME commit) must submit on the first Enter.
+    #[test]
+    fn first_enter_after_one_key_submits() {
+        let mut app = App::new(80, 24);
+        let mut burst = keyburst::Burst::default();
+        let t = std::time::Instant::now();
+        let sent = [(KeyCode::Char('한'), 0), (KeyCode::Enter, 1)];
+        let mut action = Action::Continue;
+        for (code, ms) in sent {
+            let at = t + Duration::from_millis(ms);
+            let k = burst.filter(key(code, KeyModifiers::NONE), at, || false);
+            action = app.on_key(k);
+        }
+        match action {
+            Action::Submit(text) => assert_eq!(text, "한"),
+            _ => panic!("the first Enter after one key must submit"),
+        }
+    }
+
     fn text(s: &str) -> UiEvent {
         UiEvent::TextDelta {
             role: Role::Main,
