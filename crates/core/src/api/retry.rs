@@ -366,6 +366,7 @@ impl State {
             || self.proc.is_none()
             || self.prompter.waiting()
             || self.idle_fired_for == Some(t0)
+            || idle_timer_yields(self.ctx_tokens)
         {
             return None;
         }
