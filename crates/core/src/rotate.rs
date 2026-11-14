@@ -43,12 +43,6 @@ pub fn idle_prompt_rotation_due(ctx: u64, idle: Option<Duration>) -> bool {
     ctx > IDLE_ROTATE_CTX && idle.is_some_and(|d| d > IDLE_ROTATE_AFTER)
 }
 
-// The idle timer (idle_rotate, 3570 s) leaves an over-80K main to the prompt rule above: its handoff would be a model
-// call before the 1h cache expires. At or under 80K the timer rotates as before.
-pub fn idle_timer_yields(ctx: u64) -> bool {
-    ctx > IDLE_ROTATE_CTX
-}
-
 // A resident agent (haiku-coder, tui) after a reply: rotates when its context reaches the model's threshold.
 // configured 0 turns rotation off, as for the main child.
 pub fn rotation_due(ctx: u64, model: &str, configured: u64) -> bool {
@@ -188,24 +182,6 @@ mod tests {
         assert!(!idle_prompt_rotation_due(80_000, min(61)));
         // No API response yet: the idle time is unknown, so no rotation.
         assert!(!idle_prompt_rotation_due(81_000, None));
-    }
-
-    #[test]
-    fn idle_timer_yields_only_over_80k() {
-        // 81K idle at 61 min: the timer is silent, the prompt rule owns it (one rotation, no model call).
-        assert!(idle_timer_yields(81_000));
-        assert!(idle_prompt_rotation_due(
-            81_000,
-            Some(Duration::from_secs(61 * 60))
-        ));
-        // 81K at 59 min: neither acts, so no handoff model call before the cache expires.
-        assert!(!idle_prompt_rotation_due(
-            81_000,
-            Some(Duration::from_secs(59 * 60))
-        ));
-        // At or under 80K the timer stays as before.
-        assert!(!idle_timer_yields(80_000));
-        assert!(!idle_timer_yields(79_000));
     }
 
     #[test]

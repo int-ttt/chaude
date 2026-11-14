@@ -68,6 +68,7 @@ impl State {
 
     // Main idle rotation before a user prompt is sent (rotate::idle_prompt_rotation_due). No model call: the snapshot
     // is built from the transcript and goes in front of the prompt on the fresh child (pending_snapshot).
+    // Fallback only: every rotation clears last_api (restart_child_with), so after an idle timer rotation there is no idle here.
     pub(super) fn idle_prompt_rotate(&mut self) {
         let idle = self.last_api.map(|t| t.elapsed());
         if self.proc.is_none()

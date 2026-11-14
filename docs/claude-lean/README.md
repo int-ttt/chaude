@@ -51,7 +51,7 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
 | 값 | 무엇을 제어하나 | 원본 (file:symbol) |
 |---|---|---|
 | 80k (`80000`) | Opus가 아닌 메인 모델의 회전 기준. Haiku 상주 coder와 TUI 에이전트는 응답 후 같은 기준으로 인계 노트를 쓰고 새 세션으로 회전. CLI `--threshold` 기본값 | `crates/core/src/rotate.rs:7` `HAIKU_THRESHOLD`; `crates/core/src/rotate.rs:38` `rotation_due`; `crates/cli/src/repl_args.rs:55` `GO_THRESHOLD` |
-| 80k (`80000`) + 1h (`3600` s) | 메인 세션 사용자 입력 시: 마지막 API 응답이 1시간 넘게 지났고 맥락이 80K를 넘으면, 모델 호출 없이 트랜스크립트로 인계를 만들어 새 세션으로 회전한 뒤 입력을 보냄. 모든 메인 모델 동일 (1시간 캐시 만료). 기존 3570 s 유휴 회전과 별개 | `crates/core/src/rotate.rs:12` `IDLE_ROTATE_CTX`, `IDLE_ROTATE_AFTER`, `idle_prompt_rotation_due`; `crates/core/src/api/misc.rs` `idle_prompt_rotate`; `crates/core/src/api/route.rs` `submit` |
+| 80k (`80000`) + 1h (`3600` s) | 메인 세션 사용자 입력 시: 마지막 API 응답이 1시간 넘게 지났고 맥락이 80K를 넘으면, 모델 호출 없이 트랜스크립트로 인계를 만들어 새 세션으로 회전한 뒤 입력을 보냄. 모든 메인 모델 동일 (1시간 캐시 만료). 3570 s 유휴 타이머가 먼저 회전했으면 생략(유휴 구간당 한 번); 타이머가 회전하지 못했을 때의 대비책 | `crates/core/src/rotate.rs:12` `IDLE_ROTATE_CTX`, `IDLE_ROTATE_AFTER`, `idle_prompt_rotation_due`; `crates/core/src/api/misc.rs` `idle_prompt_rotate`; `crates/core/src/api/route.rs` `submit` |
 | 100k (`100000`) | 서브에이전트 자동 압축 창 (`.claude/agents/*.md` 13개 파일) | `.claude/agents/*.md:8` `autoCompactWindow` |
 | 150k (`150000`) | 메인 Opus 자동 압축 창 | `.claude/settings.json:4` `autoCompactWindow` |
 | 200k (`200000`) | Opus 메인의 회전 기준 (고정) | `crates/core/src/rotate.rs:8` `OPUS_THRESHOLD` |
