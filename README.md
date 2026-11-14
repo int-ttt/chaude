@@ -13,6 +13,11 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 
 `chaude` wraps the `claude` CLI in a chat-style terminal screen. Opus is the main session. Haiku agents do lookups, small edits, and checks. When the context gets large, `chaude` writes a handoff note and continues the conversation in a new session.
 
+**Pricing design.** `chaude` is built around Haiku's pricing. Haiku's rate is lower for contexts at or under 100K tokens and higher above 100K, so Haiku does the routine work and the context limits below keep Haiku contexts at or near that line.
+- Haiku agents in `chaude` rotate at 80K tokens, under the 100K line. Claude Code Haiku subagents auto-compact with a 100K window.
+- Opus, the main session, rotates at 200K tokens.
+- `haiku-coder` and `haiku-batch-worker` have a turn cap of 60, so a long run stops after about 60 tool calls.
+
 ## Features
 
 - Chat-style REPL with a status line: context bar, rotation count, permission mode, running agents.

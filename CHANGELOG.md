@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- docs: README.md and README.ko.md state the pricing design: Haiku's lower rate at or under 100K, Haiku agents rotating at 80K, Opus rotating at 200K, and the turn cap of 60 for haiku-coder and haiku-batch-worker.
+  - docs: README.md와 README.ko.md에 가격 설계를 적었습니다. Haiku 단가는 100K 이하에서 낮고, Haiku 에이전트는 80K에서 회전하며, Opus는 200K에서 회전하고, haiku-coder와 haiku-batch-worker의 턴 상한은 60입니다.
 - agents: haiku-coder and haiku-batch-worker get `maxTurns: 60` in frontmatter (Claude Code ends the run at that turn) and a body rule to stop after ~60 tool calls or one commit and hand back state; the brief format (docs/claude-lean/CAVEMAN_FORMAT.md 3.1) now says one commit per brief.
   - agents: haiku-coder와 haiku-batch-worker에 frontmatter `maxTurns: 60`(Claude Code가 그 턴에서 실행을 끊음)과, 약 60 도구 호출 또는 커밋 1개 후 멈추고 상태를 넘기라는 본문 규칙을 추가했습니다. 브리프 형식(docs/claude-lean/CAVEMAN_FORMAT.md 3.1)에는 브리프당 커밋 1개 규칙이 추가되었습니다.
 - release: `scripts/release-usage.py` writes token usage for one release cycle (previous tag to new tag) for this project only: cycle totals (main vs subagents, per model), a table per 5h block with the top 3 agents, a table per 7-day week, and the peak 5h block. Local transcripts only; the release procedure (notes/RELEASE.md) commits the result as notes/usage/<version>.md.
