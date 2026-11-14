@@ -6,7 +6,7 @@ Goal: a long agent job runs as a sequence of steps from a task file. The residen
 - Task file: `notes/tasks/<ws>.md`. Steps: title, files, gate cmd, commit msg, status `todo|done|failed`, commit hash, notes.
 - Checkpoint = end of a step: the agent runs the gate, commits, and updates that step in the task file.
 - Scheduler (core, step 2) dispatches the next `todo` step to the resident coder without main round-trips.
-- At each checkpoint, if the agent context is over 50K, the next step starts in a fresh session given only the task file and the step.
+- The scheduler never resets the session at a checkpoint. The resident coder keeps its session across steps; rotation happens only when context reaches the fixed 80K threshold (`HAIKU_THRESHOLD` in `crates/core/src/rotate.rs`), after a reply.
 - Gate fail: one retry in a fresh session with the failure log. If it fails again, stop and report.
 - Safety stays: 80K rotation and `maxTurns: 60`.
 - Step 3: TUI agentview shows step n/m. GUI later.
@@ -33,7 +33,7 @@ Goal: a long agent job runs as a sequence of steps from a task file. The residen
 
 ## Steps
 1. [done in code] Core module `crates/core/src/tasks.rs`: parse and render the task file, `next_todo`, `mark_done`, `mark_failed`, load and save, unit tests. Checkpoint rule in the `haiku-coder` and `haiku-batch-worker` definitions (`crates/core/src/settings/agents/` and `.claude/agents/`): "if the brief names a task file, do only the first todo step, run its gate, commit, update that step, hand back."
-2. Scheduler in core: pick the next todo step, dispatch it to the resident coder, read the checkpoint result, apply the context and retry rules above.
+2. Scheduler in core: pick the next todo step, dispatch it to the resident coder, read the checkpoint result, apply the retry rule and the 80K rotation above.
 3. TUI agentview shows step n/m. GUI later.
 
 ## Gate (every step)
