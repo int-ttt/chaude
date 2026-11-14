@@ -15,6 +15,7 @@ lang: caveman | ko | en   (lang = language of the haiku-output reply; relay is a
 
 - The E<n> evidence-line format in ctx reuses the earlier definition.
 - User original text and Korean values stay verbatim inside ctx too.
+- One commit per brief: a write brief ends after one commit (none if nothing changed). The agent then stops and hands back state (done, next step, uncommitted paths).
 
 ## 3.2 Read return R-read
 

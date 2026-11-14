@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- agents: haiku-coder and haiku-batch-worker get `maxTurns: 60` in frontmatter (Claude Code ends the run at that turn) and a body rule to stop after ~60 tool calls or one commit and hand back state; the brief format (docs/claude-lean/CAVEMAN_FORMAT.md 3.1) now says one commit per brief.
+  - agents: haiku-coder와 haiku-batch-worker에 frontmatter `maxTurns: 60`(Claude Code가 그 턴에서 실행을 끊음)과, 약 60 도구 호출 또는 커밋 1개 후 멈추고 상태를 넘기라는 본문 규칙을 추가했습니다. 브리프 형식(docs/claude-lean/CAVEMAN_FORMAT.md 3.1)에는 브리프당 커밋 1개 규칙이 추가되었습니다.
 - release: `scripts/release-usage.py` writes token usage for one release cycle (previous tag to new tag) for this project only: cycle totals (main vs subagents, per model), a table per 5h block with the top 3 agents, a table per 7-day week, and the peak 5h block. Local transcripts only; the release procedure (notes/RELEASE.md) commits the result as notes/usage/<version>.md.
   - release: `scripts/release-usage.py`는 이 프로젝트만의 릴리스 주기(이전 태그부터 새 태그까지) 토큰 사용량을 씁니다. 주기 합계(메인과 서브에이전트, 모델별), 5시간 블록별 표(상위 에이전트 3개), 7일 주간 표, 최대 5시간 블록을 포함합니다. 로컬 기록만 사용하며, 릴리스 절차(notes/RELEASE.md)가 결과를 notes/usage/<버전>.md로 커밋합니다.
 

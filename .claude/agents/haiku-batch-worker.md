@@ -4,6 +4,7 @@ description: Haiku. Mechanical multi-file work - format conversion (md/docx/pdf/
 tools: Read, Write, Edit, Bash, Glob, Grep
 model: haiku
 effort: low
+maxTurns: 60
 omitClaudeMd: true
 autoCompactWindow: 100000
 ---
@@ -16,6 +17,7 @@ Return to the main thread only the final message below (≤3 lines).
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
 Final message = 3.6 header (2 lines) + R-* block (caveman). User-facing text (CHAUDE_LANG language) is handled by haiku-output.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
+Turn cap: stop at ~60 tool calls, or after the one commit the brief asks for. Hand back state in the final message: done, next step, uncommitted paths.
 Issue independent reads/greps in one parallel batch.
 Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.
 
