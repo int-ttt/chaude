@@ -172,6 +172,11 @@ fn run_tui(args: &[String]) -> i32 {
     // Go repl.go:1357: the startup prune of old records uses the loaded SessionRetentionDays.
     let set = tui::settings::load(tui::settings::file_for(Some(Path::new(&cwd))).as_deref());
     tui::settings::prune_records_at_startup(Path::new(&cwd), &set, std::time::SystemTime::now());
+    // notes/runs GC: runs only when notes/runs/ or notes/ is over its threshold; logs one line when it moved files.
+    let gc = chaude_core::notes_gc::startup(Path::new(&cwd), std::time::SystemTime::now());
+    if let Some(line) = gc {
+        eprintln!("{line}");
+    }
     match tui::run(cfg, startup.map(|(_, imp)| imp)) {
         Ok(()) => 0,
         Err(e) => {

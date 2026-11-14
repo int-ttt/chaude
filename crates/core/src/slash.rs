@@ -94,6 +94,10 @@ pub const SLASH_CMDS: &[SlashCmd] = &[
         desc: "check installation, PATH, hooks, login and target size",
     },
     SlashCmd {
+        name: "/notes-gc",
+        desc: "bundle old notes/runs files into notes/archive (--dry-run to preview)",
+    },
+    SlashCmd {
         name: "/mode",
         desc: "permission mode: default|acceptEdits|plan|auto (shift+tab cycles)",
     },
@@ -241,6 +245,8 @@ pub enum Dispatch {
     // Caller shows the checking note, then runs doctor::checks_now() off the UI thread (render as Wake::Note).
     Doctor,
     SetMode(PermMode),
+    // Args after /notes-gc. The caller runs notes_gc::slash_text in the current folder and shows the line.
+    NotesGc { args: Vec<String> },
 }
 
 pub fn mouse_note(on: bool) -> &'static str {
@@ -435,6 +441,9 @@ pub fn dispatch(line: &str, ctx: &Ctx) -> Option<Dispatch> {
         "/version" => Dispatch::Note(version_note(ctx.chaude_version, claude_version())),
         "/update" => Dispatch::Update,
         "/doctor" => Dispatch::Doctor,
+        "/notes-gc" => Dispatch::NotesGc {
+            args: args.iter().map(|s| s.to_string()).collect(),
+        },
         "/usage" => Dispatch::OpenUsage,
         "/clear" => Dispatch::Clear,
         "/rotate" => Dispatch::Rotate {

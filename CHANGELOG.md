@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: notes folder GC: `/notes-gc [--dry-run]` and chaude startup bundle notes/runs/ files older than 14 days into notes/archive/runs-YYYY-MM.md (startup runs only when notes/runs/ has over 200 files or notes/ is over 20 MB); originals are removed only after the bundle is written.
+  - core: notes 폴더 GC: `/notes-gc [--dry-run]`와 chaude 시작 시 14일 넘은 notes/runs/ 파일을 notes/archive/runs-YYYY-MM.md로 묶습니다(시작 시에는 notes/runs/ 파일이 200개를 넘거나 notes/가 20 MB를 넘을 때만 실행). 원본은 묶음 파일을 쓴 뒤에만 지웁니다.
 - docs: README.md and README.ko.md state the pricing design: Haiku's lower rate at or under 100K, Haiku agents rotating at 80K, Opus rotating at 200K, and the turn cap of 60 for haiku-coder and haiku-batch-worker.
   - docs: README.md와 README.ko.md에 가격 설계를 적었습니다. Haiku 단가는 100K 이하에서 낮고, Haiku 에이전트는 80K에서 회전하며, Opus는 200K에서 회전하고, haiku-coder와 haiku-batch-worker의 턴 상한은 60입니다.
 - agents: haiku-coder and haiku-batch-worker get `maxTurns: 60` in frontmatter (Claude Code ends the run at that turn) and a body rule to stop after ~60 tool calls or one commit and hand back state; the brief format (docs/claude-lean/CAVEMAN_FORMAT.md 3.1) now says one commit per brief.

@@ -1352,6 +1352,11 @@ impl App {
                 }
                 return Action::Continue;
             }
+            Some(Dispatch::NotesGc { args }) => {
+                let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+                self.note(&chaude_core::notes_gc::slash_text(&cwd, &args));
+                return Action::Continue;
+            }
             Some(Dispatch::Update) => {
                 self.note(commands::UPDATE_START_NOTE);
                 return Action::Update;
@@ -3891,6 +3896,10 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                         }
                     }
                 }
+            }
+            Some(Dispatch::NotesGc { args }) => {
+                let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+                println!("{}", chaude_core::notes_gc::slash_text(&cwd, &args));
             }
             Some(Dispatch::Update) => {
                 println!("{}", chaude_update::text(env!("CARGO_PKG_VERSION")))

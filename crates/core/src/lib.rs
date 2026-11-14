@@ -26,6 +26,7 @@ pub mod mcp;
 pub mod metrics;
 pub mod metrics_report;
 pub mod mode;
+pub mod notes_gc;
 pub mod orch;
 pub mod osenv;
 pub mod pick_child;
