@@ -2,10 +2,15 @@
 //! Pure functions only: the actor decides when to rotate and runs the handoff turn.
 
 use std::path::Path;
+use std::time::Duration;
 
 // Go haikuThreshold / opusThreshold: context tokens at which a rotation fires.
 pub const HAIKU_THRESHOLD: u64 = 80_000;
 pub const OPUS_THRESHOLD: u64 = 200_000;
+// Idle rotation on a user prompt (no model call): the main's last API response is over IDLE_ROTATE_AFTER old (the 1h
+// prompt cache has expired) and its context is over IDLE_ROTATE_CTX. The same 80K applies to every main model.
+pub const IDLE_ROTATE_CTX: u64 = 80_000;
+pub const IDLE_ROTATE_AFTER: Duration = Duration::from_secs(60 * 60);
 
 // Go handoffPrompt: the hidden turn that asks the child for the handoff note.
 pub const HANDOFF_PROMPT: &str = "Write a handoff note for a fresh session that will continue this work. No tools. \
@@ -31,6 +36,11 @@ pub fn threshold_for(model: &str, configured: u64) -> u64 {
 // Rotation fires at the threshold itself (Go shouldRotate, >=).
 pub fn should_rotate(ctx: u64, threshold: u64) -> bool {
     ctx >= threshold
+}
+
+// Main idle rotation on a user prompt: idle is the time since the last API response (None when there is none).
+pub fn idle_prompt_rotation_due(ctx: u64, idle: Option<Duration>) -> bool {
+    ctx > IDLE_ROTATE_CTX && idle.is_some_and(|d| d > IDLE_ROTATE_AFTER)
 }
 
 // A resident agent (haiku-coder, tui) after a reply: rotates when its context reaches the model's threshold.
@@ -160,6 +170,27 @@ mod tests {
         assert!(!rotation_due(79_999, "haiku", HAIKU_THRESHOLD));
         assert!(rotation_due(80_000, "haiku", HAIKU_THRESHOLD));
         assert!(!rotation_due(80_001, "haiku", 0));
+    }
+
+    #[test]
+    fn idle_prompt_rotation_needs_over_1h_idle_and_over_80k() {
+        let min = |m: u64| Some(Duration::from_secs(m * 60));
+        assert!(idle_prompt_rotation_due(81_000, min(61)));
+        assert!(!idle_prompt_rotation_due(81_000, min(59)));
+        assert!(!idle_prompt_rotation_due(81_000, min(60)));
+        assert!(!idle_prompt_rotation_due(79_000, min(61)));
+        assert!(!idle_prompt_rotation_due(80_000, min(61)));
+        // No API response yet: the idle time is unknown, so no rotation.
+        assert!(!idle_prompt_rotation_due(81_000, None));
+    }
+
+    #[test]
+    fn idle_prompt_rotation_applies_to_opus_too() {
+        // The 1h cache rule is model-independent; the 200K Opus threshold does not apply here.
+        assert!(idle_prompt_rotation_due(
+            81_000,
+            Some(Duration::from_secs(3_700))
+        ));
     }
 
     #[test]

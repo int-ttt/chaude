@@ -66,6 +66,27 @@ impl State {
         }
     }
 
+    // Main idle rotation before a user prompt is sent (rotate::idle_prompt_rotation_due). No model call: the snapshot
+    // is built from the transcript and goes in front of the prompt on the fresh child (pending_snapshot).
+    pub(super) fn idle_prompt_rotate(&mut self) {
+        let idle = self.last_api.map(|t| t.elapsed());
+        if self.proc.is_none()
+            || !self.pending_snapshot.is_empty()
+            || !self.auto_rotate_allowed()
+            || !idle_prompt_rotation_due(self.ctx_tokens, idle)
+        {
+            return;
+        }
+        let reason = format!(
+            "idle {}m, ctx {}",
+            idle.map_or(0, |d| d.as_secs() / 60),
+            self.ctx_tokens
+        );
+        let body = "(handoff note skipped: idle rotation, no model call; recent turns follow)";
+        let snapshot = with_reco(&self.last_reco, &self.build_snapshot(body));
+        self.rotate_child(snapshot, reason, false, 0);
+    }
+
     // Reason shown for a context rotation: the context tokens against the threshold.
     pub(super) fn ctx_reason(&self) -> String {
         let thr = threshold_for(&self.model, self.cfg.rotate_threshold);

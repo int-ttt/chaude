@@ -66,6 +66,7 @@ impl State {
             self.emit_queue();
             return;
         }
+        self.idle_prompt_rotate();
         self.begin_turn(text);
     }
 

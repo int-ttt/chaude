@@ -49,8 +49,8 @@ use crate::resident::{
 use crate::resume_group;
 use crate::resume_note;
 use crate::rotate::{
-    HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, rotation_due, should_rotate,
-    threshold_for, validate_handoff, with_reco,
+    HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, idle_prompt_rotation_due,
+    rotation_due, should_rotate, threshold_for, validate_handoff, with_reco,
 };
 use crate::rotate_defer::{self, Hold};
 use crate::turn_spend::TurnSpend;
