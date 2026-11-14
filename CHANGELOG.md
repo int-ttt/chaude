@@ -19,6 +19,8 @@
   - core: 상태 막대 문구, 에이전트 행, 기록 알림(고아 프로세스, 예산, 컨텍스트 회전, 새 세션, 무출력)을 core i18n 키와 함께 `chaude_core::bar_text`로 옮겼습니다. GUI 상태 막대와 권한 대화상자도 같은 문구를 씁니다. TUI 출력은 ko, en 모두 그대로입니다.
 - core: the transcript notices (orphan, budget, rotated, new session, quiet), the status bar held and last-tokens lines, and the permission dialog strings now have Korean text in core i18n; English output is unchanged. The status bar text tests from the GUI (kfmt, status line with default mode hidden, idle activity line) are back in `chaude_core::bar_text`.
   - core: 기록 알림(고아 프로세스, 예산, 컨텍스트 교체, 새 세션, 무출력), 상태 막대의 보류와 마지막 토큰 줄, 권한 대화상자 문구에 core i18n의 한국어 문구를 붙였습니다. 영어 출력은 그대로입니다. GUI에 있던 상태 막대 테스트(kfmt, 기본 모드 숨김, 유휴 활동 줄)는 `chaude_core::bar_text`로 다시 옮겼습니다.
+- tui: resident haiku-coder and TUI agents rotate after their reply once their context reaches 80K: the agent writes a handoff note, it is validated as for the main session, and the next call starts a fresh session with it. Main sessions are unchanged (Opus 200K, others 80K).
+  - tui: Haiku 상주 coder와 TUI 에이전트는 응답이 끝난 뒤 맥락이 80K에 닿으면 회전합니다. 에이전트가 인계 노트를 쓰고, 메인과 같은 검증을 거친 뒤, 다음 호출이 그 노트로 새 세션을 시작합니다. 메인 세션은 그대로입니다(Opus 200K, 그 밖 80K).
 
 ## 0.12.6 - 2026-11-13
 - agents: `haiku-runner` and `haiku-test-lead` note that on Windows `python3` is `py -3` (else `python`), the same interpreter choice the Windows hooks use.

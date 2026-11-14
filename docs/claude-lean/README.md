@@ -50,7 +50,7 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
 
 | 값 | 무엇을 제어하나 | 원본 (file:symbol) |
 |---|---|---|
-| 80k (`80000`) | Opus가 아닌 메인 모델의 회전 기준. CLI `--threshold` 기본값 | `crates/core/src/rotate.rs:7` `HAIKU_THRESHOLD`; `crates/cli/src/repl_args.rs:55` `GO_THRESHOLD` |
+| 80k (`80000`) | Opus가 아닌 메인 모델의 회전 기준. Haiku 상주 coder와 TUI 에이전트는 응답 후 같은 기준으로 인계 노트를 쓰고 새 세션으로 회전. CLI `--threshold` 기본값 | `crates/core/src/rotate.rs:7` `HAIKU_THRESHOLD`; `crates/core/src/rotate.rs:38` `rotation_due`; `crates/cli/src/repl_args.rs:55` `GO_THRESHOLD` |
 | 100k (`100000`) | 서브에이전트 자동 압축 창 (`.claude/agents/*.md` 13개 파일) | `.claude/agents/*.md:8` `autoCompactWindow` |
 | 150k (`150000`) | 메인 Opus 자동 압축 창 | `.claude/settings.json:4` `autoCompactWindow` |
 | 200k (`200000`) | Opus 메인의 회전 기준 (고정) | `crates/core/src/rotate.rs:8` `OPUS_THRESHOLD` |

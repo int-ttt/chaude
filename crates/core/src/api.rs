@@ -49,8 +49,8 @@ use crate::resident::{
 use crate::resume_group;
 use crate::resume_note;
 use crate::rotate::{
-    HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, should_rotate, threshold_for,
-    validate_handoff, with_reco,
+    HAIKU_THRESHOLD, HANDOFF_PROMPT, PREAMBLE, extract_reco, rotation_due, should_rotate,
+    threshold_for, validate_handoff, with_reco,
 };
 use crate::rotate_defer::{self, Hold};
 use crate::turn_spend::TurnSpend;
@@ -976,6 +976,10 @@ struct State {
     resume_pending: BTreeMap<String, String>,
     // Last context tokens each resident role reported (Go per-role ctx), kept for the live handoff.
     role_ctx: BTreeMap<String, u64>,
+    // A resident role whose handoff turn is in flight (over the rotation threshold), with its attempt count.
+    res_handoff: BTreeMap<String, u32>,
+    // Handoff note a resident role's next session starts with (after PREAMBLE), taken when its task is sent.
+    res_carry: BTreeMap<String, String>,
     self_tx: Sender<Input>,
     opts: SpawnOpts,
     // Bumped on every fresh child so the old child's late lines and EOF are ignored.
@@ -1550,6 +1554,8 @@ fn actor(
         resident_slots: slots,
         resume_pending,
         role_ctx: BTreeMap::new(),
+        res_handoff: BTreeMap::new(),
+        res_carry: BTreeMap::new(),
         mcp_cfg: None,
         record: RecordState::default(),
         self_tx,

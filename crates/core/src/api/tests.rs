@@ -770,6 +770,105 @@ done
     );
 }
 
+// Engine whose tui answers each prompt with the given context tokens and logs every prompt it receives to tui.log.
+// A handoff prompt gets a valid note back, so a rotation ends with the tui dropped and the note carried over.
+#[cfg(unix)]
+fn resident_rotation_engine(dir: &TempDir, tui_ctx: u64) -> (EngineHandle, Receiver<UiEvent>) {
+    use std::os::unix::fs::PermissionsExt;
+    let turn = r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}},"session_id":"s1","parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"session_id":"s1","parent_tool_use_id":null}
+{"type":"assistant","message":{"content":[{"type":"text","text":"done"}]},"session_id":"s1","parent_tool_use_id":null}
+{"type":"result","session_id":"s1","result":"done"}
+"#;
+    let t1 = dir.path().join("turn.jsonl");
+    std::fs::write(&t1, turn).expect("write turn");
+    let log = dir.path().join("tui.log");
+    let note = "Goal: ship the rotation fix. Decisions: keep the 80K threshold for haiku agents and reuse the handoff validator. Files: none changed. In-progress: tests are being written. Open questions: none. Preferences: keep diffs minimal. Exact: run cargo test -p chaude-core.";
+    let script = r#"#!/bin/sh
+case "$*" in
+  *--mcp-config*) ROLE=main ;;
+  *"input summarizer"*) ROLE=prompter ;;
+  *) ROLE=tui ;;
+esac
+while IFS= read -r line; do
+  case "$line" in
+*'"type":"user"'*)
+  if [ "$ROLE" = main ]; then
+    cat 'TURN'
+  elif [ "$ROLE" = prompter ]; then
+    printf '%s\n' '{"type":"result","session_id":"s-prompter","result":"ok"}'
+  else
+    printf '%s\n' "$line" >> 'LOG'
+    case "$line" in
+    *"Write a handoff note"*)
+      printf '%s\n' '{"type":"result","session_id":"s-tui","result":"NOTE","usage":{"input_tokens":1000}}' ;;
+    *)
+      printf '%s\n' '{"type":"result","session_id":"s-tui","result":"ok","usage":{"input_tokens":CTX}}' ;;
+    esac
+  fi
+  ;;
+  esac
+done
+"#
+    .replace("TURN", &t1.display().to_string())
+    .replace("LOG", &log.display().to_string())
+    .replace("CTX", &tui_ctx.to_string())
+    .replace("NOTE", note);
+    let bin = dir.path().join("claude");
+    std::fs::write(&bin, script).expect("write fake claude");
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    let cfg = Config {
+        claude_bin: bin.display().to_string(),
+        model: "haiku".into(),
+        residents: true,
+        record_dir: Some(dir.path().join("record")),
+        ..isolated(dir.path())
+    };
+    let (h, rx) = Engine::try_start(cfg).expect("engine boots");
+    h.submit("hello");
+    (h, rx)
+}
+
+// Runs one turn on the resident rotation engine; returns the tui prompts it received, in order.
+#[cfg(unix)]
+fn resident_tui_prompts(dir: &TempDir, tui_ctx: u64) -> Vec<String> {
+    let (h, rx) = resident_rotation_engine(dir, tui_ctx);
+    loop {
+        let ev = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("engine went silent");
+        if ev == UiEvent::Busy(false) {
+            break;
+        }
+    }
+    h.shutdown();
+    std::fs::read_to_string(dir.path().join("tui.log"))
+        .unwrap_or_default()
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
+#[cfg(unix)]
+#[test]
+fn resident_tui_at_80k_plus_one_rotates_after_reply() {
+    let dir = TempDir::new("tui-rotate-over");
+    let prompts = resident_tui_prompts(&dir, 80_001);
+    assert_eq!(prompts.len(), 2, "answer then handoff: {prompts:?}");
+    assert!(
+        prompts[1].contains("Write a handoff note"),
+        "second prompt is not the handoff: {prompts:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn resident_tui_at_80k_minus_one_keeps_session() {
+    let dir = TempDir::new("tui-rotate-under");
+    let prompts = resident_tui_prompts(&dir, 79_999);
+    assert_eq!(prompts.len(), 1, "no handoff expected: {prompts:?}");
+}
+
 // Engine whose main child replays turn one (an Agent call with the given result, then a final reply) and turn two
 // (the continuation) on the next prompt. Roles by argv as in the pretool test.
 #[cfg(unix)]

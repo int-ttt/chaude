@@ -427,10 +427,12 @@ impl State {
         self.stage("tui", StagePhase::Working);
         self.tui_deadline = Some(Instant::now() + self.cfg.tui_timeout);
         self.resident_busy("tui", true, &reply);
+        let mut prompt = tui_prompt(&reply, crate::i18n::current());
+        if let Some(note) = self.res_carry.remove("tui") {
+            prompt = format!("{PREAMBLE}\n\n{note}\n\n{prompt}");
+        }
         let wrote = match self.tui_proc.as_mut() {
-            Some(p) => p
-                .write_user(&tui_prompt(&reply, crate::i18n::current()))
-                .map_err(Error::from),
+            Some(p) => p.write_user(&prompt).map_err(Error::from),
             None => Err(Error::Msg("tui not running".to_string())),
         };
         if let Err(e) = wrote {
@@ -509,7 +511,10 @@ impl State {
         self.resident_busy(&role, true, &task);
         self.coders[i].idle_since = None;
         self.coders[i].waiter = waiter;
-        let text = format!("{task}{CODER_REPLY_FORMAT}");
+        let mut text = format!("{task}{CODER_REPLY_FORMAT}");
+        if let Some(note) = self.res_carry.remove(&role) {
+            text = format!("{PREAMBLE}\n\n{note}\n\n{text}");
+        }
         self.coders[i].task = Some(text.clone());
         let wrote = match self.coders[i].proc.as_mut() {
             Some(p) => p.write_user(&text).map_err(Error::from),
@@ -654,7 +659,12 @@ impl State {
             }
             return;
         }
-        let text = summarize_reply(&raw);
+        // A handoff note is kept whole: summarize_reply would cut it to its status lines.
+        let text = if self.res_handoff.contains_key(&coder_role(i)) {
+            raw.trim().to_string()
+        } else {
+            summarize_reply(&raw)
+        };
         if text.is_empty() {
             self.finish_coder(i, Err(Error::Msg("coder empty reply".to_string())));
         } else {
@@ -738,11 +748,23 @@ impl State {
         let waiter = self.coders[i].waiter.take();
         let role = coder_role(i);
         answer(waiter, out.as_ref().cloned().map_err(|e| e.to_string()));
+        if self.res_handoff.contains_key(&role) {
+            let changed = self.coders[i].changed.clone();
+            self.resident_handoff_end(Some(i), out, &changed);
+            return;
+        }
         // Every turn end is a handback: a failed task still sends its reason as the reply, so main never sees silence.
         match out {
             Ok(text) => {
                 self.stage(&role, StagePhase::Done);
-                self.emit(UiEvent::CoderReply { role, text });
+                self.emit(UiEvent::CoderReply {
+                    role: role.clone(),
+                    text,
+                });
+                // Over the threshold after a reply: the next task waits for the handoff note (see resident_handoff_end).
+                if self.resident_rotation_due(&role) {
+                    self.start_resident_handoff(Some(i), 1);
+                }
             }
             Err(reason) => {
                 self.emit(UiEvent::CoderReply {
@@ -752,6 +774,100 @@ impl State {
                 self.stage(&role, StagePhase::Failed(reason.to_string()));
             }
         }
+    }
+
+    // Over the rotation threshold after a reply, for a resident role (haiku-coder, tui). Main is not checked here.
+    pub(super) fn resident_rotation_due(&self, role: &str) -> bool {
+        let ctx = self.role_ctx.get(role).copied().unwrap_or(0);
+        rotation_due(ctx, &self.resident_model(role), self.cfg.rotate_threshold)
+    }
+
+    // Sends the handoff prompt to the resident child that just replied (slot None is the tui), as attempt `attempts`.
+    // Returns false when the write failed: the handoff is dropped and the rotation is held.
+    pub(super) fn start_resident_handoff(&mut self, slot: Option<usize>, attempts: u32) -> bool {
+        let role = slot.map_or_else(|| "tui".to_string(), coder_role);
+        self.res_handoff.insert(role.clone(), attempts);
+        self.stage(&role, StagePhase::Working);
+        let wrote = match slot {
+            Some(i) => {
+                self.coders[i].deadline = Some(Instant::now() + self.cfg.coder_timeout);
+                self.coders[i].task = Some(HANDOFF_PROMPT.to_string());
+                self.resident_busy(&role, true, HANDOFF_PROMPT);
+                match self.coders[i].proc.as_mut() {
+                    Some(p) => p.write_user(HANDOFF_PROMPT).map_err(Error::from),
+                    None => Err(Error::Msg("coder not running".to_string())),
+                }
+            }
+            None => {
+                self.tui_deadline = Some(Instant::now() + self.cfg.tui_timeout);
+                self.resident_busy("tui", true, HANDOFF_PROMPT);
+                match self.tui_proc.as_mut() {
+                    Some(p) => p.write_user(HANDOFF_PROMPT).map_err(Error::from),
+                    None => Err(Error::Msg("tui not running".to_string())),
+                }
+            }
+        };
+        if wrote.is_ok() {
+            return true;
+        }
+        self.res_handoff.remove(&role);
+        match slot {
+            Some(i) => {
+                self.coders[i].deadline = None;
+                self.coders[i].task = None;
+                self.resident_busy(&role, false, "");
+            }
+            None => {
+                self.tui_deadline = None;
+                self.resident_busy("tui", false, "");
+            }
+        }
+        self.stage(&role, StagePhase::Done);
+        self.emit(UiEvent::Error(format!(
+            "{role} rotation held: handoff failed"
+        )));
+        false
+    }
+
+    // Ends a resident handoff turn. A valid note is carried into the role's next session, and the child is dropped so
+    // that session starts fresh. An invalid note is asked for once more; after the second failure the rotation is held
+    // and the child keeps running. Returns true when a retry was sent (the turn is still in flight).
+    pub(super) fn resident_handoff_end(
+        &mut self,
+        slot: Option<usize>,
+        out: Result<String, Error>,
+        changed: &[String],
+    ) -> bool {
+        let role = slot.map_or_else(|| "tui".to_string(), coder_role);
+        let attempts = self.res_handoff.remove(&role).unwrap_or(1);
+        let note = out.map(|t| t.trim().to_string()).unwrap_or_default();
+        let valid = !note.is_empty()
+            && (self.cfg.no_handoff_validate || validate_handoff(&note, changed).is_empty());
+        if !valid {
+            if attempts < 2 && self.start_resident_handoff(slot, attempts + 1) {
+                return true;
+            }
+            self.stage(&role, StagePhase::Done);
+            self.emit(UiEvent::Error(format!(
+                "{role} rotation held: handoff failed"
+            )));
+            return false;
+        }
+        self.role_ctx.remove(&role);
+        self.resident_sids.remove(&role);
+        self.resume_pending.remove(&role);
+        match slot {
+            Some(i) => self.drop_coder(i),
+            None => {
+                if let Some(mut p) = self.tui_proc.take() {
+                    p.kill();
+                }
+                self.tui_epoch += 1;
+            }
+        }
+        self.res_carry.insert(role.clone(), note);
+        self.stage(&role, StagePhase::Done);
+        false
     }
 
     // The tui's result line is its answer. An empty answer is a failure (Go empty reply).
@@ -805,11 +921,22 @@ impl State {
         if self.tui_deadline.take().is_some() {
             self.resident_busy("tui", false, "");
         }
+        // The handoff turn's end: the answer was already shown, so the turn ends here (after_turn) unless a retry runs.
+        if self.res_handoff.contains_key("tui") {
+            if !self.resident_handoff_end(None, out, &[]) {
+                self.after_turn();
+            }
+            return;
+        }
         let raw = std::mem::take(&mut self.routed_text);
         match out {
             Ok(text) => {
                 self.stage("tui", StagePhase::Done);
                 self.emit(UiEvent::TuiAnswer { text });
+                // Over the threshold after an answer: the handoff turn runs first, and after_turn waits for its end.
+                if self.resident_rotation_due("tui") && self.start_resident_handoff(None, 1) {
+                    return;
+                }
             }
             Err(detail) => {
                 // Go viaTUI: on failure the raw main reply is shown, then the notice.

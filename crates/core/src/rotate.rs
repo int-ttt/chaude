@@ -33,6 +33,12 @@ pub fn should_rotate(ctx: u64, threshold: u64) -> bool {
     ctx >= threshold
 }
 
+// A resident agent (haiku-coder, tui) after a reply: rotates when its context reaches the model's threshold.
+// configured 0 turns rotation off, as for the main child.
+pub fn rotation_due(ctx: u64, model: &str, configured: u64) -> bool {
+    configured > 0 && should_rotate(ctx, threshold_for(model, configured))
+}
+
 // Returns the last recommendation line of reply through the end of reply, trailing whitespace trimmed.
 // Leading '*', '#', '>' and spaces before the marker are allowed. Empty when there is none.
 pub fn extract_reco(reply: &str) -> String {
@@ -145,6 +151,22 @@ mod tests {
         assert!(should_rotate(80_000, 80_000));
         assert!(!should_rotate(199_999, 200_000));
         assert!(should_rotate(200_000, 200_000));
+    }
+
+    #[test]
+    fn rotation_due_resident_haiku_at_80k() {
+        // Resident haiku-coder and tui rotate at the configured 80K threshold, after the reply.
+        assert!(rotation_due(80_001, "haiku", HAIKU_THRESHOLD));
+        assert!(!rotation_due(79_999, "haiku", HAIKU_THRESHOLD));
+        assert!(rotation_due(80_000, "haiku", HAIKU_THRESHOLD));
+        assert!(!rotation_due(80_001, "haiku", 0));
+    }
+
+    #[test]
+    fn rotation_due_main_opus_keeps_200k() {
+        assert!(rotation_due(200_000, "opus", HAIKU_THRESHOLD));
+        assert!(!rotation_due(80_001, "opus", HAIKU_THRESHOLD));
+        assert!(!rotation_due(199_999, "claude-opus-5-5", HAIKU_THRESHOLD));
     }
 
     #[test]
