@@ -1,11 +1,12 @@
 //! Notes GC: bundles old <cwd>/notes/runs/ files into monthly archive files under <cwd>/notes/archive/.
 //! Candidates are the direct regular files of notes/runs/ whose mtime is older than 14 days. Subfolders, notes/*.md,
 //! notes/usage/, notes/research/, notes/tasks/ and every other path are never touched.
-//! Each bundle entry is a "=== notes/runs/<name> (mtime YYYY-MM-DD) ===" line, then the file text. Files that are not
-//! UTF-8 stay in place. A month's bundle is written to a temp file and renamed into place; the originals are removed
-//! only after that rename succeeds. A rerun finds the entries already bundled and only removes the leftover originals.
-//! Session start runs it only when notes/runs/ holds more than 200 files or notes/ is over 20 MB; /notes-gc runs it
-//! on demand (--dry-run reports only).
+//! Each bundle entry is a "<!-- notes-gc: notes/runs/<name> (mtime YYYY-MM-DD) -->" line, then the file text. Only
+//! text files (valid UTF-8, no NUL byte) are bundled; other files stay in place. A month's bundle is written to a temp
+//! file and renamed into place; the originals are removed only after that rename succeeds. A rerun finds the entries
+//! already bundled (new or legacy "=== notes/runs/<name> (mtime ...) ===" header) and only removes the leftover originals.
+//! Session start runs it only for an interactive launch (stdin is a terminal, no positional word) and only when
+//! notes/runs/ holds more than 200 files or notes/ is over 20 MB; /notes-gc runs it on demand (--dry-run reports only).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -47,8 +48,23 @@ fn archive_dir(cwd: &Path) -> PathBuf {
     cwd.join("notes").join("archive")
 }
 
+// Not a body-safe prefix: a text body may hold "=== ..." lines, so the header uses an HTML comment.
 fn header_line(c: &Candidate) -> String {
+    format!(
+        "<!-- notes-gc: notes/runs/{} (mtime {}) -->",
+        c.name, c.date
+    )
+}
+
+// Header written by the first version; still recognised so a rerun does not bundle a second copy.
+fn legacy_header_line(c: &Candidate) -> String {
     format!("=== notes/runs/{} (mtime {}) ===", c.name, c.date)
+}
+
+// Text only: valid UTF-8 with no NUL byte. Anything else stays in place.
+fn read_text(path: &Path) -> Option<String> {
+    let text = String::from_utf8(fs::read(path).ok()?).ok()?;
+    (!text.contains('\0')).then_some(text)
 }
 
 // Days since the epoch to (year, month, day) in UTC (Howard Hinnant's civil_from_days).
@@ -146,8 +162,9 @@ pub fn run(cwd: &Path, now: SystemTime, dry_run: bool) -> io::Result<Outcome> {
         let mut done: Vec<&Candidate> = Vec::new();
         for c in &cands {
             let header = header_line(c);
-            if !text.lines().any(|l| l == header) {
-                let Ok(body) = fs::read_to_string(&c.path) else {
+            let legacy = legacy_header_line(c);
+            if !text.lines().any(|l| l == header || l == legacy) {
+                let Some(body) = read_text(&c.path) else {
                     out.skipped += 1;
                     continue;
                 };
@@ -226,13 +243,22 @@ fn dir_bytes(dir: &Path) -> u64 {
         .sum()
 }
 
-// Session start: nothing when both thresholds hold; otherwise a real run. Returns the line to log, if anything
-// moved or failed. Never fails startup.
-pub fn startup(cwd: &Path, now: SystemTime) -> Option<String> {
-    startup_with(cwd, now, MAX_RUN_FILES, MAX_NOTES_BYTES)
+// Session start: nothing for a non-interactive launch (piped stdin, slash command, subcommand, prompt), nothing when
+// both thresholds hold; otherwise a real run. Returns the line to log, if anything moved or failed. Never fails startup.
+pub fn startup(cwd: &Path, now: SystemTime, interactive: bool) -> Option<String> {
+    startup_with(cwd, now, interactive, MAX_RUN_FILES, MAX_NOTES_BYTES)
 }
 
-fn startup_with(cwd: &Path, now: SystemTime, max_files: usize, max_bytes: u64) -> Option<String> {
+fn startup_with(
+    cwd: &Path,
+    now: SystemTime,
+    interactive: bool,
+    max_files: usize,
+    max_bytes: u64,
+) -> Option<String> {
+    if !interactive {
+        return None;
+    }
     if run_file_count(cwd) <= max_files && dir_bytes(&cwd.join("notes")) <= max_bytes {
         return None;
     }
@@ -309,9 +335,9 @@ mod tests {
         let bundle_rel = format!("notes/archive/runs-{}.md", month_of(days_ago(30)));
         assert_eq!(o.bundles, vec![bundle_rel.clone()]);
         let text = fs::read_to_string(cwd.join(&bundle_rel)).unwrap();
-        assert!(text.contains("=== notes/runs/old.md (mtime "));
+        assert!(text.contains("<!-- notes-gc: notes/runs/old.md (mtime "));
         assert!(text.contains("old body\n\n"));
-        assert!(text.contains("=== notes/runs/old.json (mtime "));
+        assert!(text.contains("<!-- notes-gc: notes/runs/old.json (mtime "));
         assert!(!runs.join("old.md").exists());
         assert!(!runs.join("old.json").exists());
         assert_eq!(
@@ -340,6 +366,57 @@ mod tests {
         let o = run(cwd, now(), false).unwrap();
         assert_eq!((o.moved, o.bundles.len()), (0, 0));
         assert_eq!(fs::read_to_string(&bundle).unwrap(), first);
+    }
+
+    #[test]
+    fn legacy_header_is_recognised_on_rerun() {
+        let t = TempDir::new("notes-gc-legacy");
+        let cwd = t.path();
+        let runs = cwd.join("notes/runs");
+        put(&runs.join("a.md"), b"alpha\n", days_ago(20));
+        run(cwd, now(), false).unwrap();
+        let bundle = cwd.join(format!("notes/archive/runs-{}.md", month_of(days_ago(20))));
+        // Rewrite the bundle with the first version's header; a leftover original must not be bundled again.
+        let legacy = fs::read_to_string(&bundle)
+            .unwrap()
+            .replace(
+                "<!-- notes-gc: notes/runs/a.md (mtime ",
+                "=== notes/runs/a.md (mtime ",
+            )
+            .replace(") -->", ") ===");
+        fs::write(&bundle, &legacy).unwrap();
+        put(&runs.join("a.md"), b"alpha\n", days_ago(20));
+        let o = run(cwd, now(), false).unwrap();
+        assert_eq!(o.moved, 1);
+        assert_eq!(fs::read_to_string(&bundle).unwrap(), legacy);
+    }
+
+    #[test]
+    fn text_with_nul_stays_and_is_counted() {
+        let t = TempDir::new("notes-gc-nul");
+        let cwd = t.path();
+        put(&cwd.join("notes/runs/nul.log"), b"abc\0def\n", days_ago(30));
+        put(&cwd.join("notes/runs/ok.md"), b"ok\n", days_ago(30));
+        let o = run(cwd, now(), false).unwrap();
+        assert_eq!((o.moved, o.skipped), (1, 1));
+        assert!(cwd.join("notes/runs/nul.log").exists());
+        assert!(summary(&o).ends_with("kept 1 (not text or not removable)"));
+    }
+
+    #[test]
+    fn body_with_eq_lines_is_bundled_intact() {
+        let t = TempDir::new("notes-gc-eq");
+        let cwd = t.path();
+        put(
+            &cwd.join("notes/runs/test.md"),
+            b"=== RUN TestFoo\n=== notes/runs/x.md (mtime 2026-01-01) ===\n",
+            days_ago(30),
+        );
+        let o = run(cwd, now(), false).unwrap();
+        assert_eq!(o.moved, 1);
+        let bundle = cwd.join(format!("notes/archive/runs-{}.md", month_of(days_ago(30))));
+        let text = fs::read_to_string(bundle).unwrap();
+        assert!(text.contains("=== RUN TestFoo\n=== notes/runs/x.md (mtime 2026-01-01) ===\n"));
     }
 
     #[test]
@@ -419,12 +496,26 @@ mod tests {
         put(&cwd.join("notes/runs/a.md"), b"a\n", days_ago(30));
         put(&cwd.join("notes/runs/b.md"), b"b\n", days_ago(30));
 
-        assert_eq!(startup_with(cwd, now(), 2, u64::MAX), None);
+        assert_eq!(startup_with(cwd, now(), true, 2, u64::MAX), None);
         assert!(cwd.join("notes/runs/a.md").exists());
 
-        let line = startup_with(cwd, now(), 1, u64::MAX).unwrap();
+        let line = startup_with(cwd, now(), true, 1, u64::MAX).unwrap();
         assert!(line.starts_with("notes gc: moved 2 runs files"), "{line}");
         assert!(!cwd.join("notes/runs/a.md").exists());
+    }
+
+    #[test]
+    fn startup_skipped_when_not_interactive() {
+        let t = TempDir::new("notes-gc-piped");
+        let cwd = t.path();
+        put(&cwd.join("notes/runs/a.md"), b"a\n", days_ago(30));
+        put(&cwd.join("notes/runs/b.md"), b"b\n", days_ago(30));
+
+        // Over both thresholds, but piped or slash/prompt launch: no run, nothing moved.
+        assert_eq!(startup_with(cwd, now(), false, 1, 1), None);
+        assert!(cwd.join("notes/runs/a.md").exists());
+        assert!(cwd.join("notes/runs/b.md").exists());
+        assert!(!cwd.join("notes/archive").exists());
     }
 
     #[test]

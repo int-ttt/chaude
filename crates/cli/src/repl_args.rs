@@ -62,21 +62,25 @@ const GO_IDLE_NOTICE: Duration = Duration::from_secs(30 * 60);
 pub struct Parsed {
     raw: BTreeMap<&'static str, String>,
     help: bool,
+    positional: bool,
 }
 
 /// Parses the flag words. Value checks happen in `apply`. Err is a Go-style flag error (exit 2).
 pub fn parse(args: &[String]) -> Result<Parsed, String> {
     let mut raw = BTreeMap::new();
     let mut help = false;
+    let mut positional = false;
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
         i += 1;
         if a == "--" {
+            positional = i < args.len();
             break;
         }
         // Positionals are ignored, as Go's repl ignores them.
         let Some(body) = a.strip_prefix('-') else {
+            positional = true;
             continue;
         };
         let body = body.strip_prefix('-').unwrap_or(body);
@@ -112,12 +116,21 @@ pub fn parse(args: &[String]) -> Result<Parsed, String> {
         };
         raw.insert(fname, value);
     }
-    Ok(Parsed { raw, help })
+    Ok(Parsed {
+        raw,
+        help,
+        positional,
+    })
 }
 
 impl Parsed {
     pub fn help(&self) -> bool {
         self.help
+    }
+
+    /// True when a positional word came with the flags (a slash command, subcommand or prompt); the parser ignores it.
+    pub fn has_positional(&self) -> bool {
+        self.positional
     }
 
     /// --model; None when absent (the caller resolves orch and settings defaults).
@@ -342,6 +355,28 @@ mod tests {
         assert_eq!(p.claude_source().as_deref(), Some("latest"));
         assert!(p.import_dry_run());
         assert_eq!(parse(&strs(&["--orch", "b"])).unwrap().orch(), "b");
+    }
+
+    #[test]
+    fn positional_words_are_detected() {
+        assert!(!parse(&strs(&[])).unwrap().has_positional());
+        assert!(
+            !parse(&strs(&["--model", "opus", "--cwd=/tmp"]))
+                .unwrap()
+                .has_positional()
+        );
+        assert!(
+            !parse(&strs(&["--cwd", "/tmp", "--"]))
+                .unwrap()
+                .has_positional()
+        );
+        assert!(parse(&strs(&["/notes-gc"])).unwrap().has_positional());
+        assert!(
+            parse(&strs(&["--model", "opus", "fix it"]))
+                .unwrap()
+                .has_positional()
+        );
+        assert!(parse(&strs(&["--", "/notes-gc"])).unwrap().has_positional());
     }
 
     #[test]
