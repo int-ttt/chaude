@@ -687,7 +687,7 @@ impl App {
                     .collect();
             }
             // Go repl.go:1412: /clear starts a new session.
-            UiEvent::NewSession { .. } => self.note(bar::NEW_SESSION_NOTICE),
+            UiEvent::NewSession { .. } => self.note(&bar::new_session_notice()),
             UiEvent::RotatedFrom { old_session } => {
                 self.session_id.clear();
                 self.rot_from = old_session;
@@ -3116,13 +3116,7 @@ fn agent_row_line(r: &AgentRow, width: usize) -> String {
         text = format!("{} {text}", clock_hhmmss(r.started_at as i64));
     }
     // Go tui.go:1494: only the dot is coloured (agentDot: running 220, interrupted 208); the text is dimSt grey.
-    let dot_on = match state {
-        bar::AgentState::Running => 220,
-        bar::AgentState::Done => 42,
-        bar::AgentState::Failed => 196,
-        bar::AgentState::Queued => 245,
-        bar::AgentState::Interrupted => 208,
-    };
+    let dot_on = bar::agent_dot_color(state);
     let dot = format!("\x1b[38;5;{dot_on}m●\x1b[39m");
     format!(
         "  {dot}{GREY_ON} {}{FG_OFF}",

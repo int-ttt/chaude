@@ -219,6 +219,29 @@ pub enum Msg {
     DoctorTargetOk,
     DoctorTargetBig,
     DoctorTargetFix,
+    BarIdle,
+    BarRunning,
+    BarTurn,
+    BarAgent,
+    BarAgentsRunning,
+    BarBg,
+    BarQueued,
+    BarRot,
+    BarMode,
+    BarCtx,
+    BarTok,
+    BarAgentsFgBg,
+    BarHeld,
+    BarLastTokens,
+    NoticeOrphan,
+    NoticeBudget,
+    NoticeRotated,
+    NoticeNewSession,
+    NoticeQuiet,
+    PermTitle,
+    PermAsk,
+    PermAllow,
+    PermDeny,
 }
 
 pub fn text(lang: Lang, msg: Msg) -> &'static str {
@@ -459,6 +482,60 @@ pub fn text(lang: Lang, msg: Msg) -> &'static str {
         (Lang::En, Msg::DoctorTargetBig) => "{0} GB (over 10 GB)",
         (Lang::Ko, Msg::DoctorTargetFix) => "쓰지 않는 빌드 산출물을 지우세요: rm -rf target/debug",
         (Lang::En, Msg::DoctorTargetFix) => "delete unused build output: rm -rf target/debug",
+        (Lang::Ko, Msg::BarIdle) => "idle",
+        (Lang::En, Msg::BarIdle) => "idle",
+        (Lang::Ko, Msg::BarRunning) => "running {0}",
+        (Lang::En, Msg::BarRunning) => "running {0}",
+        (Lang::Ko, Msg::BarTurn) => "turn {0}s",
+        (Lang::En, Msg::BarTurn) => "turn {0}s",
+        (Lang::Ko, Msg::BarAgent) => "agent {0} {1}",
+        (Lang::En, Msg::BarAgent) => "agent {0} {1}",
+        (Lang::Ko, Msg::BarAgentsRunning) => "agents {0} running",
+        (Lang::En, Msg::BarAgentsRunning) => "agents {0} running",
+        (Lang::Ko, Msg::BarBg) => "(bg {0})",
+        (Lang::En, Msg::BarBg) => "(bg {0})",
+        (Lang::Ko, Msg::BarQueued) => "queued {0}",
+        (Lang::En, Msg::BarQueued) => "queued {0}",
+        (Lang::Ko, Msg::BarRot) => "rot {0}",
+        (Lang::En, Msg::BarRot) => "rot {0}",
+        (Lang::Ko, Msg::BarMode) => "mode {0}",
+        (Lang::En, Msg::BarMode) => "mode {0}",
+        (Lang::Ko, Msg::BarCtx) => "ctx {0}%",
+        (Lang::En, Msg::BarCtx) => "ctx {0}%",
+        (Lang::Ko, Msg::BarTok) => "{0} tok",
+        (Lang::En, Msg::BarTok) => "{0} tok",
+        (Lang::Ko, Msg::BarAgentsFgBg) => "agents fg {0} bg {1}",
+        (Lang::En, Msg::BarAgentsFgBg) => "agents fg {0} bg {1}",
+        (Lang::Ko, Msg::BarHeld) => "held, waiting {0}",
+        (Lang::En, Msg::BarHeld) => "held, waiting {0}",
+        (Lang::Ko, Msg::BarLastTokens) => "last in {0} out {1} cache {2}",
+        (Lang::En, Msg::BarLastTokens) => "last in {0} out {1} cache {2}",
+        (Lang::Ko, Msg::NoticeOrphan) => {
+            "[orphan] claude pid {0} ({1}, {2}) still running after its harness died; left running"
+        }
+        (Lang::En, Msg::NoticeOrphan) => {
+            "[orphan] claude pid {0} ({1}, {2}) still running after its harness died; left running"
+        }
+        (Lang::Ko, Msg::NoticeBudget) => "[budget] ${0} / ${1} reached, task stopped",
+        (Lang::En, Msg::NoticeBudget) => "[budget] ${0} / ${1} reached, task stopped",
+        (Lang::Ko, Msg::NoticeRotated) => "── context rotated #{0} ({1}; {2} → new) ──",
+        (Lang::En, Msg::NoticeRotated) => "── context rotated #{0} ({1}; {2} → new) ──",
+        (Lang::Ko, Msg::NoticeNewSession) => "── new session ──",
+        (Lang::En, Msg::NoticeNewSession) => "── new session ──",
+        (Lang::Ko, Msg::NoticeQuiet) => {
+            "[no output for {0}; still waiting, Esc/Ctrl+C to interrupt]"
+        }
+        (Lang::En, Msg::NoticeQuiet) => {
+            "[no output for {0}; still waiting, Esc/Ctrl+C to interrupt]"
+        }
+        (Lang::Ko, Msg::PermTitle) => "permission",
+        (Lang::En, Msg::PermTitle) => "permission",
+        (Lang::Ko, Msg::PermAsk) => "Allow {0}?",
+        (Lang::En, Msg::PermAsk) => "Allow {0}?",
+        (Lang::Ko, Msg::PermAllow) => "Allow (y)",
+        (Lang::En, Msg::PermAllow) => "Allow (y)",
+        (Lang::Ko, Msg::PermDeny) => "Deny (n)",
+        (Lang::En, Msg::PermDeny) => "Deny (n)",
     }
 }
 

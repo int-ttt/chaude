@@ -53,12 +53,12 @@ Basis: crates/cli/src/tui/*.rs, crates/core/src/slash.rs (SLASH_CMDS, PASSTHROUG
 |---|---|---|---|---|---|
 | Output stream (text, tool blocks, markdown) | tui/render.rs, tui/records.rs, tui/sessview.rs | yes (event.rs, UiEvent) | partial: output pane with markdown and tail-follow (G1 commit 2); tool/agent rows are plain text, no tool blocks yet | L | G1 |
 | Multi-line input, Enter sends, history | tui/mod.rs (key handling ~1085-1290) | partial (history file path needs check) | partial: Enter sends, trailing-backslash and Shift/Alt+Enter newline, Up/Down history loaded from and saved to `<cwd>/.chaude/history.jsonl` via core `input_history` (S4 commit 1); Shift/Alt+Enter not run in a GUI session yet | M | G1 |
-| Status bar M/P/T/C rows and turn token line | tui/bar.rs | partial: status bar from bar_at (G1 commit 3): model, ctx %, tokens, cost, turn timer, agents, queue, P/T/C role tokens, last-turn tokens as plain English; coder line, rate/rot/mode notices and bar.rs formatting not ported (S4 or i18n); orphan/budget/rotated/quiet notices hard-coded English (bar.rs:381-406), not i18n | not started | M | G1 |
+| Status bar M/P/T/C rows and turn token line | tui/bar.rs | partial: status bar from bar_at (G1 commit 3): model, ctx %, tokens, cost, turn timer, agents, queue, P/T/C role tokens, last-turn tokens as plain English; text now in core `bar_text` with i18n keys (S4 commit 2), GUI wired; ko and en both English for now; coder line, rate/rot/mode notices not yet wired in GUI | partial | M | G1 |
 | Tasks panel (status, title, Nk tokens, Ns) | tui/mod.rs (UiEvent::TaskStats ~630) | yes | not started | M | G1 |
 | Edit and clipboard | tui/edit.rs, tui/mod.rs (~2927-3024) | n/a (toolkit side) | not started | M | G1 |
 | Agent view window (Ctrl+T) | tui/agentview.rs | yes (agent_rows) | not started | M | G2 |
 | Session view | tui/sessview.rs | yes (UiEvent stream) | not started | M | G2 |
-| Permission prompt (y/n) | tui/mod.rs (~968) | yes (answer_permission) | partial: modal y/n dialog and buttons, Shift+Tab mode cycle (G1 commit 3); dialog strings are hard-coded English, not i18n; not run in a live GUI session yet | S | G2 |
+| Permission prompt (y/n) | tui/mod.rs (~968) | yes (answer_permission) | partial: modal y/n dialog and buttons, Shift+Tab mode cycle (G1 commit 3); dialog strings come from core i18n keys (PermTitle/PermAsk/PermAllow/PermDeny, S4 commit 2), English in both languages; not run in a live GUI session yet | S | G2 |
 | agent_wait queue hold/release/cancel | tui/mod.rs | yes (cancel_wait) | not started | S | G2 |
 | Esc cancels wait, Esc Esc rewind | tui/mod.rs, tui/rewind.rs | partial (interrupt yes; rewind flow in TUI only) | not started | M | G2 |
 | Ctrl+C / Ctrl+D | tui/mod.rs | yes (interrupt) | not started | S | G2 |
@@ -68,7 +68,7 @@ Basis: crates/cli/src/tui/*.rs, crates/core/src/slash.rs (SLASH_CMDS, PASSTHROUG
 | Usage overlay | tui/usage.rs | yes (usage) | not started | S | G2 |
 | Help and popup overlay | tui/overlay.rs | n/a (UI only) | not started | S | G2 |
 | Keyburst effect | tui/keyburst.rs | n/a (TUI-only effect; keep or drop in G2) | not started | S | G2 |
-| Notices: orphan, budget, rotated, quiet | tui/bar.rs, tui/mod.rs (~697, ~814, ~931) | partial (English text, see bar.rs row) | not started | S | G2 |
+| Notices: orphan, budget, rotated, quiet | tui/bar.rs, tui/mod.rs (~697, ~814, ~931) | partial: text in core `bar_text` and i18n keys (S4 commit 2), English in both languages | not started | S | G2 |
 | OS notification on turn complete | (new, GUI only per notes/OPEN.md) | yes (notify-rust dep, 101a788) | not started | S | G2 |
 
 ### Slash commands (crates/core/src/slash.rs)
@@ -102,4 +102,4 @@ Basis: crates/cli/src/tui/*.rs, crates/core/src/slash.rs (SLASH_CMDS, PASSTHROUG
 | /memory | slash.rs UNSUPPORTED | no (unsupported in TUI too) | not planned | S | none |
 | /permissions | slash.rs UNSUPPORTED | no (unsupported in TUI too) | not planned | S | none |
 
-Gaps to fill in G1/G2: (1) bar.rs notice strings go through core i18n (ko/en); (2) confirm history file, update path, and settings fields in core before marking "yes".
+Gaps to fill in G1/G2: (1) bar.rs notice strings go through core i18n keys (done in S4 commit 2; Korean translations still missing); (2) confirm history file, update path, and settings fields in core before marking "yes".

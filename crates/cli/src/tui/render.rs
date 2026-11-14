@@ -1961,6 +1961,7 @@ mod tests {
     }
     #[test]
     fn input_cursor_cells_and_view() {
+        let _lang = crate::test_support::lang_lock();
         // input_test.go TestInputWidthMixed: cursor before 글 in "ab한글cd" is cell 4.
         assert_eq!(input_cursor_cells("ab한글cd", 5), 4);
         assert_eq!(input_cursor_cells("ab글cd", 2), 2);

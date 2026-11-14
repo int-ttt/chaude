@@ -4,7 +4,8 @@ use std::sync::mpsc::Receiver;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{EngineHandle, Role, UiEvent};
-use chaude_core::ui_state::BarInput;
+use chaude_core::bar_text;
+use chaude_core::i18n::{self, Msg};
 use eframe::egui::{self, Key, Modifiers};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 
@@ -132,18 +133,18 @@ impl ChaudeApp {
             return;
         };
         let mut choice = None;
-        egui::Window::new("permission")
+        egui::Window::new(i18n::t(Msg::PermTitle))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.strong(format!("Allow {}?", p.tool));
+                ui.strong(i18n::tf(Msg::PermAsk, &[&p.tool]));
                 ui.label(&p.summary);
                 ui.horizontal(|ui| {
-                    if ui.button("Allow (y)").clicked() {
+                    if ui.button(i18n::t(Msg::PermAllow)).clicked() {
                         choice = Some(true);
                     }
-                    if ui.button("Deny (n)").clicked() {
+                    if ui.button(i18n::t(Msg::PermDeny)).clicked() {
                         choice = Some(false);
                     }
                 });
@@ -159,8 +160,9 @@ impl ChaudeApp {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
         let bar = self.state.bar_at(Instant::now(), now_unix);
-        ui.weak(status_line(&bar));
-        let activity = activity_line(&bar);
+        let lang = i18n::current();
+        ui.weak(bar_text::status_line(lang, &bar));
+        let activity = bar_text::activity_line(lang, &bar);
         if !activity.is_empty() {
             ui.weak(activity);
         }
@@ -232,64 +234,6 @@ impl eframe::App for ChaudeApp {
     }
 }
 
-// Compact token count: 999 stays as is, 1500 becomes "1.5k".
-fn kfmt(n: u64) -> String {
-    if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1000.0)
-    } else {
-        n.to_string()
-    }
-}
-
-// Model, context percent, tokens, cost, and the permission mode when it is not the default.
-fn status_line(bar: &BarInput) -> String {
-    let mut parts = vec![
-        bar.model.clone(),
-        format!("ctx {}%", bar.context_pct),
-        format!("{} tok", kfmt(bar.tokens)),
-        format!("${:.2}", bar.cost_usd),
-    ];
-    if !bar.mode.is_empty() && bar.mode != "default" {
-        parts.push(bar.mode.clone());
-    }
-    if bar.rot > 0 {
-        parts.push(format!("rot {}", bar.rot));
-    }
-    if let Some(rate) = &bar.rate {
-        parts.push(rate.clone());
-    }
-    parts.join(" · ")
-}
-
-// Turn timer, running agents, queue, held reply, per-role context, and the last turn's tokens. Empty when idle.
-fn activity_line(bar: &BarInput) -> String {
-    let mut parts = Vec::new();
-    if let Some(secs) = bar.turn_secs {
-        parts.push(format!("turn {secs}s"));
-    }
-    if bar.fg + bar.bg > 0 {
-        parts.push(format!("agents fg {} bg {}", bar.fg, bar.bg));
-    }
-    if bar.queued > 0 {
-        parts.push(format!("queued {}", bar.queued));
-    }
-    if let Some(n) = bar.waiting {
-        parts.push(format!("held, waiting {n}"));
-    }
-    for (role, tokens) in &bar.role_tokens {
-        parts.push(format!("{role} {}", kfmt(*tokens)));
-    }
-    if let Some((input, output, cache)) = bar.turn_tokens {
-        parts.push(format!(
-            "last in {} out {} cache {}",
-            kfmt(input),
-            kfmt(output),
-            kfmt(cache)
-        ));
-    }
-    parts.join(" · ")
-}
-
 fn render_entry(ui: &mut egui::Ui, md: &mut CommonMarkCache, entry: &Entry) {
     match entry {
         Entry::User(t) => {
@@ -326,45 +270,5 @@ fn render_entry(ui: &mut egui::Ui, md: &mut CommonMarkCache, entry: &Entry) {
         Entry::Error(t) => {
             ui.colored_label(egui::Color32::RED, format!("error: {t}"));
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn kfmt_keeps_small_and_shortens_large() {
-        assert_eq!(kfmt(999), "999");
-        assert_eq!(kfmt(1500), "1.5k");
-    }
-
-    #[test]
-    fn status_line_hides_default_mode() {
-        let bar = BarInput {
-            model: "opus".into(),
-            context_pct: 12,
-            tokens: 2500,
-            cost_usd: 0.5,
-            mode: "default".into(),
-            ..Default::default()
-        };
-        assert_eq!(status_line(&bar), "opus · ctx 12% · 2.5k tok · $0.50");
-        let plan = BarInput {
-            mode: "plan".into(),
-            ..bar
-        };
-        assert!(status_line(&plan).ends_with("· plan"));
-    }
-
-    #[test]
-    fn activity_line_is_empty_when_idle() {
-        assert_eq!(activity_line(&BarInput::default()), "");
-        let busy = BarInput {
-            turn_secs: Some(7),
-            queued: 2,
-            ..Default::default()
-        };
-        assert_eq!(activity_line(&busy), "turn 7s · queued 2");
     }
 }

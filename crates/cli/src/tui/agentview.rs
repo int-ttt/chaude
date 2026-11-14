@@ -344,7 +344,10 @@ impl AgentView {
         );
         let head = format!("{ORANGE_ON}{head_a}{FG_OFF}{DIM_ON}{head_b}{RESET}");
 
-        let dot = format!("\x1b[38;5;{}m●{FG_OFF}", rec.state().dot_color());
+        let dot = format!(
+            "\x1b[38;5;{}m●{FG_OFF}",
+            super::bar::agent_dot_color(rec.state())
+        );
         let status = clip(
             &format!(" {}", rec.status_text(now_ms)),
             width.saturating_sub(3),

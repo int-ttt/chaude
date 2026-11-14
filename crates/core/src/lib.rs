@@ -2,6 +2,7 @@
 
 pub mod agent_store;
 pub mod api;
+pub mod bar_text;
 pub mod budget;
 pub mod cache_ttl;
 pub mod category;
