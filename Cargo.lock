@@ -627,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "chaude-clean"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "chaude-core",
  "serde_json",
@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "chaude-cli"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "chaude-clean",
  "chaude-core",
@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "chaude-core"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "libc",
  "serde",
@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "chaude-gui"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "chaude-core",
  "eframe",
@@ -669,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "chaude-scripts"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "chaude-core",
  "flate2",
@@ -678,7 +678,7 @@ dependencies = [
 
 [[package]]
 name = "chaude-update"
-version = "0.12.6"
+version = "0.12.7"
 dependencies = [
  "flate2",
  "serde",
