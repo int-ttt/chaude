@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- release: `scripts/release-usage.py` writes token usage for one release cycle (previous tag to new tag) for this project only: cycle totals (main vs subagents, per model), a table per 5h block with the top 3 agents, a table per 7-day week, and the peak 5h block. Local transcripts only; the release procedure (notes/RELEASE.md) commits the result as notes/usage/<version>.md.
+  - release: `scripts/release-usage.py`는 이 프로젝트만의 릴리스 주기(이전 태그부터 새 태그까지) 토큰 사용량을 씁니다. 주기 합계(메인과 서브에이전트, 모델별), 5시간 블록별 표(상위 에이전트 3개), 7일 주간 표, 최대 5시간 블록을 포함합니다. 로컬 기록만 사용하며, 릴리스 절차(notes/RELEASE.md)가 결과를 notes/usage/<버전>.md로 커밋합니다.
 
 ## 0.12.7 - 2026-11-15
 - ci: the Linux jobs (rust.yml, release.yml) install the system libraries chaude-gui needs (xkbcommon, GL, X11, Wayland) before building.
