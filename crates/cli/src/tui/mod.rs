@@ -5,7 +5,6 @@
 pub mod agentview;
 pub mod bar;
 pub mod commands;
-pub mod edit;
 mod keyburst;
 pub mod lang;
 pub mod overlay;
@@ -13,7 +12,6 @@ pub mod records;
 pub mod render;
 pub mod resume_pick;
 pub mod rewind;
-mod runewidth_table;
 pub mod sessview;
 pub mod settings;
 pub mod usage;
@@ -47,8 +45,8 @@ use crossterm::{execute, queue};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use bar::BarInput;
+use chaude_core::editor::Editor;
 use commands::{Ctx, Dispatch, PermMode};
-use edit::Editor;
 use render::{BOLD_OFF, BOLD_ON, FG_OFF, GREY_ON, ORANGE_ON, RESET};
 
 const TICK: Duration = Duration::from_millis(80);
@@ -296,7 +294,7 @@ impl App {
                 model: "claude-opus-5-5".to_string(),
                 threshold: 200_000,
             },
-            editor: Editor::default(),
+            editor: Editor::with_east_asian(render::east_asian()),
             cols,
             rows,
             bar: BarInput {

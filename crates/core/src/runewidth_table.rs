@@ -1,5 +1,5 @@
 //! Range tables for display width, copied from go-runewidth v0.0.16 (runewidth.go, runewidth_table.go).
-//! Each entry is an inclusive (first, last) code point range, sorted. Used by render::char_width_ea.
+//! Each entry is an inclusive (first, last) code point range, sorted. Used by width::char_width_ea.
 #![allow(clippy::unreadable_literal)]
 
 pub(super) static NONPRINT: &[(u32, u32)] = &[

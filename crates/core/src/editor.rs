@@ -3,11 +3,12 @@
 // Editing rules follow the Go inputBox (Go tree (v0.11.2) internal/harness/input.go); prompt history
 // follows history.go (cap, consecutive-duplicate rule, <cwd>/.chaude/history.jsonl).
 
-// This is a binary crate, and mod.rs does not call every method here yet (delete_word, kill_to_start,
-// kill_to_end, move_row, backslash_newline, load_history are waiting for key wiring in mod.rs).
+// Terminal-free, so the TUI (crates/cli/src/tui/mod.rs) and the GUI share it. The TUI does not call every
+// method yet (delete_word, kill_to_start, kill_to_end, move_row, backslash_newline, load_history wait for key wiring).
 
-use chaude_core::input_history::{append_history, history_file_for, read_history};
-use chaude_core::ui_state::push_history;
+use crate::input_history::{append_history, history_file_for, read_history};
+use crate::ui_state::push_history;
+use crate::width::char_width_ea;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default)]
@@ -20,9 +21,18 @@ pub struct Editor {
     draft: String,
     // Set by load_history; every submitted prompt is saved here.
     history_file: Option<PathBuf>,
+    // EastAsianWidth rule for cell widths (go-runewidth); the TUI passes render::east_asian().
+    east_asian: bool,
 }
 
 impl Editor {
+    pub fn with_east_asian(east_asian: bool) -> Self {
+        Editor {
+            east_asian,
+            ..Editor::default()
+        }
+    }
+
     pub fn text(&self) -> String {
         self.buf.iter().collect()
     }
@@ -151,7 +161,7 @@ impl Editor {
             .iter()
             .rposition(|&(start, _)| start <= self.cursor)
             .unwrap_or(0);
-        let col = cells(&self.buf[rows[row].0..self.cursor]);
+        let col = self.cells(&self.buf[rows[row].0..self.cursor]);
         let t = row as i32 + d;
         if t < 0 || t as usize >= rows.len() {
             return false;
@@ -159,8 +169,8 @@ impl Editor {
         let (start, end) = rows[t as usize];
         let mut p = start;
         let mut c = 0;
-        while p < end && c + cell_width(self.buf[p]) <= col {
-            c += cell_width(self.buf[p]);
+        while p < end && c + self.cell_width(self.buf[p]) <= col {
+            c += self.cell_width(self.buf[p]);
             p += 1;
         }
         self.cursor = p;
@@ -179,7 +189,7 @@ impl Editor {
                 cur = 0;
                 continue;
             }
-            let cw = cell_width(ch);
+            let cw = self.cell_width(ch);
             if cur + cw > w && i > start {
                 rows.push((start, i));
                 start = i;
@@ -298,12 +308,14 @@ fn is_word_char(c: char) -> bool {
     c.is_alphabetic() || c.is_numeric() || c == '_'
 }
 
-fn cell_width(c: char) -> usize {
-    super::render::char_width(c)
-}
+impl Editor {
+    fn cell_width(&self, c: char) -> usize {
+        char_width_ea(c, self.east_asian)
+    }
 
-fn cells(cs: &[char]) -> usize {
-    cs.iter().map(|&c| cell_width(c)).sum()
+    fn cells(&self, cs: &[char]) -> usize {
+        cs.iter().map(|&c| self.cell_width(c)).sum()
+    }
 }
 
 #[cfg(test)]
@@ -480,12 +492,16 @@ mod tests {
     fn up_moves_a_visual_row_across_a_wide_wrap() {
         let mut e = typed("가나다라마");
         assert_eq!(e.visual_rows(6), vec![(0, 3), (3, 5)]);
-        assert_eq!(cells(&e.buf[3..e.cursor()]), 4, "cursor on row 1, column 4");
+        assert_eq!(
+            e.cells(&e.buf[3..e.cursor()]),
+            4,
+            "cursor on row 1, column 4"
+        );
         e.insert_str("x");
         assert_eq!(e.visual_rows(6).len(), 2, "라마x is 5 cells and fits");
         assert!(e.move_row(-1, 6), "there is a row above");
         assert_eq!(e.cursor(), 2, "row 0 at cell column 4 is before 다");
-        assert_eq!(cells(&e.buf[..e.cursor()]), 4);
+        assert_eq!(e.cells(&e.buf[..e.cursor()]), 4);
     }
 
     // Port of TestInputWidthMixed (input_test.go:9-29): cursor cell column, left moves, backspace over a wide char.
@@ -493,14 +509,14 @@ mod tests {
     fn mixed_width_cursor_and_backspace_follow_cells() {
         let mut e = typed("ab한글cd");
         assert_eq!(e.cursor(), 6);
-        assert_eq!(cells(&e.buf[..e.cursor()]), 8);
+        assert_eq!(e.cells(&e.buf[..e.cursor()]), 8);
         e.left();
         e.left();
         e.left();
-        assert_eq!(cells(&e.buf[..e.cursor()]), 4, "before 글");
+        assert_eq!(e.cells(&e.buf[..e.cursor()]), 4, "before 글");
         e.backspace();
         assert_eq!(e.text(), "ab글cd");
-        assert_eq!(cells(&e.buf[..e.cursor()]), 2);
+        assert_eq!(e.cells(&e.buf[..e.cursor()]), 2);
     }
 
     #[test]

@@ -9,6 +9,7 @@ pub mod category;
 pub mod child_set;
 pub mod clients;
 pub mod doctor;
+pub mod editor;
 pub mod error;
 pub mod event;
 pub mod file_lock;
@@ -39,12 +40,14 @@ pub mod resume_note;
 mod role_coexist;
 pub mod rotate;
 pub mod rotate_defer;
+mod runewidth_table;
 pub mod settings;
 pub mod slash;
 pub mod tmp_layout;
 pub mod turn_spend;
 pub mod ui_state;
 pub mod usage_poll;
+pub mod width;
 
 #[cfg(test)]
 pub(crate) mod testutil {
