@@ -43,6 +43,7 @@ pub mod rotate_defer;
 mod runewidth_table;
 pub mod settings;
 pub mod slash;
+pub mod tasks;
 pub mod tmp_layout;
 pub mod turn_spend;
 pub mod ui_state;

@@ -9,6 +9,8 @@
   - release: `scripts/release-usage.py`는 이 프로젝트만의 릴리스 주기(이전 태그부터 새 태그까지) 토큰 사용량을 씁니다. 주기 합계(메인과 서브에이전트, 모델별), 5시간 블록별 표(상위 에이전트 3개), 7일 주간 표, 최대 5시간 블록을 포함합니다. 로컬 기록만 사용하며, 릴리스 절차(notes/RELEASE.md)가 결과를 notes/usage/<버전>.md로 커밋합니다.
 - core: the input line's buffer logic (cursor, word and line edits, wrapped rows, history browsing) and the display-width table moved from the TUI to `chaude_core::editor` and `chaude_core::width`; the TUI output is unchanged.
   - core: 입력줄의 버퍼 로직(커서, 단어와 줄 편집, 줄바꿈 행, 기록 탐색)과 표시 폭 표를 TUI에서 `chaude_core::editor`와 `chaude_core::width`로 옮겼습니다. TUI 출력은 그대로입니다.
+- agents: a long job can run from a task file `notes/tasks/<ws>.md` (steps with title, files, gate, commit message, status todo|done|failed, hash, notes; `chaude_core::tasks` parses and updates it). haiku-coder and haiku-batch-worker do only the first todo step per brief, run its gate, commit, update that step, and hand back (plan/agent-scheduler.md, step 1).
+  - agents: 긴 작업을 `notes/tasks/<ws>.md` 작업 파일의 단계(제목, 파일, 게이트, 커밋 메시지, 상태 todo|done|failed, 해시, 메모)로 돌릴 수 있습니다. `chaude_core::tasks`가 파일을 읽고 갱신합니다. haiku-coder와 haiku-batch-worker는 브리프당 첫 todo 단계만 수행하고, 게이트를 돌려 커밋한 뒤 그 단계를 갱신하고 상태를 넘깁니다(plan/agent-scheduler.md, 1단계).
 
 ## 0.12.7 - 2026-11-15
 - ci: the Linux jobs (rust.yml, release.yml) install the system libraries chaude-gui needs (xkbcommon, GL, X11, Wayland) before building.

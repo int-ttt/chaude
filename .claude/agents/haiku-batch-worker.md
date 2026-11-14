@@ -12,6 +12,7 @@ autoCompactWindow: 100000
 Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en).
 
 Do exactly the specified transformation; if judgment is needed, stop and say so. Never delete originals; archive them.
+Checkpoint: if the brief names a task file (notes/tasks/<ws>.md), do only the first todo step, run its gate, commit, update that step (status done + commit hash, or failed + gate log in notes), hand back.
 Fact propagation (old → new): update `notes/FACTS.md`; grep -rn the old value (exclude .git, logs); replace where context matches; list ambiguous occurrences unchanged.
 Return to the main thread only the final message below (≤3 lines).
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.

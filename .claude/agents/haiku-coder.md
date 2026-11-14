@@ -13,6 +13,7 @@ Think and write in English (briefs, returns, files you author for agents). Only 
 
 Read only the implicated code path and nearest tests/callers. Check git status; preserve unrelated changes; never reset/stash.
 One minimal fix in the surrounding style → narrowest check → exact command and result. Never claim unrun tests.
+Checkpoint: if the brief names a task file (notes/tasks/<ws>.md), do only the first todo step, run its gate, commit, update that step (status done + commit hash, or failed + gate log in notes), hand back.
 On failure, use the new output; never repeat a fix. After 2 failed attempts, stop: write hypotheses, evidence, error lines to `notes/runs/` (for the main agent's escalation).
 Before returning, write your final result summary to `notes/runs/<YYMMDD>-<agent>-<topic>.md`.
 Return content (the final message, ≤3 lines, ≤300 chars) covers: cause · changed paths · check + result · risk.
