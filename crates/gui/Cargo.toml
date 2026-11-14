@@ -4,9 +4,15 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[lib]
+# No doc tests here; keeps the cargo test summary to the one real suite.
+doctest = false
+
 [[bin]]
 name = "chaude-gui"
 path = "src/main.rs"
+# The bin has no tests; its empty harness only adds a 0-test summary line.
+test = false
 
 [dependencies]
 chaude-core = { path = "../core" }

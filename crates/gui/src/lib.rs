@@ -25,4 +25,13 @@ mod tests {
     fn invalid_json_is_none() {
         assert_eq!(event_kind("{not json"), None);
     }
+
+    #[test]
+    fn known_types_map_to_their_names() {
+        assert_eq!(
+            event_kind(r#"{"type":"rate_limit_event"}"#),
+            Some("rate_limit_event")
+        );
+        assert_eq!(event_kind(r#"{"type":"result"}"#), Some("result"));
+    }
 }
