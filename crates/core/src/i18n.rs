@@ -511,20 +511,18 @@ pub fn text(lang: Lang, msg: Msg) -> &'static str {
         (Lang::Ko, Msg::BarLastTokens) => "last in {0} out {1} cache {2}",
         (Lang::En, Msg::BarLastTokens) => "last in {0} out {1} cache {2}",
         (Lang::Ko, Msg::NoticeOrphan) => {
-            "[orphan] claude pid {0} ({1}, {2}) still running after its harness died; left running"
+            "[고아] 하네스가 종료된 뒤에도 실행 중인 claude pid {0} ({1}, {2}); 그대로 둠"
         }
         (Lang::En, Msg::NoticeOrphan) => {
             "[orphan] claude pid {0} ({1}, {2}) still running after its harness died; left running"
         }
-        (Lang::Ko, Msg::NoticeBudget) => "[budget] ${0} / ${1} reached, task stopped",
+        (Lang::Ko, Msg::NoticeBudget) => "[예산] ${0} / ${1} 도달, 작업 중지됨",
         (Lang::En, Msg::NoticeBudget) => "[budget] ${0} / ${1} reached, task stopped",
-        (Lang::Ko, Msg::NoticeRotated) => "── context rotated #{0} ({1}; {2} → new) ──",
+        (Lang::Ko, Msg::NoticeRotated) => "── 컨텍스트 교체 #{0} ({1}; {2} → 새 세션) ──",
         (Lang::En, Msg::NoticeRotated) => "── context rotated #{0} ({1}; {2} → new) ──",
-        (Lang::Ko, Msg::NoticeNewSession) => "── new session ──",
+        (Lang::Ko, Msg::NoticeNewSession) => "── 새 세션 ──",
         (Lang::En, Msg::NoticeNewSession) => "── new session ──",
-        (Lang::Ko, Msg::NoticeQuiet) => {
-            "[no output for {0}; still waiting, Esc/Ctrl+C to interrupt]"
-        }
+        (Lang::Ko, Msg::NoticeQuiet) => "[{0} 동안 출력 없음; 대기 중, Esc/Ctrl+C로 중단]",
         (Lang::En, Msg::NoticeQuiet) => {
             "[no output for {0}; still waiting, Esc/Ctrl+C to interrupt]"
         }

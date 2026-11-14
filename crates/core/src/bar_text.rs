@@ -390,6 +390,45 @@ pub fn go_duration(d: Duration) -> String {
 mod tests {
     use super::*;
 
+    // Moved from gui app.rs (deleted in b41d445) so the status bar text keeps its test in core.
+    #[test]
+    fn fmt_k_keeps_small_and_shortens_large() {
+        assert_eq!(fmt_k(999), "999");
+        assert_eq!(fmt_k(1500), "1.50k");
+    }
+
+    #[test]
+    fn status_line_hides_default_mode() {
+        let bar = BarInput {
+            model: "opus".into(),
+            context_pct: 12,
+            tokens: 2500,
+            cost_usd: 0.5,
+            mode: "default".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            status_line(Lang::En, &bar),
+            "opus · ctx 12% · 2.5k tok · $0.50"
+        );
+        let plan = BarInput {
+            mode: "plan".into(),
+            ..bar
+        };
+        assert!(status_line(Lang::En, &plan).ends_with("· mode plan"));
+    }
+
+    #[test]
+    fn activity_line_is_empty_when_idle() {
+        assert_eq!(activity_line(Lang::En, &BarInput::default()), "");
+        let busy = BarInput {
+            turn_secs: Some(7),
+            queued: 2,
+            ..Default::default()
+        };
+        assert_eq!(activity_line(Lang::En, &busy), "turn 7s · queued 2");
+    }
+
     #[test]
     fn scroll_range_text_is_one_based() {
         assert_eq!(

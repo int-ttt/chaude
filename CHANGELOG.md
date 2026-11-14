@@ -17,6 +17,8 @@
   - core: 프롬프트 기록 파일(`<cwd>/.chaude/history.jsonl`)을 TUI 편집기에서 `chaude_core::input_history`로 옮겼습니다. GUI도 시작할 때 같은 기록을 읽고 보낸 프롬프트를 저장하므로, 두 UI 모두 재시작 후에도 Up/Down 기록 불러오기가 유지됩니다. TUI 동작은 그대로입니다.
 - core: the status bar text, agent rows and transcript notices (orphan, budget, rotated, new session, quiet) moved to `chaude_core::bar_text` with keys in core i18n; the GUI status bar and permission dialog use the same text. TUI output is unchanged in ko and en; the new strings are still English in both languages (Korean translation is a follow-up).
   - core: 상태 막대 문구, 에이전트 행, 기록 알림(고아 프로세스, 예산, 컨텍스트 회전, 새 세션, 무출력)을 core i18n 키와 함께 `chaude_core::bar_text`로 옮겼습니다. GUI 상태 막대와 권한 대화상자도 같은 문구를 씁니다. TUI 출력은 ko, en 모두 그대로입니다. 새 문구는 아직 ko, en 모두 영어이며 한국어 번역은 후속 작업입니다.
+- core: the transcript notices (orphan, budget, rotated, new session, quiet) now have Korean text in core i18n; English output is unchanged. The status bar text tests from the GUI (kfmt, status line with default mode hidden, idle activity line) are back in `chaude_core::bar_text`.
+  - core: 기록 알림(고아 프로세스, 예산, 컨텍스트 교체, 새 세션, 무출력)에 core i18n의 한국어 문구를 붙였습니다. 영어 출력은 그대로입니다. GUI에 있던 상태 막대 테스트(kfmt, 기본 모드 숨김, 유휴 활동 줄)는 `chaude_core::bar_text`로 다시 옮겼습니다.
 
 ## 0.12.6 - 2026-11-13
 - agents: `haiku-runner` and `haiku-test-lead` note that on Windows `python3` is `py -3` (else `python`), the same interpreter choice the Windows hooks use.

@@ -6422,7 +6422,7 @@ mod tests {
         assert!(
             app.transcript
                 .iter()
-                .any(|r| r == "── context rotated #1 (tokens; abcdef01 → new) ──"),
+                .any(|r| r == "── 컨텍스트 교체 #1 (tokens; abcdef01 → 새 세션) ──"),
             "{:?}",
             app.transcript
         );
@@ -7201,9 +7201,9 @@ mod tests {
             model: String::new(),
         });
         assert!(
-            app.transcript
-                .iter()
-                .any(|r| r.starts_with("[orphan] claude pid 4242 (claude-opus-5-5, ")),
+            app.transcript.iter().any(|r| r.starts_with(
+                "[고아] 하네스가 종료된 뒤에도 실행 중인 claude pid 4242 (claude-opus-5-5, "
+            )),
             "{:?}",
             app.transcript
         );
@@ -7567,10 +7567,7 @@ mod tests {
         });
         assert_eq!(
             app.transcript.last().map(String::as_str),
-            Some(
-                format!("{GREY_ON}[budget] $1.5000 / $2.0000 reached, task stopped{FG_OFF}")
-                    .as_str()
-            )
+            Some(format!("{GREY_ON}[예산] $1.5000 / $2.0000 도달, 작업 중지됨{FG_OFF}").as_str())
         );
     }
 
@@ -8276,7 +8273,7 @@ mod tests {
         app.tick(later);
         app.tick(later);
         let rows = app.transcript.join("\n");
-        assert_eq!(rows.matches("[no output for 30m0s").count(), 1);
+        assert_eq!(rows.matches("[30m0s 동안 출력 없음").count(), 1);
 
         let mut app = App::new(80, 24);
         app.apply(UiEvent::Busy(true));
@@ -8286,7 +8283,7 @@ mod tests {
             summary: String::new(),
         });
         app.tick(app.clock + IDLE_NOTICE);
-        assert!(!app.transcript.join("\n").contains("still waiting"));
+        assert!(!app.transcript.join("\n").contains("대기 중"));
     }
 
     // Minimal terminal model for the escapes draw() emits: cursor moves, line clear, scroll region, SU/SD.
