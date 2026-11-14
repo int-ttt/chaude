@@ -506,9 +506,9 @@ pub fn text(lang: Lang, msg: Msg) -> &'static str {
         (Lang::En, Msg::BarTok) => "{0} tok",
         (Lang::Ko, Msg::BarAgentsFgBg) => "agents fg {0} bg {1}",
         (Lang::En, Msg::BarAgentsFgBg) => "agents fg {0} bg {1}",
-        (Lang::Ko, Msg::BarHeld) => "held, waiting {0}",
+        (Lang::Ko, Msg::BarHeld) => "보류, {0} 대기",
         (Lang::En, Msg::BarHeld) => "held, waiting {0}",
-        (Lang::Ko, Msg::BarLastTokens) => "last in {0} out {1} cache {2}",
+        (Lang::Ko, Msg::BarLastTokens) => "마지막 입력 {0} 출력 {1} 캐시 {2}",
         (Lang::En, Msg::BarLastTokens) => "last in {0} out {1} cache {2}",
         (Lang::Ko, Msg::NoticeOrphan) => {
             "[고아] 하네스가 종료된 뒤에도 실행 중인 claude pid {0} ({1}, {2}); 그대로 둠"
@@ -526,13 +526,13 @@ pub fn text(lang: Lang, msg: Msg) -> &'static str {
         (Lang::En, Msg::NoticeQuiet) => {
             "[no output for {0}; still waiting, Esc/Ctrl+C to interrupt]"
         }
-        (Lang::Ko, Msg::PermTitle) => "permission",
+        (Lang::Ko, Msg::PermTitle) => "권한",
         (Lang::En, Msg::PermTitle) => "permission",
-        (Lang::Ko, Msg::PermAsk) => "Allow {0}?",
+        (Lang::Ko, Msg::PermAsk) => "{0} 허용?",
         (Lang::En, Msg::PermAsk) => "Allow {0}?",
-        (Lang::Ko, Msg::PermAllow) => "Allow (y)",
+        (Lang::Ko, Msg::PermAllow) => "허용 (y)",
         (Lang::En, Msg::PermAllow) => "Allow (y)",
-        (Lang::Ko, Msg::PermDeny) => "Deny (n)",
+        (Lang::Ko, Msg::PermDeny) => "거부 (n)",
         (Lang::En, Msg::PermDeny) => "Deny (n)",
     }
 }

@@ -6412,6 +6412,7 @@ mod tests {
 
     #[test]
     fn rotation_notice_names_the_replaced_session() {
+        let _lang = crate::test_support::lang_lock();
         let mut app = App::new(80, 24);
         app.apply(UiEvent::RotatedFrom {
             old_session: "abcdef0123456789".to_string(),
@@ -7194,6 +7195,7 @@ mod tests {
 
     #[test]
     fn orphan_notice_names_the_child_and_its_model() {
+        let _lang = crate::test_support::lang_lock();
         let mut app = App::new(80, 24);
         app.apply(UiEvent::OrphanNotice {
             role: "main".to_string(),
@@ -7551,6 +7553,7 @@ mod tests {
 
     #[test]
     fn rate_event_sets_the_status_rate_and_budget_stop_prints_one_line() {
+        let _lang = crate::test_support::lang_lock();
         let mut app = App::new(80, 24);
         app.apply(UiEvent::RateLimit {
             info: serde_json::json!({"unifiedWindows": {"five_hour": {"utilization": 0.5}}}),
@@ -8267,6 +8270,7 @@ mod tests {
     // Go quiet(): a busy turn with no content for 30 min shows one notice; an open tool call suppresses it.
     #[test]
     fn idle_notice_once_and_not_while_tool_open() {
+        let _lang = crate::test_support::lang_lock();
         let mut app = App::new(80, 24);
         app.apply(UiEvent::Busy(true));
         let later = app.clock + IDLE_NOTICE;
