@@ -27,12 +27,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, TaskStatus, UiEvent};
+use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::handoff;
 use chaude_core::i18n::{Msg, t, tf};
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::resident::StagePhase;
 use chaude_core::resume_note;
+use chaude_core::ui_state::{RunState, TaskRow, TaskState};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
@@ -105,26 +106,6 @@ struct StageRow {
     at: Instant,
 }
 
-// One main Agent/Task call in the task list. Queued until its launch ack (TaskResolved Running), then Running.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TaskState {
-    Queued,
-    Running,
-    Done,
-    Failed,
-    Timeout,
-}
-
-#[derive(Debug, Clone)]
-struct TaskRow {
-    id: String,
-    desc: String,
-    state: TaskState,
-    // The agent's total tokens and wall time from its tool result (UiEvent::TaskStats); None until it arrives.
-    tokens: Option<u64>,
-    duration_ms: Option<u64>,
-}
-
 // "12.3k tok · 45s" for a task row; only the figures that are known. None when neither is.
 fn task_stats_text(task: &TaskRow) -> Option<String> {
     let mut parts = Vec::new();
@@ -152,42 +133,16 @@ pub struct App {
     cols: usize,
     rows: usize,
     bar: BarInput,
-    busy: bool,
-    turn_start: Option<Instant>,
-    // First line of the prompt that started the turn (Go curPrompt), shown in the busy row.
-    turn_prompt: String,
-    // (id, description, elapsed clock, started_at in ms since epoch: AgentStart carries Unix seconds).
-    agents: Vec<(String, String, Instant, u64)>,
-    // Ids of the agents launched in the background (UiEvent::AgentBackground); they have no AgentEnd until done.
-    bg_agents: Vec<String>,
-    // Go opusRunning / residentBusy: an opus Agent is running, and the resident roles with a command in flight.
-    opus_busy: bool,
-    // Busy resident sessions as running rows (Go residentBusy), oldest first; id and name are the role.
-    resident_busy: Vec<AgentRow>,
-    // Go tracker, shared with the engine: the tick re-reads it into agent_rows. None without an engine.
+    // Engine progress (busy, agents, queue, tasks, held reply, ...) shared with the GUI: core ui_state::RunState.
+    run: RunState,
+    // Go tracker, shared with the engine: the tick re-reads it into run.agent_rows. None without an engine.
     agent_src: Option<Arc<Mutex<Vec<AgentRow>>>>,
-    // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
-    agent_rows: Vec<AgentRow>,
-    // Go lastRun: running count (running_n) at the last refresh; the idle tick skips when it is unchanged and not busy.
-    last_run: usize,
-    // Agents an earlier harness left unfinished, listed after the running rows (UiEvent::AgentsRestored).
-    restored_rows: Vec<AgentRow>,
     // Agent-view log by agent tool id (UiEvent::AgentLog; Go agentRec.log, newest MAX_AGENT_LOG lines).
     agent_logs: HashMap<String, agentview::AgentLog>,
     // Finished agents of this run by id (Go tracker keeps them): the agent view lists them as 완료/실패 with their log.
     finished_agents: HashMap<String, agentview::AgentRec>,
     // First agent row shown in the panels (Go panOff), moved by the wheel over them.
     pan_off: usize,
-    // Last tool call of the running turn, cut to 40 runes (Go lastTool); the busy row shows it.
-    last_tool: String,
-    // Prompts waiting for the next turn, oldest first (UiEvent::QueueTexts; Go m.queue).
-    queue_texts: Vec<String>,
-    // Main's Agent/Task calls of the current round, oldest first (UiEvent::TaskQueued / TaskResolved).
-    tasks: Vec<TaskRow>,
-    // Pending task count while main's final reply is held (UiEvent::ReplyHeld); None once released.
-    held: Option<usize>,
-    // Rotations seen this session (UiEvent::Rotated); Go m.r.rotations.
-    rot: u32,
     // Time of the last tick. Elapsed times and the spinner are computed from it, so `frame` stays pure.
     clock: Instant,
     spin: char,
@@ -301,23 +256,11 @@ impl App {
                 mode: "auto".to_string(),
                 ..BarInput::default()
             },
-            busy: false,
-            turn_start: None,
-            turn_prompt: String::new(),
-            agents: Vec::new(),
-            bg_agents: Vec::new(),
-            agent_rows: Vec::new(),
-            last_run: 0,
+            run: RunState::default(),
             agent_src: None,
-            restored_rows: Vec::new(),
             agent_logs: HashMap::new(),
             finished_agents: HashMap::new(),
             pan_off: 0,
-            last_tool: String::new(),
-            queue_texts: Vec::new(),
-            tasks: Vec::new(),
-            held: None,
-            rot: 0,
             session_id: String::new(),
             clock: Instant::now(),
             spin: ' ',
@@ -330,8 +273,6 @@ impl App {
             unseen: false,
             quiet_since: None,
             open_tools: HashSet::new(),
-            opus_busy: false,
-            resident_busy: Vec::new(),
             quiet_noted: false,
             mouse: true,
             ime_shift: 0,
@@ -439,7 +380,7 @@ impl App {
                 } else {
                     format!("{name}({summary})")
                 };
-                self.last_tool = trunc_runes(&head, LAST_TOOL_RUNES);
+                self.run.last_tool = trunc_runes(&head, LAST_TOOL_RUNES);
                 let row = ToolRow {
                     row: self.transcript.len(),
                     name,
@@ -462,7 +403,7 @@ impl App {
                     } else {
                         format!("{}({summary})", r.name)
                     };
-                    self.last_tool = trunc_runes(&r.head, LAST_TOOL_RUNES);
+                    self.run.last_tool = trunc_runes(&r.head, LAST_TOOL_RUNES);
                     *line = tool_line(r);
                 }
             }
@@ -500,15 +441,6 @@ impl App {
                     None => self.transcript.extend(rows),
                 }
             }
-            UiEvent::AgentBackground { id } => self.bg_agents.push(id),
-            UiEvent::AgentStart {
-                id,
-                description,
-                started_at,
-            } => {
-                self.agents
-                    .push((id, description, Instant::now(), started_at * 1000));
-            }
             // A background agent resumed by SendMessage runs again under its original tool id (core keeps background=true).
             UiEvent::AgentResumed {
                 id,
@@ -519,18 +451,18 @@ impl App {
                 // The SendMessage call's own timed row is the resumed agent's row: it stays open until AgentEnd.
                 self.open_tools.remove(&send_id);
                 // A finished agent that runs again (SendMessage) reappears as running: its pane shows only the new turn.
-                if !self.agents.iter().any(|(aid, _, _, _)| *aid == id) {
+                if !self.run.agents.iter().any(|(aid, _, _, _)| *aid == id) {
                     self.finished_agents.remove(&id);
                     self.agent_logs.remove(&id);
-                    self.agents.push((
+                    self.run.agents.push((
                         id.clone(),
                         description.clone(),
                         Instant::now(),
                         started_at * 1000,
                     ));
                 }
-                if !self.bg_agents.contains(&id) {
-                    self.bg_agents.push(id.clone());
+                if !self.run.bg_agents.contains(&id) {
+                    self.run.bg_agents.push(id.clone());
                 }
                 // A resume while its row is still open adds none; the AgentEnd closes and removes the row.
                 // The SendMessage row (ToolStart..) moves to resume_rows, so the call and the agent share one row.
@@ -591,12 +523,9 @@ impl App {
                 self.bar.context_pct = context_pct;
             }
             UiEvent::Busy(b) => {
-                self.busy = b;
-                self.turn_start = if b { Some(Instant::now()) } else { None };
+                self.run.apply(UiEvent::Busy(b), Instant::now());
                 if b {
                     self.got_text = false;
-                    // Go sendPrompt resets lastTool at the start of each turn.
-                    self.last_tool.clear();
                     // A new turn is past any late AgentEnd of the interrupted one.
                     self.finished_fg.clear();
                 } else {
@@ -608,53 +537,14 @@ impl App {
                 self.quiet_noted = false;
             }
             UiEvent::Queued(n) => self.bar.queued = n,
-            UiEvent::TaskQueued { id, desc } => {
-                // A new round starts once every earlier task has settled, as the engine's own list does.
-                if self
-                    .tasks
-                    .iter()
-                    .all(|t| !matches!(t.state, TaskState::Queued | TaskState::Running))
-                {
-                    self.tasks.clear();
-                }
-                self.tasks.push(TaskRow {
-                    id,
-                    desc,
-                    state: TaskState::Queued,
-                    tokens: None,
-                    duration_ms: None,
-                });
-            }
-            UiEvent::TaskStats {
-                id,
-                tokens,
-                duration_ms,
-            } => {
-                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == id) {
-                    t.tokens = tokens;
-                    t.duration_ms = duration_ms;
-                }
-            }
             UiEvent::TurnTokens {
                 input,
                 output,
                 cache,
             } => self.bar.turn_tokens = Some((input, output, cache)),
-            UiEvent::TaskResolved { id, status } => {
-                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == id) {
-                    t.state = match status {
-                        TaskStatus::Running => TaskState::Running,
-                        TaskStatus::Done => TaskState::Done,
-                        TaskStatus::Failed => TaskState::Failed,
-                        TaskStatus::Timeout => TaskState::Timeout,
-                    };
-                }
-            }
-            UiEvent::ReplyHeld { pending } => self.held = Some(pending),
-            UiEvent::ReplyReleased => self.held = None,
             // Go shows no per-turn "done" row; its footer comes from engine stats that UiEvent does not carry yet.
             UiEvent::TurnEnd { .. } => {
-                self.held = None;
+                self.run.held = None;
                 self.end_main_block();
             }
             UiEvent::RoleContext { role, tokens } => {
@@ -704,9 +594,9 @@ impl App {
                 self.note(&bar::orphan_notice(pid, &model, &cwd));
             }
             UiEvent::Rotated { reason } => {
-                self.rot += 1;
+                self.run.rot += 1;
                 let old = std::mem::take(&mut self.rot_from);
-                self.note(&bar::rotated_notice(self.rot, &reason, &old));
+                self.note(&bar::rotated_notice(self.run.rot, &reason, &old));
             }
             UiEvent::Usage { text } => {
                 let (w, h) = self.usage_geom();
@@ -813,12 +703,6 @@ impl App {
                 let notice = bar::budget_notice(spent_usd, cap_usd);
                 self.transcript.push(format!("{GREY_ON}{notice}{FG_OFF}"));
             }
-            // Go agentRows / m.queue: the panels and the queue are redrawn from these lists each frame.
-            UiEvent::AgentRows { rows } => {
-                self.agent_rows = rows;
-                self.last_run = self.running_n();
-            }
-            UiEvent::AgentsRestored { rows } => self.restored_rows = rows,
             // Core log lines carry no time, so each gets this arrival's local stamp (agentview::stamp_lines).
             UiEvent::AgentLog {
                 id,
@@ -844,49 +728,17 @@ impl App {
             // The engine drains the queue into the next turn (core next_turn: one merged prompt, joined by a blank line).
             // That is the moment a queued prompt is sent, so it is echoed here, once, and becomes the turn's label.
             UiEvent::QueueTexts(texts) => {
-                let drained = std::mem::replace(&mut self.queue_texts, texts);
-                if !drained.is_empty() && self.queue_texts.is_empty() && self.busy {
+                let drained = std::mem::replace(&mut self.run.queue_texts, texts);
+                if !drained.is_empty() && self.run.queue_texts.is_empty() && self.run.busy {
                     let merged = drained.join("\n\n");
-                    self.turn_prompt =
+                    self.run.turn_prompt =
                         render::trunc_chars(merged.lines().next().unwrap_or("").trim(), 60);
                     self.echo_prompt(&merged);
                 }
             }
-            // Go opusRunning / residentBusy: state only, read by the thinking row.
-            UiEvent::OpusBusy(on) => self.opus_busy = on,
-            UiEvent::ResidentBusy {
-                role,
-                busy,
-                model,
-                prompt,
-                started_at,
-            } => {
-                self.resident_busy.retain(|r| r.id != role);
-                if busy {
-                    self.resident_busy.push(AgentRow {
-                        id: role.clone(),
-                        task: String::new(),
-                        prompt,
-                        name: role,
-                        // A resident row never falls back to the session (main) model; residents default to haiku.
-                        model: if model.is_empty() {
-                            "haiku".to_string()
-                        } else {
-                            model
-                        },
-                        background: false,
-                        done: false,
-                        failed: false,
-                        interrupted: false,
-                        last_active: 0,
-                        agent_id: String::new(),
-                        result_path: String::new(),
-                        started_at,
-                    });
-                }
-            }
-            // Variants added after the TUI wiring (non_exhaustive in core) render nothing yet.
-            _ => {}
+            // Progress-only events (agents, tasks, queue, held reply, opus/resident state) fold into the shared
+            // run state. Variants added after the TUI wiring (non_exhaustive in core) are ignored there too.
+            ev => self.run.apply(ev, Instant::now()),
         }
         if content && !self.follow {
             self.unseen = true;
@@ -900,7 +752,7 @@ impl App {
     // True while something changes with time (spinner, elapsed clock, copy note). The loop wakes every TICK only then.
     pub fn animating(&self) -> bool {
         // A running agent's elapsed time ticks in the panel and the Ctrl+T view, so its loop keeps waking too.
-        self.busy || self.copy_note.is_some() || self.agent_rows.iter().any(|r| !r.done)
+        self.run.busy || self.copy_note.is_some() || self.run.agent_rows.iter().any(|r| !r.done)
     }
 
     // Hands the TUI the engine's agent list. The tick re-reads it (Go tick: m.r.tracker.running()).
@@ -920,15 +772,15 @@ impl App {
         // the last refresh. Rust lays out per frame, so the list is enough.
         if let Some(src) = &self.agent_src {
             let live = src.lock().unwrap_or_else(|e| e.into_inner());
-            let n = live.iter().filter(|r| !r.done).count() + self.resident_busy.len();
-            if self.busy || n != self.last_run {
-                self.agent_rows = live.clone();
-                self.last_run = n;
+            let n = live.iter().filter(|r| !r.done).count() + self.run.resident_busy.len();
+            if self.run.busy || n != self.run.last_run {
+                self.run.agent_rows = live.clone();
+                self.run.last_run = n;
             }
         }
         // Go quiet(): one notice after a quiet stretch with no open tool call (Agent/Task calls are waited for).
         let quiet_for = self.quiet_since.map(|since| now.duration_since(since));
-        if self.busy
+        if self.run.busy
             && self.open_tools.is_empty()
             && !self.quiet_noted
             && quiet_for.is_some_and(|d| d >= IDLE_NOTICE)
@@ -936,8 +788,8 @@ impl App {
             self.quiet_noted = true;
             self.note(&bar::quiet_notice(IDLE_NOTICE));
         }
-        self.spin = match self.turn_start {
-            Some(t) if self.busy => bar::spinner_frame(now.duration_since(t)),
+        self.spin = match self.run.turn_start {
+            Some(t) if self.run.busy => bar::spinner_frame(now.duration_since(t)),
             _ => ' ',
         };
         // The copy note lasts 2s (Go copyNoteMsg timer).
@@ -1102,7 +954,7 @@ impl App {
             }
             KeyCode::Char('c') if ctrl => {
                 // Go tui.go: Ctrl+C interrupts when busy, otherwise quits even with input text.
-                if self.busy {
+                if self.run.busy {
                     Action::Interrupt(InterruptSource::CtrlC)
                 } else {
                     Action::Quit
@@ -1153,9 +1005,9 @@ impl App {
             }
             KeyCode::Enter => self.submit(),
             // While the reply is held, Esc abandons the queued-task wait; it takes precedence over the busy interrupt.
-            KeyCode::Esc if self.held.is_some() => Action::CancelWait,
+            KeyCode::Esc if self.run.held.is_some() => Action::CancelWait,
             // Go tui.go: a single Esc interrupts while busy.
-            KeyCode::Esc if self.busy => Action::Interrupt(InterruptSource::EscKey),
+            KeyCode::Esc if self.run.busy => Action::Interrupt(InterruptSource::EscKey),
             KeyCode::Esc => {
                 // Go tui.go esc: on an empty input a second Esc within 600 ms opens the rewind picker.
                 let now = Instant::now();
@@ -1255,7 +1107,7 @@ impl App {
             }
             KeyCode::Tab if !self.suggest().is_empty() => {
                 let text = self.editor.text();
-                if let Some(done) = commands::complete(&text, self.sugg_sel, self.busy, false) {
+                if let Some(done) = commands::complete(&text, self.sugg_sel, self.run.busy, false) {
                     self.editor.clear();
                     self.editor.insert_str(&done);
                 }
@@ -1297,11 +1149,11 @@ impl App {
                 model: &self.bar.model,
                 last_ctx: self.bar.tokens,
                 threshold: self.welcome.threshold,
-                rotations: u64::from(self.rot),
+                rotations: u64::from(self.run.rot),
                 session_id: Some(self.session_id.as_str()),
                 mode: commands::parse_mode(&self.bar.mode).unwrap_or(PermMode::Default),
                 chaude_version: env!("CARGO_PKG_VERSION"),
-                busy: self.busy,
+                busy: self.run.busy,
             };
             commands::dispatch(&text, &ctx)
         };
@@ -1313,9 +1165,10 @@ impl App {
         let first = text.split_whitespace().next().unwrap_or("");
         // A prompt sent while a turn runs only joins the queue (queue_lines shows it as "대기"). It is echoed once,
         // when QueueTexts drains and the merged prompt goes out as the next turn. Commands never queue.
-        let queued = self.busy && dispatched.is_none();
+        let queued = self.run.busy && dispatched.is_none();
         if !queued {
-            self.turn_prompt = render::trunc_chars(text.lines().next().unwrap_or("").trim(), 60);
+            self.run.turn_prompt =
+                render::trunc_chars(text.lines().next().unwrap_or("").trim(), 60);
         }
         // Go tui.go /view is a local note and echoes nothing into the transcript.
         if first != "/view" && !queued {
@@ -1582,12 +1435,13 @@ impl App {
 
     fn agent_recs(&self) -> Vec<agentview::AgentRec> {
         let mut recs: Vec<agentview::AgentRec> = self
+            .run
             .agents
             .iter()
             .map(|(id, desc, _, started_at)| {
                 // Type and model are the panel row's (core AgentRow: name = name else subagent_type); the
                 // description is only the task.
-                let row = self.agent_rows.iter().find(|r| r.id == *id);
+                let row = self.run.agent_rows.iter().find(|r| r.id == *id);
                 agentview::AgentRec {
                     id: id.clone(),
                     task: desc.clone(),
@@ -1603,9 +1457,10 @@ impl App {
         // Restored rows are finished (interrupted or failed when their saved status says so); they open in the view
         // like running agents.
         recs.extend(
-            self.restored_rows
+            self.run
+                .restored_rows
                 .iter()
-                .filter(|r| self.agents.iter().all(|(id, _, _, _)| *id != r.id))
+                .filter(|r| self.run.agents.iter().all(|(id, _, _, _)| *id != r.id))
                 .map(|r| agentview::AgentRec {
                     id: r.id.clone(),
                     task: r.task.clone(),
@@ -1627,8 +1482,8 @@ impl App {
             self.finished_agents
                 .iter()
                 .filter(|(id, _)| {
-                    self.agents.iter().all(|(aid, _, _, _)| aid != *id)
-                        && self.restored_rows.iter().all(|r| r.id != **id)
+                    self.run.agents.iter().all(|(aid, _, _, _)| aid != *id)
+                        && self.run.restored_rows.iter().all(|r| r.id != **id)
                 })
                 .map(|(id, r)| agentview::AgentRec {
                     log: self.agent_log_lines(id),
@@ -1727,9 +1582,10 @@ impl App {
     // Background agents (bg_agents) keep running.
     fn finish_foreground(&mut self) {
         let fg: Vec<(String, String)> = self
+            .run
             .agents
             .iter()
-            .filter(|(id, _, _, _)| !self.bg_agents.contains(id))
+            .filter(|(id, _, _, _)| !self.run.bg_agents.contains(id))
             .map(|(id, desc, _, _)| (id.clone(), desc.clone()))
             .collect();
         for (id, desc) in fg {
@@ -1745,7 +1601,7 @@ impl App {
         let failed = self.agent_outcome.remove(id);
         // Keep the finished agent for the agent view (Go tracker keeps done agents; sortedAll lists them).
         // Without a local start row (no AgentStart seen here) the AgentEnd name labels the done record.
-        let start = self.agents.iter().find(|(aid, _, _, _)| aid == id);
+        let start = self.run.agents.iter().find(|(aid, _, _, _)| aid == id);
         let desc = start
             .map(|(_, desc, _, _)| desc.clone())
             .unwrap_or_else(|| name.to_string());
@@ -1764,8 +1620,8 @@ impl App {
             ..Default::default()
         };
         self.finished_agents.insert(id.to_string(), rec);
-        self.agents.retain(|(aid, _, _, _)| aid != id);
-        self.bg_agents.retain(|aid| aid != id);
+        self.run.agents.retain(|(aid, _, _, _)| aid != id);
+        self.run.bg_agents.retain(|aid| aid != id);
         // A resumed agent's timed row gets its end time and elapsed, like the other timed rows.
         if let Some(mut r) = self.resume_rows.remove(id) {
             r.end = Some((unix_now(), r.at.elapsed().as_secs()));
@@ -1862,13 +1718,13 @@ impl App {
     // Go mainStatusText + the spinner (tui.go:385-390): `✶ 생각중-model-메인(prompt) · Mm SSs`, orange frame, grey text.
     fn busy_row(&self, esc: bool) -> String {
         let mut text = tf(Msg::BusyRow, &[&self.welcome.model]);
-        if !self.turn_prompt.is_empty() {
-            text.push_str(&format!("({})", self.turn_prompt));
+        if !self.run.turn_prompt.is_empty() {
+            text.push_str(&format!("({})", self.run.turn_prompt));
         }
-        if let Some(t) = self.turn_start {
+        if let Some(t) = self.run.turn_start {
             text.push_str(&bar::elapsed_suffix(
                 self.clock.duration_since(t).as_secs(),
-                &self.last_tool,
+                &self.run.last_tool,
             ));
         }
         if esc {
@@ -1903,16 +1759,17 @@ impl App {
         // Go tui.go View() thinking row (tui.go:383-391), in the transcript flow. Go runningN/residentBusy:
         // an opus Agent or a resident role with a command in flight keeps the row up after text started.
         let fg = self
+            .run
             .agents
             .iter()
-            .any(|(id, _, _, _)| !self.bg_agents.contains(id));
+            .any(|(id, _, _, _)| !self.run.bg_agents.contains(id));
         match bar::thinking_row(
             fg,
-            self.opus_busy,
-            !self.resident_busy.is_empty(),
+            self.run.opus_busy,
+            !self.run.resident_busy.is_empty(),
             self.got_text,
             self.perm.is_some(),
-            self.busy,
+            self.run.busy,
         ) {
             bar::ThinkingRow::None => {}
             bar::ThinkingRow::Status => lines.push(&status_row),
@@ -2022,9 +1879,9 @@ impl App {
             return Vec::new();
         }
         let width = text_width(w);
-        let total = self.queue_texts.len();
+        let total = self.run.queue_texts.len();
         let mut out = Vec::new();
-        for (i, q) in self.queue_texts.iter().enumerate() {
+        for (i, q) in self.run.queue_texts.iter().enumerate() {
             if i + 1 == max_show && total > max_show {
                 out.push(format!(
                     "{GREY_ON}{}{FG_OFF}",
@@ -2041,7 +1898,7 @@ impl App {
     // Main's Agent/Task calls, grouped 대기 / 진행 중 / 완료 / 실패 (Timeout under 실패 with its own label), above the
     // input box and below the queue. Past the cap the last row becomes "… +N" with the count still hidden.
     fn task_lines(&self, w: usize, h: usize) -> Vec<String> {
-        if self.tasks.is_empty() {
+        if self.run.tasks.is_empty() {
             return Vec::new();
         }
         let room = h.saturating_sub(
@@ -2066,7 +1923,7 @@ impl App {
             TaskState::Failed,
             TaskState::Timeout,
         ] {
-            for t in self.tasks.iter().filter(|t| t.state == state) {
+            for t in self.run.tasks.iter().filter(|t| t.state == state) {
                 let label = match state {
                     TaskState::Queued => chaude_core::i18n::t(Msg::StateQueued).to_string(),
                     TaskState::Running => chaude_core::i18n::t(Msg::TaskRunning).to_string(),
@@ -2106,11 +1963,6 @@ impl App {
 
     // Go panelLines / bgLines: the foreground agent rows (below the input box) and the background rows under
     // them. Only running agents show; the panel above takes its rows out of the room the background panel gets.
-    // Go runningN (tui.go:1445): running agents plus busy resident sessions.
-    fn running_n(&self) -> usize {
-        self.agent_rows.iter().filter(|r| !r.done).count() + self.resident_busy.len()
-    }
-
     fn panel_lines(&self, w: usize, h: usize) -> (Vec<String>, Vec<String>) {
         let queue_h = self.queue_lines(w, h).len() + self.task_lines(w, h).len();
         let fg = self.agent_lines(false, w, h, queue_h, 0);
@@ -2131,11 +1983,12 @@ impl App {
     ) -> (Vec<&AgentRow>, usize, usize) {
         // Go panel order: running agents, then busy residents (foreground only), then sortedRestored (Go rowsA).
         let list: Vec<&AgentRow> = self
+            .run
             .agent_rows
             .iter()
             .filter(|r| r.background == bg && !r.done)
-            .chain(self.resident_busy.iter().filter(|_| !bg))
-            .chain(self.restored_rows.iter().filter(|r| r.background == bg))
+            .chain(self.run.resident_busy.iter().filter(|_| !bg))
+            .chain(self.run.restored_rows.iter().filter(|r| r.background == bg))
             .collect();
         if list.is_empty() || w < 10 {
             return (Vec::new(), 0, 0);
@@ -2472,8 +2325,8 @@ impl App {
         if panel_rows == 0 || row < self.rows.saturating_sub(panel_rows + 1) {
             return false;
         }
-        let total = (self.agent_rows.iter().filter(|r| !r.done).count() + self.restored_rows.len())
-            as isize;
+        let total = (self.run.agent_rows.iter().filter(|r| !r.done).count()
+            + self.run.restored_rows.len()) as isize;
         let d: isize = if up { -1 } else { 1 };
         self.pan_off = (self.pan_off as isize + d).clamp(0, total) as usize;
         true
@@ -2521,28 +2374,31 @@ impl App {
     fn bar_input(&self) -> BarInput {
         let mut b = self.bar.clone();
         b.turn_secs = self
+            .run
             .turn_start
             .map(|t| self.clock.duration_since(t).as_secs());
         b.limit = self.welcome.threshold;
-        b.waiting = self.held;
+        b.waiting = self.run.held;
         b.agents = self
+            .run
             .agents
             .iter()
             .map(|(_, d, t, _)| (d.clone(), self.clock.duration_since(*t).as_secs()))
             .collect();
         b.bg = self
+            .run
             .agents
             .iter()
-            .filter(|(id, _, _, _)| self.bg_agents.contains(id))
+            .filter(|(id, _, _, _)| self.run.bg_agents.contains(id))
             .count();
-        b.fg = self.agents.len() - b.bg;
-        b.rot = self.rot;
+        b.fg = self.run.agents.len() - b.bg;
+        b.rot = self.run.rot;
         b
     }
 
     // Slash menu rows for the current input (empty when no menu applies).
     fn suggest(&self) -> Vec<&'static commands::SlashCmd> {
-        commands::suggestions(&self.editor.text(), self.busy, false)
+        commands::suggestions(&self.editor.text(), self.run.busy, false)
     }
 
     // Go inputBox.rows() (input.go:149): logical lines soft-wrapped at `w` cells. Returns the visual rows,
@@ -2601,8 +2457,8 @@ impl App {
     // The top row also stays once a turn has reported its tokens, so the idle "turn: ..." line is visible.
     fn shows_bar(&self) -> bool {
         self.unseen
-            || !self.agents.is_empty()
-            || self.held.is_some()
+            || !self.run.agents.is_empty()
+            || self.run.held.is_some()
             || self.bar.turn_tokens.is_some()
     }
 
@@ -2681,7 +2537,7 @@ impl App {
         let active = self.input_active();
         let mut out = vec![edge("╭", "╮")];
         if self.editor.is_empty() {
-            let ph = render::input_placeholder(self.busy);
+            let ph = render::input_placeholder(self.run.busy);
             // The prompt and the cursor cell take their columns; the last column stays blank.
             let ph = bar::clip(ph, inner.saturating_sub(UnicodeWidthStr::width(PROMPT) + 2));
             let cell = if active { REV_ON } else { "" };
@@ -3721,7 +3577,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                 Wake::Note(text) => app.note(&text),
                 #[cfg(unix)]
                 Wake::Signal => {
-                    if app.busy {
+                    if app.run.busy {
                         engine.interrupt(InterruptSource::Signal);
                     }
                 }
@@ -4039,6 +3895,7 @@ fn clock_hhmmss(secs: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chaude_core::api::TaskStatus;
     use crossterm::event::KeyEventState;
 
     // Drop the "HH:MM:SS " start stamp after an action row's lead ("● " / "· " / result "  ⎿  ") and any " → HH:MM:SS (..)" end.
@@ -4609,7 +4466,7 @@ mod tests {
     #[test]
     fn queued_prompt_is_not_echoed_while_busy() {
         let mut app = App::new(80, 30);
-        app.busy = true;
+        app.run.busy = true;
         type_str(&mut app, "next one");
         app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
         app.apply(UiEvent::QueueTexts(vec!["next one".into()]));
@@ -4630,7 +4487,7 @@ mod tests {
     #[test]
     fn queued_prompt_echoes_once_when_it_is_sent() {
         let mut app = App::new(80, 30);
-        app.busy = true;
+        app.run.busy = true;
         type_str(&mut app, "next one");
         app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
         app.apply(UiEvent::QueueTexts(vec!["next one".into()]));
@@ -4641,7 +4498,7 @@ mod tests {
             .filter(|r| render::strip_sgr(r) == "> next one")
             .count();
         assert_eq!(echoes, 1, "{:?}", app.transcript);
-        assert_eq!(app.turn_prompt, "next one");
+        assert_eq!(app.run.turn_prompt, "next one");
     }
 
     #[test]
@@ -4861,7 +4718,7 @@ mod tests {
             name: "Scan repo".into(),
             summary: "done".into(),
         });
-        assert!(app.agents.iter().all(|(id, _, _, _)| id != "f1"));
+        assert!(app.run.agents.iter().all(|(id, _, _, _)| id != "f1"));
         // (a) done: stays listed for the session as a finished row.
         assert!(
             app.agent_recs().iter().any(|r| r.id == "f1" && r.done),
@@ -5355,15 +5212,15 @@ mod tests {
             name: "Agent".into(),
             summary: "x".repeat(60),
         });
-        assert_eq!(app.last_tool.chars().count(), LAST_TOOL_RUNES);
+        assert_eq!(app.run.last_tool.chars().count(), LAST_TOOL_RUNES);
         let body = app.body(100);
         assert!(
             body.iter()
-                .any(|r| r.contains(&format!("0m00s · {}", app.last_tool))),
+                .any(|r| r.contains(&format!("0m00s · {}", app.run.last_tool))),
             "{body:?}"
         );
         app.apply(UiEvent::Busy(true));
-        assert!(app.last_tool.is_empty());
+        assert!(app.run.last_tool.is_empty());
     }
 
     // The slash menu takes room from the queue (Go popH): an open menu leaves fewer queue rows.
@@ -5465,30 +5322,30 @@ mod tests {
         let mut app = App::new(80, 30);
         app.set_agent_source(Arc::clone(&list));
         app.tick(Instant::now());
-        assert_eq!(app.agent_rows[0].task, "task b1", "count 0 -> 1 fires");
+        assert_eq!(app.run.agent_rows[0].task, "task b1", "count 0 -> 1 fires");
 
         list.lock().unwrap()[0].task = "edited".into();
         app.tick(Instant::now());
         assert_eq!(
-            app.agent_rows[0].task, "task b1",
+            app.run.agent_rows[0].task, "task b1",
             "idle, count same: skipped"
         );
 
         app.apply(UiEvent::Busy(true));
         app.tick(Instant::now());
-        assert_eq!(app.agent_rows[0].task, "edited", "busy: fires");
+        assert_eq!(app.run.agent_rows[0].task, "edited", "busy: fires");
 
         list.lock().unwrap()[0].task = "edited again".into();
         app.apply(UiEvent::Busy(false));
         app.tick(Instant::now());
         assert_eq!(
-            app.agent_rows[0].task, "edited",
+            app.run.agent_rows[0].task, "edited",
             "idle again, count same: skipped"
         );
 
         list.lock().unwrap()[0].done = true;
         app.tick(Instant::now());
-        assert!(app.agent_rows[0].done, "idle, count 1 -> 0: fires");
+        assert!(app.run.agent_rows[0].done, "idle, count 1 -> 0: fires");
     }
 
     #[test]
@@ -6964,7 +6821,7 @@ mod tests {
         app.on_key(key(KeyCode::Char('h'), KeyModifiers::NONE));
         app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
         assert!(app.editor.is_empty(), "typing is dropped");
-        assert!(app.queue_texts.is_empty(), "Enter queues nothing");
+        assert!(app.run.queue_texts.is_empty(), "Enter queues nothing");
         assert!(app.av.is_some(), "typing keeps the view open");
         app.on_key(key(KeyCode::Esc, KeyModifiers::NONE));
         assert!(app.av.is_none(), "esc closes");
@@ -7156,8 +7013,8 @@ mod tests {
         }
         app.apply(UiEvent::AgentBackground { id: "bg".into() });
         app.finish_foreground();
-        assert_eq!(app.agents.len(), 1);
-        assert_eq!(app.agents[0].0, "bg");
+        assert_eq!(app.run.agents.len(), 1);
+        assert_eq!(app.run.agents[0].0, "bg");
         assert!(app.transcript.iter().any(|r| r.contains("[agent 완료]")));
         // Core's late AgentEnd for the finished foreground agent adds no second done line.
         let before = app.transcript.len();
@@ -7189,8 +7046,8 @@ mod tests {
             started_at: 0,
         });
         app.apply(UiEvent::Busy(false));
-        assert_eq!(app.agents.len(), 1);
-        assert_eq!(app.agents[0].0, "bg");
+        assert_eq!(app.run.agents.len(), 1);
+        assert_eq!(app.run.agents[0].0, "bg");
     }
 
     // E23: a background agent's AgentEnd removes its row and adds the done notice (Go onUserEvent path).
@@ -7210,8 +7067,8 @@ mod tests {
             name: "b1".into(),
             summary: "Watch".into(),
         });
-        assert!(app.agents.is_empty());
-        assert!(app.bg_agents.is_empty());
+        assert!(app.run.agents.is_empty());
+        assert!(app.run.bg_agents.is_empty());
         assert!(
             app.transcript
                 .iter()
@@ -7299,7 +7156,7 @@ mod tests {
         let mut app = App::new(80, 30);
         assert!(app.panel_lines(80, 30).0.is_empty(), "idle: no row");
         assert!(!thinking(&app), "idle: no 생각중 indicator");
-        assert_eq!(app.running_n(), 0);
+        assert_eq!(app.run.running_n(), 0);
 
         app.apply(UiEvent::ResidentBusy {
             role: "tui".into(),
@@ -7317,7 +7174,7 @@ mod tests {
             thinking(&app),
             "thinking indicator while a resident handles a command"
         );
-        assert_eq!(app.running_n(), 1, "runningN counts the busy resident");
+        assert_eq!(app.run.running_n(), 1, "runningN counts the busy resident");
 
         app.apply(UiEvent::ResidentBusy {
             role: "tui".into(),
@@ -7331,7 +7188,7 @@ mod tests {
             "finished resident leaves the list"
         );
         assert!(!thinking(&app), "finished resident: no indicator");
-        assert_eq!(app.running_n(), 0, "runningN after finish");
+        assert_eq!(app.run.running_n(), 0, "runningN after finish");
     }
 
     // The busy row and the welcome box show the model the server reports in stream-json, not a settings alias.
@@ -8050,17 +7907,17 @@ mod tests {
     fn only_busy_or_a_copy_note_keeps_the_loop_on_a_timer() {
         let mut app = App::new(40, 10);
         assert!(!app.animating());
-        app.busy = true;
+        app.run.busy = true;
         assert!(app.animating());
-        app.busy = false;
+        app.run.busy = false;
         app.copy_done(3, Ok(()));
         assert!(app.animating());
         app.copy_note = None;
         assert!(!app.animating());
         // A running agent keeps the loop on the timer (its elapsed ticks); a finished one does not.
-        app.agent_rows = vec![agent_row("ar", false, true)];
+        app.run.agent_rows = vec![agent_row("ar", false, true)];
         assert!(!app.animating());
-        app.agent_rows = vec![agent_row("ar", false, false)];
+        app.run.agent_rows = vec![agent_row("ar", false, false)];
         assert!(app.animating());
     }
 

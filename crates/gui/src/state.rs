@@ -3,8 +3,8 @@
 
 use std::time::Instant;
 
-use chaude_core::api::{AgentRow, Role, TaskStatus, UiEvent};
-use chaude_core::ui_state::BarInput;
+use chaude_core::api::{AgentRow, Role, UiEvent};
+use chaude_core::ui_state::{BarInput, RunState};
 
 // One row of the output pane. Text rows keep the role so main and agent text stay in their own blocks.
 #[derive(Debug, Clone, PartialEq)]
@@ -39,26 +39,14 @@ pub struct Permission {
     pub summary: String,
 }
 
-// A main Agent/Task call the reply waits for (UiEvent::TaskQueued, TaskResolved, TaskStats).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Task {
-    pub id: String,
-    pub desc: String,
-    pub status: Option<TaskStatus>,
-    pub tokens: Option<u64>,
-    pub duration_ms: Option<u64>,
-}
-
 #[derive(Debug, Default)]
 pub struct GuiState {
     pub transcript: Vec<Entry>,
     // Status-bar data. turn_secs and the agent list are derived in bar_at, not stored here.
     pub bar: BarInput,
-    pub busy: bool,
-    pub busy_since: Option<Instant>,
-    pub agent_rows: Vec<AgentRow>,
+    // Engine progress shared with the TUI: busy turn, agent rows, tasks, rotations (core ui_state::RunState).
+    pub run: RunState,
     pub permission: Option<Permission>,
-    pub tasks: Vec<Task>,
 }
 
 impl GuiState {
@@ -133,7 +121,6 @@ impl GuiState {
                     }
                 }
             }
-            UiEvent::AgentRows { rows } => self.agent_rows = rows,
             UiEvent::Status {
                 model,
                 tokens,
@@ -145,17 +132,18 @@ impl GuiState {
                 self.bar.cost_usd = cost_usd;
                 self.bar.context_pct = context_pct;
             }
+            // The GUI keeps the start of a turn already running (the TUI restarts it; both read run.turn_start).
             UiEvent::Busy(on) => {
-                self.busy = on;
-                self.busy_since = match (on, self.busy_since) {
+                self.run.busy = on;
+                self.run.turn_start = match (on, self.run.turn_start) {
                     (false, _) => None,
                     (true, Some(t)) => Some(t),
                     (true, None) => Some(now),
                 };
             }
             UiEvent::TurnEnd { .. } => {
-                self.busy = false;
-                self.busy_since = None;
+                self.run.busy = false;
+                self.run.turn_start = None;
             }
             UiEvent::Queued(n) => self.bar.queued = n,
             UiEvent::ModeChanged { mode } => self.bar.mode = mode,
@@ -171,7 +159,7 @@ impl GuiState {
             }
             UiEvent::CoderContexts { coders } => self.bar.coders = coders,
             UiEvent::Rotated { reason } => {
-                self.bar.rot += 1;
+                self.run.rot += 1;
                 self.transcript.push(Entry::Notice(reason));
             }
             UiEvent::Notice { text } => self.transcript.push(Entry::Notice(text)),
@@ -179,29 +167,8 @@ impl GuiState {
             UiEvent::PermissionRequest { id, tool, summary } => {
                 self.permission = Some(Permission { id, tool, summary });
             }
-            UiEvent::TaskQueued { id, desc } => self.tasks.push(Task {
-                id,
-                desc,
-                status: None,
-                tokens: None,
-                duration_ms: None,
-            }),
-            UiEvent::TaskResolved { id, status } => {
-                if let Some(t) = self.task_mut(&id) {
-                    t.status = Some(status);
-                }
-            }
-            UiEvent::TaskStats {
-                id,
-                tokens,
-                duration_ms,
-            } => {
-                if let Some(t) = self.task_mut(&id) {
-                    t.tokens = tokens;
-                    t.duration_ms = duration_ms;
-                }
-            }
-            _ => {}
+            // Agent rows, tasks, opus/resident state and the rest of the progress events fold into the run state.
+            ev => self.run.apply(ev, now),
         }
     }
 
@@ -209,9 +176,11 @@ impl GuiState {
     pub fn bar_at(&self, now: Instant, now_unix: u64) -> BarInput {
         let mut bar = self.bar.clone();
         bar.turn_secs = self
-            .busy_since
+            .run
+            .turn_start
             .map(|t| now.saturating_duration_since(t).as_secs());
-        let running: Vec<&AgentRow> = self.agent_rows.iter().filter(|r| !r.done).collect();
+        bar.rot = self.run.rot;
+        let running: Vec<&AgentRow> = self.run.agent_rows.iter().filter(|r| !r.done).collect();
         bar.fg = running.iter().filter(|r| !r.background).count();
         bar.bg = running.iter().filter(|r| r.background).count();
         bar.agents = running
@@ -250,16 +219,15 @@ impl GuiState {
             .rev()
             .find(|e| matches!(e, Entry::Agent { id: i, .. } if i == id))
     }
-
-    fn task_mut(&mut self, id: &str) -> Option<&mut Task> {
-        self.tasks.iter_mut().find(|t| t.id == id)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    use chaude_core::api::TaskStatus;
+    use chaude_core::ui_state::{TaskRow, TaskState};
 
     fn text(role: Role, s: &str) -> UiEvent {
         UiEvent::TextDelta {
@@ -393,7 +361,7 @@ mod tests {
         assert_eq!(bar.turn_secs, Some(7));
         st.apply(UiEvent::TurnEnd { duration_ms: 1 }, t0);
         assert_eq!(st.bar_at(t0, 0).turn_secs, None);
-        assert!(!st.busy);
+        assert!(!st.run.busy);
     }
 
     #[test]
@@ -525,16 +493,13 @@ mod tests {
             },
             now,
         );
-        assert_eq!(
-            st.tasks,
-            [Task {
-                id: "t".into(),
-                desc: "build".into(),
-                status: Some(TaskStatus::Done),
-                tokens: Some(4000),
-                duration_ms: Some(2000),
-            }]
-        );
+        let rows: &[TaskRow] = &st.run.tasks;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "t");
+        assert_eq!(rows[0].desc, "build");
+        assert_eq!(rows[0].state, TaskState::Done);
+        assert_eq!(rows[0].tokens, Some(4000));
+        assert_eq!(rows[0].duration_ms, Some(2000));
     }
 
     #[test]

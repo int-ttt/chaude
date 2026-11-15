@@ -2,8 +2,9 @@
 //! prompt-history push rule. No terminal, render or editor types here; the TUI keeps Editor, RefCell and render.
 
 use std::collections::BTreeMap;
+use std::time::Instant;
 
-use crate::api::{CoderContext, InterruptSource};
+use crate::api::{AgentRow, CoderContext, InterruptSource, TaskStatus, UiEvent};
 use crate::slash::PermMode;
 
 // history.go maxHistory
@@ -79,9 +80,252 @@ pub struct BarInput {
     pub turn_tokens: Option<(u64, u64, u64)>,
 }
 
+// One main Agent/Task call in the task list. Queued until its launch ack (TaskResolved Running), then Running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskState {
+    Queued,
+    Running,
+    Done,
+    Failed,
+    Timeout,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskRow {
+    pub id: String,
+    pub desc: String,
+    pub state: TaskState,
+    // The agent's total tokens and wall time from its tool result (UiEvent::TaskStats); None until it arrives.
+    pub tokens: Option<u64>,
+    pub duration_ms: Option<u64>,
+}
+
+// Engine progress shared by the TUI and the GUI: what runs, what is queued, what a held reply waits for.
+// Each front end keeps its own transcript and render state beside it.
+#[derive(Debug, Default)]
+pub struct RunState {
+    // A main turn is running; turn_start is when it began (None while idle).
+    pub busy: bool,
+    pub turn_start: Option<Instant>,
+    // First line of the prompt that started the turn (Go curPrompt), shown in the busy row.
+    pub turn_prompt: String,
+    // (id, description, elapsed clock, started_at in ms since epoch: AgentStart carries Unix seconds).
+    pub agents: Vec<(String, String, Instant, u64)>,
+    // Ids of the agents launched in the background (UiEvent::AgentBackground); they have no AgentEnd until done.
+    pub bg_agents: Vec<String>,
+    // Go opusRunning / residentBusy: an opus Agent is running, and the resident roles with a command in flight.
+    pub opus_busy: bool,
+    // Busy resident sessions as running rows (Go residentBusy), oldest first; id and name are the role.
+    pub resident_busy: Vec<AgentRow>,
+    // Panel rows of the started agents, oldest first (UiEvent::AgentRows; Go tracker rows).
+    pub agent_rows: Vec<AgentRow>,
+    // Go lastRun: running count (running_n) at the last refresh.
+    pub last_run: usize,
+    // Agents an earlier harness left unfinished, listed after the running rows (UiEvent::AgentsRestored).
+    pub restored_rows: Vec<AgentRow>,
+    // Last tool call of the running turn, cut to 40 runes (Go lastTool); the busy row shows it.
+    pub last_tool: String,
+    // Prompts waiting for the next turn, oldest first (UiEvent::QueueTexts; Go m.queue).
+    pub queue_texts: Vec<String>,
+    // Main's Agent/Task calls of the current round, oldest first (UiEvent::TaskQueued / TaskResolved).
+    pub tasks: Vec<TaskRow>,
+    // Pending task count while main's final reply is held (UiEvent::ReplyHeld); None once released.
+    pub held: Option<usize>,
+    // Rotations seen this session (UiEvent::Rotated); Go m.r.rotations.
+    pub rot: u32,
+}
+
+impl RunState {
+    // Go runningN (tui.go:1445): running agents plus busy resident sessions.
+    pub fn running_n(&self) -> usize {
+        self.agent_rows.iter().filter(|r| !r.done).count() + self.resident_busy.len()
+    }
+
+    // Folds the progress events that touch only this state; other events are ignored. now is the arrival time
+    // (turn start, agent start). A front end that also writes a transcript row for an event does that itself.
+    pub fn apply(&mut self, ev: UiEvent, now: Instant) {
+        match ev {
+            UiEvent::Busy(on) => {
+                self.busy = on;
+                self.turn_start = if on { Some(now) } else { None };
+                if on {
+                    // Go sendPrompt resets lastTool at the start of each turn.
+                    self.last_tool.clear();
+                }
+            }
+            UiEvent::AgentBackground { id } => self.bg_agents.push(id),
+            UiEvent::AgentStart {
+                id,
+                description,
+                started_at,
+            } => self.agents.push((id, description, now, started_at * 1000)),
+            // A new round starts once every earlier task has settled, as the engine's own list does.
+            UiEvent::TaskQueued { id, desc } => {
+                if self
+                    .tasks
+                    .iter()
+                    .all(|t| !matches!(t.state, TaskState::Queued | TaskState::Running))
+                {
+                    self.tasks.clear();
+                }
+                self.tasks.push(TaskRow {
+                    id,
+                    desc,
+                    state: TaskState::Queued,
+                    tokens: None,
+                    duration_ms: None,
+                });
+            }
+            UiEvent::TaskStats {
+                id,
+                tokens,
+                duration_ms,
+            } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == id) {
+                    t.tokens = tokens;
+                    t.duration_ms = duration_ms;
+                }
+            }
+            UiEvent::TaskResolved { id, status } => {
+                if let Some(t) = self.tasks.iter_mut().find(|t| t.id == id) {
+                    t.state = match status {
+                        TaskStatus::Running => TaskState::Running,
+                        TaskStatus::Done => TaskState::Done,
+                        TaskStatus::Failed => TaskState::Failed,
+                        TaskStatus::Timeout => TaskState::Timeout,
+                    };
+                }
+            }
+            UiEvent::ReplyHeld { pending } => self.held = Some(pending),
+            UiEvent::ReplyReleased => self.held = None,
+            UiEvent::TurnEnd { .. } => self.held = None,
+            UiEvent::Rotated { .. } => self.rot += 1,
+            // Go agentRows / m.queue: the panels are redrawn from these lists each frame.
+            UiEvent::AgentRows { rows } => {
+                self.agent_rows = rows;
+                self.last_run = self.running_n();
+            }
+            UiEvent::AgentsRestored { rows } => self.restored_rows = rows,
+            // Go opusRunning / residentBusy: state only, read by the thinking row.
+            UiEvent::OpusBusy(on) => self.opus_busy = on,
+            UiEvent::ResidentBusy {
+                role,
+                busy,
+                model,
+                prompt,
+                started_at,
+            } => {
+                self.resident_busy.retain(|r| r.id != role);
+                if busy {
+                    self.resident_busy.push(AgentRow {
+                        id: role.clone(),
+                        task: String::new(),
+                        prompt,
+                        name: role,
+                        // A resident row never falls back to the session (main) model; residents default to haiku.
+                        model: if model.is_empty() {
+                            "haiku".to_string()
+                        } else {
+                            model
+                        },
+                        background: false,
+                        done: false,
+                        failed: false,
+                        interrupted: false,
+                        last_active: 0,
+                        agent_id: String::new(),
+                        result_path: String::new(),
+                        started_at,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_state_busy_sets_turn_start_and_clears_last_tool() {
+        let mut run = RunState {
+            last_tool: "Read(a)".into(),
+            ..RunState::default()
+        };
+        let now = Instant::now();
+        run.apply(UiEvent::Busy(true), now);
+        assert!(run.busy);
+        assert_eq!(run.turn_start, Some(now));
+        assert!(run.last_tool.is_empty());
+        run.apply(UiEvent::Busy(false), now);
+        assert!(!run.busy);
+        assert_eq!(run.turn_start, None);
+    }
+
+    #[test]
+    fn run_state_task_round_restarts_once_settled() {
+        let mut run = RunState::default();
+        let now = Instant::now();
+        run.apply(
+            UiEvent::TaskQueued {
+                id: "t1".into(),
+                desc: "a".into(),
+            },
+            now,
+        );
+        run.apply(
+            UiEvent::TaskResolved {
+                id: "t1".into(),
+                status: TaskStatus::Done,
+            },
+            now,
+        );
+        run.apply(
+            UiEvent::TaskStats {
+                id: "t1".into(),
+                tokens: Some(5),
+                duration_ms: Some(9),
+            },
+            now,
+        );
+        assert_eq!(run.tasks.len(), 1);
+        assert_eq!(run.tasks[0].state, TaskState::Done);
+        assert_eq!(run.tasks[0].tokens, Some(5));
+        run.apply(
+            UiEvent::TaskQueued {
+                id: "t2".into(),
+                desc: "b".into(),
+            },
+            now,
+        );
+        assert_eq!(run.tasks.len(), 1);
+        assert_eq!(run.tasks[0].id, "t2");
+    }
+
+    #[test]
+    fn run_state_held_and_rot() {
+        let mut run = RunState::default();
+        let now = Instant::now();
+        run.apply(UiEvent::ReplyHeld { pending: 2 }, now);
+        assert_eq!(run.held, Some(2));
+        run.apply(UiEvent::ReplyReleased, now);
+        assert_eq!(run.held, None);
+        run.apply(
+            UiEvent::Rotated {
+                reason: "ctx".into(),
+            },
+            now,
+        );
+        run.apply(
+            UiEvent::Rotated {
+                reason: "ctx".into(),
+            },
+            now,
+        );
+        assert_eq!(run.rot, 2);
+    }
 
     #[test]
     fn push_history_skips_blank_and_repeat_of_last() {
