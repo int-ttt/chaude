@@ -6,6 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{AgentRow, EngineHandle, InterruptSource, Role, UiEvent};
 use chaude_core::bar_text;
+use chaude_core::handoff::session_mode_note;
 use chaude_core::i18n::{self, Msg};
 use chaude_core::settings::pickers;
 use chaude_core::slash;
@@ -61,6 +62,9 @@ pub struct ChaudeApp {
     view: ScrollView,
     // Keyboard scroll target for the next frame (PageUp/PageDown/Home), in points.
     scroll_to: Option<f32>,
+    // The /view prompt body's pane from the last frame, and its keyboard scroll target for the next frame (points).
+    sess_pane: ScrollView,
+    sess_scroll: Option<f32>,
     // True while the output shows the tail; false once the user scrolls up.
     follow: bool,
     // Output arrived while not following (the TUI's unseen-output bar).
@@ -112,6 +116,14 @@ impl ChaudeApp {
         state.cwd = cwd.display().to_string();
         // Read before the engine starts: its live marker would hide a killed run (TUI killed_sid).
         state.killed_sid = chaude_core::group_pick::killed_session(&state.cwd);
+        // The previous run's mode, as the TUI notes it at start (the same config the engine starts with).
+        let cfg = chaude_core::api::Config::default();
+        let handoff = engine::handoff_path(&cwd);
+        state.session_mode =
+            session_mode_note(Some(&handoff), &cfg.model, cfg.rotate_threshold, false);
+        if let Some(mode) = state.session_mode.clone() {
+            state.transcript.push_notice(mode);
+        }
         let (engine, rx) = match engine::start(ctx) {
             Ok((handle, rx)) => (Some(handle), Some(rx)),
             Err(e) => {
@@ -132,6 +144,8 @@ impl ChaudeApp {
             jump_tail: false,
             view: ScrollView::default(),
             scroll_to: None,
+            sess_pane: ScrollView::default(),
+            sess_scroll: None,
             follow: true,
             unseen: false,
             slash_sel: 0,
@@ -565,12 +579,11 @@ impl ChaudeApp {
                     i.consume_key(Modifiers::NONE, Key::ArrowRight),
                 )
             });
-            if left {
-                self.state.sess_prompt(false);
+            if left || right {
+                self.state.sess_prompt(right);
+                self.sess_scroll = Some(0.0);
             }
-            if right {
-                self.state.sess_prompt(true);
-            }
+            self.sess_body_keys(ctx);
             return;
         }
         if k.up {
@@ -587,6 +600,41 @@ impl ChaudeApp {
         }
     }
 
+    // Level 2 body scroll (TUI sess key, level 2): up/down and k/j move one text row, PageUp/PageDown a window,
+    // Home/End the top and the bottom. The row is a fixed 18 points here, since egui wraps the text itself.
+    fn sess_body_keys(&mut self, ctx: &egui::Context) {
+        const ROW: f32 = 18.0;
+        let (mut up, mut down, mut page_up, mut page_down, mut home, mut end) =
+            (false, false, false, false, false, false);
+        ctx.input_mut(|i| {
+            up = i.consume_key(Modifiers::NONE, Key::ArrowUp)
+                | i.consume_key(Modifiers::NONE, Key::K);
+            down = i.consume_key(Modifiers::NONE, Key::ArrowDown)
+                | i.consume_key(Modifiers::NONE, Key::J);
+            page_up = i.consume_key(Modifiers::NONE, Key::PageUp);
+            page_down = i.consume_key(Modifiers::NONE, Key::PageDown);
+            home = i.consume_key(Modifiers::NONE, Key::Home);
+            end = i.consume_key(Modifiers::NONE, Key::End);
+        });
+        let pane = self.sess_pane;
+        let to = if up {
+            pane.offset - ROW
+        } else if down {
+            pane.offset + ROW
+        } else if page_up {
+            pane.offset - pane.viewport
+        } else if page_down {
+            pane.offset + pane.viewport
+        } else if home {
+            0.0
+        } else if end {
+            pane.max
+        } else {
+            return;
+        };
+        self.sess_scroll = Some(to.clamp(0.0, pane.max));
+    }
+
     // The /view browser window (TUI sess lines and prompt_lines): level 1 lists the sessions, level 2 shows the
     // prompt under its header. A click opens a row; the X button closes it.
     fn sess_window(&mut self, ctx: &egui::Context) {
@@ -599,6 +647,8 @@ impl ChaudeApp {
         let head = sv.prompt_head();
         let body = sv.shown().unwrap_or_default().to_string();
         let sel = sv.sel;
+        // The body scroll is per session: the id in the ScrollArea key starts a new session at the top.
+        let id = sv.id.clone();
         let mut open = true;
         let mut click = None;
         let mut back = false;
@@ -609,9 +659,19 @@ impl ChaudeApp {
             .show(ctx, |ui| {
                 if in_prompts {
                     ui.strong(head);
-                    egui::ScrollArea::vertical().show(ui, |ui| {
+                    let mut area = egui::ScrollArea::vertical().id_salt(("sess_body", id.as_str()));
+                    if let Some(to) = self.sess_scroll.take() {
+                        area = area.vertical_scroll_offset(to);
+                    }
+                    let out = area.show(ui, |ui| {
                         ui.label(body);
                     });
+                    let viewport = out.inner_rect.height();
+                    self.sess_pane = ScrollView {
+                        offset: out.state.clamped_offset().y,
+                        max: (out.content_size.y - viewport).max(0.0),
+                        viewport,
+                    };
                     if ui.button("back").clicked() {
                         back = true;
                     }

@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::bar_text;
-use chaude_core::handoff;
+use chaude_core::handoff::{self, session_mode_note};
 use chaude_core::i18n::{Msg, current, t, tf};
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::localtime::{clock_hhmmss, unix_now};
@@ -3532,36 +3532,6 @@ fn wait_batch(wakes: &Receiver<Wake>, timeout: Option<Duration>) -> Option<Vec<W
         batch.push(wake);
     }
     Some(batch)
-}
-
-// Which mode the previous session loads with, as core decides it at start (handoff::resume_mode, same inputs).
-// None when there is no previous run, or when --resume was given explicitly (core takes that one as is).
-fn session_mode_note(
-    handoff_path: Option<&std::path::Path>,
-    model: &str,
-    rotate: u64,
-    explicit: bool,
-) -> Option<String> {
-    if explicit {
-        return None;
-    }
-    let (prev, killed) = handoff::previous_run(&handoff::read_path(handoff_path?, None))?;
-    let threshold = chaude_core::rotate::threshold_for(model, rotate);
-    Some(
-        match handoff::resume_mode(&prev, handoff::MAIN_ROLE, killed, threshold) {
-            handoff::Load::Resume(sid) if killed => {
-                format!("previous session: resume claude --resume {sid} (last run was killed)")
-            }
-            handoff::Load::Resume(sid) => {
-                format!(
-                    "previous session: resume claude --resume {sid} (context below rotation threshold)"
-                )
-            }
-            handoff::Load::Fresh => {
-                "previous session: fresh start, handoff note carried over".to_string()
-            }
-        },
-    )
 }
 
 fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {

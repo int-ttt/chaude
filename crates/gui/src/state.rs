@@ -78,6 +78,8 @@ pub struct GuiState {
     // The session id the previous run did not finish, read by the app before the engine starts (TUI killed_sid).
     // A bare /resume imports it.
     pub killed_sid: Option<String>,
+    // Which mode the previous session loads with (TUI session_mode), noted at start and by /view.
+    pub session_mode: Option<String>,
     // The open /view browser (TUI sess): the session list, then one session's prompts. The model is core (session_view).
     pub sess: Option<SessView>,
     // Sessions this run owns (SessionIds; TUI this_run) and their purposes (TUI session_purpose).
@@ -314,6 +316,9 @@ impl GuiState {
     }
 
     pub fn open_view(&mut self, arg: &str) {
+        if let Some(mode) = self.session_mode.clone() {
+            self.transcript.push_notice(mode);
+        }
         let Some(home) = self.home() else {
             self.transcript
                 .push_notice("$HOME is not defined".to_string());
@@ -1901,6 +1906,24 @@ mod view_tests {
                 .iter()
                 .any(|e| matches!(e, Entry::Notice(t) if t.contains("zzzz"))),
             "the miss is a notice"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn view_notes_the_session_mode_before_the_list() {
+        let cwd = "/chaude-gui-view/work-mode";
+        let home = home_with("mode", cwd, &sessions());
+        let mut st = owned_state(&home, cwd);
+        st.session_mode = Some("previous session: fresh start, handoff note carried over".into());
+        st.open_view("zzzz");
+        assert!(st.sess.is_none(), "a miss still opens no browser");
+        assert!(
+            st.transcript
+                .entries
+                .iter()
+                .any(|e| matches!(e, Entry::Notice(t) if t.starts_with("previous session"))),
+            "the mode is noted on every /view, as the TUI does"
         );
         let _ = std::fs::remove_dir_all(&home);
     }

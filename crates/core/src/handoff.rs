@@ -286,6 +286,32 @@ pub fn resume_mode(prev: &ExitHandoff, role: &str, killed: bool, threshold: u64)
     }
 }
 
+// Which mode the previous session loads with, as core decides it at start (resume_mode, same inputs).
+// None when there is no previous run, or when --resume was given explicitly (core takes that one as is).
+pub fn session_mode_note(
+    handoff_path: Option<&Path>,
+    model: &str,
+    rotate: u64,
+    explicit: bool,
+) -> Option<String> {
+    if explicit {
+        return None;
+    }
+    let (prev, killed) = previous_run(&read_path(handoff_path?, None))?;
+    let threshold = crate::rotate::threshold_for(model, rotate);
+    Some(match resume_mode(&prev, MAIN_ROLE, killed, threshold) {
+        Load::Resume(sid) if killed => {
+            format!("previous session: resume claude --resume {sid} (last run was killed)")
+        }
+        Load::Resume(sid) => {
+            format!(
+                "previous session: resume claude --resume {sid} (context below rotation threshold)"
+            )
+        }
+        Load::Fresh => "previous session: fresh start, handoff note carried over".to_string(),
+    })
+}
+
 // Clean exit: the live marker is no longer needed. A missing file is fine. The shared legacy marker goes too,
 // so an old run's leftover is consumed once a run exits cleanly and is not read as killed again.
 pub fn remove_live_handoff(exit_path: &Path) {
