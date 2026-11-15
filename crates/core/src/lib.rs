@@ -15,6 +15,7 @@ pub mod event;
 pub mod file_lock;
 pub mod forward;
 pub mod group_pick;
+pub mod gui_bridge;
 pub mod haiku_pool;
 pub mod handoff;
 pub mod i18n;
