@@ -246,6 +246,60 @@ pub fn push_history(items: &mut Vec<String>, s: String) -> bool {
     false
 }
 
+// Cut to n chars (repl.go trunc, rune based).
+pub fn trunc_chars(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+// R06 toolSummary (tui.go:67): the first priority key whose string value is non-empty, newlines turned
+// into spaces, cut to 100 chars. Otherwise the compact JSON of the input (Go jsonStr), cut to 100 chars.
+// Empty for no input.
+pub fn tool_summary(input: &serde_json::Value) -> String {
+    const KEYS: [&str; 8] = [
+        "command",
+        "file_path",
+        "pattern",
+        "path",
+        "url",
+        "query",
+        "description",
+        "prompt",
+    ];
+    for key in KEYS {
+        if let Some(v) = input.get(key).and_then(serde_json::Value::as_str)
+            && !v.is_empty()
+        {
+            return trunc_chars(&v.replace('\n', " "), 100);
+        }
+    }
+    let Some(obj) = input.as_object().filter(|m| !m.is_empty()) else {
+        return String::new();
+    };
+    // Go encodes a map with sorted keys; a BTreeMap gives the same order whatever serde_json preserves.
+    let sorted: BTreeMap<&String, &serde_json::Value> = obj.iter().collect();
+    trunc_chars(&serde_json::to_string(&sorted).unwrap_or_default(), 100)
+}
+
+// Default model and rotate threshold the welcome box shows before the first Status event (TUI App::new).
+pub const WELCOME_MODEL: &str = "claude-opus-5-5";
+pub const WELCOME_THRESHOLD: u64 = 200_000;
+
+// The welcome box text (tui.go welcome()), one entry per row, without the box and the colours.
+// Row 0 is the title; the cwd is cut to cwd_max chars. The TUI and the GUI both draw these rows.
+pub fn welcome_lines(cwd: &str, cwd_max: usize, model: &str, threshold: u64) -> Vec<String> {
+    vec![
+        "✻ Welcome to Claude Harness!".to_string(),
+        String::new(),
+        "  /help for help, /rotate to rotate session, /quit to exit".to_string(),
+        String::new(),
+        format!("  cwd: {}", trunc_chars(cwd, cwd_max)),
+        format!(
+            "  model: {model} · rotate at {} tokens",
+            crate::slash::commas(threshold)
+        ),
+    ]
+}
+
 // What the event loop must do after a key press.
 #[derive(Debug, PartialEq)]
 pub enum Action {

@@ -500,39 +500,8 @@ fn table_edge(cols: &[usize], left: char, mid: char, right: char) -> String {
     format!("{left}{}{right}", segs.join(&mid.to_string()))
 }
 
-// R06 toolSummary (tui.go:67): the first priority key whose string value is non-empty, newlines turned
-// into spaces, cut to 100 chars. Otherwise the compact JSON of the input (Go jsonStr), cut to 100 chars.
-// Empty for no input.
-pub fn tool_summary(input: &serde_json::Value) -> String {
-    const KEYS: [&str; 8] = [
-        "command",
-        "file_path",
-        "pattern",
-        "path",
-        "url",
-        "query",
-        "description",
-        "prompt",
-    ];
-    for key in KEYS {
-        if let Some(v) = input.get(key).and_then(serde_json::Value::as_str)
-            && !v.is_empty()
-        {
-            return trunc_chars(&v.replace('\n', " "), 100);
-        }
-    }
-    let Some(obj) = input.as_object().filter(|m| !m.is_empty()) else {
-        return String::new();
-    };
-    // Go encodes a map with sorted keys; a BTreeMap gives the same order whatever serde_json preserves.
-    let sorted: std::collections::BTreeMap<&String, &serde_json::Value> = obj.iter().collect();
-    trunc_chars(&serde_json::to_string(&sorted).unwrap_or_default(), 100)
-}
-
-// Cut to n chars (repl.go trunc, rune based).
-pub fn trunc_chars(s: &str, n: usize) -> String {
-    s.chars().take(n).collect()
-}
+// Shared with the GUI: the tool summary and the cut helper live in core ui_state.
+pub use chaude_core::ui_state::{tool_summary, trunc_chars};
 
 // R07 permission note (tui.go:499).
 pub fn perm_note(tool: &str, arg: &str) -> String {

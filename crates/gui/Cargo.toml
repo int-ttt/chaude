@@ -19,3 +19,6 @@ chaude-core = { path = "../core" }
 eframe = "0.37"
 egui_commonmark = "0.26"
 notify-rust = "4.19"
+
+[dev-dependencies]
+serde_json.workspace = true

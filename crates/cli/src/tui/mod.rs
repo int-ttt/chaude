@@ -38,6 +38,7 @@ use chaude_core::ui_state::{
     Entry, RunState, TaskRow, TaskState, Transcript, action_line, stage_text, tool_line,
     tool_result_line, tool_result_text,
 };
+use chaude_core::ui_state::{WELCOME_MODEL, WELCOME_THRESHOLD, welcome_lines};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
@@ -255,8 +256,8 @@ impl App {
                 cwd: std::env::current_dir()
                     .map(|p| p.display().to_string())
                     .unwrap_or_default(),
-                model: "claude-opus-5-5".to_string(),
-                threshold: 200_000,
+                model: WELCOME_MODEL.to_string(),
+                threshold: WELCOME_THRESHOLD,
             },
             editor: Editor::with_east_asian(render::east_asian()),
             cols,
@@ -2717,21 +2718,21 @@ impl App {
         let text = inner - 2; // one padding cell on each side inside the border
         let edge = |s: &str| format!("{ORANGE_ON}{s}{FG_OFF}");
         let grey = |s: String| format!("{GREY_ON}{s}{FG_OFF}");
-        let title = format!("{BOLD_ON}{ORANGE_ON}✻ Welcome to Claude Harness!{FG_OFF}{BOLD_OFF}");
-        let cwd = render::trunc_chars(&self.welcome.cwd, inner.saturating_sub(12));
-        let model = format!(
-            "  model: {} · rotate at {} tokens",
-            self.welcome.model,
-            commands::commas(self.welcome.threshold)
-        );
-        let lines = [
-            title,
-            String::new(),
-            grey("  /help for help, /rotate to rotate session, /quit to exit".to_string()),
-            String::new(),
-            grey(format!("  cwd: {cwd}")),
-            grey(model),
-        ];
+        // Row 0 is the title (bold orange); the other text rows are grey, empty rows stay empty.
+        let lines: Vec<String> = welcome_lines(
+            &self.welcome.cwd,
+            inner.saturating_sub(12),
+            &self.welcome.model,
+            self.welcome.threshold,
+        )
+        .into_iter()
+        .enumerate()
+        .map(|(i, l)| match i {
+            0 => format!("{BOLD_ON}{ORANGE_ON}{l}{FG_OFF}{BOLD_OFF}"),
+            _ if l.is_empty() => l,
+            _ => grey(l),
+        })
+        .collect();
         let mut rows = vec![edge(&format!("╭{}╮", "─".repeat(inner)))];
         for l in lines {
             for piece in render::wrap_cells(&l, text).split('\n') {

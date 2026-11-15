@@ -1,17 +1,17 @@
 //! Pure GUI state: applies core UiEvents to the transcript, the status-bar data and the open permission prompt.
 //! No egui types here, so the reducer is unit-tested without a window.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use chaude_core::api::{AgentRow, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::handoff;
 use chaude_core::i18n;
-use chaude_core::localtime::unix_now;
+use chaude_core::localtime::{clock_hhmmss, unix_now};
 use chaude_core::resident::StagePhase;
 use chaude_core::ui_state::{
-    BarInput, Entry, RunState, Transcript, stage_line, stage_text, tool_result_text,
+    BarInput, Entry, RunState, Transcript, stage_line, stage_text, tool_result_text, tool_summary,
 };
 
 // A can_use_tool request waiting for the user (UiEvent::PermissionRequest).
@@ -45,6 +45,8 @@ pub struct GuiState {
     rot_from: String,
     // Open stage rows by resident slot.
     stage_rows: HashMap<String, StageRow>,
+    // Agents whose tool call ended in error (ToolEnd ok=false), by tool id until their AgentEnd (TUI agent_outcome).
+    agent_failed: HashSet<String>,
 }
 
 impl GuiState {
@@ -72,9 +74,18 @@ impl GuiState {
             UiEvent::ToolStart { id, name, summary } => {
                 self.transcript.push_tool(id, name, summary, unix_now());
             }
+            // The input JSON gives the row its argument summary (TUI ToolInput, tool_summary).
+            UiEvent::ToolInput { id, input } => {
+                if let Some(Entry::Tool { summary, .. }) = self.find_tool(&id) {
+                    *summary = tool_summary(&input);
+                }
+            }
             // The tool row gets its end time and elapsed seconds, as the TUI stamps them.
             UiEvent::ToolEnd { id, ok } => {
                 let now_unix = unix_now();
+                if !ok && self.find_agent(&id).is_some() {
+                    self.agent_failed.insert(id.clone());
+                }
                 if let Some(Entry::Tool {
                     ok: slot,
                     start,
@@ -166,16 +177,27 @@ impl GuiState {
                     summary: String::new(),
                 }),
             },
-            UiEvent::AgentEnd { id, summary, .. } => {
+            // The agent row is marked done, then its completion notice follows with the local arrival time (TUI agent_done).
+            UiEvent::AgentEnd {
+                id,
+                model,
+                name,
+                summary,
+                ..
+            } => {
+                let failed = self.agent_failed.remove(&id);
                 if let Some(Entry::Agent {
                     done, summary: s, ..
                 }) = self.find_agent(&id)
                 {
                     *done = true;
                     if !summary.is_empty() {
-                        *s = summary;
+                        *s = summary.clone();
                     }
                 }
+                let line = bar_text::done_line(i18n::current(), failed, &model, &name, &summary);
+                self.transcript
+                    .push_notice(format!("{} {line}", clock_hhmmss(unix_now())));
             }
             UiEvent::Status {
                 model,
@@ -633,6 +655,66 @@ mod tests {
                 summary: "found 3".into()
             }
         );
+    }
+
+    #[test]
+    fn tool_input_sets_the_summary_and_agent_end_writes_a_done_notice() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        st.apply(
+            UiEvent::ToolStart {
+                id: "t1".into(),
+                name: "Bash".into(),
+                summary: String::new(),
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::ToolInput {
+                id: "t1".into(),
+                input: serde_json::json!({"command": "ls\n-la"}),
+            },
+            now,
+        );
+        assert!(
+            matches!(&st.transcript.entries[0], Entry::Tool { summary, .. } if summary == "ls -la")
+        );
+
+        st.apply(
+            UiEvent::AgentStart {
+                id: "a1".into(),
+                description: "scan".into(),
+                started_at: 0,
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::ToolEnd {
+                id: "a1".into(),
+                ok: false,
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::AgentEnd {
+                id: "a1".into(),
+                elapsed_ms: 5,
+                model: "haiku".into(),
+                name: "scan".into(),
+                summary: "boom".into(),
+            },
+            now,
+        );
+        let Some(Entry::Notice(line)) = st.transcript.entries.last() else {
+            panic!("agent end writes a notice");
+        };
+        assert!(line.ends_with(&bar_text::done_line(
+            i18n::current(),
+            true,
+            "haiku",
+            "scan",
+            "boom"
+        )));
     }
 
     #[test]

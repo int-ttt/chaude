@@ -665,6 +665,7 @@ dependencies = [
  "eframe",
  "egui_commonmark",
  "notify-rust",
+ "serde_json",
 ]
 
 [[package]]

@@ -6,7 +6,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use chaude_core::api::{EngineHandle, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::i18n::{self, Msg};
-use chaude_core::ui_state::{Entry, tool_line, tool_result_line};
+use chaude_core::ui_state::{
+    Entry, WELCOME_MODEL, WELCOME_THRESHOLD, tool_line, tool_result_line, welcome_lines,
+};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{self, Key, Modifiers};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
@@ -211,6 +213,7 @@ impl ChaudeApp {
             area = area.vertical_scroll_offset(f32::INFINITY);
         }
         area.show(ui, |ui| {
+            welcome(ui, &self.state);
             for entry in &self.state.transcript.entries {
                 render_entry(ui, &mut self.md, entry);
             }
@@ -228,6 +231,26 @@ impl eframe::App for ChaudeApp {
         egui::CentralPanel::default().show(ui, |ui| self.output(ui));
         self.permission_dialog(ui.ctx());
     }
+}
+
+// The welcome box at the top of the transcript: the shared core text rows (TUI welcome_rows), title first.
+fn welcome(ui: &mut egui::Ui, state: &GuiState) {
+    let model = if state.bar.model.is_empty() {
+        WELCOME_MODEL
+    } else {
+        &state.bar.model
+    };
+    let rows = welcome_lines(&state.cwd, 80, model, WELCOME_THRESHOLD);
+    ui.group(|ui| {
+        for (i, row) in rows.iter().enumerate() {
+            if i == 0 {
+                ui.strong(row);
+            } else {
+                ui.weak(row);
+            }
+        }
+    });
+    ui.add_space(ui.spacing().item_spacing.y);
 }
 
 fn render_entry(ui: &mut egui::Ui, md: &mut CommonMarkCache, entry: &Entry) {
