@@ -454,6 +454,34 @@ mod tests {
     }
 
     #[test]
+    fn streaming_chunks_send_updates_with_the_full_text() {
+        let mut m = Mirror::default();
+        let mut t = Transcript::default();
+        t.push_text(Role::Main, "", false);
+        m.sync(&t, idle(), &[], None);
+        let mut shown = String::new();
+        for chunk in ["he", "llo", " there"] {
+            if let Entry::Text { text, .. } = &mut t.entries[0] {
+                text.push_str(chunk);
+            }
+            shown.push_str(chunk);
+            let evs = m.sync(&t, idle(), &[], None);
+            match evs.as_slice() {
+                [
+                    Event::EntryUpdate {
+                        index: 0,
+                        entry: EntryView::Text { text, done, .. },
+                    },
+                ] => {
+                    assert_eq!(text, &shown);
+                    assert!(!done);
+                }
+                other => panic!("expected one entry_update, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn mirror_tracks_pickers_state_and_note() {
         let mut m = Mirror::default();
         let t = Transcript::default();

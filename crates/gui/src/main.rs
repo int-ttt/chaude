@@ -8,13 +8,15 @@ use std::time::{Duration, Instant};
 use chaude_gui::bridge;
 use chaude_gui::front::Front;
 use chaude_gui::guard::{self, Claim};
+use chaude_gui::page;
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::WindowBuilder;
 use wry::WebViewBuilder;
 
-const PAGE: &str = include_str!("../web/index.html");
+// Smoke only: the page's DOM counts, read 2 seconds before the smoke quit (rows and assistant text characters).
+const PROBE_JS: &str = "JSON.stringify({rows: document.querySelectorAll('#column > .row').length, assistant_chars: [...document.querySelectorAll('.row.assistant .md')].reduce((n, el) => n + el.textContent.length, 0)})";
 
 // Events the window thread gets from other threads: the page's messages, a second launch's focus request, and a
 // wake from the engine or a job (the page events are then pulled from Front).
@@ -63,7 +65,7 @@ fn main() {
     // The IPC handler runs on the window thread; it hands the message to the loop, which routes it to Front.
     let proxy = event_loop.create_proxy();
     let webview = WebViewBuilder::new()
-        .with_html(PAGE)
+        .with_html(page::html())
         .with_ipc_handler(move |req| {
             let _ = proxy.send_event(UserEvent::FromPage(req.into_body()));
         })
@@ -84,11 +86,25 @@ fn main() {
         });
     }
 
+    let probe_at = quit_at.and_then(|at| at.checked_sub(Duration::from_secs(2)));
+    let mut probed = false;
+    // Set once the run is closing; the quit line prints once, not on every later loop callback.
+    let mut quitting = false;
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = match quit_at {
+        let next = [quit_at, probe_at.filter(|_| !probed)]
+            .into_iter()
+            .flatten()
+            .min();
+        *control_flow = match next {
             Some(at) => ControlFlow::WaitUntil(at),
             None => ControlFlow::Wait,
         };
+        if !probed && probe_at.is_some_and(|at| Instant::now() >= at) {
+            probed = true;
+            let _ = webview.evaluate_script_with_callback(PROBE_JS, |counts| {
+                eprintln!("dom: {counts}");
+            });
+        }
         match event {
             Event::UserEvent(UserEvent::FromPage(body)) => match bridge::parse(&body) {
                 Ok(cmd) => {
@@ -113,12 +129,15 @@ fn main() {
             } => *control_flow = ControlFlow::Exit,
             _ => {}
         }
-        if front.quit {
+        if !quitting && front.quit {
+            quitting = true;
             eprintln!("quit: the run asked to close");
-            *control_flow = ControlFlow::Exit;
         }
-        if quit_at.is_some_and(|at| Instant::now() >= at) {
+        if !quitting && quit_at.is_some_and(|at| Instant::now() >= at) {
+            quitting = true;
             eprintln!("quit: smoke timer reached");
+        }
+        if quitting {
             *control_flow = ControlFlow::Exit;
         }
     });

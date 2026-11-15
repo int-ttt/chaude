@@ -198,6 +198,9 @@ mod tests {
         });
         assert!(matches!(claim(&dir).unwrap(), Claim::Second));
         assert!(rx.recv_timeout(Duration::from_secs(2)).is_ok());
+        // One connection is one focus request: no extra callbacks follow.
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(rx.try_iter().count(), 0);
         let _ = fs::remove_dir_all(&dir);
     }
 }

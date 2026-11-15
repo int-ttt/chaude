@@ -781,6 +781,15 @@ impl GuiState {
                 self.transcript.push_notice(text);
             }
             UiEvent::Notice { text } => self.transcript.push_notice(text),
+            // With residents the tui answer is the main reply (TUI feed_main + end_main_block); it lands in the open
+            // main row, or a new one, and that row is done.
+            UiEvent::TuiAnswer { text } => {
+                let i = self.open_text(&Role::Main);
+                if let Entry::Text { text: t, done, .. } = &mut self.transcript.entries[i] {
+                    t.push_str(&text);
+                    *done = true;
+                }
+            }
             UiEvent::Error(text) if self.usage_pending => {
                 self.usage_pending = false;
                 self.usage = Some(usage_text::usage_failed(&text));
@@ -904,6 +913,26 @@ mod tests {
             role,
             text: s.into(),
         }
+    }
+
+    #[test]
+    fn tui_answer_is_the_done_main_reply() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        st.apply(
+            UiEvent::TuiAnswer {
+                text: "answer".into(),
+            },
+            now,
+        );
+        assert_eq!(
+            st.transcript.entries,
+            [Entry::Text {
+                role: Role::Main,
+                text: "answer".into(),
+                done: true
+            }]
+        );
     }
 
     #[test]

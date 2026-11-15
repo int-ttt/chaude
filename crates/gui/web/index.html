@@ -3,40 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
 <title>chaude</title>
-<style>
-  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-  body { margin: 0; padding: 24px; }
-  h1 { font-size: 18px; font-weight: 600; margin: 0 0 16px; }
-  button { font: inherit; padding: 6px 14px; border-radius: 8px; border: 1px solid #8884; background: none; cursor: pointer; }
-  pre { margin: 16px 0 0; padding: 12px; border-radius: 8px; background: #8881; min-height: 120px; white-space: pre-wrap; }
-</style>
+<!--style-->
 </head>
 <body>
-<h1>chaude</h1>
-<button id="ping" type="button">Ping Rust</button>
-<pre id="log"></pre>
-<script>
-  // Rust calls window.chaude.onEvent(event) for each event (core chaude_core::gui_bridge::Event, serde tag "type").
-  // The page only logs for now; the rendering comes in a later step.
-  const log = (text) => {
-    const el = document.getElementById("log");
-    el.textContent += text + "\n";
-  };
-  window.chaude = {
-    send(command) {
-      window.ipc.postMessage(JSON.stringify(command));
-    },
-    onEvent(event) {
-      log("rust -> page: " + event.type + (event.type === "entry_push" ? " " + event.entry.kind : ""));
-    },
-  };
-  document.getElementById("ping").addEventListener("click", () => {
-    window.chaude.send({ type: "ping" });
-    log("page -> rust: ping");
-  });
-  window.chaude.send({ type: "ping" });
-  log("page -> rust: ping (on load)");
-</script>
+<main id="chat" aria-label="Conversation">
+  <div id="column" class="column"></div>
+</main>
+<footer class="dock">
+  <div id="toast" class="toast" role="status" hidden></div>
+  <div id="permission" class="permission" hidden>
+    <div class="permission-text"><span class="permission-label">Permission needed</span> <span id="permission-text"></span></div>
+    <div class="permission-actions">
+      <button id="deny" type="button">Deny</button>
+      <button id="allow" type="button" class="primary">Allow</button>
+    </div>
+  </div>
+  <div class="composer">
+    <textarea id="input" rows="1" placeholder="Message chaude" aria-label="Message"></textarea>
+    <div class="composer-actions">
+      <button id="stop" type="button" hidden>Stop</button>
+      <button id="send" type="button" class="primary">Send</button>
+    </div>
+  </div>
+</footer>
+<!--vendor-->
+<!--app-->
 </body>
 </html>

@@ -1,0 +1,187 @@
+/* chaude page styles. Own palette and open system fonts only; no Anthropic assets. */
+:root {
+  color-scheme: light dark;
+  --bg: #f7f6f2;
+  --fg: #1d1c1a;
+  --muted: #77736a;
+  --line: #e2dfd5;
+  --panel: #ffffff;
+  --code: #f0eee6;
+  --accent: #2c2b28;
+  --accent-fg: #f7f6f2;
+  --danger: #b3261e;
+  --hl-kw: #7b3fb0;
+  --hl-str: #2d7a48;
+  --hl-num: #a85a14;
+  --hl-com: #8a857a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #262624;
+    --fg: #ebeae5;
+    --muted: #9a968c;
+    --line: #3a3935;
+    --panel: #30302d;
+    --code: #1e1e1c;
+    --accent: #e9e7e0;
+    --accent-fg: #262624;
+    --danger: #f2766b;
+    --hl-kw: #c49bf0;
+    --hl-str: #8fd1a5;
+    --hl-num: #e6a86b;
+    --hl-com: #7d796f;
+  }
+}
+[hidden] { display: none !important; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.6 Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+button {
+  font: inherit;
+  font-size: 13px;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+button:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
+
+#chat { flex: 1; overflow-y: auto; }
+.column {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 24px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.row { min-width: 0; }
+.row.user { align-self: flex-end; max-width: 86%; }
+.bubble {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.assistant { overflow-wrap: anywhere; }
+.assistant.streaming .md::after { content: "\258D"; color: var(--muted); margin-left: 2px; }
+.assistant .who { font-size: 12px; color: var(--muted); }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0.6em 0; }
+.md h1, .md h2, .md h3, .md h4 { font-weight: 600; line-height: 1.3; margin: 1em 0 0.4em; }
+.md h1 { font-size: 1.3em; }
+.md h2 { font-size: 1.15em; }
+.md h3, .md h4 { font-size: 1.02em; }
+.md ul, .md ol { padding-left: 1.4em; margin: 0.5em 0; }
+.md li + li { margin-top: 0.2em; }
+.md blockquote { margin: 0.6em 0; padding-left: 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.md a { color: inherit; text-decoration: underline dotted; }
+.md code {
+  font: 0.9em ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: var(--code);
+  padding: 0.1em 0.35em;
+  border-radius: 5px;
+}
+.md table { border-collapse: collapse; margin: 0.6em 0; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: left; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+
+.codeblock { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 10px 0; }
+.codebar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 10px;
+  background: var(--code);
+  font-size: 12px;
+  color: var(--muted);
+}
+.codebar button { font-size: 12px; padding: 1px 10px; border-radius: 7px; }
+.codeblock pre { margin: 0; padding: 12px; overflow-x: auto; background: var(--code); }
+.codeblock code { font: 13px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; background: none; padding: 0; }
+.hljs-keyword, .hljs-built_in, .hljs-selector-tag, .hljs-type { color: var(--hl-kw); }
+.hljs-string, .hljs-title, .hljs-attr { color: var(--hl-str); }
+.hljs-number, .hljs-literal { color: var(--hl-num); }
+.hljs-comment, .hljs-quote { color: var(--hl-com); font-style: italic; }
+
+.tool, .result, .notice, .status, .error, .agent-card {
+  font-size: 13px;
+  color: var(--muted);
+}
+.tool summary, .result summary { cursor: pointer; list-style: none; }
+.tool summary::-webkit-details-marker, .result summary::-webkit-details-marker { display: none; }
+.tool summary::before, .result summary::before { content: "\25B8"; display: inline-block; margin-right: 6px; transition: transform 0.12s; }
+.tool[open] summary::before, .result[open] summary::before { transform: rotate(90deg); }
+.tool .name { color: var(--fg); font-weight: 600; }
+.tool .arg { overflow-wrap: anywhere; }
+.tool.fail .verdict { color: var(--danger); }
+.tool.running .verdict { color: var(--muted); }
+.tool .body, .result pre {
+  margin: 6px 0 0 18px;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--code);
+  border-radius: 8px;
+  font: 12px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.status { font-size: 12px; }
+.notice, .status { white-space: pre-wrap; }
+.error { color: var(--danger); white-space: pre-wrap; }
+.agent-card { border: 1px dashed var(--line); border-radius: 10px; padding: 6px 10px; }
+.blank { height: 4px; }
+
+.dock { padding: 8px 24px 20px; }
+.dock > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+.toast { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 6px; }
+.permission {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+}
+.permission-text { font-size: 14px; overflow-wrap: anywhere; min-width: 0; }
+.permission-label { font-weight: 600; }
+.permission-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 10px 10px 10px 16px;
+}
+.composer textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+  max-height: 200px;
+  padding: 4px 0;
+}
+.composer-actions { display: flex; gap: 6px; flex-shrink: 0; }

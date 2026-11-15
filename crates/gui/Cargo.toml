@@ -17,6 +17,7 @@ test = false
 [dependencies]
 chaude-core = { path = "../core" }
 chaude-update = { path = "../update" }
+arboard = { version = "3.7", default-features = false }
 notify-rust = "4.19"
 serde.workspace = true
 serde_json.workspace = true

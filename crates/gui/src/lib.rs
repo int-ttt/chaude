@@ -6,6 +6,7 @@ pub mod engine;
 pub mod front;
 pub mod guard;
 pub mod input;
+pub mod page;
 pub mod state;
 
 /// Kind of one stream-json line from the Claude CLI, as the shared core names it.

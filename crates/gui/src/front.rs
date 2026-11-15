@@ -18,6 +18,17 @@ use crate::commands::{self, Effect};
 use crate::engine;
 use crate::state::GuiState;
 
+// Writes the text to the OS clipboard. False when the clipboard is not reachable (then no copied note is shown).
+fn copy_to_clipboard(text: &str) -> bool {
+    match arboard::Clipboard::new().and_then(|mut clip| clip.set_text(text)) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("copy: clipboard failed: {e}");
+            false
+        }
+    }
+}
+
 pub struct Front {
     pub state: GuiState,
     // Set by /exit and /quit; the window closes after the events of that command went out.
@@ -84,7 +95,12 @@ impl Front {
     // Routes one page command into the core logic; returns the page events it caused.
     pub fn command(&mut self, cmd: Command, now: Instant) -> Vec<Event> {
         match cmd {
-            Command::Ping => return vec![Event::Pong],
+            // The page's first ping (on load) gets the whole transcript and state, so nothing sent before it is lost.
+            Command::Ping => {
+                let mut out = vec![Event::Pong];
+                out.extend(self.sync(now));
+                return out;
+            }
             Command::Submit { text } => self.submit(&text),
             Command::Slash { name, arg } => {
                 let line = if arg.is_empty() {
@@ -101,7 +117,11 @@ impl Front {
             }
             Command::PermissionAnswer { allow, interrupt } => self.answer(allow, interrupt),
             Command::PickerPick { picker, row } => self.pick(&picker, row),
-            Command::Copy { text } => self.state.copy_done(text.chars().count(), now),
+            Command::Copy { text } => {
+                if copy_to_clipboard(&text) {
+                    self.state.copy_done(text.chars().count(), now);
+                }
+            }
         }
         self.sync(now)
     }
