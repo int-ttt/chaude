@@ -172,7 +172,7 @@ pub struct App {
     // Open /lang picker (ko | en). Enter saves the choice and switches the UI language at once.
     lang: Option<lang::LangPicker>,
     // Open /resume record picker (Go m.rpick) and /view session browser (Go m.sv). Both replace the body.
-    recs: Option<records::RecPicker>,
+    recs: Option<chaude_core::record_pick::Picker>,
     // Open /resume session picker (Go m.pick): the Claude Code session groups of this project.
     pick: Option<resume_pick::GroupPicker>,
     sess: Option<sessview::SessView>,
@@ -890,7 +890,7 @@ impl App {
             }
             return Action::Continue;
         }
-        if let Some(act) = self.recs.as_mut().map(|rp| rp.key(key)) {
+        if let Some(act) = self.recs.as_mut().map(|rp| records::key(rp, key)) {
             match act {
                 records::Action::None => {}
                 records::Action::Close => self.recs = None,
@@ -1359,9 +1359,9 @@ impl App {
         if !record {
             return self.open_groups(&terms);
         }
-        match records::pick(&root, &arg) {
-            Err(e) => self.note(&e),
-            Ok(Some(ps)) => self.recs = Some(records::RecPicker::new(ps)),
+        match chaude_core::record_pick::Picker::open(&root, &arg) {
+            Err(e) => self.note(&e.to_string()),
+            Ok(Some(picker)) => self.recs = Some(picker),
             Ok(None) => match chaude_core::record_turn::resume(&root, &arg, &records::list_date) {
                 Err(e) => self.note(&e.to_string()),
                 Ok((lines, entries)) => {
@@ -1408,8 +1408,8 @@ impl App {
 
     // Enter in the record picker: the whole folder is appended to the transcript (Go loadRecordPick).
     fn load_record(&mut self, p: &records::RecordProject) {
-        match records::load_project(&p.dir) {
-            Err(e) => self.note(&e),
+        match chaude_core::record_folder::load_project(&p.dir) {
+            Err(e) => self.note(&e.to_string()),
             Ok(entries) => {
                 for e in &entries {
                     self.record_block(&e.kind, &e.text);
@@ -1540,7 +1540,7 @@ impl App {
             return Some(lp.lines(width, h));
         }
         if let Some(rp) = &self.recs {
-            return Some(rp.lines(width, h));
+            return Some(records::lines(rp, width, h));
         }
         if let Some(gp) = &self.pick {
             return Some(gp.lines(width, h));
@@ -2496,7 +2496,7 @@ impl App {
             return true;
         }
         if let Some(rp) = self.recs.as_mut() {
-            rp.wheel(up);
+            records::wheel(rp, up);
             return true;
         }
         if let Some(gp) = self.pick.as_mut() {

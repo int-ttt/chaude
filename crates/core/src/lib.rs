@@ -33,6 +33,7 @@ pub mod pick_child;
 pub mod proc;
 pub mod record;
 pub mod record_folder;
+pub mod record_pick;
 pub mod record_turn;
 pub mod resident;
 pub mod resume_group;

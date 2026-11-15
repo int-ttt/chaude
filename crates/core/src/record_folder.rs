@@ -137,9 +137,10 @@ pub fn list_projects(root: &Path) -> io::Result<Vec<Project>> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
+    let mut ents = ents.collect::<io::Result<Vec<_>>>()?;
+    ents.sort_by_key(|ent| ent.file_name()); // name order first, so equal write times list the same way everywhere
     let mut out = Vec::new();
     for ent in ents {
-        let ent = ent?;
         let name = ent.file_name().to_string_lossy().into_owned();
         if !ent.file_type()?.is_dir() || name.starts_with('.') {
             continue;
@@ -161,7 +162,7 @@ pub fn list_projects(root: &Path) -> io::Result<Vec<Project>> {
             last,
         });
     }
-    out.sort_by_key(|p| std::cmp::Reverse(p.last)); // stable: ties keep read_dir order
+    out.sort_by_key(|p| std::cmp::Reverse(p.last)); // stable: ties keep name order
     Ok(out)
 }
 

@@ -3,6 +3,8 @@
 ## Unreleased
 - core: the Esc Esc rewind model (prompt list, selection, cut and restored prompt text) moved from the TUI into shared `chaude_core::rewind`; the TUI calls it and its output is unchanged.
   - core: Esc Esc 되감기 모델(프롬프트 목록, 선택, 자르기와 복원할 프롬프트 문구)을 TUI에서 공용 `chaude_core::rewind`로 옮겼습니다. TUI는 이를 호출하며 출력은 그대로입니다.
+- core: the /resume record picker model (project folder list, cursor, row text, and the folder a pick loads) moved from the TUI into shared `chaude_core::record_pick`; the TUI calls it and its output is unchanged. Folders with the same write time now list in name order, as the TUI already did.
+  - core: /resume 기록 선택기 모델(프로젝트 폴더 목록, 커서, 행 문구, 고른 폴더를 여는 일)을 TUI에서 공용 `chaude_core::record_pick`으로 옮겼습니다. TUI는 이를 호출하며 출력은 그대로입니다. 수정 시각이 같은 폴더는 이름 순으로 나열합니다(TUI와 같은 순서).
 - gui: Esc Esc on an empty input box (no turn busy) opens a rewind window over the prompts; Up/Down (or k/j) pick, Enter or a click rewinds: the transcript is cut before that prompt and its text goes back into the input box; Esc, q, Ctrl+C or X cancels.
   - gui: 입력 상자가 비어 있고 턴이 돌지 않을 때 Esc를 두 번 누르면 프롬프트 목록의 되감기 창이 열립니다. Up/Down(또는 k/j)으로 고르고 Enter 또는 클릭하면 그 프롬프트 앞에서 트랜스크립트를 자르고 프롬프트 문구를 입력 상자에 되돌립니다. Esc, q, Ctrl+C 또는 X로 취소합니다.
 - gui: /usage, /lang and /settings open their own windows instead of "not in the GUI yet": /usage shows the one-shot run text with usage bars (Esc, q, Enter, Ctrl+C or X closes); /lang picks ko or en with 1/2, arrows or click, and `/lang CODE` saves and switches the UI; /settings edits the three project settings rows and saves on close. The picker models and the usage text are the shared core ones, as in the TUI.
