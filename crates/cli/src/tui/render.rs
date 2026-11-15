@@ -522,24 +522,6 @@ pub fn commas(n: i64) -> String {
     if n < 0 { format!("-{out}") } else { out }
 }
 
-// R19 importBlocks (tui.go:283): (kind, text) blocks; only the last 100 turns are shown, with a note first.
-pub fn import_blocks(turns: &[(String, String)]) -> Vec<(&'static str, String)> {
-    let mut out = Vec::new();
-    let mut turns = turns;
-    if turns.len() > 100 {
-        out.push((
-            "note",
-            format!("({} earlier turns not shown)", turns.len() - 100),
-        ));
-        turns = &turns[turns.len() - 100..];
-    }
-    for (u, a) in turns {
-        out.push(("user", u.clone()));
-        out.push(("asst", a.clone()));
-    }
-    out
-}
-
 // R15 barWidth (usagebar.go:35): display width of a rendered bar.
 #[allow(dead_code)] // unwired: usage bar width (usagebar.go barWidth) not drawn on this path
 pub fn bar_width(pct: f64) -> usize {
@@ -1632,14 +1614,14 @@ mod tests {
         let turns: Vec<(String, String)> = (0..150)
             .map(|i| (format!("u{i}"), format!("a{i}")))
             .collect();
-        let blocks = import_blocks(&turns);
+        let blocks = chaude_core::import_claude::import_blocks(&turns);
         assert_eq!(blocks.len(), 201);
         assert_eq!(
             blocks[0],
             ("note", "(50 earlier turns not shown)".to_string())
         );
         assert_eq!(blocks[1], ("user", "u50".to_string()));
-        let few = import_blocks(&turns[..2]);
+        let few = chaude_core::import_claude::import_blocks(&turns[..2]);
         assert_eq!(few.len(), 4);
     }
 

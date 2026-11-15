@@ -1,27 +1,17 @@
 // Go /resume session picker (tui.go pick): the Claude Code session groups of this project that match the
-// /resume terms. Enter imports the chosen group.
+// /resume terms. Enter imports the chosen group. The model (groups, cursor, import key) is core group_pick.
 
-use std::path::Path;
 use std::time::SystemTime;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use chaude_core::record;
-use chaude_core::resume_group::{self, SessionGroup};
+pub use chaude_core::group_pick::GroupPicker;
 
 use super::bar::clip;
 use super::render::{FG_OFF, GREY_ON, ORANGE_ON};
-use super::sessview::{home_dir, project_dir, stamp, wheel_sel};
+use super::sessview::{stamp, wheel_sel};
 
 const TITLE: &str = "Resume a session  (↑/↓ wheel or 1-9 select · enter resume · esc cancel)";
-
-// Go groupList: the groups of cwd's Claude Code project dir matching terms. Err is the status line.
-pub fn groups(cwd: &str, terms: &[String]) -> Result<Vec<SessionGroup>, String> {
-    let home = home_dir().ok_or_else(|| "$HOME is not defined".to_string())?;
-    let claude = project_dir(&home, cwd);
-    let marks = resume_group::clear_mark_path(&record::dir_for(Path::new(cwd)));
-    resume_group::group_list(&claude, &marks, cwd, terms)
-}
 
 // Result of a key press on the session picker.
 #[derive(Debug, PartialEq)]
@@ -33,79 +23,66 @@ pub enum Action {
     Pick(String),
 }
 
-// Go pick and pickSel: the open picker and its cursor.
-#[derive(Debug, Default)]
-pub struct GroupPicker {
-    pub groups: Vec<SessionGroup>,
-    pub sel: usize,
+// Go wheelSel on pickSel.
+pub fn wheel(p: &mut GroupPicker, up: bool) {
+    let n = p.groups.len();
+    wheel_sel(&mut p.sel, n, up);
 }
 
-impl GroupPicker {
-    // All matching groups stay: lines() draws a window around sel, so older groups are reachable by wheel.
-    // A 30-row cap hid every group older than the newest 30 (project with 120 groups, Go-era ones last).
-    pub fn new(groups: Vec<SessionGroup>) -> Self {
-        GroupPicker { groups, sel: 0 }
-    }
-
-    // Go wheelSel on pickSel.
-    pub fn wheel(&mut self, up: bool) {
-        wheel_sel(&mut self.sel, self.groups.len(), up);
-    }
-
-    // Go pick key branch. Up/k and down/j wrap; 1-9 move the cursor to that row; enter picks; esc/q/ctrl+c close.
-    pub fn key(&mut self, key: KeyEvent) -> Action {
-        let n = self.groups.len();
-        let plain = key.modifiers == KeyModifiers::NONE;
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') if plain => wheel_sel(&mut self.sel, n, true),
-            KeyCode::Down | KeyCode::Char('j') if plain => wheel_sel(&mut self.sel, n, false),
-            KeyCode::Esc | KeyCode::Char('q') if plain => return Action::Close,
-            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => return Action::Close,
-            KeyCode::Enter => {
-                if let Some(g) = self.groups.get(self.sel) {
-                    return Action::Pick(g.key());
-                }
+// Go pick key branch. Up/k and down/j wrap; 1-9 move the cursor to that row; enter picks; esc/q/ctrl+c close.
+pub fn key(p: &mut GroupPicker, key: KeyEvent) -> Action {
+    let n = p.groups.len();
+    let plain = key.modifiers == KeyModifiers::NONE;
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') if plain => p.move_by(-1),
+        KeyCode::Down | KeyCode::Char('j') if plain => p.move_by(1),
+        KeyCode::Esc | KeyCode::Char('q') if plain => return Action::Close,
+        KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => return Action::Close,
+        KeyCode::Enter => {
+            if let Some(k) = p.chosen_key() {
+                return Action::Pick(k);
             }
-            KeyCode::Char(c)
-                if plain && ('1'..='9').contains(&c) && ((c as u8 - b'1') as usize) < n =>
-            {
-                self.sel = (c as u8 - b'1') as usize;
-            }
-            _ => {}
         }
-        Action::None
+        KeyCode::Char(c)
+            if plain && ('1'..='9').contains(&c) && ((c as u8 - b'1') as usize) < n =>
+        {
+            p.select((c as u8 - b'1') as usize);
+        }
+        _ => {}
     }
+    Action::None
+}
 
-    // Go pick draw: a title row, then rows from a window around sel, exactly hh rows total.
-    pub fn lines(&self, width: usize, hh: usize) -> Vec<String> {
-        if hh == 0 {
-            return Vec::new();
-        }
-        let n = self.groups.len() as isize;
-        let from = (self.sel as isize - (hh / 2) as isize)
-            .min(n - (hh as isize - 2))
-            .max(0) as usize;
-        let mut l = vec![format!("{ORANGE_ON}{TITLE}{FG_OFF}")];
-        for (i, g) in self.groups.iter().enumerate().skip(from) {
-            if l.len() >= hh - 1 {
-                break;
-            }
-            let t = format!("{:>2}) {}", i + 1, g.label(&|t: SystemTime| stamp(t, true)));
-            l.push(if i == self.sel {
-                format!("{ORANGE_ON}{}{FG_OFF}", clip(&format!("> {t}"), width))
-            } else {
-                format!("{GREY_ON}{}{FG_OFF}", clip(&format!("  {t}"), width))
-            });
-        }
-        l.resize(hh, String::new());
-        l
+// Go pick draw: a title row, then rows from a window around sel, exactly hh rows total.
+// All matching groups stay: the window is drawn around sel, so older groups are reachable by wheel.
+pub fn lines(p: &GroupPicker, width: usize, hh: usize) -> Vec<String> {
+    if hh == 0 {
+        return Vec::new();
     }
+    let n = p.groups.len() as isize;
+    let from = (p.sel as isize - (hh / 2) as isize)
+        .min(n - (hh as isize - 2))
+        .max(0) as usize;
+    let mut l = vec![format!("{ORANGE_ON}{TITLE}{FG_OFF}")];
+    for (i, g) in p.groups.iter().enumerate().skip(from) {
+        if l.len() >= hh - 1 {
+            break;
+        }
+        let t = format!("{:>2}) {}", i + 1, g.label(&|t: SystemTime| stamp(t, true)));
+        l.push(if i == p.sel {
+            format!("{ORANGE_ON}{}{FG_OFF}", clip(&format!("> {t}"), width))
+        } else {
+            format!("{GREY_ON}{}{FG_OFF}", clip(&format!("  {t}"), width))
+        });
+    }
+    l.resize(hh, String::new());
+    l
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chaude_core::resume_group::SessionInfo;
+    use chaude_core::resume_group::{SessionGroup, SessionInfo};
     use std::path::PathBuf;
 
     fn group(id: &str) -> SessionGroup {
@@ -133,13 +110,13 @@ mod tests {
     #[test]
     fn enter_picks_the_selected_group_and_keys_move_the_cursor() {
         let mut p = GroupPicker::new(vec![group("a"), group("b"), group("c")]);
-        assert_eq!(p.key(press(KeyCode::Char('2'))), Action::None);
+        assert_eq!(key(&mut p, press(KeyCode::Char('2'))), Action::None);
         assert_eq!(p.sel, 1);
-        assert_eq!(p.key(press(KeyCode::Enter)), Action::Pick("b".into()));
-        assert_eq!(p.key(press(KeyCode::Down)), Action::None);
-        assert_eq!(p.key(press(KeyCode::Down)), Action::None);
+        assert_eq!(key(&mut p, press(KeyCode::Enter)), Action::Pick("b".into()));
+        assert_eq!(key(&mut p, press(KeyCode::Down)), Action::None);
+        assert_eq!(key(&mut p, press(KeyCode::Down)), Action::None);
         assert_eq!(p.sel, 0, "down wraps to the first row");
-        assert_eq!(p.key(press(KeyCode::Esc)), Action::Close);
+        assert_eq!(key(&mut p, press(KeyCode::Esc)), Action::Close);
     }
 
     #[test]
@@ -147,20 +124,26 @@ mod tests {
         let mut g = group("new");
         g.files.push(group("old").files.remove(0));
         let mut p = GroupPicker::new(vec![g]);
-        assert_eq!(p.key(press(KeyCode::Enter)), Action::Pick("old,new".into()));
+        assert_eq!(
+            key(&mut p, press(KeyCode::Enter)),
+            Action::Pick("old,new".into())
+        );
     }
 
     #[test]
     fn groups_beyond_thirty_stay_reachable() {
         let mut p = GroupPicker::new((0..45).map(|i| group(&i.to_string())).collect());
         assert_eq!(p.groups.len(), 45, "no row cap");
-        p.wheel(true);
+        wheel(&mut p, true);
         assert_eq!(
             p.sel, 44,
             "wheel up from the first row reaches the oldest group"
         );
-        assert_eq!(p.key(press(KeyCode::Enter)), Action::Pick("44".into()));
-        let l = p.lines(120, 8);
+        assert_eq!(
+            key(&mut p, press(KeyCode::Enter)),
+            Action::Pick("44".into())
+        );
+        let l = lines(&p, 120, 8);
         assert!(
             l.iter().any(|r| r.contains("> 45)")),
             "selected old row is drawn"
@@ -170,10 +153,10 @@ mod tests {
     #[test]
     fn lines_are_exactly_hh_rows_with_the_title_first() {
         let p = GroupPicker::new((0..10).map(|i| group(&i.to_string())).collect());
-        let l = p.lines(120, 5);
+        let l = lines(&p, 120, 5);
         assert_eq!(l.len(), 5);
         assert!(l[0].contains("Resume a session"));
         assert!(l.iter().any(|r| r.contains("> ")));
-        assert!(GroupPicker::new(Vec::new()).lines(80, 0).is_empty());
+        assert!(lines(&GroupPicker::new(Vec::new()), 80, 0).is_empty());
     }
 }

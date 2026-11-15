@@ -34,7 +34,6 @@ use chaude_core::i18n::{Msg, current, t, tf};
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::localtime::{clock_hhmmss, unix_now};
 use chaude_core::resident::StagePhase;
-use chaude_core::resume_note;
 use chaude_core::ui_state::{
     Entry, RunState, Transcript, action_line, stage_text, tool_line, tool_result_line,
     tool_result_text,
@@ -879,7 +878,7 @@ impl App {
             }
             return Action::Continue;
         }
-        if let Some(act) = self.pick.as_mut().map(|gp| gp.key(key)) {
+        if let Some(act) = self.pick.as_mut().map(|gp| resume_pick::key(gp, key)) {
             match act {
                 resume_pick::Action::None => {}
                 resume_pick::Action::Close => self.pick = None,
@@ -1259,22 +1258,9 @@ impl App {
     // transcript is queued for the engine (Go applyImport) so the next prompt starts from it.
     // digest: a /resume writes notes/tmp/<session>.md and the engine gets its path with the first input.
     fn import_view(&mut self, arg: &str, digest: bool) {
-        match import_claude::load_import_arg(arg, &self.welcome.cwd) {
+        match import_claude::import_for_resume(arg, &self.welcome.cwd, digest) {
             Err(e) => self.note(&e.to_string()),
-            Ok((_, mut imp)) => {
-                if digest {
-                    let sids: Vec<String> = arg
-                        .split(',')
-                        .filter_map(|a| {
-                            import_claude::resolve_claude_transcript(a, &self.welcome.cwd).ok()
-                        })
-                        .map(|p| import_claude::session_stem(&p))
-                        .collect();
-                    // A failed write leaves the import without the digest hint; the transcript still loads.
-                    imp.note_path =
-                        resume_note::write(std::path::Path::new(&self.welcome.cwd), &imp, &sids)
-                            .ok();
-                }
+            Ok(imp) => {
                 self.show_import(&imp);
                 self.import_install = Some(imp);
             }
@@ -1298,7 +1284,7 @@ impl App {
     // Go importedMsg: replaces the transcript with the imported view (importBlocks), then the install note.
     fn show_import(&mut self, imp: &ClaudeImport) {
         self.clear_transcript();
-        for (kind, text) in render::import_blocks(&imp.view) {
+        for (kind, text) in import_claude::import_blocks(&imp.view) {
             self.record_block(kind, &text);
         }
         self.note(IMPORT_INSTALL_NOTE);
@@ -1381,16 +1367,13 @@ impl App {
     // The group that holds the killed session is imported with its digest (import_view, as a single /resume claude
     // group). When no group lists it, the bare id is tried, and import_view notes the error.
     fn resume_killed(&mut self, sid: &str) {
-        let key = resume_pick::groups(&self.welcome.cwd, &[])
-            .ok()
-            .and_then(|gs| gs.into_iter().find(|g| g.files.iter().any(|f| f.id == sid)))
-            .map_or_else(|| sid.to_string(), |g| g.key());
+        let key = chaude_core::group_pick::killed_key(&self.welcome.cwd, sid);
         self.import_view(&key, true);
     }
 
     // Go groupList + pick: one matching group imports it (sendImport), several open the picker, an error is the note.
     fn open_groups(&mut self, terms: &[String]) -> Action {
-        match resume_pick::groups(&self.welcome.cwd, terms) {
+        match chaude_core::group_pick::groups(&self.welcome.cwd, terms) {
             Err(e) => {
                 self.note(&e);
                 Action::Continue
@@ -1400,7 +1383,7 @@ impl App {
                 Action::Continue
             }
             Ok(gs) => {
-                self.pick = Some(resume_pick::GroupPicker::new(gs));
+                self.pick = Some(chaude_core::group_pick::GroupPicker::new(gs));
                 Action::Continue
             }
         }
@@ -1543,7 +1526,7 @@ impl App {
             return Some(records::lines(rp, width, h));
         }
         if let Some(gp) = &self.pick {
-            return Some(gp.lines(width, h));
+            return Some(resume_pick::lines(gp, width, h));
         }
         self.sess.as_ref().map(|sv| match sv.turns {
             Some(_) => sv.prompt_lines(width, h),
@@ -2500,7 +2483,7 @@ impl App {
             return true;
         }
         if let Some(gp) = self.pick.as_mut() {
-            gp.wheel(up);
+            resume_pick::wheel(gp, up);
             return true;
         }
         // Go panelWheel: only with no agent view and no permission prompt open, and only over the panels.
@@ -4323,7 +4306,7 @@ mod tests {
         assert!(!input_row(&app).contains("\x1b[7m"));
         assert!(!shown(&app));
         app.av = None;
-        app.pick = Some(resume_pick::GroupPicker::new(Vec::new()));
+        app.pick = Some(chaude_core::group_pick::GroupPicker::new(Vec::new()));
         assert!(!input_row(&app).contains("\x1b[7m"));
         assert!(!shown(&app));
         app.pick = None;
@@ -8089,7 +8072,7 @@ mod tests {
         let group = chaude_core::resume_group::SessionGroup {
             files: vec![info("new"), info("old")],
         };
-        app.pick = Some(resume_pick::GroupPicker::new(vec![group]));
+        app.pick = Some(chaude_core::group_pick::GroupPicker::new(vec![group]));
         // Enter closes the picker and goes through the import path (Go sendImport), not a relaunch.
         assert_eq!(
             app.on_key(key(KeyCode::Enter, KeyModifiers::NONE)),

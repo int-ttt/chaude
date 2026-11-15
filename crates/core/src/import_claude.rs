@@ -5,6 +5,7 @@
 use crate::error::Error;
 use crate::import_view::{Turn, ViewBuilder, bget, list, parse_event, sget, trunc};
 use crate::osenv::home_dir;
+use crate::resume_note;
 use crate::rotate::{PREAMBLE, extract_reco, with_reco};
 use serde_json::{Value, json};
 use std::fs::{self, File};
@@ -91,6 +92,39 @@ pub fn resolve_claude_transcript(arg: &str, cwd: &str) -> Result<PathBuf, Error>
     }
     best.map(|(p, _)| p)
         .ok_or_else(|| Error::Msg(format!("no transcripts in {}", dir.display())))
+}
+
+// /resume claude import (TUI import_view): reads arg and, with digest, writes the resume note of the sessions it
+// names (the note path is the digest hint). A failed note write leaves the import without the hint.
+pub fn import_for_resume(arg: &str, cwd: &str, digest: bool) -> Result<ClaudeImport, Error> {
+    let (_, mut imp) = load_import_arg(arg, cwd)?;
+    if digest {
+        let sids: Vec<String> = arg
+            .split(',')
+            .filter_map(|a| resolve_claude_transcript(a, cwd).ok())
+            .map(|p| session_stem(&p))
+            .collect();
+        imp.note_path = resume_note::write(Path::new(cwd), &imp, &sids).ok();
+    }
+    Ok(imp)
+}
+
+// R19 importBlocks (tui.go:283): (kind, text) blocks; only the last 100 turns are shown, with a note first.
+pub fn import_blocks(turns: &[(String, String)]) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
+    let mut turns = turns;
+    if turns.len() > 100 {
+        out.push((
+            "note",
+            format!("({} earlier turns not shown)", turns.len() - 100),
+        ));
+        turns = &turns[turns.len() - 100..];
+    }
+    for (u, a) in turns {
+        out.push(("user", u.clone()));
+        out.push(("asst", a.clone()));
+    }
+    out
 }
 
 // Resolves arg (one id/path/"latest", or a comma-separated list for a /resume group) and reads it.
