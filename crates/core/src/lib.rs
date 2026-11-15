@@ -37,6 +37,7 @@ pub mod record_turn;
 pub mod resident;
 pub mod resume_group;
 pub mod resume_note;
+pub mod rewind;
 #[cfg(test)]
 mod role_coexist;
 pub mod rotate;

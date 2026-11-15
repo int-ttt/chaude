@@ -920,7 +920,7 @@ impl App {
                 .iter()
                 .map(|(_, t)| ("user", t.as_str()))
                 .collect();
-            if let Some(cut) = self.rw.key(key, &refs) {
+            if let Some(cut) = rewind::key(&mut self.rw, key, &refs) {
                 let entry = self.prompts[cut.cut].0;
                 self.truncate_transcript(self.row_of_entry(entry));
                 let n = self.entries.len();
@@ -1521,7 +1521,7 @@ impl App {
                 .iter()
                 .map(|(_, t)| ("user", t.as_str()))
                 .collect();
-            return Some(self.rw.lines(&refs, width, h));
+            return Some(rewind::lines(&self.rw, &refs, width, h));
         }
         if let Some(av) = &self.av {
             let rec = self.view_rec(&av.id).unwrap_or_default();

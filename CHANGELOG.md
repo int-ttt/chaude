@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: the Esc Esc rewind model (prompt list, selection, cut and restored prompt text) moved from the TUI into shared `chaude_core::rewind`; the TUI calls it and its output is unchanged.
+  - core: Esc Esc 되감기 모델(프롬프트 목록, 선택, 자르기와 복원할 프롬프트 문구)을 TUI에서 공용 `chaude_core::rewind`로 옮겼습니다. TUI는 이를 호출하며 출력은 그대로입니다.
 - gui: /usage, /lang and /settings open their own windows instead of "not in the GUI yet": /usage shows the one-shot run text with usage bars (Esc, q, Enter, Ctrl+C or X closes); /lang picks ko or en with 1/2, arrows or click, and `/lang CODE` saves and switches the UI; /settings edits the three project settings rows and saves on close. The picker models and the usage text are the shared core ones, as in the TUI.
   - gui: /usage, /lang, /settings가 GUI 미지원 안내 대신 자기 창을 엽니다. /usage 창은 한 번 실행한 결과 텍스트를 사용량 막대와 함께 보여주며(Esc, q, Enter, Ctrl+C 또는 X로 닫음), /lang은 1/2, 화살표 또는 클릭으로 ko·en을 고르고 `/lang CODE`는 저장 후 UI를 바꿉니다. /settings는 프로젝트 설정 세 행을 고치고 닫을 때 저장합니다. 창 모델과 사용량 문구는 TUI와 같이 공용 코어를 씁니다.
 - gui: queued prompts show above the input box and are echoed once when the engine sends them; the task panel groups tasks by state (tokens, duration, timeout); foreground and background agent rows sit above the status rows, with a range line past four rows; a finished turn sends a desktop notification while the window is in the background; the session cost is back in the bottom status row. The rows come from the shared core `bar_text` helpers (`queue_rows`, `task_rows`, `agent_row_text`, `cost_text`).
