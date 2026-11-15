@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- gui: /usage, /lang and /settings open their own windows instead of "not in the GUI yet": /usage shows the one-shot run text with usage bars (Esc, q, Enter, Ctrl+C or X closes); /lang picks ko or en with 1/2, arrows or click, and `/lang CODE` saves and switches the UI; /settings edits the three project settings rows and saves on close. The picker models and the usage text are the shared core ones, as in the TUI.
+  - gui: /usage, /lang, /settings가 GUI 미지원 안내 대신 자기 창을 엽니다. /usage 창은 한 번 실행한 결과 텍스트를 사용량 막대와 함께 보여주며(Esc, q, Enter, Ctrl+C 또는 X로 닫음), /lang은 1/2, 화살표 또는 클릭으로 ko·en을 고르고 `/lang CODE`는 저장 후 UI를 바꿉니다. /settings는 프로젝트 설정 세 행을 고치고 닫을 때 저장합니다. 창 모델과 사용량 문구는 TUI와 같이 공용 코어를 씁니다.
 - gui: queued prompts show above the input box and are echoed once when the engine sends them; the task panel groups tasks by state (tokens, duration, timeout); foreground and background agent rows sit above the status rows, with a range line past four rows; a finished turn sends a desktop notification while the window is in the background; the session cost is back in the bottom status row. The rows come from the shared core `bar_text` helpers (`queue_rows`, `task_rows`, `agent_row_text`, `cost_text`).
   - gui: 대기 중 프롬프트가 입력 상자 위에 표시되고 엔진이 보낼 때 한 번 에코됩니다. 작업 패널은 상태별로 작업을 묶고(토큰, 소요 시간, 시간 초과), 전경·백그라운드 에이전트 행이 상태 행 위에 나오며 네 행을 넘으면 범위 줄이 붙습니다. 창이 백그라운드에 있을 때 턴이 끝나면 데스크톱 알림을 보내고, 하단 상태 행에 세션 비용이 다시 표시됩니다. 행 문구는 공용 코어 `bar_text` 도우미(`queue_rows`, `task_rows`, `agent_row_text`, `cost_text`)에서 옵니다.
 - core: the queue, task and agent row text moved from the TUI into shared `bar_text` (`queue_rows`, `task_rows`, `agent_row_text`, `agent_state`); the TUI calls them and its output is unchanged.
