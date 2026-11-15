@@ -1,11 +1,13 @@
 //! The eframe app: drains engine events into GuiState once per frame, draws the output pane and the input box.
 
-use std::sync::mpsc::Receiver;
+use std::path::Path;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{AgentRow, EngineHandle, InterruptSource, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::i18n::{self, Msg};
+use chaude_core::slash;
 use chaude_core::ui_state::{
     Action, Entry, WELCOME_MODEL, WELCOME_THRESHOLD, ctrl_c_action, tool_line, tool_result_line,
     welcome_lines,
@@ -14,6 +16,7 @@ use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{self, Key, Modifiers};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 
+use crate::commands::{self, Effect};
 use crate::engine;
 use crate::input::Input;
 use crate::state::GuiState;
@@ -25,6 +28,7 @@ const INPUT_ID: &str = "chaude-input";
 const MAX_QUEUE_ROWS: usize = 5;
 const MAX_TASK_ROWS: usize = 8;
 const MAX_PANEL_ROWS: usize = 4;
+const MAX_SLASH_ROWS: usize = 8;
 
 // Desktop notification for a finished turn (sent only while the window is in the background). A failed send is
 // ignored: the transcript already shows the reply.
@@ -60,6 +64,11 @@ pub struct ChaudeApp {
     follow: bool,
     // Output arrived while not following (the TUI's unseen-output bar).
     unseen: bool,
+    // Results of /doctor and /update checks, run off the UI thread; drained into the transcript each frame.
+    jobs_tx: Sender<String>,
+    jobs_rx: Receiver<String>,
+    // Selected row of the slash popup (clamped to the matches when drawn).
+    slash_sel: usize,
 }
 
 // Output pane geometry from the last frame, in points.
@@ -103,9 +112,12 @@ impl ChaudeApp {
                 (None, None)
             }
         };
+        let (jobs_tx, jobs_rx) = mpsc::channel();
         Self {
             engine,
             rx,
+            jobs_tx,
+            jobs_rx,
             state,
             md: CommonMarkCache::default(),
             input: Input::new(&cwd),
@@ -115,10 +127,14 @@ impl ChaudeApp {
             scroll_to: None,
             follow: true,
             unseen: false,
+            slash_sel: 0,
         }
     }
 
     fn drain(&mut self, ctx: &egui::Context) {
+        while let Ok(text) = self.jobs_rx.try_recv() {
+            self.state.transcript.push_notice(text);
+        }
         if let Some(rx) = &self.rx {
             while let Ok(ev) = rx.try_recv() {
                 if !self.follow && adds_output(&ev) {
@@ -133,15 +149,42 @@ impl ChaudeApp {
         }
     }
 
-    // Sends the input as a prompt (or /command) and echoes it in the transcript.
-    fn submit(&mut self) {
+    // Sends the input as a prompt or /command and echoes it in the transcript. Commands the GUI runs itself
+    // (notes, /exit, /mode, /doctor, /update) stay here; the rest go to the engine.
+    fn submit(&mut self, ctx: &egui::Context) {
         let Some(engine) = &self.engine else { return };
         let Some(text) = self.input.submit() else {
             return;
         };
-        engine.submit(&text);
+        let outcome = slash::dispatch(&text, &commands::ctx(&self.state.bar, self.state.run.busy));
+        match commands::effect(outcome, Path::new(&self.state.cwd)) {
+            Effect::Note(s) => self.state.transcript.push_notice(s),
+            Effect::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Effect::SetMode(p) => engine.set_mode(p.name()),
+            Effect::Doctor => {
+                self.state
+                    .transcript
+                    .push_notice(i18n::t(Msg::DoctorChecking));
+                let (tx, ctx) = (self.jobs_tx.clone(), ctx.clone());
+                std::thread::spawn(move || {
+                    let lines = chaude_core::doctor::render(&chaude_core::doctor::checks_now());
+                    let _ = tx.send(lines.join("\n"));
+                    ctx.request_repaint();
+                });
+            }
+            Effect::Update => {
+                self.state.transcript.push_notice(slash::UPDATE_START_NOTE);
+                let (tx, ctx) = (self.jobs_tx.clone(), ctx.clone());
+                std::thread::spawn(move || {
+                    let _ = tx.send(chaude_update::text(env!("CARGO_PKG_VERSION")));
+                    ctx.request_repaint();
+                });
+            }
+            Effect::Send => engine.submit(&text),
+        }
         self.state.push_user(&text);
         self.jump_tail = true;
+        self.slash_sel = 0;
     }
 
     // Moves the output by delta points from the last frame's offset, clamped to the scroll range.
@@ -385,7 +428,14 @@ impl ChaudeApp {
         let ready = self.engine.is_some() && self.state.permission.is_none();
         let focused = ready && self.input_focused;
         let single_line = self.input.is_single_line();
+        // Slash popup: the matches for a command word being typed (none while busy or a permission prompt is open).
+        let text = self.input.text();
+        let busy = self.state.run.busy;
+        let perm_open = self.state.permission.is_some();
+        let sugg = slash::suggestions(&text, busy, perm_open);
+        let sel = self.slash_sel.min(sugg.len().saturating_sub(1));
         let (mut enter, mut up, mut down) = (false, false, false);
+        let (mut tab, mut sel_up, mut sel_down) = (false, false, false);
         // Editor keys (core Editor, the TUI's emacs-style keys): Ctrl+A/E home/end, Ctrl+W delete word,
         // Ctrl+U/K kill to start/end, Ctrl+J or Alt+Enter newline, Alt+Backspace delete word.
         let mut edits: Vec<&'static str> = Vec::new();
@@ -408,14 +458,31 @@ impl ChaudeApp {
                     }
                 }
                 enter = i.consume_key(Modifiers::NONE, Key::Enter);
-                if single_line {
+                if single_line && sugg.is_empty() {
                     up = i.consume_key(Modifiers::NONE, Key::ArrowUp);
                     down = i.consume_key(Modifiers::NONE, Key::ArrowDown);
+                }
+                // With the popup open, Tab completes the selected command and the arrows move the selection.
+                if !sugg.is_empty() {
+                    tab = i.consume_key(Modifiers::NONE, Key::Tab);
+                    sel_up = i.consume_key(Modifiers::NONE, Key::ArrowUp);
+                    sel_down = i.consume_key(Modifiers::NONE, Key::ArrowDown);
                 }
             });
         }
         // Editor-side changes (history recall, Enter, editor keys) move the widget's cursor with them.
         let mut moved = !edits.is_empty();
+        if sel_up {
+            self.slash_sel = sel.saturating_sub(1);
+        }
+        if sel_down {
+            self.slash_sel = (sel + 1).min(sugg.len().saturating_sub(1));
+        }
+        if tab && let Some(done) = slash::complete(&text, sel, busy, perm_open) {
+            self.input.apply_widget(&done, done.chars().count());
+            self.slash_sel = 0;
+            moved = true;
+        }
         for op in edits {
             self.input.apply_key(op);
         }
@@ -430,12 +497,20 @@ impl ChaudeApp {
         if enter {
             // A trailing backslash turns Enter into a newline (the TUI rule); anything else sends.
             if !self.input.backslash_newline() {
-                self.submit();
+                self.submit(ui.ctx());
             }
             moved = true;
         }
         if moved {
             self.place_cursor(ui);
+        }
+        for c in sugg.iter().take(MAX_SLASH_ROWS) {
+            let row = egui::RichText::new(format!("{:<10} {}", c.name, c.desc));
+            ui.label(if std::ptr::eq(*c, sugg[sel]) {
+                row.strong()
+            } else {
+                row.weak()
+            });
         }
         // The widget edits a copy of the editor text (IME preedit and commit, paste, Shift+Enter); the edit is copied back.
         let mut shown = self.input.text();

@@ -1,6 +1,7 @@
 //! Helpers for the chaude GUI (eframe, see main.rs). Uses the chaude-core public API only.
 
 pub mod app;
+pub mod commands;
 pub mod engine;
 pub mod input;
 pub mod state;

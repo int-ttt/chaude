@@ -662,6 +662,7 @@ name = "chaude-gui"
 version = "0.12.8"
 dependencies = [
  "chaude-core",
+ "chaude-update",
  "eframe",
  "egui_commonmark",
  "notify-rust",
