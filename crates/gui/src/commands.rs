@@ -56,15 +56,15 @@ pub fn effect(outcome: SlashOutcome, cwd: &Path) -> Effect {
     }
 }
 
-// The core context for dispatch, read from the bar the GUI shows. The GUI does not track the session id,
-// so /status shows "-" for it.
-pub fn ctx(bar: &BarInput, busy: bool) -> Ctx<'_> {
+// The core context for dispatch, read from the bar the GUI shows. An empty session id (none yet, or after a
+// rotation) shows "-" in /status.
+pub fn ctx<'a>(bar: &'a BarInput, busy: bool, session_id: &'a str) -> Ctx<'a> {
     Ctx {
         model: &bar.model,
         last_ctx: bar.tokens,
         threshold: bar.limit,
         rotations: u64::from(bar.rot),
-        session_id: None,
+        session_id: (!session_id.is_empty()).then_some(session_id),
         mode: slash::parse_mode(&bar.mode).unwrap_or(PermMode::Default),
         chaude_version: env!("CARGO_PKG_VERSION"),
         busy,
@@ -149,7 +149,10 @@ mod tests {
             mode: "plan".into(),
             ..Default::default()
         };
-        let c = ctx(&bar, true);
+        let c = ctx(&bar, true, "abc");
+        assert_eq!(c.session_id, Some("abc"));
+        assert_eq!(ctx(&bar, false, "").session_id, None);
+        let c = ctx(&bar, true, "abc");
         assert_eq!(c.model, "sonnet");
         assert_eq!(c.last_ctx, 1200);
         assert_eq!(c.threshold, 150_000);
@@ -162,7 +165,8 @@ mod tests {
                     mode: "nope".into(),
                     ..Default::default()
                 },
-                false
+                false,
+                ""
             )
             .mode,
             PermMode::Default

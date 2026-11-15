@@ -156,7 +156,10 @@ impl ChaudeApp {
         let Some(text) = self.input.submit() else {
             return;
         };
-        let outcome = slash::dispatch(&text, &commands::ctx(&self.state.bar, self.state.run.busy));
+        let outcome = slash::dispatch(
+            &text,
+            &commands::ctx(&self.state.bar, self.state.run.busy, &self.state.session_id),
+        );
         match commands::effect(outcome, Path::new(&self.state.cwd)) {
             Effect::Note(s) => self.state.transcript.push_notice(s),
             Effect::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),

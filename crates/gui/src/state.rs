@@ -7,12 +7,13 @@ use std::time::Instant;
 use chaude_core::api::{AgentRow, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::handoff;
-use chaude_core::i18n;
+use chaude_core::i18n::{self, Msg};
 use chaude_core::localtime::{clock_hhmmss, unix_now};
 use chaude_core::resident::StagePhase;
 use chaude_core::ui_state::{
     BarInput, Entry, RunState, Transcript, stage_line, stage_text, tool_result_text, tool_summary,
 };
+use chaude_core::usage_text;
 
 // A can_use_tool request waiting for the user (UiEvent::PermissionRequest).
 #[derive(Debug, Clone, PartialEq)]
@@ -47,12 +48,30 @@ pub struct GuiState {
     stage_rows: HashMap<String, StageRow>,
     // Agents whose tool call ended in error (ToolEnd ok=false), by tool id until their AgentEnd (TUI agent_outcome).
     agent_failed: HashSet<String>,
+    // Main session id (UiEvent::SessionIds); empty after a rotation until the new one. /status shows it.
+    pub session_id: String,
+    // The /usage window text while it is open (None = closed; the loading text until the one-shot run answers).
+    pub usage: Option<String>,
+    // True from open until the one-shot run answers; its failure then goes into the window (TUI usage.pending).
+    usage_pending: bool,
 }
 
 impl GuiState {
     // Echoes a prompt the user sent. Prompt history is kept by the input box (crate::input, core Editor).
     pub fn push_user(&mut self, text: &str) {
         self.transcript.push_user(text);
+    }
+
+    // Opens the /usage window with the loading text (TUI usage.open). The one-shot run answers through apply.
+    pub fn open_usage(&mut self) {
+        self.usage = Some(i18n::t(Msg::UsageLoading).to_string());
+        self.usage_pending = true;
+    }
+
+    // Closes the /usage window; a late answer then goes to the transcript as before (TUI usage.close).
+    pub fn close_usage(&mut self) {
+        self.usage = None;
+        self.usage_pending = false;
     }
 
     // Applies one engine event. now is the time it arrived (turn timer start).
@@ -250,7 +269,22 @@ impl GuiState {
             UiEvent::RateLimit { info } => {
                 self.bar.rate = bar_text::rate_status(&info, unix_now()).filter(|s| !s.is_empty());
             }
-            UiEvent::RotatedFrom { old_session } => self.rot_from = old_session,
+            UiEvent::SessionIds { main, .. } => self.session_id = main,
+            UiEvent::RotatedFrom { old_session } => {
+                self.session_id.clear();
+                self.rot_from = old_session;
+            }
+            // The /usage answer fills the open window (TUI UiEvent::Usage); a late answer after close is dropped.
+            UiEvent::Usage { text } if self.usage_pending => {
+                self.usage_pending = false;
+                let text = if text.trim().is_empty() {
+                    i18n::t(Msg::UsageEmpty).to_string()
+                } else {
+                    usage_text::decorate_usage(&text, self.bar.tokens as i64)
+                };
+                self.usage = Some(text);
+            }
+            UiEvent::Usage { .. } => {}
             UiEvent::Rotated { reason } => {
                 self.run.rot += 1;
                 let old = std::mem::take(&mut self.rot_from);
@@ -275,6 +309,10 @@ impl GuiState {
                 self.transcript.push_notice(text);
             }
             UiEvent::Notice { text } => self.transcript.push_notice(text),
+            UiEvent::Error(text) if self.usage_pending => {
+                self.usage_pending = false;
+                self.usage = Some(usage_text::usage_failed(&text));
+            }
             UiEvent::Error(text) => self.transcript.push_error(text),
             UiEvent::PermissionRequest { id, tool, summary } => {
                 self.permission = Some(Permission { id, tool, summary });
