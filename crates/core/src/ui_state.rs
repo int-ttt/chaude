@@ -141,8 +141,9 @@ impl RunState {
         self.agent_rows.iter().filter(|r| !r.done).count() + self.resident_busy.len()
     }
 
-    // Busy flag and turn start for the GUI: a turn already running keeps its start (the TUI's apply restarts it).
-    // Off clears the start. Other effects of Busy/TurnEnd (last tool, held reply) are the caller's to apply.
+    // Busy flag, turn start and last tool, shared by the TUI and the GUI. A turn already running keeps its start,
+    // so a repeated Busy(true) does not restart the clock. Off clears the start. Every Busy(true) clears the last
+    // tool (Go sendPrompt). The held reply is the caller's to apply (TurnEnd does not clear it here).
     pub fn set_busy(&mut self, on: bool, now: Instant) {
         self.busy = on;
         self.turn_start = match (on, self.turn_start) {
@@ -150,20 +151,17 @@ impl RunState {
             (true, Some(t)) => Some(t),
             (true, None) => Some(now),
         };
+        if on {
+            // Go sendPrompt resets lastTool at the start of each turn.
+            self.last_tool.clear();
+        }
     }
 
     // Folds the progress events that touch only this state; other events are ignored. now is the arrival time
     // (turn start, agent start). A front end that also writes a transcript row for an event does that itself.
     pub fn apply(&mut self, ev: UiEvent, now: Instant) {
         match ev {
-            UiEvent::Busy(on) => {
-                self.busy = on;
-                self.turn_start = if on { Some(now) } else { None };
-                if on {
-                    // Go sendPrompt resets lastTool at the start of each turn.
-                    self.last_tool.clear();
-                }
-            }
+            UiEvent::Busy(on) => self.set_busy(on, now),
             UiEvent::AgentBackground { id } => self.bg_agents.push(id),
             UiEvent::AgentStart {
                 id,
@@ -287,6 +285,23 @@ mod tests {
         run.set_busy(false, t1);
         assert!(!run.busy);
         assert_eq!(run.turn_start, None);
+    }
+
+    #[test]
+    fn run_state_repeated_busy_keeps_turn_start_and_clears_last_tool() {
+        // TUI (apply) and GUI (set_busy) share the rule: a second Busy(true) keeps the first start.
+        let mut run = RunState::default();
+        let t0 = Instant::now();
+        let t1 = t0 + std::time::Duration::from_secs(5);
+        run.apply(UiEvent::Busy(true), t0);
+        run.last_tool = "Read(a)".into();
+        run.apply(UiEvent::Busy(true), t1);
+        assert_eq!(run.turn_start, Some(t0));
+        assert!(run.last_tool.is_empty());
+        run.last_tool = "Bash(b)".into();
+        run.set_busy(true, t1);
+        assert_eq!(run.turn_start, Some(t0));
+        assert!(run.last_tool.is_empty());
     }
 
     #[test]

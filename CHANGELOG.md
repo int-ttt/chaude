@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- tui: a repeated `Busy(true)` while a turn runs keeps its start time, as the GUI does; the TUI and GUI now share core `RunState::set_busy` (busy, turn start, last tool cleared on each turn start).
+  - tui: 이미 진행 중인 턴에 `Busy(true)`가 다시 와도 시작 시각을 유지합니다(GUI와 동일). TUI와 GUI가 코어 `RunState::set_busy`(busy, 턴 시작 시각, 턴 시작 시 마지막 도구 초기화)를 함께 씁니다.
 - gui: the busy turn and the held-reply count (`bar.waiting`) now come from core `RunState` (`set_busy`, `held`) instead of GUI-only fields; a running turn keeps its start and the TUI behavior is unchanged.
   - gui: 진행 중 턴과 보류 응답 대기 수(`bar.waiting`)를 GUI 전용 필드 대신 코어 `RunState`(`set_busy`, `held`)에서 읽습니다. 이미 진행 중인 턴은 시작 시각을 유지하며 TUI 동작은 그대로입니다.
 - core: engine progress (busy turn, running agents and their rows, background ids, opus and resident busy, restored rows, queue, Agent/Task list, held reply, rotations, last tool) moved from the TUI `App` into shared `chaude_core::ui_state::RunState`, with its own `apply` and unit tests. The TUI embeds it as `run` and the GUI's `GuiState` embeds it too; the GUI's own copies of busy, agent rows and task list were removed. The TUI output is unchanged. The GUI task list now follows the TUI rule that a new round clears the settled tasks (the GUI does not draw tasks yet).

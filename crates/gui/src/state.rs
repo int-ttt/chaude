@@ -132,7 +132,7 @@ impl GuiState {
                 self.bar.cost_usd = cost_usd;
                 self.bar.context_pct = context_pct;
             }
-            // Busy keeps the start of a turn already running (core RunState::set_busy; the TUI's apply restarts it).
+            // Busy keeps the start of a turn already running and clears the last tool (core RunState::set_busy, shared with the TUI).
             UiEvent::Busy(on) => self.run.set_busy(on, now),
             // TurnEnd ends the turn only; a held reply is cleared by ReplyReleased, as before.
             UiEvent::TurnEnd { .. } => self.run.set_busy(false, now),

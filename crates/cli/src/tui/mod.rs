@@ -523,7 +523,7 @@ impl App {
                 self.bar.context_pct = context_pct;
             }
             UiEvent::Busy(b) => {
-                self.run.apply(UiEvent::Busy(b), Instant::now());
+                self.run.set_busy(b, Instant::now());
                 if b {
                     self.got_text = false;
                     // A new turn is past any late AgentEnd of the interrupted one.
