@@ -49,6 +49,7 @@ pub mod tmp_layout;
 pub mod turn_spend;
 pub mod ui_state;
 pub mod usage_poll;
+pub mod usage_text;
 pub mod width;
 
 #[cfg(test)]

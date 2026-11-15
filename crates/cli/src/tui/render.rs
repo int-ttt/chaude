@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 
 use unicode_width::UnicodeWidthChar;
 
+pub use chaude_core::usage_text::{CTX_BAR_MAX, decorate_usage, pct_value, render_bar};
 pub use chaude_core::width::char_width_ea;
 
 // R01 palette (tui.go:252-256): brand orange and grey as truecolor foreground SGR.
@@ -539,63 +540,10 @@ pub fn import_blocks(turns: &[(String, String)]) -> Vec<(&'static str, String)> 
     out
 }
 
-const BAR_CELLS: usize = 10;
-// R15/R16 ctxBarMax (usagebar.go:9).
-pub const CTX_BAR_MAX: i64 = 150_000;
-
-// R15 renderBar (usagebar.go:18): "[████░░░░░░] 45%", fill clamped, " !" above 100%.
-pub fn render_bar(pct: f64) -> String {
-    let pct = if pct < 0.0 { 0.0 } else { pct };
-    let n = ((pct / 100.0 * BAR_CELLS as f64 + 0.5) as usize).min(BAR_CELLS);
-    let bar = format!("{}{}", "█".repeat(n), "░".repeat(BAR_CELLS - n));
-    let mut s = format!("[{bar}] {}%", (pct + 0.5) as i64);
-    if pct > 100.0 {
-        s.push_str(" !");
-    }
-    s
-}
-
 // R15 barWidth (usagebar.go:35): display width of a rendered bar.
 #[allow(dead_code)] // unwired: usage bar width (usagebar.go barWidth) not drawn on this path
 pub fn bar_width(pct: f64) -> usize {
     cell_width(&render_bar(pct))
-}
-
-// R17 pctRe (usagebar.go:37) `(\d+(?:\.\d+)?)%`: the value of the first percentage on a line.
-pub fn pct_value(line: &str) -> Option<f64> {
-    let b = line.as_bytes();
-    for p in 0..b.len() {
-        if !b[p].is_ascii_digit() {
-            continue;
-        }
-        let mut q = digits_end(b, p);
-        if q + 1 < b.len() && b[q] == b'.' && b[q + 1].is_ascii_digit() {
-            q = digits_end(b, q + 1);
-        }
-        if b.get(q) == Some(&b'%') {
-            return line[p..q].parse().ok();
-        }
-    }
-    None
-}
-
-// R16 decorateUsage (usagebar.go:41): a bar after each line's percentage, then a context bar against CTX_BAR_MAX.
-pub fn decorate_usage(text: &str, ctx: i64) -> String {
-    let lines: Vec<String> = text
-        .split('\n')
-        .map(|l| match pct_value(l) {
-            Some(v) => format!("{l}  {}", render_bar(v)),
-            None => l.to_string(),
-        })
-        .collect();
-    let pct = ctx as f64 / CTX_BAR_MAX as f64 * 100.0;
-    format!(
-        "{}\n\nContext (now): {}  ({} / {})",
-        lines.join("\n"),
-        render_bar(pct),
-        commas(ctx),
-        commas(CTX_BAR_MAX)
-    )
 }
 
 // ---- Links (links.go) ----
