@@ -10,6 +10,7 @@ use chaude_core::handoff;
 use chaude_core::i18n::{self, Msg};
 use chaude_core::localtime::{clock_hhmmss, unix_now};
 use chaude_core::resident::StagePhase;
+use chaude_core::settings::pickers::LangPicker;
 use chaude_core::ui_state::{
     BarInput, Entry, RunState, Transcript, stage_line, stage_text, tool_result_text, tool_summary,
 };
@@ -54,6 +55,8 @@ pub struct GuiState {
     pub usage: Option<String>,
     // True from open until the one-shot run answers; its failure then goes into the window (TUI usage.pending).
     usage_pending: bool,
+    // The open /lang picker (None = closed). Keys and the apply live in the app; the model is core (settings::pickers).
+    pub lang: Option<LangPicker>,
 }
 
 impl GuiState {
@@ -72,6 +75,33 @@ impl GuiState {
     pub fn close_usage(&mut self) {
         self.usage = None;
         self.usage_pending = false;
+    }
+
+    // Opens the /lang picker on the language in use (TUI LangPicker::open).
+    pub fn open_lang(&mut self) {
+        self.lang = Some(LangPicker::open());
+    }
+
+    // Moves the /lang cursor up or down (no-op while closed).
+    pub fn lang_step(&mut self, up: bool) {
+        if let Some(p) = self.lang.as_mut() {
+            p.step(up);
+        }
+    }
+
+    // Closes the /lang picker without a pick (TUI Key::Cancel).
+    pub fn close_lang(&mut self) {
+        self.lang = None;
+    }
+
+    // Picks a row (Some(index) for 1/2 or a click, None for Enter on the cursor row) and closes the picker.
+    // Returns the settings code to apply; None when the picker was closed.
+    pub fn lang_pick(&mut self, row: Option<usize>) -> Option<&'static str> {
+        let mut p = self.lang.take()?;
+        if let Some(i) = row {
+            p.sel = i;
+        }
+        Some(p.picked())
     }
 
     // Applies one engine event. now is the time it arrived (turn timer start).
@@ -1006,6 +1036,23 @@ mod tests {
             st.transcript.entries.is_empty(),
             "a closed window adds no notice"
         );
+    }
+
+    #[test]
+    fn lang_window_steps_picks_and_closes() {
+        let mut st = GuiState::default();
+        st.lang_step(true);
+        assert!(st.lang.is_none(), "stepping while closed does nothing");
+        st.open_lang();
+        let start = st.lang.as_ref().map(|p| p.sel);
+        st.lang_step(false);
+        assert_eq!(st.lang.as_ref().map(|p| p.sel), start.map(|s| (s + 1) % 2));
+        assert_eq!(st.lang_pick(Some(1)), Some("en"));
+        assert!(st.lang.is_none(), "a pick closes the window");
+        assert_eq!(st.lang_pick(Some(0)), None, "no pick while closed");
+        st.open_lang();
+        st.close_lang();
+        assert!(st.lang.is_none(), "esc closes without a pick");
     }
 
     #[test]

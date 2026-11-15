@@ -19,6 +19,10 @@ pub enum Effect {
     Doctor,
     // Opens the /usage window and asks the engine for the one-shot run; its answer fills the window.
     OpenUsage,
+    // Opens the /lang picker (the current language is noted first).
+    OpenLang,
+    // Saves the language typed as /lang CODE and switches the UI (the TUI lang::apply).
+    SetLang(String),
     // The update check runs off the UI thread; its answer comes back as a notice.
     Update,
     // Plain prompts and the engine-side commands (/clear, /rotate, /model, /cost and the other passthroughs).
@@ -47,7 +51,8 @@ pub fn effect(outcome: SlashOutcome, cwd: &Path) -> Effect {
         | SlashOutcome::Model { .. }
         | SlashOutcome::Passthrough { .. } => Effect::Send,
         SlashOutcome::OpenUsage => Effect::OpenUsage,
-        SlashOutcome::OpenLang | SlashOutcome::SetLang(_) => Effect::Note(not_yet("/lang")),
+        SlashOutcome::OpenLang => Effect::OpenLang,
+        SlashOutcome::SetLang(code) => Effect::SetLang(code),
         SlashOutcome::OpenSettings => Effect::Note(not_yet("/settings")),
         SlashOutcome::OpenView { .. } => Effect::Note(not_yet("/view")),
         SlashOutcome::Resume { .. } => Effect::Note(not_yet("/resume")),
@@ -106,6 +111,15 @@ mod tests {
     }
 
     #[test]
+    fn lang_opens_its_picker_or_sets_the_code() {
+        assert_eq!(effect(SlashOutcome::OpenLang, cwd()), Effect::OpenLang);
+        assert_eq!(
+            effect(SlashOutcome::SetLang("en".into()), cwd()),
+            Effect::SetLang("en".into())
+        );
+    }
+
+    #[test]
     fn prompts_and_engine_routes_go_to_the_engine() {
         for o in [
             SlashOutcome::SendPrompt,
@@ -128,8 +142,6 @@ mod tests {
     #[test]
     fn pickers_without_a_gui_window_say_so() {
         for (o, name) in [
-            (SlashOutcome::OpenLang, "/lang"),
-            (SlashOutcome::SetLang("ko".into()), "/lang"),
             (SlashOutcome::OpenSettings, "/settings"),
             (SlashOutcome::OpenView { arg: String::new() }, "/view"),
             (SlashOutcome::Resume { args: vec![] }, "/resume"),

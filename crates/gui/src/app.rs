@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use chaude_core::api::{AgentRow, EngineHandle, InterruptSource, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::i18n::{self, Msg};
+use chaude_core::settings::pickers;
 use chaude_core::slash;
 use chaude_core::ui_state::{
     Action, Entry, WELCOME_MODEL, WELCOME_THRESHOLD, ctrl_c_action, tool_line, tool_result_line,
@@ -168,6 +169,18 @@ impl ChaudeApp {
                 self.state.open_usage();
                 engine.usage();
             }
+            Effect::OpenLang => {
+                let note = pickers::lang_current_note(None);
+                self.state.transcript.push_notice(note);
+                self.state.open_lang();
+            }
+            Effect::SetLang(code) => {
+                let note = pickers::lang_apply(None, &code);
+                self.state.transcript.push_notice(note);
+                if pickers::lang_is_code(&code) {
+                    engine.submit(&format!("/lang {code}"));
+                }
+            }
             Effect::Doctor => {
                 self.state
                     .transcript
@@ -226,6 +239,91 @@ impl ChaudeApp {
             if interrupt {
                 engine.interrupt(InterruptSource::CtrlC);
             }
+        }
+    }
+
+    // Saves a /lang pick and switches the UI (TUI lang::apply); a valid code also goes to the engine as /lang CODE,
+    // which restarts the main child in that language.
+    fn finish_lang(&mut self, code: &str) {
+        let note = pickers::lang_apply(None, code);
+        self.state.transcript.push_notice(note);
+        if pickers::lang_is_code(code)
+            && let Some(engine) = &self.engine
+        {
+            engine.submit(&format!("/lang {code}"));
+        }
+    }
+
+    // Keys of the open /lang picker (TUI lang.rs key): 1/2 pick that row, Up/Down (or k/j) move the cursor, Enter
+    // picks the cursor row, Esc, q and Ctrl+C cancel.
+    fn lang_keys(&mut self, ctx: &egui::Context) {
+        if self.state.permission.is_some() || self.state.lang.is_none() {
+            return;
+        }
+        let (mut up, mut down, mut enter, mut cancel) = (false, false, false, false);
+        let mut row = None;
+        ctx.input_mut(|i| {
+            up |= i.consume_key(Modifiers::NONE, Key::ArrowUp);
+            up |= i.consume_key(Modifiers::NONE, Key::K);
+            down |= i.consume_key(Modifiers::NONE, Key::ArrowDown);
+            down |= i.consume_key(Modifiers::NONE, Key::J);
+            enter |= i.consume_key(Modifiers::NONE, Key::Enter);
+            cancel |= i.consume_key(Modifiers::NONE, Key::Escape);
+            cancel |= i.consume_key(Modifiers::NONE, Key::Q);
+            cancel |= i.consume_key(Modifiers::CTRL, Key::C);
+            for (n, k) in [(0, Key::Num1), (1, Key::Num2)] {
+                if i.consume_key(Modifiers::NONE, k) {
+                    row = Some(n);
+                }
+            }
+        });
+        if cancel {
+            self.state.close_lang();
+            return;
+        }
+        if up {
+            self.state.lang_step(true);
+        }
+        if down {
+            self.state.lang_step(false);
+        }
+        let choice = match row {
+            Some(i) => self.state.lang_pick(Some(i)),
+            None if enter => self.state.lang_pick(None),
+            None => None,
+        };
+        if let Some(code) = choice {
+            self.finish_lang(code);
+        }
+    }
+
+    // The /lang picker window (TUI lang.rs): the two languages with their native names and the cursor row
+    // highlighted. A click picks that row; the X button closes it.
+    fn lang_window(&mut self, ctx: &egui::Context) {
+        let Some(sel) = self.state.lang.as_ref().map(|p| p.sel) else {
+            return;
+        };
+        let mut open = true;
+        let mut click = None;
+        egui::Window::new(i18n::t(Msg::LangPickTitle))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                for (i, (code, name)) in pickers::LANG_CHOICES.iter().enumerate() {
+                    let label = format!("{}  {code}  {name}", i + 1);
+                    if ui.selectable_label(sel == i, label).clicked() {
+                        click = Some(i);
+                    }
+                }
+                ui.weak(i18n::t(Msg::LangHint));
+            });
+        if let Some(code) = click.and_then(|i| self.state.lang_pick(Some(i))) {
+            self.finish_lang(code);
+        }
+        if !open {
+            self.state.close_lang();
         }
     }
 
@@ -473,9 +571,11 @@ impl ChaudeApp {
     }
 
     fn input_box(&mut self, ui: &mut egui::Ui) {
-        // No input while a permission prompt or a /usage window is open; they take the keys.
-        let ready =
-            self.engine.is_some() && self.state.permission.is_none() && self.state.usage.is_none();
+        // No input while a permission prompt or a /usage or /lang window is open; they take the keys.
+        let ready = self.engine.is_some()
+            && self.state.permission.is_none()
+            && self.state.usage.is_none()
+            && self.state.lang.is_none();
         let focused = ready && self.input_focused;
         let single_line = self.input.is_single_line();
         // Slash popup: the matches for a command word being typed (none while busy or a permission prompt is open).
@@ -610,6 +710,7 @@ impl ChaudeApp {
 impl eframe::App for ChaudeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain(ui.ctx());
+        self.lang_keys(ui.ctx());
         self.window_keys(ui.ctx());
         self.shortcuts(ui.ctx());
         // Bottom panels stack in show order (later is higher). Bottom to top this is the TUI chrome order reversed:
@@ -635,6 +736,7 @@ impl eframe::App for ChaudeApp {
         egui::CentralPanel::default().show(ui, |ui| self.output(ui));
         self.permission_dialog(ui.ctx());
         self.usage_window(ui.ctx());
+        self.lang_window(ui.ctx());
     }
 }
 
