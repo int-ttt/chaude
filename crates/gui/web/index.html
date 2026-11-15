@@ -17,17 +17,18 @@
 <button id="ping" type="button">Ping Rust</button>
 <pre id="log"></pre>
 <script>
-  // Rust calls window.chaude.onEvent(message) for each message it sends (see src/bridge.rs ToPage).
+  // Rust calls window.chaude.onEvent(event) for each event (core chaude_core::gui_bridge::Event, serde tag "type").
+  // The page only logs for now; the rendering comes in a later step.
   const log = (text) => {
     const el = document.getElementById("log");
     el.textContent += text + "\n";
   };
   window.chaude = {
-    send(message) {
-      window.ipc.postMessage(JSON.stringify(message));
+    send(command) {
+      window.ipc.postMessage(JSON.stringify(command));
     },
-    onEvent(message) {
-      log("rust -> page: " + message.type);
+    onEvent(event) {
+      log("rust -> page: " + event.type + (event.type === "entry_push" ? " " + event.entry.kind : ""));
     },
   };
   document.getElementById("ping").addEventListener("click", () => {

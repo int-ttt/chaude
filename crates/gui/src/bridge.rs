@@ -1,30 +1,16 @@
-//! The webview bridge's message shapes. Plain JSON, tagged by "type": the page posts a `FromPage` string through
-//! `window.ipc.postMessage`, and Rust answers with a `ToPage` run as a script call on `window.chaude.onEvent`.
+//! The webview bridge's wire format. The page posts a JSON `Command` through `window.ipc.postMessage`, and Rust answers
+//! with a JSON `Event` run as a script call on `window.chaude.onEvent`. The shapes are core's (chaude_core::gui_bridge).
 
-use serde::{Deserialize, Serialize};
-
-// A message from the page (JS -> Rust).
-#[derive(Debug, PartialEq, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum FromPage {
-    Ping,
-}
-
-// A message to the page (Rust -> JS).
-#[derive(Debug, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ToPage {
-    Pong,
-}
+use chaude_core::gui_bridge::{Command, Event};
 
 // Reads one page message. Err carries the parse failure text (unknown type or bad JSON).
-pub fn parse(body: &str) -> Result<FromPage, String> {
+pub fn parse(body: &str) -> Result<Command, String> {
     serde_json::from_str(body).map_err(|e| e.to_string())
 }
 
-// The script that delivers one message to the page.
-pub fn script(ev: &ToPage) -> String {
-    // serde_json cannot fail on these plain enums.
+// The script that delivers one event to the page.
+pub fn script(ev: &Event) -> String {
+    // serde_json cannot fail on these plain types.
     let json = serde_json::to_string(ev).unwrap_or_default();
     format!("window.chaude && window.chaude.onEvent({json});")
 }
@@ -32,10 +18,19 @@ pub fn script(ev: &ToPage) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chaude_core::gui_bridge::{EntryView, ToolEnd};
 
     #[test]
     fn ping_from_page_parses() {
-        assert_eq!(parse(r#"{"type":"ping"}"#), Ok(FromPage::Ping));
+        assert_eq!(parse(r#"{"type":"ping"}"#), Ok(Command::Ping));
+    }
+
+    #[test]
+    fn submit_from_page_parses() {
+        assert_eq!(
+            parse(r#"{"type":"submit","text":"hi"}"#),
+            Ok(Command::Submit { text: "hi".into() })
+        );
     }
 
     #[test]
@@ -49,18 +44,29 @@ mod tests {
     }
 
     #[test]
-    fn pong_serializes_with_its_type() {
+    fn pong_script_calls_the_page_handler() {
         assert_eq!(
-            serde_json::to_string(&ToPage::Pong).unwrap(),
-            r#"{"type":"pong"}"#
+            script(&Event::Pong),
+            r#"window.chaude && window.chaude.onEvent({"type":"pong"});"#
         );
     }
 
     #[test]
-    fn pong_script_calls_the_page_handler() {
+    fn entry_script_carries_the_event_json() {
+        let ev = Event::EntryPush {
+            index: 3,
+            entry: EntryView::Tool {
+                id: "t".into(),
+                name: "Read".into(),
+                summary: String::new(),
+                ok: None,
+                start: 1,
+                end: Some(ToolEnd { at: 2, secs: 1 }),
+            },
+        };
         assert_eq!(
-            script(&ToPage::Pong),
-            r#"window.chaude && window.chaude.onEvent({"type":"pong"});"#
+            script(&ev),
+            r#"window.chaude && window.chaude.onEvent({"type":"entry_push","index":3,"entry":{"kind":"tool","id":"t","name":"Read","summary":"","ok":null,"start":1,"end":{"at":2,"secs":1}}});"#
         );
     }
 }

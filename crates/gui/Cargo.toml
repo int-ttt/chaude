@@ -24,3 +24,7 @@ tao = "0.37.2"
 wry = "0.57.2"
 
 [dev-dependencies]
+
+# The Windows focus pipe (guard.rs) only.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Pipes"] }
