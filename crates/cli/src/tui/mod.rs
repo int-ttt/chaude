@@ -33,7 +33,7 @@ use chaude_core::i18n::{Msg, t, tf};
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::resident::StagePhase;
 use chaude_core::resume_note;
-use chaude_core::ui_state::{RunState, TaskRow, TaskState};
+use chaude_core::ui_state::{Entry, RunState, TaskRow, TaskState, Transcript};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
@@ -147,6 +147,10 @@ pub struct App {
     clock: Instant,
     spin: char,
     transcript: Vec<String>,
+    // The rows of the switched kinds as core entries (Notice, User, Status, Error, Blank so far). row_entry[r] is the
+    // index in entries of the entry that drew transcript row r; NO_ENTRY marks a row still pushed as a raw string.
+    entries: Transcript,
+    row_entry: Vec<usize>,
     // True while the main assistant block has emitted its first line (the "● " lead is written once).
     main_open: bool,
     // Unfinished text (no newline yet) per role. Agent text shares one buffer; it is flushed at its MessageDone.
@@ -265,6 +269,8 @@ impl App {
             clock: Instant::now(),
             spin: ' ',
             transcript: Vec::new(),
+            entries: Transcript::default(),
+            row_entry: Vec::new(),
             main_open: false,
             pending_main: String::new(),
             pending_agent: String::new(),
@@ -655,8 +661,8 @@ impl App {
             // Go repl.go error paths: a dim note block, then a blank row (tui.go:379 note rendering).
             UiEvent::Error(msg) => {
                 self.end_main_block();
-                self.transcript.push(format!("{GREY_ON}{msg}{FG_OFF}"));
-                self.transcript.push(String::new());
+                self.push_entry(Entry::Error(msg));
+                self.push_entry(Entry::Blank);
             }
             // Core relaunched the idle main child with --resume; the view moves to the session list.
             UiEvent::SessionResumed {
@@ -673,26 +679,24 @@ impl App {
                 // The engine drops the abandoned turn's prompts (core pending_perm), so none can be answered now.
                 self.perm = None;
                 self.end_main_block();
-                self.transcript
-                    .push(format!("{GREY_ON}[interrupted]{FG_OFF}"));
-                self.transcript.push(String::new());
+                self.push_entry(Entry::Status("[interrupted]".to_string()));
+                self.push_entry(Entry::Blank);
             }
             // Go record_turn.go writes the [측정] line to the record file only; the Go TUI never showed it
             // (repl.go:1143 prints to os.Stdout under bubbletea), so the transcript has no row for it.
             UiEvent::TurnStats { .. } => {}
             // Go modeLine / setMode: the start state is not announced, so only later changes print.
             UiEvent::ModeChanged { mode } => {
-                self.transcript
-                    .push(format!("{GREY_ON}mode: {mode}{FG_OFF}"));
-                self.transcript.push(String::new());
+                self.push_entry(Entry::Status(format!("mode: {mode}")));
+                self.push_entry(Entry::Blank);
                 self.bar.mode = mode;
             }
             // Go ui.ask: the prompt is a note; the answer key path is not wired yet.
             UiEvent::PermissionRequest { id, tool, summary } => {
                 self.perm = Some(id);
                 let note = render::perm_note(&tool, &summary);
-                self.transcript.push(format!("{GREY_ON}{note}{FG_OFF}"));
-                self.transcript.push(String::new());
+                self.push_entry(Entry::Status(note));
+                self.push_entry(Entry::Blank);
             }
             // Go repl.go setRate: the status-line rate text is recomputed on every rate_limit_event.
             UiEvent::RateLimit { info } => {
@@ -904,7 +908,7 @@ impl App {
                 .map(|(_, t)| ("user", t.as_str()))
                 .collect();
             if let Some(cut) = self.rw.key(key, &refs) {
-                self.transcript.truncate(self.prompts[cut.cut].0);
+                self.truncate_transcript(self.prompts[cut.cut].0);
                 self.tool_rows.retain(|_, r| r.row < self.transcript.len());
                 self.stage_rows.retain(|_, r| r.row < self.transcript.len());
                 self.wide.retain(|&i| i < self.transcript.len());
@@ -1270,6 +1274,8 @@ impl App {
     // Empties the transcript and the row indexes that point into it (Go m.blocks = nil).
     fn clear_transcript(&mut self) {
         self.transcript.clear();
+        self.entries = Transcript::default();
+        self.row_entry.clear();
         self.wide.clear();
         self.linked.clear();
         self.prompts.clear();
@@ -1404,11 +1410,7 @@ impl App {
     fn record_block(&mut self, kind: &str, text: &str) {
         if kind == "user" {
             let at = self.transcript.len();
-            for (i, line) in text.split('\n').enumerate() {
-                let lead = if i == 0 { PROMPT } else { "  " };
-                self.transcript
-                    .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
-            }
+            self.push_entry(Entry::User(text.to_string()));
             self.link_from(at);
         } else if kind == "asst" {
             let at = self.transcript.len();
@@ -1420,7 +1422,7 @@ impl App {
         } else {
             self.note(text);
         }
-        self.transcript.push(String::new());
+        self.push_entry(Entry::Blank);
     }
 
     // Body rows of the open /settings, /resume or /view picker (same geometry as /usage). None when none is open.
@@ -1575,7 +1577,42 @@ impl App {
     }
 
     fn note(&mut self, text: &str) {
-        self.transcript.extend(text.split('\n').map(str::to_string));
+        self.push_entry(Entry::Notice(text.to_string()));
+    }
+
+    // Brings the row map to the transcript length: rows pushed as raw strings have no entry.
+    fn sync_rows(&mut self) {
+        self.row_entry.resize(self.transcript.len(), NO_ENTRY);
+    }
+
+    // Pushes one core entry and the rows it draws, recording each row's entry.
+    fn push_entry(&mut self, e: Entry) {
+        self.sync_rows();
+        let rows = entry_rows(&e);
+        debug_assert!(!rows.is_empty(), "entry kind not switched to the TUI yet");
+        self.row_entry.extend(vec![self.entries.len(); rows.len()]);
+        self.transcript.extend(rows);
+        self.entries.push(e);
+    }
+
+    // The entry that drew transcript row `r`, if an entry drew it.
+    #[allow(dead_code)]
+    fn entry_of_row(&self, r: usize) -> Option<usize> {
+        self.row_entry.get(r).copied().filter(|&e| e != NO_ENTRY)
+    }
+
+    // Cuts the transcript back to `n` rows and drops the entries that drew the cut rows.
+    fn truncate_transcript(&mut self, n: usize) {
+        self.sync_rows();
+        let keep = self.row_entry[..n.min(self.row_entry.len())]
+            .iter()
+            .filter(|&&e| e != NO_ENTRY)
+            .map(|&e| e + 1)
+            .max()
+            .unwrap_or(0);
+        self.entries.entries.truncate(keep);
+        self.row_entry.truncate(n);
+        self.transcript.truncate(n);
     }
 
     // Go finishForeground: on interrupt the foreground panel agents are done at once, not when core reports them.
@@ -1642,13 +1679,9 @@ impl App {
     fn echo_prompt(&mut self, text: &str) {
         self.prompts.push((self.transcript.len(), text.to_string()));
         let at = self.transcript.len();
-        for (i, line) in text.split('\n').enumerate() {
-            let lead = if i == 0 { PROMPT } else { "  " };
-            self.transcript
-                .push(format!("{GREY_ON}{lead}{line}{FG_OFF}"));
-        }
+        self.push_entry(Entry::User(text.to_string()));
         self.link_from(at);
-        self.transcript.push(String::new());
+        self.push_entry(Entry::Blank);
         self.follow_tail();
     }
 
@@ -1659,6 +1692,8 @@ impl App {
         let anchor =
             (!self.av_shown()).then(|| (self.transcript_row_start(at), self.total_rows(self.cols)));
         let n = rows.len();
+        self.sync_rows();
+        self.row_entry.splice(at..at, vec![NO_ENTRY; n]);
         self.transcript.splice(at..at, rows);
         let shift = |i: usize| if i >= at { i + n } else { i };
         for r in self
@@ -2761,6 +2796,30 @@ fn action_line(lead: &str, start: i64, body: &str, end: Option<(i64, u64)>) -> S
 // The green tool block colour (Go tool block). Shared by the main pane's tool rows and the agent pane's call lines.
 pub(super) fn tool_color(s: &str) -> String {
     format!("{TOOL_ON}{s}{FG_OFF}")
+}
+
+// row_entry value for a transcript row that no core entry drew (a raw push, not yet switched).
+const NO_ENTRY: usize = usize::MAX;
+
+// The transcript rows one core entry draws. Only the switched kinds draw here; the others are pushed as raw rows.
+fn entry_rows(e: &Entry) -> Vec<String> {
+    match e {
+        Entry::Notice(text) => text.split('\n').map(str::to_string).collect(),
+        Entry::Error(text) | Entry::Status(text) => vec![format!("{GREY_ON}{text}{FG_OFF}")],
+        Entry::User(text) => text
+            .split('\n')
+            .enumerate()
+            .map(|(i, line)| {
+                let lead = if i == 0 { PROMPT } else { "  " };
+                format!("{GREY_ON}{lead}{line}{FG_OFF}")
+            })
+            .collect(),
+        Entry::Blank => vec![String::new()],
+        Entry::Text { .. }
+        | Entry::Tool { .. }
+        | Entry::ToolResult { .. }
+        | Entry::Agent { .. } => Vec::new(),
+    }
 }
 
 // A tool row as the transcript holds it: the green "● " tool block with its time.
@@ -8376,6 +8435,39 @@ mod tests {
             cells.iter().sum::<usize>() / n,
             cells.iter().max().unwrap()
         );
+    }
+}
+
+// The row -> entry map: switched pushes record their entry per row; inserts and cuts keep the map in step.
+#[cfg(test)]
+mod transcript_rows {
+    use super::*;
+
+    #[test]
+    fn rows_resolve_to_their_entry_through_inserts_and_cuts() {
+        let mut app = App::new(60, 24);
+        app.note("a\nb");
+        app.echo_prompt("hi\nthere");
+        app.push_entry(Entry::Status("mode: x".into()));
+        assert_eq!(app.transcript.len(), 6);
+        assert_eq!(app.transcript[3], format!("{GREY_ON}  there{FG_OFF}"));
+        let map: Vec<Option<usize>> = (0..6).map(|r| app.entry_of_row(r)).collect();
+        assert_eq!(map, [0, 0, 1, 1, 2, 3].map(Some).to_vec());
+        assert_eq!(app.entries.entries[1], Entry::User("hi\nthere".into()));
+
+        // A raw row has no entry; an insert above it shifts the map and gives the inserted rows none.
+        app.transcript.push("raw".into());
+        app.insert_rows(0, vec!["x".into()]);
+        assert_eq!(app.entry_of_row(0), None);
+        assert_eq!(app.entry_of_row(1), Some(0));
+        assert_eq!(app.entry_of_row(3), Some(1));
+        assert_eq!(app.entry_of_row(8), None);
+
+        // Cutting at the echoed prompt (row 3) drops that prompt and every entry after it.
+        app.truncate_transcript(3);
+        assert_eq!(app.entries.entries.len(), 1);
+        assert_eq!(app.row_entry.len(), 3);
+        assert_eq!(app.transcript, ["x", "a", "b"]);
     }
 }
 
