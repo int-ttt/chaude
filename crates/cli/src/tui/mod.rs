@@ -94,7 +94,6 @@ struct ToolRow {
     name: String,
     head: String,
     at: Instant,
-    end: Option<(i64, u64)>,
 }
 
 // A stage row in the transcript: its index, the stage body without the "· " lead, and its start.
@@ -392,7 +391,6 @@ impl App {
                     name: name.clone(),
                     head,
                     at: Instant::now(),
-                    end: None,
                 };
                 self.push_entry(Entry::Tool {
                     id: id.clone(),
@@ -415,7 +413,7 @@ impl App {
                     };
                     self.run.last_tool = trunc_runes(&r.head, LAST_TOOL_RUNES);
                     let row = r.row;
-                    self.update_tool(row, |e| {
+                    self.update_row(row, |e| {
                         if let Entry::Tool { summary: s, .. } = e {
                             *s = summary;
                         }
@@ -425,13 +423,12 @@ impl App {
             // Go shows the tool_result text, not a done/failed word; that row comes from ToolResult.
             // The tool row also gets its end time and elapsed (" → HH:MM:SS (Ns)").
             UiEvent::ToolEnd { id, ok } => {
-                if let Some(r) = self.tool_rows.get_mut(&id)
-                    && r.end.is_none()
+                if let Some(r) = self.tool_rows.get(&id)
+                    && self.tool_open(r.row)
                 {
                     let end = Some((unix_now(), r.at.elapsed().as_secs()));
-                    r.end = end;
                     let row = r.row;
-                    self.update_tool(row, |e| {
+                    self.update_row(row, |e| {
                         if let Entry::Tool { end: slot, .. } = e {
                             *slot = end;
                         }
@@ -492,7 +489,7 @@ impl App {
                 if self.resume_rows.contains_key(&id) {
                     if let Some(r) = self.tool_rows.remove(&send_id) {
                         let end = Some((unix_now(), r.at.elapsed().as_secs()));
-                        self.update_tool(r.row, |e| {
+                        self.update_row(r.row, |e| {
                             if let Entry::Tool { end: slot, .. } = e {
                                 *slot = end;
                             }
@@ -514,7 +511,6 @@ impl App {
                         name: "resume".to_string(),
                         head,
                         at: Instant::now(),
-                        end: None,
                     };
                     self.push_entry(Entry::Tool {
                         id: id.clone(),
@@ -661,19 +657,22 @@ impl App {
                         self.stage_rows.insert(slot.clone(), row);
                     }
                     StagePhase::Done | StagePhase::Failed(_) => {
-                        if let Some(r) = self.stage_rows.remove(&slot)
-                            && let Some(line) = self.transcript.get_mut(r.row)
-                        {
+                        if let Some(r) = self.stage_rows.remove(&slot) {
                             let end = Some((unix_now(), r.at.elapsed().as_secs()));
-                            *line = format!(
+                            let line = format!(
                                 "{GREY_ON}{}{FG_OFF}",
                                 action_line("· ", r.start, &r.body, end)
                             );
+                            self.update_row(r.row, |e| {
+                                if let Entry::Notice(text) = e {
+                                    *text = line;
+                                }
+                            });
                         }
                         self.note(&format!("{GREY_ON}{text}{FG_OFF}"));
                     }
                 }
-                self.transcript.push(String::new());
+                self.push_entry(Entry::Blank);
             }
             // Go resident.go notice(): a failed prompter or tui pass, one note line.
             UiEvent::Notice { text } => {
@@ -853,8 +852,8 @@ impl App {
             self.perm = None;
             if !interrupt {
                 let word = if allow { "allowed" } else { "denied" };
-                self.transcript.push(format!("{GREY_ON}{word}{FG_OFF}"));
-                self.transcript.push(String::new());
+                self.push_entry(Entry::Status(word.to_string()));
+                self.push_entry(Entry::Blank);
             }
             return Action::Answer {
                 id,
@@ -1349,7 +1348,7 @@ impl App {
             // Go prints the note grey and resets the colour on its own row after the text.
             Err(msg) => {
                 self.note_wide(&format!("{GREY_ON}{msg}"));
-                self.transcript.push(FG_OFF.to_string());
+                self.push_entry(Entry::Notice(FG_OFF.to_string()));
             }
         }
     }
@@ -1440,10 +1439,11 @@ impl App {
             self.link_from(at);
         } else if kind == "asst" {
             let at = self.transcript.len();
-            for (i, line) in text.split('\n').enumerate() {
-                let lead = if i == 0 { ASST_FIRST } else { "  " };
-                self.transcript.push(format!("{lead}{}", asst_text(line)));
-            }
+            self.push_entry(Entry::Text {
+                role: Role::Main,
+                text: text.to_string(),
+                done: true,
+            });
             self.link_from(at);
         } else {
             self.note(text);
@@ -1597,7 +1597,7 @@ impl App {
         );
         self.link_from(at);
         if self.main_open {
-            self.transcript.push(String::new());
+            self.push_entry(Entry::Blank);
         }
         self.main_open = false;
     }
@@ -1626,8 +1626,16 @@ impl App {
         self.row_entry.get(r).copied().filter(|&e| e != NO_ENTRY)
     }
 
-    // Edits the Tool entry drawn at transcript row `row`, then redraws that row from it. Rows no Tool entry drew are left alone.
-    fn update_tool(&mut self, row: usize, f: impl FnOnce(&mut Entry)) {
+    // True while the Tool entry drawn at transcript row `row` has no end time yet.
+    fn tool_open(&self, row: usize) -> bool {
+        matches!(
+            self.entry_of_row(row).map(|e| &self.entries.entries[e]),
+            Some(Entry::Tool { end: None, .. })
+        )
+    }
+
+    // Edits the entry drawn at transcript row `row` (a one-row entry), then redraws that row from it. Rows no entry drew are left alone.
+    fn update_row(&mut self, row: usize, f: impl FnOnce(&mut Entry)) {
         let Some(e) = self.entry_of_row(row) else {
             return;
         };
@@ -1724,7 +1732,7 @@ impl App {
         // A resumed agent's timed row gets its end time and elapsed, like the other timed rows.
         if let Some(r) = self.resume_rows.remove(id) {
             let end = Some((unix_now(), r.at.elapsed().as_secs()));
-            self.update_tool(r.row, |e| {
+            self.update_row(r.row, |e| {
                 if let Entry::Tool { end: slot, .. } = e {
                     *slot = end;
                 }
@@ -2892,6 +2900,19 @@ fn entry_rows(e: &Entry) -> Vec<String> {
             )]
         }
         Entry::Blank => vec![String::new()],
+        // Main assistant text draws as the live path does: ASST_FIRST on the first row, bold markdown per line.
+        Entry::Text {
+            role: Role::Main,
+            text,
+            ..
+        } => text
+            .split('\n')
+            .enumerate()
+            .map(|(i, line)| {
+                let lead = if i == 0 { ASST_FIRST } else { "  " };
+                format!("{lead}{}", asst_text(line))
+            })
+            .collect(),
         Entry::Text { .. } | Entry::Agent { .. } => Vec::new(),
     }
 }
@@ -8541,6 +8562,37 @@ mod transcript_rows {
         assert_eq!(app.entries.entries.len(), 1);
         assert_eq!(app.row_entry.len(), 3);
         assert_eq!(app.transcript, ["x", "a", "b"]);
+    }
+
+    // A record "asst" block is one Text entry whose rows match the live path; a permission answer is a Status and a blank.
+    #[test]
+    fn record_asst_and_permission_answer_map_to_entries() {
+        let mut app = App::new(60, 24);
+        app.record_block("asst", "first\n**bold**");
+        assert_eq!(
+            app.entries.entries[0],
+            Entry::Text {
+                role: Role::Main,
+                text: "first\n**bold**".into(),
+                done: true,
+            }
+        );
+        assert_eq!(app.transcript.len(), 3);
+        assert_eq!(app.transcript[0], format!("{ASST_FIRST}first"));
+        assert_eq!(app.transcript[1], format!("  {}", asst_text("**bold**")));
+        assert_eq!(app.transcript[2], "");
+        assert_eq!(app.entry_of_row(1), Some(0));
+        assert_eq!(app.entry_of_row(2), Some(1));
+
+        app.perm = Some("p1".into());
+        let key = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE);
+        assert!(matches!(
+            app.on_key(key),
+            Action::Answer { allow: true, .. }
+        ));
+        assert_eq!(app.entries.entries[2], Entry::Status("allowed".into()));
+        assert_eq!(app.entries.entries[3], Entry::Blank);
+        assert_eq!(app.transcript[3], format!("{GREY_ON}allowed{FG_OFF}"));
     }
 
     #[test]

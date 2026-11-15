@@ -3,6 +3,8 @@
 ## Unreleased
 - tui: notes, prompt echo, status and error lines and blank rows are pushed as core `Entry` rows, and the TUI keeps a row-to-entry map through inserts and rewind cuts; the output is unchanged (snapshots stay byte-identical).
   - tui: 알림, 프롬프트 에코, 상태·오류 행과 빈 줄을 코어 `Entry` 행으로 쌓고, 삽입과 되감기 절단 때도 행→항목 매핑을 유지합니다. 출력은 그대로입니다(스냅샷은 바이트 단위로 동일).
+- tui: permission answers, the stage rows (working and done), the flush-time blank row, the /view error reset row, and recorded assistant blocks (imports and saved records) are pushed as core `Entry` rows (`Status`, `Notice`, `Blank`, `Text`); the output is unchanged (snapshots stay byte-identical).
+  - tui: 권한 답변, 단계 행(진행 중·완료), 응답 종료 뒤 빈 줄, /view 오류 뒤 색 초기화 행, 기록된 어시스턴트 블록(가져오기와 저장 기록)을 코어 `Entry` 행(`Status`, `Notice`, `Blank`, `Text`)으로 쌓습니다. 출력은 그대로입니다(스냅샷은 바이트 단위로 동일).
 - tui: tool rows, tool results, resume rows and budget stops are pushed as core `Entry` rows (`Tool` and `ToolResult` carry their start, end and arrival times); tool rows are rewritten through their entry; the output is unchanged (snapshots stay byte-identical).
   - tui: 도구 행, 도구 결과, 재개 행과 예산 중단을 코어 `Entry` 행으로 쌓습니다(`Tool`과 `ToolResult`에 시작·종료·도착 시각이 들어갑니다). 도구 행은 해당 항목을 통해 다시 씁니다. 출력은 그대로입니다(스냅샷은 바이트 단위로 동일).
 - tui: the rendered transcript (prompt echo, streamed answer, tool rows and results, notes, mode, interrupt) has byte snapshot tests under `testdata/transcript`, the baseline before the transcript moves onto core `Entry` rows; the output is unchanged.
