@@ -901,7 +901,7 @@ impl App {
             return Action::Continue;
         }
         let (sw, sh) = (text_width(self.cols), self.body_h(self.cols, self.rows));
-        if let Some(act) = self.sess.as_mut().map(|sv| sv.key(key, sw, sh)) {
+        if let Some(act) = self.sess.as_mut().map(|sv| sessview::key(sv, key, sw, sh)) {
             match act {
                 sessview::Action::None => {}
                 sessview::Action::Close => {
@@ -1300,21 +1300,9 @@ impl App {
 
     // The /view list itself, also reopened after SessionResumed so the switch is visible.
     fn open_sessions(&mut self, arg: &str) {
-        let base = handoff::handoff_file(&chaude_core::tmp_layout::long_dir(std::path::Path::new(
-            &self.welcome.cwd,
-        )));
-        let mut owned: HashSet<String> =
-            handoff::read_exit_handoff(&handoff::read_path(&base, None))
-                .map(|h| h.prev_owned().into_iter().collect())
-                .unwrap_or_default();
+        let mut owned = sessview::handoff_owned(&self.welcome.cwd);
         owned.extend(self.this_run.iter().cloned());
-        let result = sessview::session_list(&self.welcome.cwd)
-            .and_then(|all| sessview::own_sessions(all, &owned))
-            .and_then(|list| {
-                let project = sessview::session_dir(&self.welcome.cwd)?;
-                Ok(sessview::with_subagents(list, &project))
-            })
-            .and_then(|list| sessview::SessView::open(list, arg));
+        let result = sessview::open(&self.welcome.cwd, &owned, arg);
         match result {
             Ok(mut sv) => {
                 sv.purposes = self.session_purpose.clone();
@@ -1529,8 +1517,8 @@ impl App {
             return Some(resume_pick::lines(gp, width, h));
         }
         self.sess.as_ref().map(|sv| match sv.turns {
-            Some(_) => sv.prompt_lines(width, h),
-            None => sv.list_lines(width, std::time::SystemTime::now()),
+            Some(_) => sessview::prompt_lines(sv, width, h),
+            None => sessview::list_lines(sv, width, std::time::SystemTime::now()),
         })
     }
 
@@ -2475,7 +2463,7 @@ impl App {
             return true;
         }
         if let Some(sv) = self.sess.as_mut() {
-            sv.wheel(up, sw, sh);
+            sessview::wheel(sv, up, sw, sh);
             return true;
         }
         if let Some(rp) = self.recs.as_mut() {

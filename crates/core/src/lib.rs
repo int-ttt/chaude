@@ -45,6 +45,7 @@ mod role_coexist;
 pub mod rotate;
 pub mod rotate_defer;
 mod runewidth_table;
+pub mod session_view;
 pub mod settings;
 pub mod slash;
 pub mod tasks;
