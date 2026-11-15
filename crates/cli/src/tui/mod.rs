@@ -36,8 +36,8 @@ use chaude_core::localtime::{clock_hhmmss, unix_now};
 use chaude_core::resident::StagePhase;
 use chaude_core::resume_note;
 use chaude_core::ui_state::{
-    Entry, RunState, TaskRow, TaskState, Transcript, action_line, stage_text, tool_line,
-    tool_result_line, tool_result_text,
+    Entry, RunState, Transcript, action_line, stage_text, tool_line, tool_result_line,
+    tool_result_text,
 };
 use chaude_core::ui_state::{WELCOME_MODEL, WELCOME_THRESHOLD, welcome_lines};
 use crossterm::cursor::{Hide, MoveTo, Show};
@@ -108,18 +108,6 @@ struct StageRow {
     body: String,
     start: i64,
     at: Instant,
-}
-
-// "12.3k tok · 45s" for a task row; only the figures that are known. None when neither is.
-fn task_stats_text(task: &TaskRow) -> Option<String> {
-    let mut parts = Vec::new();
-    if let Some(n) = task.tokens {
-        parts.push(format!("{} {}", bar::fmt_tokens(n), t(Msg::TokensUnit)));
-    }
-    if let Some(ms) = task.duration_ms {
-        parts.push(bar::fmt_secs(ms / 1_000));
-    }
-    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 pub struct App {
@@ -2116,20 +2104,23 @@ impl App {
             return Vec::new();
         }
         let width = text_width(w);
-        let total = self.run.queue_texts.len();
-        let mut out = Vec::new();
-        for (i, q) in self.run.queue_texts.iter().enumerate() {
-            if i + 1 == max_show && total > max_show {
-                out.push(format!(
-                    "{GREY_ON}{}{FG_OFF}",
-                    tf(Msg::QueueMore, &[&(total - i)])
-                ));
-                break;
-            }
-            let text = tf(Msg::QueueItem, &[&q.replace('\n', " ")]);
-            out.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&text, width)));
-        }
-        out
+        let more = self.run.queue_texts.len() > max_show;
+        let rows = chaude_core::bar_text::queue_rows(
+            chaude_core::i18n::current(),
+            &self.run.queue_texts,
+            max_show,
+        );
+        // The "… +N" row is not clipped; item rows are.
+        rows.iter()
+            .enumerate()
+            .map(|(i, text)| {
+                if more && i + 1 == rows.len() {
+                    format!("{GREY_ON}{text}{FG_OFF}")
+                } else {
+                    format!("{GREY_ON}{}{FG_OFF}", bar::clip(text, width))
+                }
+            })
+            .collect()
     }
 
     // Main's Agent/Task calls, grouped 대기 / 진행 중 / 완료 / 실패 (Timeout under 실패 with its own label), above the
@@ -2152,49 +2143,21 @@ impl App {
             return Vec::new();
         }
         let width = text_width(w);
-        let mut rows = Vec::new();
-        for state in [
-            TaskState::Queued,
-            TaskState::Running,
-            TaskState::Done,
-            TaskState::Failed,
-            TaskState::Timeout,
-        ] {
-            for t in self.run.tasks.iter().filter(|t| t.state == state) {
-                let label = match state {
-                    TaskState::Queued => chaude_core::i18n::t(Msg::StateQueued).to_string(),
-                    TaskState::Running => chaude_core::i18n::t(Msg::TaskRunning).to_string(),
-                    TaskState::Done => chaude_core::i18n::t(Msg::StateDone).to_string(),
-                    TaskState::Failed => chaude_core::i18n::t(Msg::StateFailed).to_string(),
-                    TaskState::Timeout => format!(
-                        "{} · {}",
-                        chaude_core::i18n::t(Msg::StateFailed),
-                        chaude_core::i18n::t(Msg::StateTimeout)
-                    ),
-                };
-                let mut text = format!("  {label} {}", t.desc.replace('\n', " "));
-                if let Some(stats) = task_stats_text(t) {
-                    text.push_str(&format!(" · {stats}"));
-                }
-                rows.push(format!("{GREY_ON}{}{FG_OFF}", bar::clip(&text, width)));
-            }
-        }
-        let total = rows.len();
         let body = max_show - 1;
+        let more = self.run.tasks.len() > body;
+        let rows = bar_text::task_rows(current(), &self.run.tasks, body);
         let mut out = vec![format!(
             "{GREY_ON}{}{FG_OFF}",
-            bar::clip(chaude_core::i18n::t(Msg::TasksTitle), width)
+            bar::clip(t(Msg::TasksTitle), width)
         )];
-        if total <= body {
-            out.extend(rows);
-        } else {
-            let keep = body - 1;
-            out.extend(rows.into_iter().take(keep));
-            out.push(format!(
-                "{GREY_ON}{}{FG_OFF}",
-                tf(Msg::TasksMore, &[&(total - keep)])
-            ));
-        }
+        // The "… +N" row is not clipped; task rows are.
+        out.extend(rows.iter().enumerate().map(|(i, text)| {
+            if more && i + 1 == rows.len() {
+                format!("{GREY_ON}{text}{FG_OFF}")
+            } else {
+                format!("{GREY_ON}{}{FG_OFF}", bar::clip(text, width))
+            }
+        }));
         out
     }
 
@@ -3182,52 +3145,13 @@ fn text_width(w: usize) -> usize {
     w.saturating_sub(1).max(1)
 }
 
-// Silence after which a running agent row says it may be stalled (10 minutes).
-const STALL_SECS: u64 = 600;
-
-// One agent panel row: "  ● HH:MM:SS 상태 · 이름 · 모델 (작업) (경과)" with the dot in Go's running colour (220). The model is the
-// agent's own (never the session's); the summary is the task, else the first prompt line.
+// One agent panel row: "  ● HH:MM:SS 상태 · 이름 · 모델 (작업) (경과)" with the dot in Go's running colour (220). The text is
+// the core agent_row_text; only the dot is TUI.
 fn agent_row_line(r: &AgentRow, width: usize) -> String {
-    let summary = if r.task.is_empty() {
-        &r.prompt
-    } else {
-        &r.task
-    };
-    // Finished rows here are restored ones (AgentsRestored): their saved status decides the label, and their model is
-    // the saved one only (never the current session's model, which they did not run on).
-    let state = if r.failed {
-        bar::AgentState::Failed
-    } else if r.interrupted {
-        bar::AgentState::Interrupted
-    } else if r.done {
-        bar::AgentState::Done
-    } else {
-        bar::AgentState::Running
-    };
-    let mut text = bar::agent_status_text(state, &r.model, &r.name, summary);
-    // Elapsed after the status: a running agent runs to now, a restored one to its last activity (when known).
-    let end = if matches!(state, bar::AgentState::Running) {
-        unix_now() as u64
-    } else {
-        r.last_active
-    };
-    if r.started_at > 0 && end > r.started_at {
-        text.push_str(&format!(" ({})", bar::fmt_secs(end - r.started_at)));
-    }
-    // Display only: a running agent with no output or tool activity for STALL_SECS is flagged with its silence.
-    if matches!(state, bar::AgentState::Running) && r.last_active > 0 {
-        let silent = (unix_now() as u64).saturating_sub(r.last_active);
-        if silent >= STALL_SECS {
-            text.push_str(&tf(Msg::StallNote, &[&(silent / 60)]));
-        }
-    }
-    // The local start time leads the row, so clipping at a narrow width cuts the end first.
-    if r.started_at > 0 {
-        text = format!("{} {text}", clock_hhmmss(r.started_at as i64));
-    }
     // Go tui.go:1494: only the dot is coloured (agentDot: running 220, interrupted 208); the text is dimSt grey.
-    let dot_on = bar::agent_dot_color(state);
+    let dot_on = bar::agent_dot_color(bar_text::agent_state(r));
     let dot = format!("\x1b[38;5;{dot_on}m●\x1b[39m");
+    let text = bar_text::agent_row_text(current(), r, unix_now() as u64);
     format!(
         "  {dot}{GREY_ON} {}{FG_OFF}",
         bar::clip(&text, width.saturating_sub(4))

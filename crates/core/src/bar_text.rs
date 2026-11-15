@@ -4,10 +4,10 @@
 
 use std::time::Duration;
 
-use crate::api::CoderContext;
+use crate::api::{AgentRow, CoderContext};
 use crate::i18n::{self, Lang, Msg};
-use crate::localtime::clock_hhmm;
-use crate::ui_state::BarInput;
+use crate::localtime::{clock_hhmm, clock_hhmmss};
+use crate::ui_state::{BarInput, TaskRow, TaskState};
 
 // Spinner frames and step from tui.go:259-260 (spinner.Frames, FPS = 1/8 s).
 const SPIN_FRAMES: [char; 6] = ['✻', '✽', '✶', '✲', '✢', '·'];
@@ -197,6 +197,133 @@ pub fn bottom_text(lang: Lang, b: &BarInput) -> String {
         ));
     }
     bottom
+}
+
+// Session cost for the GUI status row: "$0.50".
+pub fn cost_text(cost_usd: f64) -> String {
+    format!("${cost_usd:.2}")
+}
+
+// Queued prompts above the input box (Go queueLines), oldest first, newlines joined. Past max_show the last row is
+// "… +N" with the count still waiting. max_show 0 gives no rows.
+pub fn queue_rows(lang: Lang, queue: &[String], max_show: usize) -> Vec<String> {
+    if max_show == 0 {
+        return Vec::new();
+    }
+    let total = queue.len();
+    let mut out = Vec::new();
+    for (i, q) in queue.iter().enumerate() {
+        if i + 1 == max_show && total > max_show {
+            out.push(fill_in(lang, Msg::QueueMore, &[&(total - i)]));
+            break;
+        }
+        out.push(fill_in(lang, Msg::QueueItem, &[&q.replace('\n', " ")]));
+    }
+    out
+}
+
+// Task rows grouped 대기 / 진행 중 / 완료 / 실패 (Timeout under 실패 with its own label, Go taskLines). Past max_rows
+// the last row is "… +N" with the count still hidden.
+pub fn task_rows(lang: Lang, tasks: &[TaskRow], max_rows: usize) -> Vec<String> {
+    let mut rows = Vec::new();
+    for state in [
+        TaskState::Queued,
+        TaskState::Running,
+        TaskState::Done,
+        TaskState::Failed,
+        TaskState::Timeout,
+    ] {
+        for t in tasks.iter().filter(|t| t.state == state) {
+            let label = match state {
+                TaskState::Queued => i18n::text(lang, Msg::StateQueued).to_string(),
+                TaskState::Running => i18n::text(lang, Msg::TaskRunning).to_string(),
+                TaskState::Done => i18n::text(lang, Msg::StateDone).to_string(),
+                TaskState::Failed => i18n::text(lang, Msg::StateFailed).to_string(),
+                TaskState::Timeout => format!(
+                    "{} · {}",
+                    i18n::text(lang, Msg::StateFailed),
+                    i18n::text(lang, Msg::StateTimeout)
+                ),
+            };
+            let mut text = format!("  {label} {}", t.desc.replace('\n', " "));
+            if let Some(stats) = task_stats_text(lang, t) {
+                text.push_str(&format!(" · {stats}"));
+            }
+            rows.push(text);
+        }
+    }
+    let total = rows.len();
+    if total <= max_rows {
+        return rows;
+    }
+    let keep = max_rows.saturating_sub(1);
+    let mut out: Vec<String> = rows.into_iter().take(keep).collect();
+    out.push(fill_in(lang, Msg::TasksMore, &[&(total - keep)]));
+    out
+}
+
+// "12.3k tok · 45s" for a task row; only the figures that are known. None when neither is.
+fn task_stats_text(lang: Lang, task: &TaskRow) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(n) = task.tokens {
+        parts.push(format!(
+            "{} {}",
+            fmt_tokens(n),
+            i18n::text(lang, Msg::TokensUnit)
+        ));
+    }
+    if let Some(ms) = task.duration_ms {
+        parts.push(fmt_secs(ms / 1_000));
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+// Silence after which a running agent row says it may be stalled (10 minutes).
+const STALL_SECS: u64 = 600;
+
+// The state an agent row is shown in (its dot colour and label).
+pub fn agent_state(r: &AgentRow) -> AgentState {
+    if r.failed {
+        AgentState::Failed
+    } else if r.interrupted {
+        AgentState::Interrupted
+    } else if r.done {
+        AgentState::Done
+    } else {
+        AgentState::Running
+    }
+}
+
+// One agent row's text without the dot: "HH:MM:SS <state> · <name> · <model> (<task>) (<elapsed>)". Finished rows
+// take their saved status and model only. Elapsed runs to now for a running agent, else to its last activity.
+pub fn agent_row_text(lang: Lang, r: &AgentRow, now: u64) -> String {
+    let summary = if r.task.is_empty() {
+        &r.prompt
+    } else {
+        &r.task
+    };
+    let state = agent_state(r);
+    let mut text = agent_status_text(lang, state, &r.model, &r.name, summary);
+    let end = if matches!(state, AgentState::Running) {
+        now
+    } else {
+        r.last_active
+    };
+    if r.started_at > 0 && end > r.started_at {
+        text.push_str(&format!(" ({})", fmt_secs(end - r.started_at)));
+    }
+    // A running agent with no output or tool activity for STALL_SECS is flagged with its silence.
+    if matches!(state, AgentState::Running) && r.last_active > 0 {
+        let silent = now.saturating_sub(r.last_active);
+        if silent >= STALL_SECS {
+            text.push_str(&fill_in(lang, Msg::StallNote, &[&(silent / 60)]));
+        }
+    }
+    // The local start time leads the row, so clipping at a narrow width cuts the end first.
+    if r.started_at > 0 {
+        text = format!("{} {text}", clock_hhmmss(r.started_at as i64));
+    }
+    text
 }
 
 // The coder line under the input box: "C1 12k/80k  C2 3.1k/80k", one entry per live coder in spawn order (used
@@ -582,5 +709,57 @@ mod tests {
             quiet_notice(Lang::En, Duration::from_secs(30 * 60)),
             "[no output for 30m0s; still waiting, Esc/Ctrl+C to interrupt]"
         );
+    }
+
+    // Moved back from the GUI status_line (deleted in 9794e16 with its cost segment).
+    #[test]
+    fn cost_text_has_two_decimals() {
+        assert_eq!(cost_text(0.5), "$0.50");
+        assert_eq!(cost_text(0.0), "$0.00");
+    }
+
+    // Moved back from the deleted activity_line test: the queue shows its cap as "… +N".
+    #[test]
+    fn queue_rows_cap_with_more_count() {
+        let q: Vec<String> = vec!["one".into(), "two\nlines".into(), "three".into()];
+        assert!(queue_rows(Lang::En, &q, 0).is_empty());
+        assert_eq!(
+            queue_rows(Lang::En, &q[..2], 2),
+            vec![
+                fill_in(Lang::En, Msg::QueueItem, &[&"one"]),
+                fill_in(Lang::En, Msg::QueueItem, &[&"two lines"]),
+            ]
+        );
+        let capped = queue_rows(Lang::En, &q, 2);
+        assert_eq!(capped.len(), 2);
+        assert_eq!(capped[1], fill_in(Lang::En, Msg::QueueMore, &[&2usize]));
+    }
+
+    #[test]
+    fn task_rows_group_by_state_and_cap() {
+        let task = |desc: &str, state| TaskRow {
+            id: desc.into(),
+            desc: desc.into(),
+            state,
+            tokens: Some(1500),
+            duration_ms: Some(45_000),
+        };
+        let tasks = vec![
+            task("b", TaskState::Done),
+            task("a", TaskState::Queued),
+            task("c", TaskState::Timeout),
+        ];
+        let rows = task_rows(Lang::En, &tasks, 8);
+        assert_eq!(rows.len(), 3);
+        let stats = format!(
+            "· {} {} · 45s",
+            fmt_tokens(1500),
+            i18n::text(Lang::En, Msg::TokensUnit)
+        );
+        assert!(rows[0].contains(" a ") && rows[0].ends_with(&stats));
+        assert!(rows[2].ends_with(&stats));
+        let capped = task_rows(Lang::En, &tasks, 2);
+        assert_eq!(capped.len(), 2);
+        assert_eq!(capped[1], fill_in(Lang::En, Msg::TasksMore, &[&2usize]));
     }
 }
