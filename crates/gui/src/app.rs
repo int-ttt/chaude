@@ -6,11 +6,16 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use chaude_core::api::{EngineHandle, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::i18n::{self, Msg};
+use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{self, Key, Modifiers};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 
 use crate::engine;
+use crate::input::Input;
 use crate::state::{Entry, GuiState};
+
+// Stable id so the input box's TextEdit state (cursor) can be set from the editor.
+const INPUT_ID: &str = "chaude-input";
 
 pub struct ChaudeApp {
     // Kept alive for the app's lifetime; dropping it shuts the engine down.
@@ -18,13 +23,10 @@ pub struct ChaudeApp {
     rx: Option<Receiver<UiEvent>>,
     state: GuiState,
     md: CommonMarkCache,
-    input: String,
+    // The input box text, cursor and prompt history (core Editor).
+    input: Input,
     // Whether the input box had focus last frame; decides if Enter and arrows are ours before the TextEdit runs.
     input_focused: bool,
-    // Index into state.history while recalling with Up/Down; None while editing a new prompt.
-    recall: Option<usize>,
-    // The unsent text kept while recalling history.
-    draft: String,
     // Set on submit: the output pane jumps to the tail for one frame.
     jump_tail: bool,
 }
@@ -32,9 +34,7 @@ pub struct ChaudeApp {
 impl ChaudeApp {
     pub fn new(ctx: egui::Context) -> Self {
         let mut state = GuiState::default();
-        if let Ok(cwd) = std::env::current_dir() {
-            state.load_history(&cwd);
-        }
+        let cwd = std::env::current_dir().unwrap_or_default();
         let (engine, rx) = match engine::start(ctx) {
             Ok((handle, rx)) => (Some(handle), Some(rx)),
             Err(e) => {
@@ -47,10 +47,8 @@ impl ChaudeApp {
             rx,
             state,
             md: CommonMarkCache::default(),
-            input: String::new(),
+            input: Input::new(&cwd),
             input_focused: false,
-            recall: None,
-            draft: String::new(),
             jump_tail: false,
         }
     }
@@ -66,37 +64,21 @@ impl ChaudeApp {
     // Sends the input as a prompt (or /command) and echoes it in the transcript.
     fn submit(&mut self) {
         let Some(engine) = &self.engine else { return };
-        if self.input.trim().is_empty() {
+        let Some(text) = self.input.submit() else {
             return;
-        }
-        let text = std::mem::take(&mut self.input);
+        };
         engine.submit(&text);
         self.state.push_user(&text);
-        self.recall = None;
-        self.draft.clear();
         self.jump_tail = true;
     }
 
-    // Steps through prompt history: older on Up, newer on Down. The unsent text is kept as the draft.
-    fn step_history(&mut self, older: bool) {
-        let len = self.state.history.len();
-        if len == 0 {
-            return;
-        }
-        let next = match (self.recall, older) {
-            (None, true) => {
-                self.draft = self.input.clone();
-                Some(len - 1)
-            }
-            (None, false) => return,
-            (Some(i), true) => Some(i.saturating_sub(1)),
-            (Some(i), false) => (i + 1 < len).then_some(i + 1),
-        };
-        self.input = match next {
-            Some(i) => self.state.history[i].clone(),
-            None => std::mem::take(&mut self.draft),
-        };
-        self.recall = next;
+    // Moves the widget's cursor to the editor's cursor after the editor changed the text (history, Enter).
+    fn place_cursor(&self, ui: &egui::Ui) {
+        let id = ui.make_persistent_id(INPUT_ID);
+        let mut st = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
+        let at = CCursor::new(self.input.cursor());
+        st.cursor.set_char_range(Some(CCursorRange::one(at)));
+        st.store(ui.ctx(), id);
     }
 
     // Answers the open permission prompt and tells the engine.
@@ -172,7 +154,7 @@ impl ChaudeApp {
         // No input while a permission prompt is open; the dialog takes the keys.
         let ready = self.engine.is_some() && self.state.permission.is_none();
         let focused = ready && self.input_focused;
-        let single_line = !self.input.contains('\n');
+        let single_line = self.input.is_single_line();
         let (mut enter, mut up, mut down) = (false, false, false);
         // Keys are consumed before the TextEdit sees them: plain Enter sends instead of inserting a newline.
         if focused {
@@ -184,27 +166,39 @@ impl ChaudeApp {
                 }
             });
         }
+        // Editor-side changes (history recall, Enter) move the widget's cursor with them.
+        let mut moved = false;
         if up {
-            self.step_history(true);
+            self.input.history_prev();
+            moved = true;
         }
         if down {
-            self.step_history(false);
+            self.input.history_next();
+            moved = true;
         }
         if enter {
             // A trailing backslash turns Enter into a newline (the TUI rule); anything else sends.
-            if let Some(rest) = self.input.strip_suffix('\\') {
-                self.input = format!("{rest}\n");
-            } else {
+            if !self.input.backslash_newline() {
                 self.submit();
             }
+            moved = true;
         }
-        let out = ui.add(
-            egui::TextEdit::multiline(&mut self.input)
-                .desired_rows(3)
-                .desired_width(f32::INFINITY)
-                .interactive(ready),
-        );
-        self.input_focused = out.has_focus();
+        if moved {
+            self.place_cursor(ui);
+        }
+        // The widget edits a copy of the editor text (IME preedit and commit, paste, Shift+Enter); the edit is copied back.
+        let mut shown = self.input.text();
+        let out = egui::TextEdit::multiline(&mut shown)
+            .id_salt(INPUT_ID)
+            .desired_rows(3)
+            .desired_width(f32::INFINITY)
+            .interactive(ready)
+            .show(ui);
+        let cursor = out
+            .cursor_range
+            .map_or(self.input.cursor(), |r| r.primary.index.into());
+        self.input.apply_widget(&shown, cursor);
+        self.input_focused = out.response.has_focus();
     }
 
     fn output(&mut self, ui: &mut egui::Ui) {

@@ -1,12 +1,10 @@
 //! Pure GUI state: applies core UiEvents to the transcript, the status-bar data and the open permission prompt.
 //! No egui types here, so the reducer is unit-tested without a window.
 
-use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chaude_core::api::{AgentRow, Role, TaskStatus, UiEvent};
-use chaude_core::input_history::{append_history, history_file_for, read_history};
-use chaude_core::ui_state::{BarInput, push_history};
+use chaude_core::ui_state::BarInput;
 
 // One row of the output pane. Text rows keep the role so main and agent text stay in their own blocks.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,33 +59,12 @@ pub struct GuiState {
     pub agent_rows: Vec<AgentRow>,
     pub permission: Option<Permission>,
     pub tasks: Vec<Task>,
-    // Prompt history, newest last; same rule and file as the TUI (core input_history).
-    pub history: Vec<String>,
-    // <cwd>/.chaude/history.jsonl, set by load_history; None means history is kept in memory only.
-    pub history_file: Option<PathBuf>,
 }
 
 impl GuiState {
-    // Loads the recall list from <cwd>/.chaude/history.jsonl, as the TUI does at start.
-    pub fn load_history(&mut self, cwd: &Path) {
-        self.history_file = history_file_for(cwd);
-        self.history = self
-            .history_file
-            .as_deref()
-            .map(read_history)
-            .unwrap_or_default();
-    }
-
-    // Echoes a prompt the user sent and records it in the history. The history gets the trimmed text, like the TUI.
+    // Echoes a prompt the user sent. Prompt history is kept by the input box (crate::input, core Editor).
     pub fn push_user(&mut self, text: &str) {
         self.transcript.push(Entry::User(text.to_string()));
-        let entry = text.trim();
-        if push_history(&mut self.history, entry.to_string())
-            && let Some(path) = &self.history_file
-        {
-            // Best effort, like the TUI: recall still works in memory.
-            let _ = append_history(path, entry);
-        }
     }
 
     // Applies one engine event. now is the time it arrived (turn timer start).
@@ -561,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    fn errors_and_user_prompts_go_to_the_transcript_and_history() {
+    fn errors_and_user_prompts_go_to_the_transcript() {
         let mut st = GuiState::default();
         let now = Instant::now();
         st.push_user("hi");
@@ -577,22 +554,5 @@ mod tests {
                 Entry::Error("boom".into()),
             ]
         );
-        assert_eq!(st.history, ["hi"]);
-    }
-
-    // The GUI reads and writes <cwd>/.chaude/history.jsonl like the TUI: trimmed, saved, loaded at start.
-    #[test]
-    fn prompt_history_is_saved_and_loaded_from_the_cwd() {
-        let dir = std::env::temp_dir().join(format!("chaude-gui-history-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let mut st = GuiState::default();
-        st.load_history(&dir);
-        st.push_user("  one  ");
-        st.push_user("two");
-        st.push_user("two");
-        let mut again = GuiState::default();
-        again.load_history(&dir);
-        assert_eq!(again.history, ["one", "two"]);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

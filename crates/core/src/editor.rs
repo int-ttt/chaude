@@ -133,6 +133,11 @@ impl Editor {
         self.buf.drain(self.cursor..end);
     }
 
+    // Moves the cursor to a char index, clamped to the buffer. The GUI input box uses it to follow the widget's cursor.
+    pub fn set_cursor(&mut self, i: usize) {
+        self.cursor = i.min(self.buf.len());
+    }
+
     pub fn left(&mut self) {
         self.cursor = self.cursor.saturating_sub(1);
     }
@@ -517,6 +522,18 @@ mod tests {
         e.backspace();
         assert_eq!(e.text(), "ab글cd");
         assert_eq!(e.cells(&e.buf[..e.cursor()]), 2);
+    }
+
+    #[test]
+    fn set_cursor_moves_the_insert_point_and_clamps() {
+        let mut e = typed("ab");
+        e.set_cursor(1);
+        e.insert_char('X');
+        assert_eq!(e.text(), "aXb");
+        e.set_cursor(99);
+        assert_eq!(e.cursor(), 3);
+        e.delete();
+        assert_eq!(e.text(), "aXb");
     }
 
     #[test]

@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- gui: the input box's text, cursor and prompt history now live in core `chaude_core::editor::Editor` (the TUI's editor); egui still draws the box and handles IME and paste, and its edits are copied into the editor. Submitted text is trimmed like the TUI, and the GUI's own history copy was removed.
+  - gui: 입력창의 텍스트, 커서, 프롬프트 기록이 이제 코어 `chaude_core::editor::Editor`(TUI의 편집기)에 있습니다. egui는 입력창을 그리고 한글 조합과 붙여넣기를 처리하며, 그 편집은 편집기로 옮겨집니다. 보낸 입력은 TUI처럼 앞뒤 공백을 제거하며, GUI의 기록 사본은 없앴습니다.
 - agents: autocompact window 130000 so the 80K handoff runs first.
   - agents: 자동 압축 창을 130000으로 올려 80K 인계가 먼저 실행되도록 했습니다.
 - agents: haiku-coder and haiku-batch-worker get a "Quiet output" rule: `-q` for cargo, `tail`/`head`/`-m` on long output, offset/limit reads, and re-run only the failing test, to cut repeated tool-output context.

@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod engine;
+pub mod input;
 pub mod state;
 
 /// Kind of one stream-json line from the Claude CLI, as the shared core names it.
