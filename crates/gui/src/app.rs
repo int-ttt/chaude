@@ -171,6 +171,7 @@ impl ChaudeApp {
         );
         match commands::effect(outcome, Path::new(&self.state.cwd)) {
             Effect::Note(s) => self.state.transcript.push_notice(s),
+            Effect::OpenView(arg) => self.state.open_view(&arg),
             Effect::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Effect::SetMode(p) => engine.set_mode(p.name()),
             Effect::OpenUsage => {
@@ -520,6 +521,114 @@ impl ChaudeApp {
                 engine.install_import(imp);
             }
             self.jump_tail = true;
+        }
+    }
+
+    // Closes /view and moves the transcript to the bottom (TUI Action::Close).
+    fn close_sess(&mut self) {
+        self.state.close_sess();
+        self.jump_tail = true;
+    }
+
+    // Keys of the open /view browser (TUI sess key). Level 1 moves and opens; level 2 steps through the prompts.
+    // Esc backs out of a prompt and closes the list; q and Ctrl+C close. Read before shortcuts, so Esc does not interrupt.
+    fn sess_keys(&mut self, ctx: &egui::Context) {
+        if self.state.permission.is_some() || self.state.sess.is_none() {
+            return;
+        }
+        let in_prompts = self.state.sess.as_ref().is_some_and(|s| s.in_prompts());
+        let (esc, close) = ctx.input_mut(|i| {
+            (
+                i.consume_key(Modifiers::NONE, Key::Escape),
+                i.consume_key(Modifiers::NONE, Key::Q) | i.consume_key(Modifiers::CTRL, Key::C),
+            )
+        });
+        if esc && in_prompts {
+            self.state.sess_back();
+            return;
+        }
+        if esc || close {
+            self.close_sess();
+            return;
+        }
+        let k = picker_keys(ctx);
+        if in_prompts {
+            let (left, right) = ctx.input_mut(|i| {
+                (
+                    i.consume_key(Modifiers::NONE, Key::ArrowLeft),
+                    i.consume_key(Modifiers::NONE, Key::ArrowRight),
+                )
+            });
+            if left {
+                self.state.sess_prompt(false);
+            }
+            if right {
+                self.state.sess_prompt(true);
+            }
+            return;
+        }
+        if k.up {
+            self.state.sess_step(true);
+        }
+        if k.down {
+            self.state.sess_step(false);
+        }
+        if let Some(i) = k.digit {
+            self.state.sess_select(i);
+        }
+        if k.enter {
+            self.state.sess_open(None);
+        }
+    }
+
+    // The /view browser window (TUI sess lines and prompt_lines): level 1 lists the sessions, level 2 shows the
+    // prompt under its header. A click opens a row; the X button closes it.
+    fn sess_window(&mut self, ctx: &egui::Context) {
+        let Some(sv) = self.state.sess.as_ref() else {
+            return;
+        };
+        let in_prompts = sv.in_prompts();
+        let now = std::time::SystemTime::now();
+        let rows: Vec<String> = (0..sv.list.len()).map(|i| sv.row_text(i, now)).collect();
+        let head = sv.prompt_head();
+        let body = sv.shown().unwrap_or_default().to_string();
+        let sel = sv.sel;
+        let mut open = true;
+        let mut click = None;
+        let mut back = false;
+        egui::Window::new("Sessions")
+            .collapsible(false)
+            .default_size([560.0, 360.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                if in_prompts {
+                    ui.strong(head);
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        ui.label(body);
+                    });
+                    if ui.button("back").clicked() {
+                        back = true;
+                    }
+                    ui.weak("←/→ prev/next · esc back");
+                } else {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for (i, row) in rows.iter().enumerate() {
+                            if ui.selectable_label(sel == i, row).clicked() {
+                                click = Some(i);
+                            }
+                        }
+                    });
+                    ui.weak("↑/↓ or 1-9 select · enter open · esc close");
+                }
+            });
+        if let Some(i) = click {
+            self.state.sess_open(Some(i));
+        }
+        if back {
+            self.state.sess_back();
+        }
+        if !open {
+            self.close_sess();
         }
     }
 
@@ -1079,6 +1188,7 @@ impl eframe::App for ChaudeApp {
         self.rewind_keys(ui.ctx());
         self.records_keys(ui.ctx());
         self.groups_keys(ui.ctx());
+        self.sess_keys(ui.ctx());
         self.window_keys(ui.ctx());
         self.shortcuts(ui.ctx());
         // Bottom panels stack in show order (later is higher). Bottom to top this is the TUI chrome order reversed:
@@ -1108,6 +1218,7 @@ impl eframe::App for ChaudeApp {
         self.rewind_window(ui.ctx());
         self.records_window(ui.ctx());
         self.groups_window(ui.ctx());
+        self.sess_window(ui.ctx());
         self.settings_window(ui.ctx());
     }
 }

@@ -1,8 +1,8 @@
 //! Pure GUI state: applies core UiEvents to the transcript, the status-bar data and the open permission prompt.
 //! No egui types here, so the reducer is unit-tested without a window.
 
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use chaude_core::api::{AgentRow, Role, UiEvent};
@@ -18,6 +18,7 @@ use chaude_core::record_pick::{self, Picker};
 use chaude_core::record_turn;
 use chaude_core::resident::StagePhase;
 use chaude_core::rewind::{NOTHING, REWOUND, Rewind};
+use chaude_core::session_view::{self, SessView};
 use chaude_core::settings::pickers::{LangPicker, SettingsPicker};
 use chaude_core::ui_state::{
     BarInput, Entry, RunState, Transcript, stage_line, stage_text, tool_result_text, tool_summary,
@@ -76,6 +77,13 @@ pub struct GuiState {
     // The session id the previous run did not finish, read by the app before the engine starts (TUI killed_sid).
     // A bare /resume imports it.
     pub killed_sid: Option<String>,
+    // The open /view browser (TUI sess): the session list, then one session's prompts. The model is core (session_view).
+    pub sess: Option<SessView>,
+    // Sessions this run owns (SessionIds; TUI this_run) and their purposes (TUI session_purpose).
+    this_run: HashSet<String>,
+    session_purpose: HashMap<String, String>,
+    // Where /view finds the Claude Code projects: None = the user's home (tests set a temp dir).
+    pub home: Option<PathBuf>,
 }
 
 // Notice after an import replaces the transcript (TUI IMPORT_INSTALL_NOTE).
@@ -269,6 +277,108 @@ impl GuiState {
         let key = self.groups.as_ref()?.chosen_key()?;
         self.groups = None;
         self.import_view(&key)
+    }
+
+    // SessionIds (TUI SessionIds arm): the purposes of this run's sessions and the set of ids it owns.
+    fn session_ids(
+        &mut self,
+        main: String,
+        residents: BTreeMap<String, String>,
+        owned: Vec<String>,
+    ) {
+        self.session_id = main.clone();
+        if !main.is_empty() {
+            self.session_purpose
+                .insert(main.clone(), "main".to_string());
+        }
+        for (role, id) in &residents {
+            if !id.is_empty() {
+                self.session_purpose.insert(id.clone(), role.clone());
+            }
+        }
+        self.this_run = std::iter::once(main)
+            .chain(residents.into_values())
+            .chain(owned)
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+
+    // /view <arg> (TUI open_view): the session list, or one session's prompts for a prefix. A failure is a notice.
+    pub fn open_view(&mut self, arg: &str) {
+        let Some(home) = self.home.clone().or_else(session_view::home_dir) else {
+            self.transcript
+                .push_notice("$HOME is not defined".to_string());
+            return;
+        };
+        let dir = session_view::project_dir(&home, &self.cwd);
+        let mut owned = session_view::handoff_owned(&self.cwd);
+        owned.extend(self.this_run.iter().cloned());
+        match session_view::open_in(&dir, &owned, arg) {
+            Ok(mut sv) => {
+                sv.purposes = self.session_purpose.clone();
+                self.sess = Some(sv);
+            }
+            Err(msg) => self.transcript.push_notice(msg),
+        }
+    }
+
+    // Level 1 cursor up or down (no-op while closed or at level 2).
+    pub fn sess_step(&mut self, up: bool) {
+        if let Some(sv) = self.sess.as_mut().filter(|s| !s.in_prompts()) {
+            sv.move_sel(up);
+        }
+    }
+
+    // A digit key: moves the level 1 cursor to row i (out-of-range rows are ignored).
+    pub fn sess_select(&mut self, i: usize) {
+        if let Some(sv) = self.sess.as_mut().filter(|s| !s.in_prompts())
+            && i < sv.list.len()
+        {
+            sv.sel = i;
+        }
+    }
+
+    // Enter (row None) or a click (Some row) at level 1 opens that session's prompts (TUI Enter). A failure is a notice.
+    pub fn sess_open(&mut self, row: Option<usize>) {
+        let Some(sv) = self.sess.as_mut() else {
+            return;
+        };
+        if sv.in_prompts() {
+            return;
+        }
+        if let Some(i) = row.filter(|&i| i < sv.list.len()) {
+            sv.sel = i;
+        }
+        let i = sv.sel;
+        if i >= sv.list.len() {
+            return;
+        }
+        if let Err(e) = sv.open_prompts(i) {
+            self.transcript.push_notice(e);
+        }
+    }
+
+    // Level 2: the previous or next prompt (TUI Left and Right).
+    pub fn sess_prompt(&mut self, next: bool) {
+        if let Some(sv) = self.sess.as_mut().filter(|s| s.in_prompts()) {
+            if next {
+                sv.next_prompt();
+            } else {
+                sv.prev_prompt();
+            }
+        }
+    }
+
+    // Level 2 back to the list (TUI Esc at level 2).
+    pub fn sess_back(&mut self) {
+        if let Some(sv) = self.sess.as_mut() {
+            sv.leave_prompts();
+        }
+    }
+
+    // Closes /view (TUI Close).
+    pub fn close_sess(&mut self) {
+        self.sess = None;
     }
 
     // Moves the record cursor up or down (no-op while closed).
@@ -599,7 +709,20 @@ impl GuiState {
             UiEvent::RateLimit { info } => {
                 self.bar.rate = bar_text::rate_status(&info, unix_now()).filter(|s| !s.is_empty());
             }
-            UiEvent::SessionIds { main, .. } => self.session_id = main,
+            UiEvent::SessionIds {
+                main,
+                residents,
+                owned,
+            } => self.session_ids(main, residents, owned),
+            // Core relaunched the main child with --resume: the /view list opens so the switch is visible (TUI).
+            UiEvent::SessionResumed {
+                old_session,
+                session_id,
+            } => {
+                self.transcript
+                    .push_notice(format!("session resumed: {session_id} (was {old_session})"));
+                self.open_view("");
+            }
             UiEvent::RotatedFrom { old_session } => {
                 self.session_id.clear();
                 self.rot_from = old_session;
@@ -1625,5 +1748,148 @@ mod tests {
             Entry::Text { text, .. } if *text == answer
         )));
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+
+    // A temp home whose Claude Code project dir for cwd holds one session per (id, prompts); the test removes it.
+    fn home_with(tag: &str, cwd: &str, sessions: &[(&str, &[&str])]) -> PathBuf {
+        let home =
+            std::env::temp_dir().join(format!("chaude-gui-view-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let dir = session_view::project_dir(&home, cwd);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (id, prompts) in sessions {
+            let mut body = String::new();
+            for p in *prompts {
+                body += &format!(
+                    "{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"{p}\"}}}}\n"
+                );
+                body += "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}\n";
+            }
+            std::fs::write(dir.join(format!("{id}.jsonl")), body).unwrap();
+        }
+        home
+    }
+
+    // A state on cwd and home, whose run owns aaaa1111 (main) and bbbb2222 (owned).
+    fn owned_state(home: &Path, cwd: &str) -> GuiState {
+        let mut st = GuiState {
+            cwd: cwd.into(),
+            home: Some(home.to_path_buf()),
+            ..Default::default()
+        };
+        st.apply(
+            UiEvent::SessionIds {
+                main: "aaaa1111".into(),
+                residents: BTreeMap::new(),
+                owned: vec!["bbbb2222".into()],
+            },
+            Instant::now(),
+        );
+        st
+    }
+
+    fn sessions() -> [(&'static str, &'static [&'static str]); 2] {
+        [
+            ("aaaa1111", &["first one", "second one"]),
+            ("bbbb2222", &["only one"]),
+        ]
+    }
+
+    #[test]
+    fn view_opens_drills_backs_picks_and_cancels() {
+        let cwd = "/chaude-gui-view/work-open";
+        let home = home_with("open", cwd, &sessions());
+        let mut st = owned_state(&home, cwd);
+        st.sess_open(None);
+        assert!(st.sess.is_none(), "enter while closed does nothing");
+        st.open_view("");
+        assert_eq!(st.sess.as_ref().map(|s| s.list.len()), Some(2));
+        let bbbb = st
+            .sess
+            .as_ref()
+            .unwrap()
+            .list
+            .iter()
+            .position(|s| s.id == "bbbb2222")
+            .unwrap();
+        st.sess_open(Some(bbbb));
+        let sv = st.sess.as_ref().unwrap();
+        assert!(sv.in_prompts(), "a pick drills into the prompts");
+        assert_eq!(sv.shown(), Some("only one"));
+        st.sess_back();
+        assert!(!st.sess.as_ref().unwrap().in_prompts(), "back to the list");
+        let aaaa = st
+            .sess
+            .as_ref()
+            .unwrap()
+            .list
+            .iter()
+            .position(|s| s.id == "aaaa1111")
+            .unwrap();
+        st.sess_select(aaaa);
+        st.sess_open(None);
+        assert_eq!(
+            st.sess.as_ref().unwrap().id,
+            "aaaa1111",
+            "enter drills the cursor row"
+        );
+        st.sess_prompt(true);
+        assert_eq!(
+            st.sess.as_ref().unwrap().cur,
+            1,
+            "right steps to the next prompt"
+        );
+        st.close_sess();
+        assert!(st.sess.is_none(), "cancel closes the browser");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn view_with_a_prefix_opens_its_prompts_and_a_miss_is_a_notice() {
+        let cwd = "/chaude-gui-view/work-prefix";
+        let home = home_with("prefix", cwd, &sessions());
+        let mut st = owned_state(&home, cwd);
+        st.open_view("bbbb");
+        assert_eq!(st.sess.as_ref().unwrap().shown(), Some("only one"));
+        st.close_sess();
+        st.open_view("zzzz");
+        assert!(st.sess.is_none(), "no match, no browser");
+        assert!(
+            st.transcript
+                .entries
+                .iter()
+                .any(|e| matches!(e, Entry::Notice(t) if t.contains("zzzz"))),
+            "the miss is a notice"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_mid_run_switch_reopens_the_session_list() {
+        let cwd = "/chaude-gui-view/work-resumed";
+        let home = home_with("resumed", cwd, &sessions());
+        let mut st = owned_state(&home, cwd);
+        st.apply(
+            UiEvent::SessionResumed {
+                old_session: "aaaa1111".into(),
+                session_id: "bbbb2222".into(),
+            },
+            Instant::now(),
+        );
+        let sv = st.sess.as_ref().expect("the list reopens after the switch");
+        assert!(!sv.in_prompts());
+        assert!(
+            st.transcript
+                .entries
+                .iter()
+                .any(|e| matches!(e, Entry::Notice(t) if t.contains("(was aaaa1111)"))),
+            "the switch is noted"
+        );
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

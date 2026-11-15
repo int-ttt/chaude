@@ -30,6 +30,8 @@ pub enum Effect {
     Resume(Vec<String>),
     // The update check runs off the UI thread; its answer comes back as a notice.
     Update,
+    // /view with its argument (empty for the list): the state opens the session browser (a prefix opens its prompts).
+    OpenView(String),
     // Plain prompts and the engine-side commands (/clear, /rotate, /model, /cost and the other passthroughs).
     Send,
 }
@@ -59,7 +61,7 @@ pub fn effect(outcome: SlashOutcome, cwd: &Path) -> Effect {
         SlashOutcome::OpenLang => Effect::OpenLang,
         SlashOutcome::SetLang(code) => Effect::SetLang(code),
         SlashOutcome::OpenSettings => Effect::OpenSettings,
-        SlashOutcome::OpenView { .. } => Effect::Note(not_yet("/view")),
+        SlashOutcome::OpenView { arg } => Effect::OpenView(arg),
         SlashOutcome::Resume { args } => Effect::Resume(args),
         SlashOutcome::Import { .. } => Effect::Note(not_yet("/import")),
         SlashOutcome::ToggleMouse => {
@@ -154,18 +156,17 @@ mod tests {
 
     #[test]
     fn pickers_without_a_gui_window_say_so() {
-        for (o, name) in [
-            (SlashOutcome::OpenView { arg: String::new() }, "/view"),
-            (
-                SlashOutcome::Import {
-                    line: "/import".into(),
-                    arg: "latest".into(),
-                },
-                "/import",
-            ),
-        ] {
-            assert_eq!(effect(o, cwd()), Effect::Note(not_yet(name)), "{name}");
-        }
+        let o = SlashOutcome::Import {
+            line: "/import".into(),
+            arg: "latest".into(),
+        };
+        assert_eq!(effect(o, cwd()), Effect::Note(not_yet("/import")));
+    }
+
+    #[test]
+    fn view_maps_its_argument_to_the_state_browser() {
+        let o = SlashOutcome::OpenView { arg: "abc".into() };
+        assert_eq!(effect(o, cwd()), Effect::OpenView("abc".into()));
     }
 
     #[test]
