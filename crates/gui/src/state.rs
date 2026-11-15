@@ -11,6 +11,7 @@ use chaude_core::handoff;
 use chaude_core::i18n::{self, Msg};
 use chaude_core::localtime::{clock_hhmmss, unix_now};
 use chaude_core::resident::StagePhase;
+use chaude_core::rewind::{NOTHING, REWOUND, Rewind};
 use chaude_core::settings::pickers::{LangPicker, SettingsPicker};
 use chaude_core::ui_state::{
     BarInput, Entry, RunState, Transcript, stage_line, stage_text, tool_result_text, tool_summary,
@@ -60,12 +61,71 @@ pub struct GuiState {
     pub lang: Option<LangPicker>,
     // The open /settings picker over a working copy (None = closed). Closing saves it (core settings::pickers).
     pub settings: Option<SettingsPicker>,
+    // The open Esc Esc rewind picker (TUI m.rw). Its list, selection and cut are the core model (chaude_core::rewind).
+    pub rewind: Rewind,
+}
+
+// The transcript as the core rewind model reads it: each user prompt is a "user" block, the rest carry no text.
+fn rewind_blocks(t: &Transcript) -> Vec<(&str, &str)> {
+    t.entries
+        .iter()
+        .map(|e| match e {
+            Entry::User(s) => ("user", s.as_str()),
+            _ => ("", ""),
+        })
+        .collect()
 }
 
 impl GuiState {
     // Echoes a prompt the user sent. Prompt history is kept by the input box (crate::input, core Editor).
     pub fn push_user(&mut self, text: &str) {
         self.transcript.push_user(text);
+    }
+
+    // Opens the rewind picker over the transcript's prompts (TUI rewind open). With no prompt it notes that there is
+    // nothing to rewind to.
+    pub fn open_rewind(&mut self) {
+        if !self.rewind.open(&rewind_blocks(&self.transcript)) {
+            self.transcript.push_notice(NOTHING);
+        }
+    }
+
+    // Moves the rewind cursor up or down (no-op while closed).
+    pub fn rewind_step(&mut self, up: bool) {
+        self.rewind.move_by(if up { -1 } else { 1 });
+    }
+
+    // Closes the rewind picker without a cut (TUI Cancel).
+    pub fn close_rewind(&mut self) {
+        self.rewind.cancel();
+    }
+
+    // The picker rows as the window shows them: "N) prompt", newlines folded and the prompt cut at 100 chars (TUI rewind lines).
+    pub fn rewind_rows(&self) -> Vec<String> {
+        let blocks = rewind_blocks(&self.transcript);
+        self.rewind
+            .turns()
+            .iter()
+            .enumerate()
+            .map(|(i, &b)| {
+                let text: String = blocks[b].1.replace('\n', " ").chars().take(100).collect();
+                format!("{:>2}) {text}", i + 1)
+            })
+            .collect()
+    }
+
+    // Picks a row (Some(index) for a click, None for Enter on the cursor row) and cuts the transcript before that
+    // prompt (TUI rewind confirm). Returns the prompt text to put back in the input; None when the picker is closed.
+    pub fn rewind_pick(&mut self, row: Option<usize>) -> Option<String> {
+        if let Some(i) = row {
+            self.rewind.select(i);
+        }
+        let cut = self.rewind.confirm(&rewind_blocks(&self.transcript))?;
+        self.transcript.entries.truncate(cut.cut);
+        let n = self.transcript.len();
+        self.stage_rows.retain(|_, r| r.idx < n);
+        self.transcript.push_notice(REWOUND);
+        Some(cut.text)
     }
 
     // Opens the /usage window with the loading text (TUI usage.open). The one-shot run answers through apply.
@@ -1111,5 +1171,75 @@ mod tests {
         st.apply(UiEvent::Error("boom".into()), Instant::now());
         assert_eq!(st.usage, Some(usage_text::usage_failed("boom")));
         assert!(st.transcript.entries.is_empty());
+    }
+
+    // Transcript: a slash command, "one", a status row, "two", a status row. Prompts 1 and 2 are listed.
+    fn rewind_fixture() -> GuiState {
+        let mut st = GuiState::default();
+        st.push_user("/help");
+        st.push_user("one");
+        st.transcript.push_status("ok");
+        st.push_user("two");
+        st.transcript.push_status("done");
+        st
+    }
+
+    #[test]
+    fn rewind_window_opens_on_the_newest_prompt_and_steps() {
+        let mut st = rewind_fixture();
+        st.rewind_step(true);
+        assert!(!st.rewind.is_open(), "stepping while closed does nothing");
+        st.open_rewind();
+        assert!(st.rewind.is_open());
+        assert_eq!(st.rewind_rows(), [" 1) one", " 2) two"]);
+        assert_eq!(st.rewind.sel(), 1, "newest prompt is selected");
+        st.rewind_step(true);
+        assert_eq!(st.rewind.sel(), 0);
+        st.rewind_step(true); // wraps
+        assert_eq!(st.rewind.sel(), 1);
+    }
+
+    #[test]
+    fn rewind_pick_cuts_before_the_prompt_and_returns_its_text() {
+        let mut st = rewind_fixture();
+        st.open_rewind();
+        st.rewind_step(true);
+        assert_eq!(st.rewind_pick(None), Some("one".to_string()));
+        assert!(!st.rewind.is_open(), "a pick closes the window");
+        assert_eq!(
+            st.transcript.entries,
+            vec![Entry::User("/help".into()), Entry::Notice(REWOUND.into()),],
+            "the cut keeps the rows before the picked prompt, then the note"
+        );
+        assert_eq!(st.rewind_pick(None), None, "no pick while closed");
+    }
+
+    #[test]
+    fn rewind_pick_by_row_and_cancel_leave_the_transcript_alone() {
+        let mut st = rewind_fixture();
+        let before = st.transcript.clone();
+        st.open_rewind();
+        st.close_rewind();
+        assert!(!st.rewind.is_open(), "cancel closes");
+        assert_eq!(st.transcript, before, "a cancel cuts nothing");
+        st.open_rewind();
+        assert_eq!(
+            st.rewind_pick(Some(0)),
+            Some("one".to_string()),
+            "a click picks its row"
+        );
+        assert_eq!(st.transcript.len(), 2);
+    }
+
+    #[test]
+    fn rewind_with_no_prompt_notes_nothing_to_rewind_to() {
+        let mut st = GuiState::default();
+        st.transcript.push_status("ok");
+        st.open_rewind();
+        assert!(!st.rewind.is_open());
+        assert_eq!(
+            st.transcript.entries.last(),
+            Some(&Entry::Notice(NOTHING.into()))
+        );
     }
 }

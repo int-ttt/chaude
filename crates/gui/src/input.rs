@@ -42,6 +42,12 @@ impl Input {
         !self.editor.text().contains('\n')
     }
 
+    // Puts text in the box with the cursor at its end (the rewind pick; the TUI clears then inserts the same way).
+    pub fn set_text(&mut self, text: &str) {
+        self.editor.clear();
+        self.editor.insert_str(text);
+    }
+
     // Copies the text the widget now shows into the editor. The span that changed is replaced with the
     // editor's own delete and insert, then the cursor takes the widget's char index.
     pub fn apply_widget(&mut self, shown: &str, cursor: usize) {

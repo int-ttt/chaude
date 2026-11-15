@@ -70,6 +70,10 @@ pub struct ChaudeApp {
     jobs_rx: Receiver<String>,
     // Selected row of the slash popup (clamped to the matches when drawn).
     slash_sel: usize,
+    // When the last Esc was pressed with no turn busy: a second one within 600 ms opens the rewind picker (TUI last_esc).
+    last_esc: Option<Instant>,
+    // Set when a rewind pick put a prompt in the input box; the next frame moves the box cursor to its end.
+    restored: bool,
 }
 
 // Output pane geometry from the last frame, in points.
@@ -129,6 +133,8 @@ impl ChaudeApp {
             follow: true,
             unseen: false,
             slash_sel: 0,
+            last_esc: None,
+            restored: false,
         }
     }
 
@@ -403,6 +409,94 @@ impl ChaudeApp {
         }
     }
 
+    // Esc with no turn busy (TUI tui.go esc): on an empty input box a second Esc within 600 ms opens the rewind picker.
+    fn esc_rewind(&mut self) {
+        let now = Instant::now();
+        let double = self.input.text().is_empty()
+            && self
+                .last_esc
+                .is_some_and(|t| now.duration_since(t) < Duration::from_millis(600));
+        self.last_esc = Some(now);
+        if double {
+            self.last_esc = None;
+            self.state.open_rewind();
+        }
+    }
+
+    // Rewinds to the picked prompt (or the cursor row when None): the transcript is cut and the prompt goes back into
+    // the input box (TUI rewind confirm).
+    fn finish_rewind(&mut self, row: Option<usize>) {
+        if let Some(text) = self.state.rewind_pick(row) {
+            self.input.set_text(&text);
+            self.restored = true;
+            self.jump_tail = true;
+        }
+    }
+
+    // Keys of the open rewind picker (TUI rewind key): Up/Down (or k/j) move, Enter rewinds to the cursor row, Esc, q
+    // and Ctrl+C cancel. They run before shortcuts, so Esc does not interrupt or count as a double Esc.
+    fn rewind_keys(&mut self, ctx: &egui::Context) {
+        if self.state.permission.is_some() || !self.state.rewind.is_open() {
+            return;
+        }
+        let (mut up, mut down, mut enter, mut cancel) = (false, false, false, false);
+        ctx.input_mut(|i| {
+            up |= i.consume_key(Modifiers::NONE, Key::ArrowUp);
+            up |= i.consume_key(Modifiers::NONE, Key::K);
+            down |= i.consume_key(Modifiers::NONE, Key::ArrowDown);
+            down |= i.consume_key(Modifiers::NONE, Key::J);
+            enter |= i.consume_key(Modifiers::NONE, Key::Enter);
+            cancel |= i.consume_key(Modifiers::NONE, Key::Escape);
+            cancel |= i.consume_key(Modifiers::NONE, Key::Q);
+            cancel |= i.consume_key(Modifiers::CTRL, Key::C);
+        });
+        if cancel {
+            self.state.close_rewind();
+            return;
+        }
+        if up {
+            self.state.rewind_step(true);
+        }
+        if down {
+            self.state.rewind_step(false);
+        }
+        if enter {
+            self.finish_rewind(None);
+        }
+    }
+
+    // The rewind picker window (TUI rewind draw): the prompts oldest first, the cursor row highlighted. A click picks
+    // that row; the X button closes it.
+    fn rewind_window(&mut self, ctx: &egui::Context) {
+        if !self.state.rewind.is_open() {
+            return;
+        }
+        let rows = self.state.rewind_rows();
+        let sel = self.state.rewind.sel();
+        let mut open = true;
+        let mut click = None;
+        egui::Window::new("Rewind to a prompt")
+            .collapsible(false)
+            .default_size([560.0, 360.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (i, row) in rows.iter().enumerate() {
+                        if ui.selectable_label(sel == i, row).clicked() {
+                            click = Some(i);
+                        }
+                    }
+                });
+                ui.weak("↑/↓ select · enter rewind · esc cancel");
+            });
+        if let Some(i) = click {
+            self.finish_rewind(Some(i));
+        }
+        if !open {
+            self.state.close_rewind();
+        }
+    }
+
     // Keys of the open /usage window (TUI usage.rs usageKey): Esc, q, Enter and Ctrl+C close it. They run before
     // shortcuts, so Esc does not interrupt a turn and Ctrl+C does not quit while the window is open.
     fn window_keys(&mut self, ctx: &egui::Context) {
@@ -481,6 +575,9 @@ impl ChaudeApp {
                 } else if self.state.run.busy {
                     engine.interrupt(InterruptSource::EscKey);
                 }
+            }
+            if esc && self.state.run.held.is_none() && !self.state.run.busy {
+                self.esc_rewind();
             }
             if ctrl_c {
                 match ctrl_c_action(self.state.run.busy) {
@@ -647,12 +744,13 @@ impl ChaudeApp {
     }
 
     fn input_box(&mut self, ui: &mut egui::Ui) {
-        // No input while a permission prompt or a /usage, /lang or /settings window is open; they take the keys.
+        // No input while a permission prompt or a /usage, /lang, /settings or rewind window is open; they take the keys.
         let ready = self.engine.is_some()
             && self.state.permission.is_none()
             && self.state.usage.is_none()
             && self.state.lang.is_none()
-            && self.state.settings.is_none();
+            && self.state.settings.is_none()
+            && !self.state.rewind.is_open();
         let focused = ready && self.input_focused;
         let single_line = self.input.is_single_line();
         // Slash popup: the matches for a command word being typed (none while busy or a permission prompt is open).
@@ -698,7 +796,7 @@ impl ChaudeApp {
             });
         }
         // Editor-side changes (history recall, Enter, editor keys) move the widget's cursor with them.
-        let mut moved = !edits.is_empty();
+        let mut moved = !edits.is_empty() || std::mem::take(&mut self.restored);
         if sel_up {
             self.slash_sel = sel.saturating_sub(1);
         }
@@ -789,6 +887,7 @@ impl eframe::App for ChaudeApp {
         self.drain(ui.ctx());
         self.settings_keys(ui.ctx());
         self.lang_keys(ui.ctx());
+        self.rewind_keys(ui.ctx());
         self.window_keys(ui.ctx());
         self.shortcuts(ui.ctx());
         // Bottom panels stack in show order (later is higher). Bottom to top this is the TUI chrome order reversed:
@@ -815,6 +914,7 @@ impl eframe::App for ChaudeApp {
         self.permission_dialog(ui.ctx());
         self.usage_window(ui.ctx());
         self.lang_window(ui.ctx());
+        self.rewind_window(ui.ctx());
         self.settings_window(ui.ctx());
     }
 }
