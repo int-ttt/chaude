@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+
+## 0.12.8 - 2026-11-15
 - core: main session idle rotation, one per idle period: the 3570 s idle timer is the primary rotation for every context size (its handoff runs a model call while the 1 hour cache is still warm). Only when the timer did not rotate (app closed or restarted, machine asleep so the timer never fired), the next prompt rotates a main over 80K whose last API response is over 1 hour old, with a handoff built from the transcript (no model call). After a timer rotation the next-prompt rule does not rotate again. The 200K Opus threshold is unchanged.
   - core: 메인 세션 유휴 회전은 유휴 구간당 한 번: 3570 s 유휴 타이머가 모든 맥락 크기에서 먼저 회전합니다(1시간 캐시가 살아 있는 동안 인계 모델 호출). 타이머가 회전하지 못했을 때(앱 종료·재시작, 기기 절전으로 타이머 미발동)에만 다음 입력 시 마지막 API 응답이 1시간 넘었고 맥락이 80K를 넘는 메인을 트랜스크립트 인계로 회전합니다(모델 호출 없음). 타이머가 회전한 뒤에는 다음 입력 규칙이 다시 회전하지 않습니다. Opus 200K 기준은 그대로입니다.
 - tui: first Enter submits: an Enter right after a single key (such as a Korean IME commit landing with the Enter) is no longer read as a pasted newline; a newline in the input needs the newline key combo or pasted text, and a run of quick keys before an Enter still counts as a paste.

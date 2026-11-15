@@ -31,6 +31,9 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 - The Bash hook `bash-py-guard.py` denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `fs.writeFile*`). Read-only code and `python3 -m pytest` stay allowed (0.11.4).
 - On Windows the guard hooks run `py -3` (or `python`), not `python3`, because the Microsoft Store `python3` stub made the guard fail open (0.11.7). Re-apply on an existing project: replace `python3` in `.claude/settings.json` with `py -3` or `python`, or regenerate it with `chaude gen-settings windows --out .claude/settings.json`.
 - Sessions (main, prompter, TUI, base coder, extra coders) wait 1 hour before idle expiry. Regular agents run inside main and have no idle limit of their own.
+- The main session rotates once per idle period: the 3570 s idle timer rotates it while the 1 hour cache is still warm. If the timer did not fire (app closed or restarted, machine asleep), the next prompt rotates a main over 80K whose last API response is over 1 hour old.
+- `/notes-gc [--dry-run]`, and chaude startup, move `notes/runs/` files older than 14 days into `notes/archive/runs-YYYY-MM.md`. Startup runs this only when `notes/runs/` has over 200 files or `notes/` is over 20 MB.
+- Release usage: `python3 scripts/release-usage.py --from <prev tag> --to <tag>` writes one release cycle's token usage for this project (local transcripts only).
 - `/lang` switches the screen between English and Korean. The language also applies to hook messages and child agent arguments.
 - `chaude doctor` and `/doctor` check old binaries (below 0.12.0), PATH order, the install lock (macOS uchg), hook wiring, Claude login, and `target/` size. Each check prints OK, WARN, or FAIL with a fix hint.
 - `agent_wait` in `.chaude/settings.json` (default `true`): a main reply waits for its running Agent/Task calls before it finishes.
@@ -87,7 +90,7 @@ An older install at `/usr/local/bin/chaude` is not removed by the installer. If 
 To pin a version, set `CHAUDE_VERSION`:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.7 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.8 bash
 ```
 
 Needs `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, and `sha256sum` or `shasum`.
@@ -131,7 +134,7 @@ Type a question or task in the input box at the bottom and press `Enter`. The de
 
 | Key | Action |
 |---|---|
-| `Enter` | Send the input |
+| `Enter` | Send the input (the first Enter after a key submits; a Korean IME commit that arrives with Enter also submits) |
 | `alt+enter` or `ctrl+j` | New line (a line ending with `\` + `Enter` also makes a new line) |
 | `↑` / `↓` | Previous or next input. Up to 500 entries are kept |
 | `tab` | Complete a slash command. Type `/` to open the list |

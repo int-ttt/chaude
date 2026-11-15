@@ -31,6 +31,9 @@ Claude Code를 채팅 형식의 프롬프트로 쓸 수 있고, 반복 작업은
 - Bash 훅 `bash-py-guard.py`는 인라인 Python이나 node로 하는 파일 편집(`open(..., 'w')`, `write_text`, `fs.writeFile*`)을 거부합니다. 읽기 전용 코드와 `python3 -m pytest`는 그대로 허용합니다 (0.11.4).
 - Windows에서는 가드 훅이 `python3`이 아니라 `py -3`(또는 `python`)으로 실행됩니다. Microsoft Store의 `python3` 스텁 때문에 가드가 열린 상태(fail open)가 되었기 때문입니다 (0.11.7). 기존 프로젝트에는 다시 적용하세요. `.claude/settings.json`의 `python3`을 `py -3` 또는 `python`으로 바꾸거나, `chaude gen-settings windows --out .claude/settings.json`으로 다시 만드세요.
 - 세션(메인, prompter, TUI, 기본 coder, 추가 coder)은 1시간 동안 쉬어야 유휴 만료됩니다. 일반 에이전트는 메인 안에서 실행되며 자체 유휴 제한이 없습니다.
+- 메인 세션은 유휴 구간당 한 번 회전합니다. 3570 s 유휴 타이머가 1시간 캐시가 살아 있는 동안 회전시킵니다. 타이머가 발동하지 못했다면(앱 종료·재시작, 기기 절전) 다음 입력 시 마지막 API 응답이 1시간을 넘고 80K를 넘는 메인을 회전합니다.
+- `/notes-gc [--dry-run]`과 chaude 시작 시, 14일이 넘은 `notes/runs/` 파일을 `notes/archive/runs-YYYY-MM.md`로 묶습니다. 시작 시에는 `notes/runs/` 파일이 200개를 넘거나 `notes/`가 20 MB를 넘을 때만 실행합니다.
+- 릴리스 사용량: `python3 scripts/release-usage.py --from <이전 태그> --to <태그>`가 이 프로젝트의 릴리스 주기 토큰 사용량을 씁니다(로컬 기록만 사용).
 - `/lang`으로 화면 언어를 영어와 한국어 사이에서 바꿉니다. 언어 설정은 훅 메시지와 하위 에이전트 인자에도 적용됩니다.
 - `chaude doctor`와 `/doctor`는 구버전 바이너리(0.12.0 미만), PATH 순서, 설치본 잠금(macOS uchg), 훅 연결, Claude 로그인, `target/` 크기를 점검합니다. 각 항목은 OK, WARN, FAIL 중 하나와 조치 안내를 보여 줍니다.
 - `.chaude/settings.json`의 `agent_wait`(기본값 `true`): 메인 답변은 실행 중인 Agent/Task 호출이 끝날 때까지 기다린 뒤 끝납니다.
@@ -87,7 +90,7 @@ chaude --version
 버전을 고정하려면 `CHAUDE_VERSION`을 지정합니다:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.7 bash
+curl -fsSL https://raw.githubusercontent.com/int-ttt/chaude/master/install.sh | CHAUDE_VERSION=v0.12.8 bash
 ```
 
 `curl`, `tar`, `awk`, `sed`, `install`, `mktemp`, 그리고 `sha256sum` 또는 `shasum`이 필요합니다.
@@ -131,7 +134,7 @@ chaude
 
 | 키 | 동작 |
 |---|---|
-| `Enter` | 입력 보내기 |
+| `Enter` | 입력 보내기 (키 하나 뒤의 첫 Enter로 바로 보냅니다. 한글 IME 조합 확정과 함께 온 Enter도 보냅니다) |
 | `alt+enter` 또는 `ctrl+j` | 줄 바꿈 (`\` 뒤에 `Enter`를 눌러도 줄이 바뀝니다) |
 | `↑` / `↓` | 이전 또는 다음 입력. 최대 500개를 기억합니다 |
 | `tab` | 슬래시 명령 완성. `/`를 입력하면 목록이 열립니다 |
