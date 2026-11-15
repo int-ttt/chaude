@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- tui: the transcript keeps an entry-to-first-row index, so looking up an entry's row no longer scans every row; it is kept in step on push, redraw, insert and rewind cut. The output is unchanged (snapshots stay byte-identical).
+  - tui: 트랜스크립트가 항목→첫 행 인덱스를 유지하므로, 항목의 행을 찾을 때 모든 행을 훑지 않습니다. 쌓기, 다시 그리기, 삽입, 되감기 절단 때마다 함께 갱신합니다. 출력은 그대로입니다(스냅샷은 바이트 단위로 동일).
 - tui: the transcript's row-keyed maps (tool, stage and resume rows, wide and linked rows, prompts) now hold core entry indexes; rewind, import and the record picker cut by entry and resolve rows through the row-to-entry map; the output is unchanged (snapshots stay byte-identical). Rewind also drops the resume rows, and clearing the transcript clears the tool, stage and resume rows.
   - tui: 트랜스크립트의 행 기준 맵(도구·단계·재개 행, 넓은·연결된 행, 프롬프트)이 이제 코어 항목 인덱스를 담습니다. 되감기, 가져오기, 기록 선택기는 항목 기준으로 자르고, 행은 행→항목 매핑으로 찾습니다. 출력은 그대로입니다(스냅샷은 바이트 단위로 동일). 되감기는 재개 행도 정리하고, 트랜스크립트를 비우면 도구·단계·재개 행도 함께 비웁니다.
 - tui: streamed assistant and agent text is pushed as core `Entry::Text` rows: the open entry grows in place as lines complete and is redrawn from its text; the output is unchanged (snapshots stay byte-identical, including a multi-chunk stream split mid-line).

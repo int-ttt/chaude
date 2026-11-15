@@ -149,6 +149,9 @@ pub struct App {
     // index in entries of the entry that drew transcript row r; NO_ENTRY marks a row still pushed as a raw string.
     entries: Transcript,
     row_entry: Vec<usize>,
+    // entry_row[e] is the first transcript row that entry e drew, so row_of_entry is a lookup, not a scan.
+    // Kept in step with entries and row_entry on every push, redraw, insert and cut.
+    entry_row: Vec<usize>,
     // True while the main assistant block has emitted its first line (the "● " lead is written once).
     main_open: bool,
     // Unfinished text (no newline yet) per role. Agent text shares one buffer; it is flushed at its MessageDone.
@@ -269,6 +272,7 @@ impl App {
             transcript: Vec::new(),
             entries: Transcript::default(),
             row_entry: Vec::new(),
+            entry_row: Vec::new(),
             main_open: false,
             pending_main: String::new(),
             pending_agent: String::new(),
@@ -1292,6 +1296,7 @@ impl App {
         self.transcript.clear();
         self.entries = Transcript::default();
         self.row_entry.clear();
+        self.entry_row.clear();
         self.wide.clear();
         self.linked.clear();
         self.prompts.clear();
@@ -1680,6 +1685,11 @@ impl App {
         let n = rows.len();
         self.transcript.splice(start..end, rows);
         self.row_entry.splice(start..end, vec![idx; n]);
+        // The entries after this one start `n - (end - start)` rows later (or earlier).
+        let delta = n.wrapping_sub(end - start);
+        for r in self.entry_row[idx + 1..].iter_mut() {
+            *r = r.wrapping_add(delta);
+        }
     }
 
     // Marks the open Text entry of `role` done. Its rows stay as they are.
@@ -1713,6 +1723,7 @@ impl App {
     fn push_entry_rows(&mut self, e: Entry, rows: Vec<String>) -> usize {
         self.sync_rows();
         debug_assert!(!rows.is_empty(), "entry kind not switched to the TUI yet");
+        self.entry_row.push(self.transcript.len());
         self.row_entry.extend(vec![self.entries.len(); rows.len()]);
         self.transcript.extend(rows);
         self.entries.push(e);
@@ -1734,9 +1745,9 @@ impl App {
 
     // The first transcript row that entry `e` drew (the transcript length when none did).
     fn row_of_entry(&self, e: usize) -> usize {
-        self.row_entry
-            .iter()
-            .position(|&x| x == e)
+        self.entry_row
+            .get(e)
+            .copied()
             .unwrap_or(self.transcript.len())
     }
 
@@ -1776,14 +1787,17 @@ impl App {
         }
         let mut map = Vec::new();
         let mut rows = Vec::new();
+        let mut starts = Vec::new();
         for (i, e) in es.iter().enumerate() {
             let drawn = entry_rows(e);
+            starts.push(at + rows.len());
             map.extend(vec![at_entry + i; drawn.len()]);
             rows.extend(drawn);
         }
         self.entries.entries.splice(at_entry..at_entry, es);
         self.insert_rows(at, rows);
         self.row_entry[at..at + map.len()].copy_from_slice(&map);
+        self.entry_row.splice(at_entry..at_entry, starts);
     }
 
     // Shifts the entry-keyed records at or after entry `at` by `k`, for k entries inserted there.
@@ -1816,6 +1830,7 @@ impl App {
             .max()
             .unwrap_or(0);
         self.entries.entries.truncate(keep);
+        self.entry_row.truncate(keep);
         self.row_entry.truncate(n);
         self.transcript.truncate(n);
     }
@@ -1901,6 +1916,10 @@ impl App {
         self.sync_rows();
         self.row_entry.splice(at..at, vec![NO_ENTRY; n]);
         self.transcript.splice(at..at, rows);
+        // Entries that start at or after `at` move down by the inserted rows.
+        for r in self.entry_row.iter_mut().filter(|r| **r >= at) {
+            *r += n;
+        }
         if let Some((start, before)) = anchor {
             let grown = self.total_rows(self.cols).saturating_sub(before);
             if !self.follow && start <= self.top {
@@ -8975,6 +8994,35 @@ mod transcript_snapshots {
                 .all(|e| !matches!(e, Entry::Text { done: false, .. }))
         );
         assert_eq!(app.row_entry.len(), app.transcript.len());
+        assert_entry_rows(&app);
+    }
+
+    // entry_row (the first row of each entry) agrees with the row map: pushes, inserts and cuts keep it in step.
+    #[test]
+    fn entry_row_index_follows_pushes_inserts_and_cuts() {
+        let mut app = App::new(60, 24);
+        app.echo_prompt("hi\nthere");
+        app.push_entry(Entry::Status("mode: x".into()));
+        app.push_entry(Entry::Blank);
+        assert_entry_rows(&app);
+        app.transcript.push("raw".into());
+        app.insert_rows(0, vec!["x".into(), "y".into()]);
+        assert_entry_rows(&app);
+        app.insert_entries(1, vec![Entry::Notice("n1\nn2".into())]);
+        assert_entry_rows(&app);
+        let before = app.entries.len();
+        app.truncate_transcript(4);
+        assert_entry_rows(&app);
+        assert!(app.entries.len() < before);
+    }
+
+    // Checks entry_row against the row map for every entry.
+    fn assert_entry_rows(app: &App) {
+        assert_eq!(app.entry_row.len(), app.entries.len());
+        for e in 0..app.entries.len() {
+            let first = app.row_entry.iter().position(|&x| x == e);
+            assert_eq!(Some(app.row_of_entry(e)), first, "entry {e}");
+        }
     }
 
     #[test]
