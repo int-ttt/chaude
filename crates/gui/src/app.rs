@@ -33,6 +33,43 @@ pub struct ChaudeApp {
     input_focused: bool,
     // Set on submit: the output pane jumps to the tail for one frame.
     jump_tail: bool,
+    // Output pane metrics from the last frame (scroll offset, largest offset, viewport height in points).
+    view: ScrollView,
+    // Keyboard scroll target for the next frame (PageUp/PageDown/Home), in points.
+    scroll_to: Option<f32>,
+    // True while the output shows the tail; false once the user scrolls up.
+    follow: bool,
+    // Output arrived while not following (the TUI's unseen-output bar).
+    unseen: bool,
+}
+
+// Output pane geometry from the last frame, in points.
+#[derive(Clone, Copy, Default)]
+struct ScrollView {
+    offset: f32,
+    max: f32,
+    viewport: f32,
+}
+
+// Scroll keys: PageUp/PageDown move a page; Home/End go to the top or the tail (when the input box is empty).
+#[derive(Clone, Copy)]
+enum Jump {
+    Up,
+    Down,
+    Home,
+    End,
+}
+
+// Events that add visible transcript rows (the TUI's content rule for the unseen-output bar).
+fn adds_output(ev: &UiEvent) -> bool {
+    matches!(
+        ev,
+        UiEvent::TextDelta { .. }
+            | UiEvent::ToolStart { .. }
+            | UiEvent::ToolResult { .. }
+            | UiEvent::Notice { .. }
+            | UiEvent::Error(_)
+    )
 }
 
 impl ChaudeApp {
@@ -55,12 +92,19 @@ impl ChaudeApp {
             input: Input::new(&cwd),
             input_focused: false,
             jump_tail: false,
+            view: ScrollView::default(),
+            scroll_to: None,
+            follow: true,
+            unseen: false,
         }
     }
 
     fn drain(&mut self) {
         if let Some(rx) = &self.rx {
             while let Ok(ev) = rx.try_recv() {
+                if !self.follow && adds_output(&ev) {
+                    self.unseen = true;
+                }
                 self.state.apply(ev, Instant::now());
             }
         }
@@ -75,6 +119,12 @@ impl ChaudeApp {
         engine.submit(&text);
         self.state.push_user(&text);
         self.jump_tail = true;
+    }
+
+    // Moves the output by delta points from the last frame's offset, clamped to the scroll range.
+    fn scroll_by(&mut self, delta: f32) {
+        let to = (self.view.offset + delta).clamp(0.0, self.view.max);
+        self.scroll_to = Some(to);
     }
 
     // Moves the widget's cursor to the editor's cursor after the editor changed the text (history, Enter).
@@ -108,11 +158,14 @@ impl ChaudeApp {
 
     // Global keys, consumed before any widget sees them. While a permission prompt is open: y/Enter allow,
     // n/Esc deny, Ctrl+C deny and interrupt. Otherwise Esc cancels a held reply's wait or interrupts a busy turn,
-    // Ctrl+C interrupts or quits, Ctrl+D quits, and Shift+Tab cycles the mode.
+    // Ctrl+C interrupts or quits, Ctrl+D quits, Shift+Tab cycles the mode, and PageUp/PageDown (plus Home/End on an
+    // empty input box, as the TUI) scroll the output.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let perm = self.state.permission.is_some();
+        let input_empty = self.input.text().is_empty();
         let (mut allow, mut deny, mut ctrl_c, mut ctrl_d, mut esc, mut mode) =
             (false, false, false, false, false, false);
+        let mut jump = None;
         ctx.input_mut(|i| {
             if perm {
                 allow = i.consume_key(Modifiers::NONE, Key::Y)
@@ -124,9 +177,28 @@ impl ChaudeApp {
                 esc = i.consume_key(Modifiers::NONE, Key::Escape);
                 ctrl_c = i.consume_key(Modifiers::CTRL, Key::C);
                 ctrl_d = i.consume_key(Modifiers::CTRL, Key::D);
+                for (k, j) in [(Key::PageUp, Jump::Up), (Key::PageDown, Jump::Down)] {
+                    if i.consume_key(Modifiers::NONE, k) {
+                        jump = Some(j);
+                    }
+                }
+                if input_empty {
+                    for (k, j) in [(Key::Home, Jump::Home), (Key::End, Jump::End)] {
+                        if i.consume_key(Modifiers::NONE, k) {
+                            jump = Some(j);
+                        }
+                    }
+                }
             }
             mode = i.consume_key(Modifiers::SHIFT, Key::Tab);
         });
+        match jump {
+            Some(Jump::Up) => self.scroll_by(-self.view.viewport),
+            Some(Jump::Down) => self.scroll_by(self.view.viewport),
+            Some(Jump::Home) => self.scroll_to = Some(0.0),
+            Some(Jump::End) => self.jump_tail = true,
+            None => {}
+        }
         if perm {
             if ctrl_c {
                 self.answer(false, true);
@@ -221,6 +293,10 @@ impl ChaudeApp {
         for (desc, secs) in &bar.agents {
             top.push_str(&bar_text::agent_segment(lang, desc, *secs));
         }
+        // Unseen output while scrolled up: the TUI's "↓ new message" marker on the top row.
+        if self.unseen && !self.follow {
+            top = format!("{top} · {}", i18n::t(Msg::NewMessage));
+        }
         ui.weak(top);
         ui.weak(bar_text::bottom_text(lang, &bar));
     }
@@ -304,12 +380,26 @@ impl ChaudeApp {
         if std::mem::take(&mut self.jump_tail) {
             area = area.vertical_scroll_offset(f32::INFINITY);
         }
-        area.show(ui, |ui| {
+        if let Some(to) = self.scroll_to.take() {
+            area = area.vertical_scroll_offset(to);
+        }
+        let out = area.show(ui, |ui| {
             welcome(ui, &self.state);
             for entry in &self.state.transcript.entries {
                 render_entry(ui, &mut self.md, entry);
             }
         });
+        let viewport = out.inner_rect.height();
+        let max = (out.content_size.y - viewport).max(0.0);
+        self.view = ScrollView {
+            offset: out.state.clamped_offset().y,
+            max,
+            viewport,
+        };
+        self.follow = max - out.state.clamped_offset().y <= 1.0;
+        if self.follow {
+            self.unseen = false;
+        }
     }
 }
 
