@@ -1,103 +1,59 @@
 //! /settings cursor picker over <project>/.chaude/settings.json (Go settings_picker.go; chaude_settings.go).
 //! The picker edits a working copy. Esc, ctrl+c or q saves it and closes; the caller appends the returned note.
 //! Changes to extra_coders and main_model apply at the next session start; session_retention_days too.
+//! The model (rows, value cycling, save) is core (settings::pickers) and shared with the GUI; this file keeps the
+//! terminal keys and drawing.
 
-use std::path::{Path, PathBuf};
-
-use chaude_core::i18n::{Msg, t, tf};
-use chaude_core::settings::chaude_settings::{MAX_EXTRA_CODERS, MODEL_CHOICES, RETAIN_CHOICES};
-pub use chaude_core::settings::chaude_settings::{
-    Settings, file_for, load, prune_records_at_startup, save,
-};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use chaude_core::i18n::{Msg, t};
 
 use super::bar::clip;
 use super::render::{FG_OFF, GREY_ON, ORANGE_ON};
 
-// Picker rows (the settings picker and its key handling live here; the data model is in chaude_core).
-pub const ROWS: usize = 3;
+pub use chaude_core::settings::chaude_settings::{
+    Settings, file_for, load, prune_records_at_startup, save,
+};
+pub use chaude_core::settings::pickers::{SETTINGS_ROWS as ROWS, SettingsPicker as Picker};
 
-// Go settingsPick: the open picker. `path` is None when the cwd is unknown (Go "").
-pub struct Picker {
-    pub s: Settings,
-    pub sel: usize,
-    pub path: Option<PathBuf>,
+// Terminal keys and drawing for the shared SettingsPicker model.
+pub trait PickerView {
+    fn wheel(&mut self, up: bool);
+    fn key(&mut self, key: KeyEvent) -> Option<String>;
+    fn close_note(&mut self) -> String;
+    fn lines(&self, width: usize, h: usize) -> Vec<String>;
 }
 
-impl Picker {
-    // Go openSettings: loads the file into the picker. Safe while busy: it only reads and edits a copy.
-    pub fn open(cwd: Option<&Path>) -> Self {
-        let path = file_for(cwd);
-        Picker {
-            s: load(path.as_deref()),
-            sel: 0,
-            path,
-        }
-    }
-
+impl PickerView for Picker {
     // Go tui.go wheel branch on the settings picker: wheelSel over the three rows.
-    pub fn wheel(&mut self, up: bool) {
+    fn wheel(&mut self, up: bool) {
         super::sessview::wheel_sel(&mut self.sel, ROWS, up);
     }
 
     // Go settingsKey. Returns the note to append when the key closes the picker (after saving), else None.
-    pub fn key(&mut self, key: KeyEvent) -> Option<String> {
+    fn key(&mut self, key: KeyEvent) -> Option<String> {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.sel = (self.sel + ROWS - 1) % ROWS,
-            KeyCode::Down | KeyCode::Char('j') => self.sel = (self.sel + 1) % ROWS,
+            KeyCode::Up | KeyCode::Char('k') => self.step(true),
+            KeyCode::Down | KeyCode::Char('j') => self.step(false),
             KeyCode::Left | KeyCode::Char('h') => self.change(-1),
             KeyCode::Right | KeyCode::Char('l') | KeyCode::Enter => self.change(1),
-            KeyCode::Esc => return Some(self.close()),
+            KeyCode::Esc => return Some(self.close_note()),
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Some(self.close());
+                return Some(self.close_note());
             }
-            KeyCode::Char('q') => return Some(self.close()),
+            KeyCode::Char('q') => return Some(self.close_note()),
             _ => {}
         }
         None
     }
 
-    // Go closeSettings: saves the working copy and returns the note that says what applies when.
-    pub fn close(&mut self) -> String {
-        match &self.path {
-            None => t(Msg::SettingsNoPath).to_string(),
-            Some(p) => match save(p, &self.s) {
-                Ok(()) => tf(Msg::SettingsSaved, &[&p.display()]),
-                Err(e) => tf(Msg::SettingsSaveFailed, &[&e]),
-            },
-        }
-    }
-
-    // Go settingsPick.change: steps the selected row by dir (+1/-1), wrapping.
-    pub fn change(&mut self, dir: i64) {
-        match self.sel {
-            0 => {
-                let n = RETAIN_CHOICES.len() as i64;
-                let i = RETAIN_CHOICES
-                    .iter()
-                    .position(|&v| v == self.s.session_retention_days)
-                    .unwrap_or(0) as i64;
-                self.s.session_retention_days = RETAIN_CHOICES[((i + dir).rem_euclid(n)) as usize];
-            }
-            1 => {
-                let n = MAX_EXTRA_CODERS + 1;
-                self.s.extra_coders = (self.s.extra_coders + dir).rem_euclid(n);
-            }
-            2 => {
-                let n = MODEL_CHOICES.len() as i64;
-                let i = MODEL_CHOICES
-                    .iter()
-                    .position(|&v| v == self.s.main_model)
-                    .unwrap_or(0) as i64;
-                self.s.main_model = MODEL_CHOICES[((i + dir).rem_euclid(n)) as usize].to_string();
-            }
-            _ => {}
-        }
+    fn close_note(&mut self) -> String {
+        self.close()
     }
 
     // Go settingsLines: header, three rows (selected orange with "> ", others dim), a dim note; padded or
     // cut to `h` lines. Rows are clipped to `width` columns.
-    pub fn lines(&self, width: usize, h: usize) -> Vec<String> {
+    fn lines(&self, width: usize, h: usize) -> Vec<String> {
         let mut l = vec![format!(
             "{ORANGE_ON}{}{FG_OFF}",
             clip(
@@ -105,21 +61,7 @@ impl Picker {
                 width
             )
         )];
-        let rows = [
-            format!(
-                "session_retention_days  {}",
-                tf(Msg::RetainDays, &[&self.s.session_retention_days])
-            ),
-            format!(
-                "extra_coders            {}",
-                tf(
-                    Msg::ExtraCoders,
-                    &[&self.s.extra_coders, &chaude_core::api::CODER_IDLE_TTL_SECS]
-                )
-            ),
-            format!("main_model              {}", self.s.main_model),
-        ];
-        for (i, r) in rows.iter().enumerate() {
+        for (i, r) in self.rows().iter().enumerate() {
             let row = if i == self.sel {
                 format!("{ORANGE_ON}{}{FG_OFF}", clip(&format!("> {r}"), width))
             } else {
@@ -142,6 +84,7 @@ mod tests {
     use super::*;
     use chaude_core::record::dir_for;
     use std::fs;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     // A fresh directory under the system temp dir, unique per call.

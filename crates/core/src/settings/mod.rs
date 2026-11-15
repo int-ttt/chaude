@@ -3,6 +3,7 @@
 //! so no shell is needed.
 
 pub mod chaude_settings;
+pub mod pickers;
 pub mod project;
 
 use std::env;

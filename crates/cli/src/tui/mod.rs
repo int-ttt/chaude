@@ -54,7 +54,9 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use bar::BarInput;
 use chaude_core::editor::Editor;
 use commands::{Ctx, PermMode, SlashOutcome};
+use lang::LangView;
 use render::{BOLD_OFF, BOLD_ON, FG_OFF, GREY_ON, ORANGE_ON, RESET};
+use settings::PickerView;
 
 const TICK: Duration = Duration::from_millis(80);
 // Shortest gap between two frames (about 60 fps). Output that arrives faster is coalesced into the next frame.
