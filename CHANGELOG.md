@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- gui: `/view` level 2 scrolls the prompt body with up/down and k/j (one row), PageUp/PageDown (a window) and Home/End (the ends); left/right resets the scroll. The previous-session mode note (`previous session: ...`) shows at start and on each `/view`, as in the TUI. The GUI now starts the engine with the project handoff file (`notes/tmp/long`), so the previous run resumes or starts fresh the same way as in the TUI.
+  - gui: `/view` 2단계에서 위/아래와 k/j는 한 줄, PageUp/PageDown은 한 화면, Home/End는 처음과 끝으로 본문을 스크롤하고, ←/→는 스크롤을 처음으로 되돌립니다. 이전 세션 모드 안내(`previous session: ...`)는 시작할 때와 `/view`마다 TUI처럼 표시됩니다. GUI는 이제 프로젝트 handoff 파일(`notes/tmp/long`)로 엔진을 시작하므로, 이전 실행을 TUI와 같은 방식으로 이어 가거나 새로 시작합니다.
+- core: the previous-session mode note (`session_mode_note`) moved from the TUI into shared `chaude_core::handoff`; the TUI output is unchanged.
+  - core: 이전 세션 모드 안내(`session_mode_note`)를 TUI에서 공용 `chaude_core::handoff`로 옮겼습니다. TUI 출력은 그대로입니다.
 - gui: `/import [id|latest|a,b]` reads the Claude Code transcript into the view as the TUI does (without the /resume digest) and installs it for the next prompt; the "not in the GUI yet" note for /import is gone.
   - gui: `/import [id|latest|a,b]`는 TUI처럼 Claude Code 기록을 트랜스크립트에 읽어 보여 주고(/resume의 요약 기록 없이), 다음 프롬프트를 위해 엔진에 설치합니다. /import의 "GUI에 아직 없음" 안내는 없어졌습니다.
 - core: the /resume group lookup and the transcript reads for /resume and /import take the home (`group_pick::groups`, `import_claude::*_in`), so tests use a temp dir and never the real $HOME; the import install note is shared as `import_claude::INSTALL_NOTE`. The TUI output is unchanged.
