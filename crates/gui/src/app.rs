@@ -210,7 +210,7 @@ impl ChaudeApp {
             area = area.vertical_scroll_offset(f32::INFINITY);
         }
         area.show(ui, |ui| {
-            for entry in &self.state.transcript {
+            for entry in &self.state.transcript.entries {
                 render_entry(ui, &mut self.md, entry);
             }
         });

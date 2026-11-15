@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use chaude_core::api::{AgentRow, Role, UiEvent};
-use chaude_core::ui_state::{BarInput, Entry, RunState};
+use chaude_core::ui_state::{BarInput, Entry, RunState, Transcript};
 
 // A can_use_tool request waiting for the user (UiEvent::PermissionRequest).
 #[derive(Debug, Clone, PartialEq)]
@@ -16,7 +16,7 @@ pub struct Permission {
 
 #[derive(Debug, Default)]
 pub struct GuiState {
-    pub transcript: Vec<Entry>,
+    pub transcript: Transcript,
     // Status-bar data. turn_secs and the agent list are derived in bar_at, not stored here.
     pub bar: BarInput,
     // Engine progress shared with the TUI: busy turn, agent rows, tasks, rotations (core ui_state::RunState).
@@ -27,7 +27,7 @@ pub struct GuiState {
 impl GuiState {
     // Echoes a prompt the user sent. Prompt history is kept by the input box (crate::input, core Editor).
     pub fn push_user(&mut self, text: &str) {
-        self.transcript.push(Entry::User(text.to_string()));
+        self.transcript.push_user(text);
     }
 
     // Applies one engine event. now is the time it arrived (turn timer start).
@@ -35,31 +35,25 @@ impl GuiState {
         match ev {
             UiEvent::TextDelta { role, text } => {
                 let i = self.open_text(&role);
-                if let Entry::Text { text: t, .. } = &mut self.transcript[i] {
+                if let Entry::Text { text: t, .. } = &mut self.transcript.entries[i] {
                     t.push_str(&text);
                 }
             }
             UiEvent::MessageDone { role } => {
                 if let Some(i) = self.open_text_index(&role)
-                    && let Entry::Text { done, .. } = &mut self.transcript[i]
+                    && let Entry::Text { done, .. } = &mut self.transcript.entries[i]
                 {
                     *done = true;
                 }
             }
             UiEvent::ToolStart { id, name, summary } => {
                 // The GUI draws no time, so the start stays 0 (the TUI stamps its own rows).
-                self.transcript.push(Entry::Tool {
-                    id,
-                    name,
-                    summary,
-                    ok: None,
-                    start: 0,
-                    end: None,
-                });
+                self.transcript.push_tool(id, name, summary, 0);
             }
             UiEvent::ToolEnd { id, ok } => {
                 if let Some(Entry::Tool { ok: slot, .. }) = self
                     .transcript
+                    .entries
                     .iter_mut()
                     .rev()
                     .find(|e| matches!(e, Entry::Tool { id: i, .. } if *i == id))
@@ -127,10 +121,10 @@ impl GuiState {
             UiEvent::CoderContexts { coders } => self.bar.coders = coders,
             UiEvent::Rotated { reason } => {
                 self.run.rot += 1;
-                self.transcript.push(Entry::Notice(reason));
+                self.transcript.push_notice(reason);
             }
-            UiEvent::Notice { text } => self.transcript.push(Entry::Notice(text)),
-            UiEvent::Error(text) => self.transcript.push(Entry::Error(text)),
+            UiEvent::Notice { text } => self.transcript.push_notice(text),
+            UiEvent::Error(text) => self.transcript.push_error(text),
             UiEvent::PermissionRequest { id, tool, summary } => {
                 self.permission = Some(Permission { id, tool, summary });
             }
@@ -165,6 +159,7 @@ impl GuiState {
 
     fn open_text_index(&self, role: &Role) -> Option<usize> {
         self.transcript
+            .entries
             .iter()
             .rposition(|e| matches!(e, Entry::Text { role: r, done: false, .. } if r == role))
     }
@@ -172,17 +167,14 @@ impl GuiState {
     // The open text row of this role, started when none is open.
     fn open_text(&mut self, role: &Role) -> usize {
         self.open_text_index(role).unwrap_or_else(|| {
-            self.transcript.push(Entry::Text {
-                role: role.clone(),
-                text: String::new(),
-                done: false,
-            });
+            self.transcript.push_text(role.clone(), "", false);
             self.transcript.len() - 1
         })
     }
 
     fn find_agent(&mut self, id: &str) -> Option<&mut Entry> {
         self.transcript
+            .entries
             .iter_mut()
             .rev()
             .find(|e| matches!(e, Entry::Agent { id: i, .. } if i == id))
@@ -213,7 +205,7 @@ mod tests {
         st.apply(UiEvent::MessageDone { role: Role::Main }, now);
         st.apply(text(Role::Main, "next"), now);
         assert_eq!(
-            st.transcript,
+            st.transcript.entries,
             [
                 Entry::Text {
                     role: Role::Main,
@@ -239,7 +231,7 @@ mod tests {
         st.apply(text(Role::Main, "c"), now);
         assert_eq!(st.transcript.len(), 2);
         assert_eq!(
-            st.transcript[0],
+            st.transcript.entries[0],
             Entry::Text {
                 role: Role::Main,
                 text: "ac".into(),
@@ -247,7 +239,10 @@ mod tests {
             }
         );
         st.apply(UiEvent::MessageDone { role: agent }, now);
-        assert!(matches!(&st.transcript[1], Entry::Text { done: true, .. }));
+        assert!(matches!(
+            &st.transcript.entries[1],
+            Entry::Text { done: true, .. }
+        ));
     }
 
     #[test]
@@ -278,13 +273,16 @@ mod tests {
             now,
         );
         assert!(matches!(
-            &st.transcript[0],
+            &st.transcript.entries[0],
             Entry::Tool {
                 ok: Some(false),
                 ..
             }
         ));
-        assert!(matches!(&st.transcript[1], Entry::Tool { ok: None, .. }));
+        assert!(matches!(
+            &st.transcript.entries[1],
+            Entry::Tool { ok: None, .. }
+        ));
     }
 
     #[test]
@@ -310,7 +308,7 @@ mod tests {
             now,
         );
         assert_eq!(
-            st.transcript[0],
+            st.transcript.entries[0],
             Entry::Agent {
                 id: "g1".into(),
                 description: "scan".into(),
@@ -479,7 +477,7 @@ mod tests {
         st.push_user("hi");
         st.apply(UiEvent::Error("boom".into()), now);
         assert_eq!(
-            st.transcript,
+            st.transcript.entries,
             [
                 Entry::User("hi".into()),
                 Entry::User("".into()),

@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- gui: the transcript is the shared core `chaude_core::ui_state::Transcript` instead of a GUI-only list; the GUI pushes user, tool, notice, error and text rows through the same core helpers the TUI uses. Rendering is unchanged.
+  - gui: 트랜스크립트가 GUI 전용 목록 대신 공용 코어 `chaude_core::ui_state::Transcript`입니다. GUI는 사용자, 도구, 알림, 오류, 텍스트 행을 TUI와 같은 코어 도우미로 쌓습니다. 화면 그리기는 그대로입니다.
 - tui: the transcript keeps an entry-to-first-row index, so looking up an entry's row no longer scans every row; it is kept in step on push, redraw, insert and rewind cut. The output is unchanged (snapshots stay byte-identical).
   - tui: 트랜스크립트가 항목→첫 행 인덱스를 유지하므로, 항목의 행을 찾을 때 모든 행을 훑지 않습니다. 쌓기, 다시 그리기, 삽입, 되감기 절단 때마다 함께 갱신합니다. 출력은 그대로입니다(스냅샷은 바이트 단위로 동일).
 - tui: the transcript's row-keyed maps (tool, stage and resume rows, wide and linked rows, prompts) now hold core entry indexes; rewind, import and the record picker cut by entry and resolve rows through the row-to-entry map; the output is unchanged (snapshots stay byte-identical). Rewind also drops the resume rows, and clearing the transcript clears the tool, stage and resume rows.
