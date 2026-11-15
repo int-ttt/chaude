@@ -159,7 +159,7 @@ impl GuiState {
         if args.is_empty()
             && let Some(sid) = self.killed_sid.clone()
         {
-            let key = group_pick::killed_key(&self.cwd, &sid);
+            let key = group_pick::killed_key(self.home().as_deref(), &self.cwd, &sid);
             return self.import_view(&key);
         }
         let root = record::dir_for(Path::new(&self.cwd));
@@ -194,7 +194,7 @@ impl GuiState {
     // Lists the session groups for terms (TUI open_groups): one group imports at once, several open the picker, an
     // error is a notice.
     fn open_groups(&mut self, terms: &[String]) -> Option<ClaudeImport> {
-        match group_pick::groups(&self.cwd, terms) {
+        match group_pick::groups(self.home().as_deref(), &self.cwd, terms) {
             Err(e) => {
                 self.transcript.push_notice(e);
                 None
@@ -304,8 +304,13 @@ impl GuiState {
     }
 
     // /view <arg> (TUI open_view): the session list, or one session's prompts for a prefix. A failure is a notice.
+    // The Claude Code home: the injected one (tests), else $HOME / USERPROFILE.
+    fn home(&self) -> Option<PathBuf> {
+        self.home.clone().or_else(session_view::home_dir)
+    }
+
     pub fn open_view(&mut self, arg: &str) {
-        let Some(home) = self.home.clone().or_else(session_view::home_dir) else {
+        let Some(home) = self.home() else {
             self.transcript
                 .push_notice("$HOME is not defined".to_string());
             return;

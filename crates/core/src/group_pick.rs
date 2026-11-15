@@ -9,14 +9,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::handoff;
 use crate::import_claude::project_key;
 use crate::localtime::local_civil;
-use crate::osenv;
 use crate::record;
 use crate::resume_group::{self, SessionGroup};
 use crate::tmp_layout;
 
-// Go groupList: the groups of cwd's Claude Code project dir matching terms. Err is the status line.
-pub fn groups(cwd: &str, terms: &[String]) -> Result<Vec<SessionGroup>, String> {
-    let home = osenv::try_home_dir().ok_or_else(|| "$HOME is not defined".to_string())?;
+// Go groupList: the groups of cwd's Claude Code project dir under home matching terms. Err is the status line; a
+// None home (no $HOME) is that line too. Callers pass the user's home, tests a temp dir.
+pub fn groups(
+    home: Option<&Path>,
+    cwd: &str,
+    terms: &[String],
+) -> Result<Vec<SessionGroup>, String> {
+    let home = home.ok_or_else(|| "$HOME is not defined".to_string())?;
     let claude = home.join(".claude").join("projects").join(project_key(cwd));
     let marks = resume_group::clear_mark_path(&record::dir_for(Path::new(cwd)));
     resume_group::group_list(&claude, &marks, cwd, terms)
@@ -31,8 +35,8 @@ pub fn killed_session(cwd: &str) -> Option<String> {
 
 // The import key of the group that holds sid (as /resume claude does). When no group lists it, the bare id is the
 // key and the import reports the error.
-pub fn killed_key(cwd: &str, sid: &str) -> String {
-    groups(cwd, &[])
+pub fn killed_key(home: Option<&Path>, cwd: &str, sid: &str) -> String {
+    groups(home, cwd, &[])
         .ok()
         .and_then(|gs| gs.into_iter().find(|g| g.files.iter().any(|f| f.id == sid)))
         .map_or_else(|| sid.to_string(), |g| g.key())
@@ -87,6 +91,22 @@ mod tests {
     use crate::resume_group::SessionInfo;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    // No $HOME is the status line; a temp home without the project dir is the list's own error. Neither reads the
+    // real $HOME.
+    #[test]
+    fn groups_take_an_injected_home() {
+        let tmp = crate::testutil::TempDir::new("group-home");
+        let cwd = tmp.path().join("proj").display().to_string();
+        assert_eq!(groups(None, &cwd, &[]).unwrap_err(), "$HOME is not defined");
+        let err = groups(Some(tmp.path()), &cwd, &[]).unwrap_err();
+        assert!(err.starts_with("no Claude Code sessions in "), "{err}");
+        assert_eq!(
+            killed_key(None, &cwd, "sid-1"),
+            "sid-1",
+            "no group: the bare id"
+        );
+    }
 
     fn group(id: &str) -> SessionGroup {
         SessionGroup {

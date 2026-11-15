@@ -1355,13 +1355,15 @@ impl App {
     // The group that holds the killed session is imported with its digest (import_view, as a single /resume claude
     // group). When no group lists it, the bare id is tried, and import_view notes the error.
     fn resume_killed(&mut self, sid: &str) {
-        let key = chaude_core::group_pick::killed_key(&self.welcome.cwd, sid);
+        let home = chaude_core::osenv::try_home_dir();
+        let key = chaude_core::group_pick::killed_key(home.as_deref(), &self.welcome.cwd, sid);
         self.import_view(&key, true);
     }
 
     // Go groupList + pick: one matching group imports it (sendImport), several open the picker, an error is the note.
     fn open_groups(&mut self, terms: &[String]) -> Action {
-        match chaude_core::group_pick::groups(&self.welcome.cwd, terms) {
+        let home = chaude_core::osenv::try_home_dir();
+        match chaude_core::group_pick::groups(home.as_deref(), &self.welcome.cwd, terms) {
             Err(e) => {
                 self.note(&e);
                 Action::Continue
