@@ -5,7 +5,7 @@ tools: Read
 model: haiku
 effort: high
 omitClaudeMd: true
-autoCompactWindow: 100000
+autoCompactWindow: 130000
 ---
 
 - input = R-* blocks / relay from agents (in the brief or relayed by main).

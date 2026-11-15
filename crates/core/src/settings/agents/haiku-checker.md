@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 model: haiku
 effort: low
 omitClaudeMd: true
-autoCompactWindow: 100000
+autoCompactWindow: 130000
 ---
 
 Do not edit. Run only the requested checks (grep new/old text per target; charcount --limit; facts vs FACTS.md; narrowest test command). Never claim an unrun check.

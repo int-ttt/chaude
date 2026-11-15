@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- agents: autocompact window 130000 so the 80K handoff runs first.
+  - agents: 자동 압축 창을 130000으로 올려 80K 인계가 먼저 실행되도록 했습니다.
 - agents: haiku-coder and haiku-batch-worker get a "Quiet output" rule: `-q` for cargo, `tail`/`head`/`-m` on long output, offset/limit reads, and re-run only the failing test, to cut repeated tool-output context.
   - agents: haiku-coder와 haiku-batch-worker에 "Quiet output" 규칙을 추가했습니다. cargo는 `-q`, 긴 출력은 `tail`/`head`/`-m`으로 자르고, 큰 파일은 offset/limit으로 읽고, 실패한 테스트만 다시 돌려 반복되는 도구 출력 맥락을 줄입니다.
 

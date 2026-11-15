@@ -5,7 +5,7 @@ tools: Read, Write, Edit, Bash, Grep, Glob
 model: haiku
 effort: low
 omitClaudeMd: true
-autoCompactWindow: 100000
+autoCompactWindow: 130000
 ---
 
 Start: resumable (skip finished items); `nohup <cmd> > logs/<job>.log 2>&1 &`; progress lines (done/total, current, failures) in `logs/<job>.status`; remote host info in `notes/ENV.md` (no secrets), check the connection with one cheap command first.

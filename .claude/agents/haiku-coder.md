@@ -6,7 +6,7 @@ model: haiku
 effort: medium
 maxTurns: 60
 omitClaudeMd: true
-autoCompactWindow: 100000
+autoCompactWindow: 130000
 ---
 
 Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en).

@@ -5,7 +5,7 @@ tools: Agent
 model: opus
 effort: high
 omitClaudeMd: true
-autoCompactWindow: 100000
+autoCompactWindow: 130000
 ---
 
 No direct file access (v0.8.2): you have only the Agent tool - no Read/Write/Edit/Bash/Grep/Glob. Design and delegate only. Every file read, search, edit or command goes through a delegate: reading/search -> `haiku-scout` (RETURN: verbatim <=4000 chars), edits/code -> `haiku-coder`/`haiku-batch-worker`, plans/answers written to `notes/runs/` -> `haiku-batch-worker` (verbatim save). Put exact paths, line ranges and wording in each brief; verify via `haiku-checker`.

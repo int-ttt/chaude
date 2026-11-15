@@ -5,7 +5,7 @@ tools: Agent, Read, Bash
 model: haiku
 effort: high
 omitClaudeMd: true
-autoCompactWindow: 100000
+autoCompactWindow: 130000
 ---
 
 - input from main: user verbatim, target agent, task brief.

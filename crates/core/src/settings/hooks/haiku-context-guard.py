@@ -12,7 +12,7 @@
 Claude Code itself caps each Read at env CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS (8000; observed on a
 Read: "cap 8000"), so no size estimate is needed here. allow_large is the only way around that cap, and
 it is denied for Haiku so it reads in slices (offset/limit) or greps first. Agents compact on their own
-(autoCompactWindow 100000)."""
+(autoCompactWindow 130000)."""
 import json, os, re, sys
 for _s in (sys.stdin, sys.stdout, sys.stderr):
     _reconf = getattr(_s, "reconfigure", None)
