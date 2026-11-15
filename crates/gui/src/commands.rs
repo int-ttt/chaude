@@ -1,8 +1,9 @@
 //! GUI side of the slash commands. Core dispatch decides what a line means; this maps each outcome to a GUI effect.
 //! The effect is plain data, so the mapping is unit-tested here without egui.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use chaude_core::record;
 use chaude_core::slash::{self, Ctx, PermMode, SlashOutcome};
 use chaude_core::ui_state::BarInput;
 
@@ -25,6 +26,8 @@ pub enum Effect {
     SetLang(String),
     // Opens the /settings picker on the project settings file (it saves when closed).
     OpenSettings,
+    // Opens the /resume record picker over the record folder of this project (the folder is the path).
+    OpenRecords(PathBuf),
     // The update check runs off the UI thread; its answer comes back as a notice.
     Update,
     // Plain prompts and the engine-side commands (/clear, /rotate, /model, /cost and the other passthroughs).
@@ -57,6 +60,9 @@ pub fn effect(outcome: SlashOutcome, cwd: &Path) -> Effect {
         SlashOutcome::SetLang(code) => Effect::SetLang(code),
         SlashOutcome::OpenSettings => Effect::OpenSettings,
         SlashOutcome::OpenView { .. } => Effect::Note(not_yet("/view")),
+        SlashOutcome::Resume { args } if args.is_empty() => {
+            Effect::OpenRecords(record::dir_for(cwd))
+        }
         SlashOutcome::Resume { .. } => Effect::Note(not_yet("/resume")),
         SlashOutcome::Import { .. } => Effect::Note(not_yet("/import")),
         SlashOutcome::ToggleMouse => {
@@ -153,7 +159,6 @@ mod tests {
     fn pickers_without_a_gui_window_say_so() {
         for (o, name) in [
             (SlashOutcome::OpenView { arg: String::new() }, "/view"),
-            (SlashOutcome::Resume { args: vec![] }, "/resume"),
             (
                 SlashOutcome::Import {
                     line: "/import".into(),
@@ -164,6 +169,19 @@ mod tests {
         ] {
             assert_eq!(effect(o, cwd()), Effect::Note(not_yet(name)), "{name}");
         }
+    }
+
+    #[test]
+    fn bare_resume_opens_the_record_picker_and_arguments_do_not() {
+        let o = SlashOutcome::Resume { args: vec![] };
+        assert_eq!(
+            effect(o, cwd()),
+            Effect::OpenRecords(record::dir_for(cwd()))
+        );
+        let o = SlashOutcome::Resume {
+            args: vec!["2".into()],
+        };
+        assert_eq!(effect(o, cwd()), Effect::Note(not_yet("/resume")));
     }
 
     #[test]

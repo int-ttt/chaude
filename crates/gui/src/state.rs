@@ -10,6 +10,9 @@ use chaude_core::bar_text;
 use chaude_core::handoff;
 use chaude_core::i18n::{self, Msg};
 use chaude_core::localtime::{clock_hhmmss, unix_now};
+use chaude_core::record_folder;
+use chaude_core::record_pick::{self, Picker};
+use chaude_core::record_turn;
 use chaude_core::resident::StagePhase;
 use chaude_core::rewind::{NOTHING, REWOUND, Rewind};
 use chaude_core::settings::pickers::{LangPicker, SettingsPicker};
@@ -63,6 +66,8 @@ pub struct GuiState {
     pub settings: Option<SettingsPicker>,
     // The open Esc Esc rewind picker (TUI m.rw). Its list, selection and cut are the core model (chaude_core::rewind).
     pub rewind: Rewind,
+    // The open /resume record picker (TUI m.recs). Its folder list and cursor are the core model (chaude_core::record_pick).
+    pub records: Option<Picker>,
 }
 
 // The transcript as the core rewind model reads it: each user prompt is a "user" block, the rest carry no text.
@@ -126,6 +131,93 @@ impl GuiState {
         self.stage_rows.retain(|_, r| r.idx < n);
         self.transcript.push_notice(REWOUND);
         Some(cut.text)
+    }
+
+    // Opens the /resume record picker over the folders under root (TUI resume with no argument). With no folder it
+    // notes what the core resume answers instead.
+    pub fn open_records(&mut self, root: &Path) {
+        match Picker::open(root, "") {
+            Err(e) => self.transcript.push_notice(e.to_string()),
+            Ok(Some(p)) => self.records = Some(p),
+            Ok(None) => match record_turn::resume(root, "", &record_pick::list_date) {
+                Err(e) => self.transcript.push_notice(e.to_string()),
+                Ok((lines, _)) => {
+                    for l in lines {
+                        self.transcript.push_notice(l);
+                    }
+                }
+            },
+        }
+    }
+
+    // Moves the record cursor up or down (no-op while closed).
+    pub fn records_step(&mut self, up: bool) {
+        if let Some(p) = self.records.as_mut() {
+            p.move_by(if up { -1 } else { 1 });
+        }
+    }
+
+    // A digit key: moves the record cursor to row i (out-of-range rows are ignored by the model).
+    pub fn records_select(&mut self, i: usize) {
+        if let Some(p) = self.records.as_mut() {
+            p.select(i);
+        }
+    }
+
+    // Closes the record picker without loading (TUI Close).
+    pub fn close_records(&mut self) {
+        self.records = None;
+    }
+
+    // The picker rows as the window shows them: "N) <name> · 파일 n개 · date" (TUI records::lines).
+    pub fn records_rows(&self) -> Vec<String> {
+        self.records
+            .as_ref()
+            .map(|p| {
+                p.projects
+                    .iter()
+                    .enumerate()
+                    .map(|(i, r)| format!("{:>2}) {}", i + 1, record_pick::row_text(r)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    // Loads the folder at row (Some for a click, None for Enter on the cursor row) into the transcript and closes the
+    // picker (TUI load_record). Returns true when the folder loaded.
+    pub fn records_pick(&mut self, row: Option<usize>) -> bool {
+        if let Some(i) = row {
+            self.records_select(i);
+        }
+        let Some(picker) = self.records.take() else {
+            return false;
+        };
+        let Some(p) = picker.chosen() else {
+            return false;
+        };
+        match record_folder::load_project(&p.dir) {
+            Err(e) => {
+                self.transcript.push_notice(e.to_string());
+                false
+            }
+            Ok(entries) => {
+                for e in &entries {
+                    self.record_block(&e.kind, &e.text);
+                }
+                true
+            }
+        }
+    }
+
+    // One record block in the transcript (TUI record_block): a user block is a prompt, an asst block a finished
+    // answer, any other kind a note; each block ends with a blank row.
+    fn record_block(&mut self, kind: &str, text: &str) {
+        match kind {
+            "user" => self.transcript.push_user(text),
+            "asst" => self.transcript.push_text(Role::Main, text, true),
+            _ => self.transcript.push_notice(text),
+        }
+        self.transcript.push_blank();
     }
 
     // Opens the /usage window with the loading text (TUI usage.open). The one-shot run answers through apply.
@@ -1241,5 +1333,124 @@ mod tests {
             st.transcript.entries.last(),
             Some(&Entry::Notice(NOTHING.into()))
         );
+    }
+
+    // One folder with one record file: a user "q" and an assistant answer "answer of <name>". Written under root
+    // (a temp dir, never ~/.claude).
+    fn write_record(root: &std::path::Path, name: &str) {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let body = format!(
+            "<!-- rec #0001 user 2026-10-31T10:00 cat={name} -->\n## #0001 · 10:00 · {name}\n\nq\n\n\
+             <!-- rec #0001 asst 2026-10-31T10:00 cat={name} -->\n## #0001 · 10:00 · {name}\n\nanswer of {name}\n\n"
+        );
+        std::fs::write(dir.join("261031-100000-0001.md"), body).unwrap();
+    }
+
+    // A temp record root with folders alpha and beta; the test removes it at its end.
+    fn records_root(tag: &str) -> std::path::PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("chaude-gui-records-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        write_record(&root, "alpha");
+        write_record(&root, "beta");
+        root
+    }
+
+    #[test]
+    fn records_window_opens_lists_and_steps() {
+        let root = records_root("open");
+        let mut st = GuiState::default();
+        st.records_step(true);
+        assert!(st.records.is_none(), "stepping while closed does nothing");
+        st.open_records(&root);
+        assert!(st.records.is_some());
+        let rows = st.records_rows();
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].starts_with(" 1) "), "{rows:?}");
+        assert_eq!(st.records.as_ref().unwrap().sel, 0);
+        st.records_step(false);
+        assert_eq!(st.records.as_ref().unwrap().sel, 1);
+        st.records_step(false); // wraps
+        assert_eq!(st.records.as_ref().unwrap().sel, 0);
+        st.records_step(true); // wraps
+        assert_eq!(st.records.as_ref().unwrap().sel, 1);
+        st.records_select(9);
+        assert_eq!(
+            st.records.as_ref().unwrap().sel,
+            1,
+            "past the list is ignored"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn records_with_no_folder_stay_closed_and_note() {
+        let root = std::env::temp_dir().join(format!(
+            "chaude-gui-records-{}-none-missing",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut st = GuiState::default();
+        st.open_records(&root);
+        assert!(st.records.is_none(), "no folder, no window");
+        assert!(
+            matches!(st.transcript.entries.last(), Some(Entry::Notice(_))),
+            "{:?}",
+            st.transcript.entries
+        );
+    }
+
+    #[test]
+    fn records_cancel_closes_without_loading() {
+        let root = records_root("cancel");
+        let mut st = GuiState::default();
+        st.open_records(&root);
+        st.close_records();
+        assert!(st.records.is_none(), "cancel closes");
+        assert!(st.transcript.is_empty(), "nothing loaded");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn records_enter_loads_the_cursor_folder_into_the_transcript() {
+        let root = records_root("enter");
+        let mut st = GuiState::default();
+        st.open_records(&root);
+        st.records_step(false);
+        let name = st.records.as_ref().unwrap().projects[1].name.clone();
+        assert!(st.records_pick(None), "enter loads the cursor row");
+        assert!(st.records.is_none(), "a pick closes the window");
+        let answer = format!("answer of {name}");
+        assert!(st.transcript.entries.contains(&Entry::User("q".into())));
+        assert!(st.transcript.entries.iter().any(|e| matches!(
+            e,
+            Entry::Text { text, done: true, .. } if *text == answer
+        )));
+        let other = if name == "alpha" { "beta" } else { "alpha" };
+        assert!(
+            !st.transcript.entries.iter().any(|e| matches!(
+                e,
+                Entry::Text { text, .. } if *text == format!("answer of {other}")
+            )),
+            "only the chosen folder loads"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn records_click_loads_the_clicked_row() {
+        let root = records_root("click");
+        let mut st = GuiState::default();
+        st.open_records(&root);
+        let name = st.records.as_ref().unwrap().projects[0].name.clone();
+        assert!(st.records_pick(Some(0)), "a click loads that row");
+        assert!(st.records.is_none());
+        let answer = format!("answer of {name}");
+        assert!(st.transcript.entries.iter().any(|e| matches!(
+            e,
+            Entry::Text { text, .. } if *text == answer
+        )));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
