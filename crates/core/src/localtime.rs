@@ -130,6 +130,12 @@ pub fn clock_hhmmss(secs: i64) -> String {
     format!("{h:02}:{m:02}:{s:02}")
 }
 
+/// Local "HH:MM" of unix seconds `secs` (Go time.Format("15:04")).
+pub fn clock_hhmm(secs: i64) -> String {
+    let [_, _, _, h, m, _] = local_civil(secs);
+    format!("{h:02}:{m:02}")
+}
+
 /// Current unix seconds; 0 when the clock is before the epoch.
 pub fn unix_now() -> i64 {
     std::time::SystemTime::now()

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::api::CoderContext;
 use crate::i18n::{self, Lang, Msg};
+use crate::localtime::clock_hhmm;
 use crate::ui_state::BarInput;
 
 // Spinner frames and step from tui.go:259-260 (spinner.Frames, FPS = 1/8 s).
@@ -372,6 +373,71 @@ pub fn quiet_notice(lang: Lang, idle: Duration) -> String {
 // window, `total` all agents. Shows 1-based bounds, e.g. "  … 3-5/12 (마우스 휠로 스크롤)".
 pub fn scroll_range_text(lang: Lang, off: usize, shown: usize, total: usize) -> String {
     fill_in(lang, Msg::ScrollHint, &[&(off + 1), &(off + shown), &total])
+}
+
+// Go ratestatus.go rateNum: a JSON number, or a numeric string.
+fn rate_num(v: &serde_json::Value) -> Option<f64> {
+    match v {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(s) => s.parse().ok(),
+        _ => None,
+    }
+}
+
+// Go ratestatus.go fmtRateStatus: "now/reset · N%" from the five-hour window; None when no percent is known.
+// Top-level fields only count for the five_hour window (rateLimitType is "" or "five_hour").
+pub fn rate_status(info: &serde_json::Value, now: i64) -> Option<String> {
+    let w = &info["unifiedWindows"]["five_hour"];
+    let top = info["rateLimitType"].as_str().unwrap_or("");
+    let top_is_5h = top.is_empty() || top == "five_hour";
+    let mut v = rate_num(&w["utilization"]).or_else(|| {
+        if top_is_5h {
+            rate_num(&info["utilization"])
+        } else {
+            None
+        }
+    })?;
+    if v < 1.0 {
+        v *= 100.0; // fraction scale (0.37 -> 37%)
+    }
+    let mut reset = rate_num(&w["resetsAt"]);
+    if reset.is_none() && top_is_5h {
+        reset = rate_num(&info["resetsAt"]);
+    }
+    let reset = match reset {
+        Some(r) if r > 1e12 => (r / 1000.0) as i64, // milliseconds
+        Some(r) => r as i64,
+        None => now,
+    };
+    Some(format!(
+        "{}/{} · {}%",
+        clock_hhmm(now),
+        clock_hhmm(reset),
+        v.round() as i64
+    ))
+}
+
+// Busy row text (Go mainStatusText tui.go:888-898): "thinking-<model>-main(<prompt>) · Mm SSs · <last tool>
+// (esc to interrupt)". The TUI adds the spinner and colours; turn_secs is None when no turn has started.
+pub fn busy_text(
+    lang: Lang,
+    model: &str,
+    prompt: &str,
+    turn_secs: Option<u64>,
+    last_tool: &str,
+    esc: bool,
+) -> String {
+    let mut text = fill_in(lang, Msg::BusyRow, &[&model]);
+    if !prompt.is_empty() {
+        text.push_str(&format!("({prompt})"));
+    }
+    if let Some(secs) = turn_secs {
+        text.push_str(&elapsed_suffix(secs, last_tool));
+    }
+    if esc {
+        text.push_str(" (esc to interrupt)");
+    }
+    text
 }
 
 // Go time.Duration.String for whole seconds: "30s", "1m0s", "1h0m0s". Sub-second parts are dropped.

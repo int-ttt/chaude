@@ -28,6 +28,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, UiEvent};
+use chaude_core::bar_text;
 use chaude_core::handoff;
 use chaude_core::i18n::{Msg, current, t, tf};
 use chaude_core::import_claude::{self, ClaudeImport};
@@ -722,7 +723,7 @@ impl App {
             }
             // Go repl.go setRate: the status-line rate text is recomputed on every rate_limit_event.
             UiEvent::RateLimit { info } => {
-                self.bar.rate = rate_status(&info, unix_now()).filter(|s| !s.is_empty());
+                self.bar.rate = bar_text::rate_status(&info, unix_now()).filter(|s| !s.is_empty());
             }
             // Go repl.go budgetStop: one dim line in the transcript (no blank row after it).
             UiEvent::BudgetStop { spent_usd, cap_usd } => {
@@ -1954,19 +1955,18 @@ impl App {
 
     // Go mainStatusText + the spinner (tui.go:385-390): `✶ 생각중-model-메인(prompt) · Mm SSs`, orange frame, grey text.
     fn busy_row(&self, esc: bool) -> String {
-        let mut text = tf(Msg::BusyRow, &[&self.welcome.model]);
-        if !self.run.turn_prompt.is_empty() {
-            text.push_str(&format!("({})", self.run.turn_prompt));
-        }
-        if let Some(t) = self.run.turn_start {
-            text.push_str(&bar::elapsed_suffix(
-                self.clock.duration_since(t).as_secs(),
-                &self.run.last_tool,
-            ));
-        }
-        if esc {
-            text.push_str(" (esc to interrupt)");
-        }
+        let turn_secs = self
+            .run
+            .turn_start
+            .map(|t| self.clock.duration_since(t).as_secs());
+        let text = bar_text::busy_text(
+            current(),
+            &self.welcome.model,
+            &self.run.turn_prompt,
+            turn_secs,
+            &self.run.last_tool,
+            esc,
+        );
         format!("{ORANGE_ON}{}{FG_OFF}{GREY_ON} {text}{FG_OFF}", self.spin)
     }
 
@@ -4030,60 +4030,6 @@ fn pump(rx: &Receiver<UiEvent>, app: &mut App, turn: bool) {
             return;
         }
     }
-}
-
-// Go ratestatus.go rateNum: a JSON number, or a numeric string.
-fn rate_num(v: &serde_json::Value) -> Option<f64> {
-    match v {
-        serde_json::Value::Number(n) => n.as_f64(),
-        serde_json::Value::String(s) => s.parse().ok(),
-        _ => None,
-    }
-}
-
-// Go ratestatus.go fmtRateStatus: "now/reset · N%" from the five-hour window; None when no percent is known.
-// Top-level fields only count for the five_hour window (rateLimitType is "" or "five_hour").
-fn rate_status(info: &serde_json::Value, now: i64) -> Option<String> {
-    let w = &info["unifiedWindows"]["five_hour"];
-    let top = info["rateLimitType"].as_str().unwrap_or("");
-    let top_is_5h = top.is_empty() || top == "five_hour";
-    let mut v = rate_num(&w["utilization"]).or_else(|| {
-        if top_is_5h {
-            rate_num(&info["utilization"])
-        } else {
-            None
-        }
-    })?;
-    if v < 1.0 {
-        v *= 100.0; // fraction scale (0.37 -> 37%)
-    }
-    let mut reset = rate_num(&w["resetsAt"]);
-    if reset.is_none() && top_is_5h {
-        reset = rate_num(&info["resetsAt"]);
-    }
-    let reset = match reset {
-        Some(r) if r > 1e12 => (r / 1000.0) as i64, // milliseconds
-        Some(r) => r as i64,
-        None => now,
-    };
-    Some(format!(
-        "{}/{} · {}%",
-        clock_hhmm(now),
-        clock_hhmm(reset),
-        v.round() as i64
-    ))
-}
-
-// Local (hour, minute, second) of a unix time, from the shared core localtime helper.
-fn clock_hms(secs: i64) -> (i64, i64, i64) {
-    let [_, _, _, h, m, s] = chaude_core::localtime::local_civil(secs);
-    (h, m, s)
-}
-
-// Local "HH:MM" (Go time.Format("15:04")).
-fn clock_hhmm(secs: i64) -> String {
-    let (h, m, _) = clock_hms(secs);
-    format!("{h:02}:{m:02}")
 }
 
 #[cfg(test)]
@@ -7649,6 +7595,8 @@ mod tests {
 
     #[test]
     fn rate_status_follows_go_fmt_rate_status() {
+        use chaude_core::bar_text::rate_status;
+        use chaude_core::localtime::clock_hhmm;
         use serde_json::json;
         let now = 1_700_000_000;
         let reset = 1_700_003_600;
