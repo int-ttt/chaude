@@ -4,18 +4,14 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use chaude_core::i18n::{Msg, t, tf};
+use chaude_core::i18n::{Msg, t};
 
 use super::bar::clip;
 use super::render::{FG_OFF, GREY_ON, ORANGE_ON, wrap_cells};
 
-// Go usageFetch: the one-shot run failed; the error text follows.
+// Go usageFetch: the one-shot run failed; the error text follows (core usage_text, shared with the GUI).
 pub fn failed(err: &str) -> String {
-    // Core reports a result-less answer as "usage: no result"; Go returns "" there, shown as the empty text.
-    if err == "usage: no result" {
-        return t(Msg::UsageEmpty).to_string();
-    }
-    tf(Msg::UsageFailed, &[&err])
+    chaude_core::usage_text::usage_failed(err)
 }
 
 #[derive(Default)]

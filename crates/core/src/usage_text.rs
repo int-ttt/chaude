@@ -1,6 +1,7 @@
 //! /usage text decoration shared by the TUI and the GUI: a bar after each percentage and a context bar (Go usagebar.go
 //! renderBar, pctRe, decorateUsage). The text itself comes from one `claude -p /usage` run (api, UiEvent::Usage).
 
+use crate::i18n::{Msg, t, tf};
 use crate::slash::commas;
 
 const BAR_CELLS: usize = 10;
@@ -35,6 +36,15 @@ pub fn pct_value(line: &str) -> Option<f64> {
         }
     }
     None
+}
+
+// Go usageFetch: the one-shot run failed; the error text follows. Core reports a result-less answer as
+// "usage: no result", which Go shows as the empty text.
+pub fn usage_failed(err: &str) -> String {
+    if err == "usage: no result" {
+        return t(Msg::UsageEmpty).to_string();
+    }
+    tf(Msg::UsageFailed, &[&err])
 }
 
 // The end of the run of ASCII digits that starts at j.
