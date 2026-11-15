@@ -4,32 +4,7 @@
 use std::time::Instant;
 
 use chaude_core::api::{AgentRow, Role, UiEvent};
-use chaude_core::ui_state::{BarInput, RunState};
-
-// One row of the output pane. Text rows keep the role so main and agent text stay in their own blocks.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Entry {
-    User(String),
-    Text {
-        role: Role,
-        text: String,
-        done: bool,
-    },
-    Tool {
-        id: String,
-        name: String,
-        summary: String,
-        ok: Option<bool>,
-    },
-    Agent {
-        id: String,
-        description: String,
-        done: bool,
-        summary: String,
-    },
-    Notice(String),
-    Error(String),
-}
+use chaude_core::ui_state::{BarInput, Entry, RunState};
 
 // A can_use_tool request waiting for the user (UiEvent::PermissionRequest).
 #[derive(Debug, Clone, PartialEq)]

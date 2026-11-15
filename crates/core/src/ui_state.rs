@@ -4,8 +4,34 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use crate::api::{AgentRow, CoderContext, InterruptSource, TaskStatus, UiEvent};
+use crate::api::{AgentRow, CoderContext, InterruptSource, Role, TaskStatus, UiEvent};
 use crate::slash::PermMode;
+
+// One row of a front end's transcript (GUI output pane). Text rows keep the role so main and agent text stay in
+// their own blocks. Renderer-free: each front end draws it its own way.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Entry {
+    User(String),
+    Text {
+        role: Role,
+        text: String,
+        done: bool,
+    },
+    Tool {
+        id: String,
+        name: String,
+        summary: String,
+        ok: Option<bool>,
+    },
+    Agent {
+        id: String,
+        description: String,
+        done: bool,
+        summary: String,
+    },
+    Notice(String),
+    Error(String),
+}
 
 // history.go maxHistory
 pub const MAX_HISTORY: usize = 500;

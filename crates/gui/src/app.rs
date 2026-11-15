@@ -6,13 +6,14 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use chaude_core::api::{EngineHandle, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::i18n::{self, Msg};
+use chaude_core::ui_state::Entry;
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{self, Key, Modifiers};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 
 use crate::engine;
 use crate::input::Input;
-use crate::state::{Entry, GuiState};
+use crate::state::GuiState;
 
 // Stable id so the input box's TextEdit state (cursor) can be set from the editor.
 const INPUT_ID: &str = "chaude-input";

@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: the GUI's transcript row type (`Entry`: user, text, tool, agent, notice, error) moved from the GUI to `chaude_core::ui_state::Entry`, so both front ends can embed it; no behavior change. The TUI transcript is still pre-rendered ANSI lines and stays in the TUI for now.
+  - core: GUI 트랜스크립트 행 타입(`Entry`: 사용자, 텍스트, 도구, 에이전트, 알림, 오류)을 GUI에서 `chaude_core::ui_state::Entry`로 옮겨 두 프론트엔드가 함께 쓸 수 있게 했습니다. 동작은 그대로입니다. TUI 트랜스크립트는 아직 미리 렌더링된 ANSI 줄이므로 당분간 TUI에 남아 있습니다.
 - tui: a repeated `Busy(true)` while a turn runs keeps its start time, as the GUI does; the TUI and GUI now share core `RunState::set_busy` (busy, turn start, last tool cleared on each turn start).
   - tui: 이미 진행 중인 턴에 `Busy(true)`가 다시 와도 시작 시각을 유지합니다(GUI와 동일). TUI와 GUI가 코어 `RunState::set_busy`(busy, 턴 시작 시각, 턴 시작 시 마지막 도구 초기화)를 함께 씁니다.
 - gui: the busy turn and the held-reply count (`bar.waiting`) now come from core `RunState` (`set_busy`, `held`) instead of GUI-only fields; a running turn keeps its start and the TUI behavior is unchanged.
