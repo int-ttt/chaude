@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- agents: haiku-coder and haiku-batch-worker get a "Quiet output" rule: `-q` for cargo, `tail`/`head`/`-m` on long output, offset/limit reads, and re-run only the failing test, to cut repeated tool-output context.
+  - agents: haiku-coder와 haiku-batch-worker에 "Quiet output" 규칙을 추가했습니다. cargo는 `-q`, 긴 출력은 `tail`/`head`/`-m`으로 자르고, 큰 파일은 offset/limit으로 읽고, 실패한 테스트만 다시 돌려 반복되는 도구 출력 맥락을 줄입니다.
 
 ## 0.12.8 - 2026-11-15
 - core: main session idle rotation, one per idle period: the 3570 s idle timer is the primary rotation for every context size (its handoff runs a model call while the 1 hour cache is still warm). Only when the timer did not rotate (app closed or restarted, machine asleep so the timer never fired), the next prompt rotates a main over 80K whose last API response is over 1 hour old, with a handoff built from the transcript (no model call). After a timer rotation the next-prompt rule does not rotate again. The 200K Opus threshold is unchanged.

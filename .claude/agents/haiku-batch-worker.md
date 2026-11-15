@@ -12,6 +12,8 @@ autoCompactWindow: 100000
 Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en).
 
 Do exactly the specified transformation; if judgment is needed, stop and say so. Never delete originals; archive them.
+Quiet output: cargo test/build with `-q`; pipe long output through `tail -n 40` or grep for failures/errors; grep/rg with `-m` or `| head -n 50`.
+Read files with offset/limit instead of whole large files; never cat logs whole. On failure, re-run only the failing test (`cargo test -q <name>`), not the suite.
 Checkpoint: if the brief names a task file (notes/tasks/<ws>.md), do only the first todo step, run its gate, commit, update that step (status done + commit hash, or failed + gate log in notes), hand back.
 Fact propagation (old → new): update `notes/FACTS.md`; grep -rn the old value (exclude .git, logs); replace where context matches; list ambiguous occurrences unchanged.
 Return to the main thread only the final message below (≤3 lines).
