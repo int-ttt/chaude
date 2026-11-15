@@ -1,5 +1,5 @@
 // Slash commands, shared by the inline TUI and the GUI: parsing, suggestions, help text, and dispatch to an enum of actions.
-// Nothing here runs an engine effect. Each side effect comes back as a Dispatch variant for the caller to
+// Nothing here runs an engine effect. Each side effect comes back as a SlashOutcome variant for the caller to
 // execute. Ported from Go tree (v0.11.2) internal/harness/tui.go (slashCmds, busyOK, suggestions,
 // runSlash) and mode.go. Plain functions, unit-tested without a terminal.
 
@@ -220,7 +220,9 @@ pub struct Ctx<'a> {
 
 // Effects the caller must run. The Note variant is a transcript line and needs no engine call.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Dispatch {
+pub enum SlashOutcome {
+    // Plain text, not a command. The caller sends it to the engine as a turn, or queues it while busy.
+    SendPrompt,
     Note(String),
     Quit,
     // Caller flips the mouse state and shows mouse_note(new_state).
@@ -383,10 +385,10 @@ pub fn complete(input: &str, sel: usize, busy: bool, perm_open: bool) -> Option<
 }
 
 // tui.go:796 (busy gate) and runSlash (tui.go:1051). None means plain text, not a command.
-pub fn dispatch(line: &str, ctx: &Ctx) -> Option<Dispatch> {
+pub fn dispatch(line: &str, ctx: &Ctx) -> SlashOutcome {
     let line = line.trim();
     if !line.starts_with('/') {
-        return None;
+        return SlashOutcome::SendPrompt;
     }
     let f: Vec<&str> = line.split_whitespace().collect();
     let name = f[0];
@@ -394,70 +396,70 @@ pub fn dispatch(line: &str, ctx: &Ctx) -> Option<Dispatch> {
     let first = args.first().copied();
 
     if ctx.busy && name != "/usage" && !BUSY_OK.contains(&name) {
-        return Some(Dispatch::Note(busy_slash_msg()));
+        return SlashOutcome::Note(busy_slash_msg());
     }
 
-    Some(match name {
-        "/quit" | "/exit" => Dispatch::Quit,
-        "/help" => Dispatch::Note(help_text()),
-        "/mouse" => Dispatch::ToggleMouse,
-        "/status" => Dispatch::Note(status_line(ctx)),
+    match name {
+        "/quit" | "/exit" => SlashOutcome::Quit,
+        "/help" => SlashOutcome::Note(help_text()),
+        "/mouse" => SlashOutcome::ToggleMouse,
+        "/status" => SlashOutcome::Note(status_line(ctx)),
         "/model" => match first {
-            None => Dispatch::Note(model_note(ctx.model)),
-            Some(name) => Dispatch::Model {
+            None => SlashOutcome::Note(model_note(ctx.model)),
+            Some(name) => SlashOutcome::Model {
                 line: line.to_string(),
                 name: name.to_string(),
             },
         },
-        "/settings" => Dispatch::OpenSettings,
+        "/settings" => SlashOutcome::OpenSettings,
         "/lang" => match first {
-            None => Dispatch::OpenLang,
+            None => SlashOutcome::OpenLang,
             Some(s) => match i18n::pref_code(s) {
-                Some(code) => Dispatch::SetLang(code.to_string()),
-                None => Dispatch::Note(i18n::tf(Msg::LangInvalid, &[&s])),
+                Some(code) => SlashOutcome::SetLang(code.to_string()),
+                None => SlashOutcome::Note(i18n::tf(Msg::LangInvalid, &[&s])),
             },
         },
-        "/resume" => Dispatch::Resume {
+        "/resume" => SlashOutcome::Resume {
             args: args.iter().map(|s| s.to_string()).collect(),
         },
-        "/view" => Dispatch::OpenView {
+        "/view" => SlashOutcome::OpenView {
             arg: first.unwrap_or("").to_string(),
         },
         // repl.go:1399-1401: the engine side defaults to "latest".
-        "/import" => Dispatch::Import {
+        "/import" => SlashOutcome::Import {
             line: line.to_string(),
             arg: first.unwrap_or("latest").to_string(),
         },
         "/mode" => match first {
-            None => Dispatch::Note(mode_note(ctx.mode)),
+            None => SlashOutcome::Note(mode_note(ctx.mode)),
             Some(s) => match parse_mode(s) {
-                Some(p) => Dispatch::SetMode(p),
-                None => Dispatch::Note(format!(
+                Some(p) => SlashOutcome::SetMode(p),
+                None => SlashOutcome::Note(format!(
                     "unknown mode {} (default | acceptEdits | plan | auto)",
                     s
                 )),
             },
         },
-        "/version" => Dispatch::Note(version_note(ctx.chaude_version, claude_version())),
-        "/update" => Dispatch::Update,
-        "/doctor" => Dispatch::Doctor,
-        "/notes-gc" => Dispatch::NotesGc {
+        "/version" => SlashOutcome::Note(version_note(ctx.chaude_version, claude_version())),
+        "/update" => SlashOutcome::Update,
+        "/doctor" => SlashOutcome::Doctor,
+        "/notes-gc" => SlashOutcome::NotesGc {
             args: args.iter().map(|s| s.to_string()).collect(),
         },
-        "/usage" => Dispatch::OpenUsage,
-        "/clear" => Dispatch::Clear,
-        "/rotate" => Dispatch::Rotate {
+        "/usage" => SlashOutcome::OpenUsage,
+        "/clear" => SlashOutcome::Clear,
+        "/rotate" => SlashOutcome::Rotate {
             line: line.to_string(),
         },
-        n if PASSTHROUGH.contains(&n) => Dispatch::Passthrough {
+        n if PASSTHROUGH.contains(&n) => SlashOutcome::Passthrough {
             line: line.to_string(),
         },
-        n if UNSUPPORTED.contains(&n) => Dispatch::Note(format!(
+        n if UNSUPPORTED.contains(&n) => SlashOutcome::Note(format!(
             "{} is interactive-only in claude and not supported in this REPL",
             n
         )),
-        n => Dispatch::Note(format!("unknown command {} (try /help)", n)),
-    })
+        n => SlashOutcome::Note(format!("unknown command {} (try /help)", n)),
+    }
 }
 
 #[cfg(test)]
@@ -481,17 +483,17 @@ mod tests {
     #[test]
     fn busy_allows_read_only_and_refuses_conversation_commands() {
         for c in ["/version", "/usage", "/help", "/mode"] {
-            let d = dispatch(c, &ctx(true)).unwrap();
+            let d = dispatch(c, &ctx(true));
             assert_ne!(
                 d,
-                Dispatch::Note(busy_slash_msg()),
+                SlashOutcome::Note(busy_slash_msg()),
                 "{c} refused while busy"
             );
         }
         for c in ["/resume", "/clear", "/rotate", "/model sonnet", "/cost"] {
             assert_eq!(
                 dispatch(c, &ctx(true)),
-                Some(Dispatch::Note(busy_slash_msg())),
+                SlashOutcome::Note(busy_slash_msg()),
                 "{c} not refused while busy"
             );
         }
@@ -504,7 +506,7 @@ mod tests {
             version_note("9.9.9", "1.2.3"),
             "chaude 9.9.9 · Claude Code 1.2.3"
         );
-        let Some(Dispatch::Note(s)) = dispatch("/version", &ctx(false)) else {
+        let SlashOutcome::Note(s) = dispatch("/version", &ctx(false)) else {
             panic!("/version must be a local Note");
         };
         assert!(s.starts_with("chaude 9.9.9 · Claude Code "), "{s}");
@@ -514,7 +516,7 @@ mod tests {
     // Port of usagebusy_test.go TestUsageSlashAcceptedWhileBusy.
     #[test]
     fn usage_is_accepted_while_busy() {
-        assert_eq!(dispatch("/usage", &ctx(true)), Some(Dispatch::OpenUsage));
+        assert_eq!(dispatch("/usage", &ctx(true)), SlashOutcome::OpenUsage);
     }
 
     // Port of usagebusy_test.go TestUsageAllowedWhileBusy: /exit is refused while busy, and the Go literal matches.
@@ -522,7 +524,7 @@ mod tests {
     fn exit_is_refused_while_busy_and_message_matches_go() {
         assert_eq!(
             dispatch("/exit", &ctx(true)),
-            Some(Dispatch::Note(busy_slash_msg()))
+            SlashOutcome::Note(busy_slash_msg())
         );
         assert_eq!(
             busy_slash_msg(),
@@ -532,23 +534,26 @@ mod tests {
 
     #[test]
     fn plain_text_is_not_a_command() {
-        assert_eq!(dispatch("hello /help", &ctx(false)), None);
-        assert_eq!(dispatch("  ", &ctx(false)), None);
+        assert_eq!(
+            dispatch("hello /help", &ctx(false)),
+            SlashOutcome::SendPrompt
+        );
+        assert_eq!(dispatch("  ", &ctx(false)), SlashOutcome::SendPrompt);
     }
 
     #[test]
     fn exit_and_quit_quit() {
-        assert_eq!(dispatch("/exit", &ctx(false)), Some(Dispatch::Quit));
-        assert_eq!(dispatch(" /quit ", &ctx(false)), Some(Dispatch::Quit));
+        assert_eq!(dispatch("/exit", &ctx(false)), SlashOutcome::Quit);
+        assert_eq!(dispatch(" /quit ", &ctx(false)), SlashOutcome::Quit);
     }
 
     #[test]
     fn status_shows_commas_and_truncated_session() {
         assert_eq!(
             dispatch("/status", &ctx(false)),
-            Some(Dispatch::Note(
+            SlashOutcome::Note(
                 "model opus · ctx 12,345/150,000 · rotations 2 · session abcdef01".to_string()
-            ))
+            )
         );
         let mut c = ctx(false);
         c.session_id = None;
@@ -559,42 +564,42 @@ mod tests {
     fn model_without_args_shows_note_and_with_args_switches() {
         assert_eq!(
             dispatch("/model", &ctx(false)),
-            Some(Dispatch::Note(
+            SlashOutcome::Note(
                 "model opus  (switch: /model <name>, hands off context to the new session)"
                     .to_string()
-            ))
+            )
         );
         assert_eq!(
             dispatch("/model sonnet", &ctx(false)),
-            Some(Dispatch::Model {
+            SlashOutcome::Model {
                 line: "/model sonnet".to_string(),
                 name: "sonnet".to_string()
-            })
+            }
         );
     }
 
     #[test]
     fn lang_without_args_opens_picker_and_with_args_sets_or_refuses() {
-        assert_eq!(dispatch("/lang", &ctx(false)), Some(Dispatch::OpenLang));
+        assert_eq!(dispatch("/lang", &ctx(false)), SlashOutcome::OpenLang);
         assert_eq!(
             dispatch("/lang EN", &ctx(false)),
-            Some(Dispatch::SetLang("en".into()))
+            SlashOutcome::SetLang("en".into())
         );
         assert_eq!(
             dispatch("/lang ko-KR", &ctx(false)),
-            Some(Dispatch::SetLang("ko".into()))
+            SlashOutcome::SetLang("ko".into())
         );
         assert_eq!(
             dispatch("/lang auto", &ctx(false)),
-            Some(Dispatch::SetLang("auto".into()))
+            SlashOutcome::SetLang("auto".into())
         );
         assert_eq!(
             dispatch("/lang fr", &ctx(false)),
-            Some(Dispatch::Note(i18n::tf(Msg::LangInvalid, &[&"fr"])))
+            SlashOutcome::Note(i18n::tf(Msg::LangInvalid, &[&"fr"]))
         );
         assert_eq!(
             dispatch("/lang en", &ctx(true)),
-            Some(Dispatch::SetLang("en".into()))
+            SlashOutcome::SetLang("en".into())
         );
     }
 
@@ -602,20 +607,20 @@ mod tests {
     fn view_and_import_default_args() {
         assert_eq!(
             dispatch("/view", &ctx(false)),
-            Some(Dispatch::OpenView { arg: String::new() })
+            SlashOutcome::OpenView { arg: String::new() }
         );
         assert_eq!(
             dispatch("/view ab12", &ctx(false)),
-            Some(Dispatch::OpenView {
+            SlashOutcome::OpenView {
                 arg: "ab12".to_string()
-            })
+            }
         );
         assert_eq!(
             dispatch("/import", &ctx(false)),
-            Some(Dispatch::Import {
+            SlashOutcome::Import {
                 line: "/import".to_string(),
                 arg: "latest".to_string()
-            })
+            }
         );
     }
 
@@ -623,9 +628,9 @@ mod tests {
     fn resume_passes_raw_args() {
         assert_eq!(
             dispatch("/resume claude foo bar", &ctx(false)),
-            Some(Dispatch::Resume {
+            SlashOutcome::Resume {
                 args: vec!["claude".into(), "foo".into(), "bar".into()]
-            })
+            }
         );
     }
 
@@ -633,23 +638,23 @@ mod tests {
     fn mode_no_args_set_and_unknown() {
         assert_eq!(
             dispatch("/mode", &ctx(false)),
-            Some(Dispatch::Note(
+            SlashOutcome::Note(
                 "mode default  (default | acceptEdits | plan | auto; shift+tab cycles)".to_string()
-            ))
+            )
         );
         assert_eq!(
             dispatch("/mode PLAN", &ctx(false)),
-            Some(Dispatch::SetMode(PermMode::Plan))
+            SlashOutcome::SetMode(PermMode::Plan)
         );
         assert_eq!(
             dispatch("/mode accept", &ctx(false)),
-            Some(Dispatch::SetMode(PermMode::AcceptEdits))
+            SlashOutcome::SetMode(PermMode::AcceptEdits)
         );
         assert_eq!(
             dispatch("/mode nope", &ctx(false)),
-            Some(Dispatch::Note(
+            SlashOutcome::Note(
                 "unknown mode nope (default | acceptEdits | plan | auto)".to_string()
-            ))
+            )
         );
     }
 
@@ -675,43 +680,41 @@ mod tests {
         ] {
             assert_eq!(
                 dispatch(c, &ctx(false)),
-                Some(Dispatch::Passthrough {
+                SlashOutcome::Passthrough {
                     line: c.to_string()
-                }),
+                },
                 "{c}"
             );
         }
-        assert_eq!(dispatch("/clear", &ctx(false)), Some(Dispatch::Clear));
+        assert_eq!(dispatch("/clear", &ctx(false)), SlashOutcome::Clear);
         assert_eq!(
             dispatch("/rotate", &ctx(false)),
-            Some(Dispatch::Rotate {
+            SlashOutcome::Rotate {
                 line: "/rotate".to_string()
-            })
+            }
         );
-        assert_eq!(dispatch("/update", &ctx(false)), Some(Dispatch::Update));
-        assert_eq!(dispatch("/doctor", &ctx(false)), Some(Dispatch::Doctor));
-        assert_eq!(dispatch("/doctor", &ctx(true)), Some(Dispatch::Doctor));
+        assert_eq!(dispatch("/update", &ctx(false)), SlashOutcome::Update);
+        assert_eq!(dispatch("/doctor", &ctx(false)), SlashOutcome::Doctor);
+        assert_eq!(dispatch("/doctor", &ctx(true)), SlashOutcome::Doctor);
         assert_eq!(
             dispatch("/settings", &ctx(false)),
-            Some(Dispatch::OpenSettings)
+            SlashOutcome::OpenSettings
         );
-        assert_eq!(dispatch("/usage", &ctx(false)), Some(Dispatch::OpenUsage));
-        assert_eq!(dispatch("/mouse", &ctx(false)), Some(Dispatch::ToggleMouse));
+        assert_eq!(dispatch("/usage", &ctx(false)), SlashOutcome::OpenUsage);
+        assert_eq!(dispatch("/mouse", &ctx(false)), SlashOutcome::ToggleMouse);
     }
 
     #[test]
     fn unknown_and_unsupported_commands_note() {
         assert_eq!(
             dispatch("/nope", &ctx(false)),
-            Some(Dispatch::Note(
-                "unknown command /nope (try /help)".to_string()
-            ))
+            SlashOutcome::Note("unknown command /nope (try /help)".to_string())
         );
         assert_eq!(
             dispatch("/memory", &ctx(false)),
-            Some(Dispatch::Note(
+            SlashOutcome::Note(
                 "/memory is interactive-only in claude and not supported in this REPL".to_string()
-            ))
+            )
         );
     }
 

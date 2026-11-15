@@ -53,7 +53,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use bar::BarInput;
 use chaude_core::editor::Editor;
-use commands::{Ctx, Dispatch, PermMode};
+use commands::{Ctx, PermMode, SlashOutcome};
 use render::{BOLD_OFF, BOLD_ON, FG_OFF, GREY_ON, ORANGE_ON, RESET};
 
 const TICK: Duration = Duration::from_millis(80);
@@ -1171,13 +1171,13 @@ impl App {
         };
         // Go tui.go /clear: the transcript is emptied first (m.blocks = nil), then the user block is shown.
         // A busy /clear is refused by dispatch, so it never reaches here.
-        if matches!(dispatched, Some(Dispatch::Clear)) {
+        if matches!(dispatched, SlashOutcome::Clear) {
             self.clear_transcript();
         }
         let first = text.split_whitespace().next().unwrap_or("");
         // A prompt sent while a turn runs only joins the queue (queue_lines shows it as "대기"). It is echoed once,
         // when QueueTexts drains and the merged prompt goes out as the next turn. Commands never queue.
-        let queued = self.run.busy && dispatched.is_none();
+        let queued = self.run.busy && dispatched == SlashOutcome::SendPrompt;
         if !queued {
             self.run.turn_prompt =
                 render::trunc_chars(text.lines().next().unwrap_or("").trim(), 60);
@@ -1188,28 +1188,28 @@ impl App {
         }
         // Go tui.go /status: answered locally from the TUI state, never sent to the child. /mode and /model are handled here too.
         match dispatched {
-            Some(Dispatch::Quit) => return Action::Quit,
-            Some(Dispatch::ToggleMouse) => {
+            SlashOutcome::Quit => return Action::Quit,
+            SlashOutcome::ToggleMouse => {
                 self.mouse = !self.mouse;
                 self.note(commands::mouse_note(self.mouse));
                 return Action::Continue;
             }
-            Some(Dispatch::OpenUsage) => {
+            SlashOutcome::OpenUsage => {
                 self.usage.open();
                 return Action::Usage;
             }
-            Some(Dispatch::OpenSettings) => {
+            SlashOutcome::OpenSettings => {
                 self.settings = Some(settings::Picker::open(
                     std::env::current_dir().ok().as_deref(),
                 ));
                 return Action::Continue;
             }
-            Some(Dispatch::OpenLang) => {
+            SlashOutcome::OpenLang => {
                 self.note(&lang::current_note(None));
                 self.lang = Some(lang::LangPicker::open());
                 return Action::Continue;
             }
-            Some(Dispatch::SetLang(code)) => {
+            SlashOutcome::SetLang(code) => {
                 let note = lang::apply(None, &code);
                 self.note(&note);
                 if lang::is_code(&code) {
@@ -1217,34 +1217,34 @@ impl App {
                 }
                 return Action::Continue;
             }
-            Some(Dispatch::NotesGc { args }) => {
+            SlashOutcome::NotesGc { args } => {
                 let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
                 self.note(&chaude_core::notes_gc::slash_text(&cwd, &args));
                 return Action::Continue;
             }
-            Some(Dispatch::Update) => {
+            SlashOutcome::Update => {
                 self.note(commands::UPDATE_START_NOTE);
                 return Action::Update;
             }
-            Some(Dispatch::Doctor) => {
+            SlashOutcome::Doctor => {
                 self.note(t(Msg::DoctorChecking));
                 return Action::Doctor;
             }
-            Some(Dispatch::OpenView { arg }) => {
+            SlashOutcome::OpenView { arg } => {
                 self.open_view(&arg);
                 return Action::Continue;
             }
-            Some(Dispatch::Import { arg, .. }) => {
+            SlashOutcome::Import { arg, .. } => {
                 self.import_view(&arg, false);
                 return Action::Continue;
             }
-            Some(Dispatch::Resume { args }) => return self.resume(&args),
-            Some(Dispatch::Note(s)) => {
+            SlashOutcome::Resume { args } => return self.resume(&args),
+            SlashOutcome::Note(s) => {
                 self.note(&s);
                 return Action::Continue;
             }
             // Go tui.go /mode: setMode; the engine answers ModeChanged, which prints "mode: <name>".
-            Some(Dispatch::SetMode(p)) => return Action::SetMode(p),
+            SlashOutcome::SetMode(p) => return Action::SetMode(p),
             // Go tui.go /model NAME: sent to the engine as the full line, which rotates to the new model.
             _ => {}
         }
@@ -3849,14 +3849,14 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
             busy: false,
         };
         match commands::dispatch(&line, &ctx) {
-            Some(Dispatch::Quit) => break,
-            Some(Dispatch::Note(s)) => println!("{s}"),
-            Some(Dispatch::SetMode(_)) => {
+            SlashOutcome::Quit => break,
+            SlashOutcome::Note(s) => println!("{s}"),
+            SlashOutcome::SetMode(_) => {
                 let arg = line.split_whitespace().nth(1).unwrap_or("");
                 engine.set_mode(arg);
                 pump(&rx, &mut app, false);
             }
-            Some(Dispatch::Import { arg, .. }) => {
+            SlashOutcome::Import { arg, .. } => {
                 match import_claude::load_import_arg(&arg, &cwd.display().to_string()) {
                     Err(e) => println!("{e}"),
                     Ok((_, imp)) => {
@@ -3868,7 +3868,7 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                     }
                 }
             }
-            Some(Dispatch::Resume { args }) => {
+            SlashOutcome::Resume { args } => {
                 // Go resumeLine: the record path only; the TUI picker for several matches is not in plain mode.
                 let arg = args.join(" ");
                 let root = chaude_core::record::dir_for(&cwd);
@@ -3884,43 +3884,43 @@ fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
                     }
                 }
             }
-            Some(Dispatch::NotesGc { args }) => {
+            SlashOutcome::NotesGc { args } => {
                 let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
                 println!("{}", chaude_core::notes_gc::slash_text(&cwd, &args));
             }
-            Some(Dispatch::Update) => {
+            SlashOutcome::Update => {
                 println!("{}", chaude_update::text(env!("CARGO_PKG_VERSION")))
             }
-            Some(Dispatch::Doctor) => {
+            SlashOutcome::Doctor => {
                 for l in crate::doctor::render(&crate::doctor::checks_now()) {
                     println!("{l}");
                 }
             }
             // Plain mode has no picker: a bare /lang prints the current language, /lang ko|en saves and switches.
-            Some(Dispatch::OpenLang) => println!("{}", lang::current_note(None)),
-            Some(Dispatch::SetLang(code)) => {
+            SlashOutcome::OpenLang => println!("{}", lang::current_note(None)),
+            SlashOutcome::SetLang(code) => {
                 println!("{}", lang::apply(None, &code));
                 if lang::is_code(&code) {
                     engine.submit(&format!("/lang {code}"));
                     pump(&rx, &mut app, true);
                 }
             }
-            Some(Dispatch::OpenUsage) => {
+            SlashOutcome::OpenUsage => {
                 engine.usage();
                 pump(&rx, &mut app, false);
             }
             // Go plain has no views or mouse: such a line is sent to the engine as a turn (Go handle(line)).
-            Some(Dispatch::OpenView { .. } | Dispatch::ToggleMouse | Dispatch::OpenSettings)
-            | None => {
+            SlashOutcome::OpenView { .. }
+            | SlashOutcome::ToggleMouse
+            | SlashOutcome::OpenSettings
+            | SlashOutcome::SendPrompt => {
                 engine.submit(&line);
                 pump(&rx, &mut app, true);
             }
-            Some(
-                Dispatch::Rotate { .. }
-                | Dispatch::Clear
-                | Dispatch::Model { .. }
-                | Dispatch::Passthrough { .. },
-            ) => {
+            SlashOutcome::Rotate { .. }
+            | SlashOutcome::Clear
+            | SlashOutcome::Model { .. }
+            | SlashOutcome::Passthrough { .. } => {
                 engine.submit(&line);
                 pump(&rx, &mut app, true);
             }
