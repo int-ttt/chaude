@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chaude_core::api::{AgentRow, Role, UiEvent};
 use chaude_core::bar_text;
@@ -34,6 +34,9 @@ pub struct Permission {
     pub summary: String,
 }
 
+// The copy note lasts 2s (TUI COPY_NOTE_TTL in cli tui/mod.rs; the TUI keeps its own copy).
+pub const COPY_NOTE_TTL: Duration = Duration::from_secs(2);
+
 // An open stage row (Working) waiting for its Done or Failed; idx is its transcript index.
 #[derive(Debug, Clone)]
 struct StageRow {
@@ -46,6 +49,8 @@ struct StageRow {
 #[derive(Debug, Default)]
 pub struct GuiState {
     pub transcript: Transcript,
+    // The copy note after a drag-select copy in the output (TUI copy_note): its text and when it was set.
+    copy_note: Option<(String, Instant)>,
     // Status-bar data. turn_secs and the agent list are derived in bar_at, not stored here.
     pub bar: BarInput,
     // Engine progress shared with the TUI: busy turn, agent rows, tasks, rotations (core ui_state::RunState).
@@ -790,6 +795,19 @@ impl GuiState {
     }
 
     // Status-bar input at a given time. now_unix is Unix seconds (agent elapsed time).
+    // Records a copy of `chars` characters: "copied (N chars)" (TUI copy_done, Ok case).
+    pub fn copy_done(&mut self, chars: usize, now: Instant) {
+        self.copy_note = Some((i18n::tf(Msg::CopyDone, &[&chars]), now));
+    }
+
+    // The copy note while it is fresh: shown for COPY_NOTE_TTL after it was set (TUI copy_note expiry).
+    pub fn copy_note_text(&self, now: Instant) -> Option<&str> {
+        self.copy_note
+            .as_ref()
+            .filter(|(_, at)| now.saturating_duration_since(*at) < COPY_NOTE_TTL)
+            .map(|(text, _)| text.as_str())
+    }
+
     pub fn bar_at(&self, now: Instant, now_unix: u64) -> BarInput {
         let mut bar = self.bar.clone();
         bar.turn_secs = self
@@ -863,6 +881,23 @@ mod tests {
 
     use chaude_core::api::TaskStatus;
     use chaude_core::ui_state::{TaskRow, TaskState};
+
+    #[test]
+    fn copy_note_shows_for_two_seconds_then_clears() {
+        let mut st = GuiState::default();
+        let t0 = Instant::now();
+        assert_eq!(st.copy_note_text(t0), None);
+        st.copy_done(5, t0);
+        let want = i18n::tf(Msg::CopyDone, &[&5usize]);
+        assert_eq!(st.copy_note_text(t0), Some(want.as_str()));
+        assert_eq!(
+            st.copy_note_text(t0 + COPY_NOTE_TTL - Duration::from_millis(1)),
+            Some(want.as_str())
+        );
+        assert_eq!(st.copy_note_text(t0 + COPY_NOTE_TTL), None);
+        st.copy_done(0, t0 + Duration::from_secs(5));
+        assert!(st.copy_note_text(t0 + Duration::from_secs(6)).is_some());
+    }
 
     fn text(role: Role, s: &str) -> UiEvent {
         UiEvent::TextDelta {

@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- gui: a drag-select in the transcript copies the selected text when the mouse is released, and shows the `copied (N chars)` note for 2s on the status row, as the TUI does. The GUI copies through the native clipboard; the copy-failed note is not shown (the GUI does not see a clipboard error).
+  - gui: 트랜스크립트에서 드래그로 고른 텍스트는 마우스를 놓을 때 복사되며, TUI처럼 상태 행에 `복사됨 (N자)` 안내를 2초 동안 표시합니다. GUI는 네이티브 클립보드로 복사하며, 복사 실패 안내는 표시하지 않습니다(GUI는 클립보드 오류를 알 수 없습니다).
 - gui: `/view` level 2 scrolls the prompt body with up/down and k/j (one row), PageUp/PageDown (a window) and Home/End (the ends); left/right resets the scroll. The previous-session mode note (`previous session: ...`) shows at start and on each `/view`, as in the TUI. The GUI now starts the engine with the project handoff file (`notes/tmp/long`), so the previous run resumes or starts fresh the same way as in the TUI.
   - gui: `/view` 2단계에서 위/아래와 k/j는 한 줄, PageUp/PageDown은 한 화면, Home/End는 처음과 끝으로 본문을 스크롤하고, ←/→는 스크롤을 처음으로 되돌립니다. 이전 세션 모드 안내(`previous session: ...`)는 시작할 때와 `/view`마다 TUI처럼 표시됩니다. GUI는 이제 프로젝트 handoff 파일(`notes/tmp/long`)로 엔진을 시작하므로, 이전 실행을 TUI와 같은 방식으로 이어 가거나 새로 시작합니다.
 - core: the previous-session mode note (`session_mode_note`) moved from the TUI into shared `chaude_core::handoff`; the TUI output is unchanged.

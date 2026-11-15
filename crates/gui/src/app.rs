@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{AgentRow, EngineHandle, InterruptSource, Role, UiEvent};
@@ -21,7 +22,7 @@ use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use crate::commands::{self, Effect};
 use crate::engine;
 use crate::input::Input;
-use crate::state::GuiState;
+use crate::state::{COPY_NOTE_TTL, GuiState};
 
 // Stable id so the input box's TextEdit state (cursor) can be set from the editor.
 const INPUT_ID: &str = "chaude-input";
@@ -67,6 +68,14 @@ pub struct ChaudeApp {
     sess_scroll: Option<f32>,
     // True while the output shows the tail; false once the user scrolls up.
     follow: bool,
+    // Drag-select copy in the output (TUI release_copy): the output pane's rect from the last frame, whether the
+    // current press began there, whether that press moved (a drag), and whether a copy was asked for this frame.
+    output_rect: egui::Rect,
+    drag_in_output: bool,
+    dragged: bool,
+    copy_armed: bool,
+    // The char count of the last copy, written by CopyTap at the end of the pass and taken on the next frame.
+    copy_tap: Arc<Mutex<Option<usize>>>,
     // Output arrived while not following (the TUI's unseen-output bar).
     unseen: bool,
     // Results of /doctor and /update checks, run off the UI thread; drained into the transcript each frame.
@@ -111,6 +120,8 @@ fn adds_output(ev: &UiEvent) -> bool {
 
 impl ChaudeApp {
     pub fn new(ctx: egui::Context) -> Self {
+        let copy_tap = Arc::new(Mutex::new(None));
+        ctx.add_plugin(CopyTap(copy_tap.clone()));
         let mut state = GuiState::default();
         let cwd = std::env::current_dir().unwrap_or_default();
         state.cwd = cwd.display().to_string();
@@ -147,6 +158,11 @@ impl ChaudeApp {
             sess_pane: ScrollView::default(),
             sess_scroll: None,
             follow: true,
+            output_rect: egui::Rect::NOTHING,
+            drag_in_output: false,
+            dragged: false,
+            copy_armed: false,
+            copy_tap,
             unseen: false,
             slash_sel: 0,
             last_esc: None,
@@ -884,6 +900,39 @@ impl ChaudeApp {
     // n/Esc deny, Ctrl+C deny and interrupt. Otherwise Esc cancels a held reply's wait or interrupts a busy turn,
     // Ctrl+C interrupts or quits, Ctrl+D quits, Shift+Tab cycles the mode, and PageUp/PageDown (plus Home/End on an
     // empty input box, as the TUI) scroll the output.
+    // Go selectMouse release (TUI release_copy): a drag that began in the output and moved copies the selected
+    // transcript text when it ends. egui copies a label selection only on a Copy event, so the release sends one;
+    // the CopyTap count gives the note on the next frame.
+    fn copy_on_release(&mut self, ctx: &egui::Context) {
+        if std::mem::take(&mut self.copy_armed) {
+            let chars = self.copy_tap.lock().ok().and_then(|mut slot| slot.take());
+            if let Some(chars) = chars {
+                self.state.copy_done(chars, Instant::now());
+            }
+        }
+        let (pressed, dragging, released, origin) = ctx.input(|i| {
+            (
+                i.pointer.primary_pressed(),
+                i.pointer.is_decidedly_dragging(),
+                i.pointer.primary_released(),
+                i.pointer.press_origin(),
+            )
+        });
+        if pressed {
+            self.drag_in_output = origin.is_some_and(|p| self.output_rect.contains(p));
+            self.dragged = false;
+        }
+        self.dragged |= dragging;
+        if released {
+            if self.drag_in_output && self.dragged {
+                ctx.input_mut(|i| i.events.push(egui::Event::Copy));
+                self.copy_armed = true;
+            }
+            self.dragged = false;
+            self.drag_in_output = false;
+        }
+    }
+
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let perm = self.state.permission.is_some();
         let input_empty = self.input.text().is_empty();
@@ -1043,6 +1092,11 @@ impl ChaudeApp {
         // Unseen output while scrolled up: the TUI's "↓ new message" marker on the top row.
         if self.unseen && !self.follow {
             top = format!("{top} · {}", i18n::t(Msg::NewMessage));
+        }
+        // The copy note sits on the same row (TUI copy_note); it expires on its own, so the row repaints once more.
+        if let Some(note) = self.state.copy_note_text(now) {
+            top = format!("{top} · {note}");
+            ui.ctx().request_repaint_after(COPY_NOTE_TTL);
         }
         ui.weak(top);
         ui.weak(format!(
@@ -1217,6 +1271,7 @@ impl ChaudeApp {
     }
 
     fn output(&mut self, ui: &mut egui::Ui) {
+        self.output_rect = ui.max_rect();
         let mut area = egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .stick_to_bottom(true);
@@ -1249,6 +1304,7 @@ impl ChaudeApp {
 impl eframe::App for ChaudeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain(ui.ctx());
+        self.copy_on_release(ui.ctx());
         self.settings_keys(ui.ctx());
         self.lang_keys(ui.ctx());
         self.rewind_keys(ui.ctx());
@@ -1286,6 +1342,30 @@ impl eframe::App for ChaudeApp {
         self.groups_window(ui.ctx());
         self.sess_window(ui.ctx());
         self.settings_window(ui.ctx());
+    }
+}
+
+// Reads the char count of each copy at the end of the pass. Added after egui's label selection plugin, so the
+// CopyText that the labels queue on this pass is already there.
+struct CopyTap(Arc<Mutex<Option<usize>>>);
+
+impl egui::plugin::Plugin for CopyTap {
+    fn debug_name(&self) -> &'static str {
+        "chaude_copy_tap"
+    }
+
+    fn on_end_pass(&mut self, ui: &mut egui::Ui) {
+        let chars = ui.ctx().output(|o| {
+            o.commands.iter().find_map(|c| match c {
+                egui::OutputCommand::CopyText(t) => Some(t.chars().count()),
+                _ => None,
+            })
+        });
+        if let Some(chars) = chars
+            && let Ok(mut slot) = self.0.lock()
+        {
+            *slot = Some(chars);
+        }
     }
 }
 
