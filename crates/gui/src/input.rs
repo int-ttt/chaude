@@ -25,6 +25,19 @@ impl Input {
         self.editor.cursor()
     }
 
+    // Applies one editor key by name (the names app.rs maps from egui keys); the core Editor does the edit.
+    pub fn apply_key(&mut self, op: &str) {
+        match op {
+            "newline" => self.editor.newline(),
+            "delete_word" => self.editor.delete_word(),
+            "home" => self.editor.home(),
+            "end" => self.editor.end(),
+            "kill_to_start" => self.editor.kill_to_start(),
+            "kill_to_end" => self.editor.kill_to_end(),
+            _ => {}
+        }
+    }
+
     pub fn is_single_line(&self) -> bool {
         !self.editor.text().contains('\n')
     }
@@ -151,5 +164,17 @@ mod tests {
         again.history_prev();
         assert_eq!(again.text(), "two");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn editor_keys_edit_the_text_the_widget_shows() {
+        let mut input = Input::new(Path::new("/nonexistent-chaude-gui-input-test"));
+        input.apply_widget("one two", 7);
+        input.apply_key("delete_word");
+        assert_eq!(input.text(), "one ");
+        input.apply_key("home");
+        assert_eq!(input.cursor(), 0);
+        input.apply_key("kill_to_end");
+        assert_eq!(input.text(), "");
     }
 }

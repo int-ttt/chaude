@@ -3,11 +3,12 @@
 use std::sync::mpsc::Receiver;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use chaude_core::api::{EngineHandle, Role, UiEvent};
+use chaude_core::api::{EngineHandle, InterruptSource, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::i18n::{self, Msg};
 use chaude_core::ui_state::{
-    Entry, WELCOME_MODEL, WELCOME_THRESHOLD, tool_line, tool_result_line, welcome_lines,
+    Action, Entry, WELCOME_MODEL, WELCOME_THRESHOLD, ctrl_c_action, tool_line, tool_result_line,
+    welcome_lines,
 };
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{self, Key, Modifiers};
@@ -86,27 +87,73 @@ impl ChaudeApp {
     }
 
     // Answers the open permission prompt and tells the engine.
-    fn answer(&mut self, allow: bool) {
+    // interrupt (Ctrl+C) also stops the turn. An answer that is not an interrupt is echoed as allowed or denied (TUI key()).
+    fn answer(&mut self, allow: bool, interrupt: bool) {
         let Some((id, allow)) = self.state.answer_permission(allow) else {
             return;
         };
+        if !interrupt {
+            self.state
+                .transcript
+                .push_status(if allow { "allowed" } else { "denied" });
+            self.state.transcript.push_blank();
+        }
         if let Some(engine) = &self.engine {
             engine.answer_permission(&id, allow);
+            if interrupt {
+                engine.interrupt(InterruptSource::CtrlC);
+            }
         }
     }
 
-    // Global keys, consumed before any widget sees them: y/n while a permission prompt is open, Shift+Tab cycles mode.
+    // Global keys, consumed before any widget sees them. While a permission prompt is open: y/Enter allow,
+    // n/Esc deny, Ctrl+C deny and interrupt. Otherwise Esc cancels a held reply's wait or interrupts a busy turn,
+    // Ctrl+C interrupts or quits, Ctrl+D quits, and Shift+Tab cycles the mode.
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        let (mut yes, mut no, mut mode) = (false, false, false);
+        let perm = self.state.permission.is_some();
+        let (mut allow, mut deny, mut ctrl_c, mut ctrl_d, mut esc, mut mode) =
+            (false, false, false, false, false, false);
         ctx.input_mut(|i| {
-            if self.state.permission.is_some() {
-                yes = i.consume_key(Modifiers::NONE, Key::Y);
-                no = i.consume_key(Modifiers::NONE, Key::N);
+            if perm {
+                allow = i.consume_key(Modifiers::NONE, Key::Y)
+                    || i.consume_key(Modifiers::NONE, Key::Enter);
+                deny = i.consume_key(Modifiers::NONE, Key::N)
+                    || i.consume_key(Modifiers::NONE, Key::Escape);
+                ctrl_c = i.consume_key(Modifiers::CTRL, Key::C);
+            } else {
+                esc = i.consume_key(Modifiers::NONE, Key::Escape);
+                ctrl_c = i.consume_key(Modifiers::CTRL, Key::C);
+                ctrl_d = i.consume_key(Modifiers::CTRL, Key::D);
             }
             mode = i.consume_key(Modifiers::SHIFT, Key::Tab);
         });
-        if yes || no {
-            self.answer(yes);
+        if perm {
+            if ctrl_c {
+                self.answer(false, true);
+            } else if allow || deny {
+                self.answer(allow, false);
+            }
+        } else {
+            if esc && let Some(engine) = &self.engine {
+                if self.state.run.held.is_some() {
+                    engine.cancel_wait();
+                } else if self.state.run.busy {
+                    engine.interrupt(InterruptSource::EscKey);
+                }
+            }
+            if ctrl_c {
+                match ctrl_c_action(self.state.run.busy) {
+                    Action::Interrupt(src) => {
+                        if let Some(engine) = &self.engine {
+                            engine.interrupt(src);
+                        }
+                    }
+                    _ => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                }
+            }
+            if ctrl_d {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
         }
         if mode && let Some(engine) = &self.engine {
             engine.set_mode("next");
@@ -136,7 +183,7 @@ impl ChaudeApp {
                 });
             });
         if let Some(allow) = choice {
-            self.answer(allow);
+            self.answer(allow, false);
         }
     }
 
@@ -160,9 +207,27 @@ impl ChaudeApp {
         let focused = ready && self.input_focused;
         let single_line = self.input.is_single_line();
         let (mut enter, mut up, mut down) = (false, false, false);
+        // Editor keys (core Editor, the TUI's emacs-style keys): Ctrl+A/E home/end, Ctrl+W delete word,
+        // Ctrl+U/K kill to start/end, Ctrl+J or Alt+Enter newline, Alt+Backspace delete word.
+        let mut edits: Vec<&'static str> = Vec::new();
         // Keys are consumed before the TextEdit sees them: plain Enter sends instead of inserting a newline.
         if focused {
             ui.input_mut(|i| {
+                // Modifier combinations first: a plain Enter or Backspace match would also take them.
+                for (m, k, op) in [
+                    (Modifiers::ALT, Key::Enter, "newline"),
+                    (Modifiers::ALT, Key::Backspace, "delete_word"),
+                    (Modifiers::CTRL, Key::J, "newline"),
+                    (Modifiers::CTRL, Key::A, "home"),
+                    (Modifiers::CTRL, Key::E, "end"),
+                    (Modifiers::CTRL, Key::W, "delete_word"),
+                    (Modifiers::CTRL, Key::U, "kill_to_start"),
+                    (Modifiers::CTRL, Key::K, "kill_to_end"),
+                ] {
+                    if i.consume_key(m, k) {
+                        edits.push(op);
+                    }
+                }
                 enter = i.consume_key(Modifiers::NONE, Key::Enter);
                 if single_line {
                     up = i.consume_key(Modifiers::NONE, Key::ArrowUp);
@@ -170,8 +235,11 @@ impl ChaudeApp {
                 }
             });
         }
-        // Editor-side changes (history recall, Enter) move the widget's cursor with them.
-        let mut moved = false;
+        // Editor-side changes (history recall, Enter, editor keys) move the widget's cursor with them.
+        let mut moved = !edits.is_empty();
+        for op in edits {
+            self.input.apply_key(op);
+        }
         if up {
             self.input.history_prev();
             moved = true;

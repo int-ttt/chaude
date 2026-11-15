@@ -246,6 +246,15 @@ pub fn push_history(items: &mut Vec<String>, s: String) -> bool {
     false
 }
 
+// Ctrl+C (Go tui.go): interrupts while a turn is busy, otherwise quits even with input text. Shared by the TUI and the GUI.
+pub fn ctrl_c_action(busy: bool) -> Action {
+    if busy {
+        Action::Interrupt(InterruptSource::CtrlC)
+    } else {
+        Action::Quit
+    }
+}
+
 // Cut to n chars (repl.go trunc, rune based).
 pub fn trunc_chars(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
@@ -533,6 +542,14 @@ impl RunState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ctrl_c_interrupts_a_busy_turn_and_quits_otherwise() {
+        assert_eq!(
+            ctrl_c_action(true),
+            Action::Interrupt(InterruptSource::CtrlC)
+        );
+        assert_eq!(ctrl_c_action(false), Action::Quit);
+    }
 
     #[test]
     fn caveman_blocks_are_detected_and_hidden() {

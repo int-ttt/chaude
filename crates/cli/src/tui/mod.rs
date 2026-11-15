@@ -981,14 +981,8 @@ impl App {
                 }
                 Action::Continue
             }
-            KeyCode::Char('c') if ctrl => {
-                // Go tui.go: Ctrl+C interrupts when busy, otherwise quits even with input text.
-                if self.run.busy {
-                    Action::Interrupt(InterruptSource::CtrlC)
-                } else {
-                    Action::Quit
-                }
-            }
+            // Go tui.go: Ctrl+C interrupts when busy, otherwise quits (core rule, shared with the GUI).
+            KeyCode::Char('c') if ctrl => chaude_core::ui_state::ctrl_c_action(self.run.busy),
             // Go tui.go: Ctrl+D quits at once, busy or not.
             KeyCode::Char('d') if ctrl => Action::Quit,
             KeyCode::Char('j') if ctrl => {
