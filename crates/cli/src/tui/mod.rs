@@ -87,18 +87,18 @@ const TOOL_ON: &str = "\x1b[38;2;95;175;135m";
 
 pub use chaude_core::ui_state::Action;
 
-// A tool row in the transcript: its index, tool name and head text, and the Instant it started (elapsed). The wall-clock
+// A tool row in the transcript: its entry index, tool name and head text, and the Instant it started (elapsed). The wall-clock
 // start and end live on its Tool entry.
 struct ToolRow {
-    row: usize,
+    entry: usize,
     name: String,
     head: String,
     at: Instant,
 }
 
-// A stage row in the transcript: its index, the stage body without the "· " lead, and its start.
+// A stage row in the transcript: its entry index, the stage body without the "· " lead, and its start.
 struct StageRow {
-    row: usize,
+    entry: usize,
     body: String,
     start: i64,
     at: Instant,
@@ -179,14 +179,14 @@ pub struct App {
     sess: Option<sessview::SessView>,
     // Open Ctrl+T agent view (Go m.av). Read-only; replaces the body.
     av: Option<agentview::AgentView>,
-    // Go m.rw: Esc Esc rewind picker. prompts = (transcript row, text) of each echoed prompt, in order.
+    // Go m.rw: Esc Esc rewind picker. prompts = (entry index, text) of each echoed prompt, in order.
     rw: rewind::Rewind,
     prompts: Vec<(usize, String)>,
     // Time of the last Esc on an empty input (Go m.lastEsc); a second Esc within 600 ms opens the picker.
     last_esc: Option<Instant>,
-    // Transcript indices of note rows that wrap at width + 1 (Go shows /view errors at the full width).
+    // Entry indices of note entries that wrap at width + 1 (Go shows /view errors at the full width).
     wide: HashSet<usize>,
-    // Transcript indices of assistant and user rows; only these get link styles in body() (Go tui.go:374, 376).
+    // Entry indices of assistant and user entries; only these get link styles in body() (Go tui.go:374, 376).
     linked: HashSet<usize>,
     // Id of the permission request waiting for y/n (UiEvent::PermissionRequest). While set, keys answer it.
     perm: Option<String>,
@@ -373,20 +373,20 @@ impl App {
                 };
                 self.run.last_tool = trunc_runes(&head, LAST_TOOL_RUNES);
                 let start = unix_now();
-                let row = ToolRow {
-                    row: self.transcript.len(),
-                    name: name.clone(),
-                    head,
-                    at: Instant::now(),
-                };
-                self.push_entry(Entry::Tool {
+                let entry = self.push_entry(Entry::Tool {
                     id: id.clone(),
-                    name,
+                    name: name.clone(),
                     summary,
                     ok: None,
                     start,
                     end: None,
                 });
+                let row = ToolRow {
+                    entry,
+                    name,
+                    head,
+                    at: Instant::now(),
+                };
                 self.tool_rows.insert(id, row);
             }
             // Go tool_summary: the input JSON gives the row its argument summary. Rewrites only a row still in place.
@@ -399,8 +399,8 @@ impl App {
                         format!("{}({summary})", r.name)
                     };
                     self.run.last_tool = trunc_runes(&r.head, LAST_TOOL_RUNES);
-                    let row = r.row;
-                    self.update_row(row, |e| {
+                    let entry = r.entry;
+                    self.update_entry(entry, |e| {
                         if let Entry::Tool { summary: s, .. } = e {
                             *s = summary;
                         }
@@ -411,11 +411,11 @@ impl App {
             // The tool row also gets its end time and elapsed (" → HH:MM:SS (Ns)").
             UiEvent::ToolEnd { id, ok } => {
                 if let Some(r) = self.tool_rows.get(&id)
-                    && self.tool_open(r.row)
+                    && self.tool_open(r.entry)
                 {
                     let end = Some((unix_now(), r.at.elapsed().as_secs()));
-                    let row = r.row;
-                    self.update_row(row, |e| {
+                    let entry = r.entry;
+                    self.update_entry(entry, |e| {
                         if let Entry::Tool { end: slot, .. } = e {
                             *slot = end;
                         }
@@ -440,8 +440,8 @@ impl App {
                 };
                 // The result sits directly under its own tool row (matched by tool id), so parallel calls keep
                 // their results; a result with no open tool row is appended.
-                match self.tool_rows.get(&id).map(|r| r.row) {
-                    Some(at) => self.insert_entries(at + 1, vec![result, Entry::Blank]),
+                match self.tool_rows.get(&id).map(|r| r.entry) {
+                    Some(e) => self.insert_entries(e + 1, vec![result, Entry::Blank]),
                     None => {
                         self.push_entry(result);
                         self.push_entry(Entry::Blank);
@@ -476,7 +476,7 @@ impl App {
                 if self.resume_rows.contains_key(&id) {
                     if let Some(r) = self.tool_rows.remove(&send_id) {
                         let end = Some((unix_now(), r.at.elapsed().as_secs()));
-                        self.update_row(r.row, |e| {
+                        self.update_entry(r.entry, |e| {
                             if let Entry::Tool { end: slot, .. } = e {
                                 *slot = end;
                             }
@@ -493,13 +493,7 @@ impl App {
                         format!("resume({description})")
                     };
                     let start = unix_now();
-                    let row = ToolRow {
-                        row: self.transcript.len(),
-                        name: "resume".to_string(),
-                        head,
-                        at: Instant::now(),
-                    };
-                    self.push_entry(Entry::Tool {
+                    let entry = self.push_entry(Entry::Tool {
                         id: id.clone(),
                         name: "resume".to_string(),
                         summary: description,
@@ -507,6 +501,12 @@ impl App {
                         start,
                         end: None,
                     });
+                    let row = ToolRow {
+                        entry,
+                        name: "resume".to_string(),
+                        head,
+                        at: Instant::now(),
+                    };
                     self.resume_rows.insert(id, row);
                 }
             }
@@ -631,16 +631,17 @@ impl App {
                 match phase {
                     StagePhase::Working => {
                         let body = text.strip_prefix("· ").unwrap_or(&text).to_string();
+                        let start = unix_now();
+                        let entry = self.push_entry(Entry::Notice(format!(
+                            "{GREY_ON}{}{FG_OFF}",
+                            action_line("· ", start, &body, None)
+                        )));
                         let row = StageRow {
-                            row: self.transcript.len(),
+                            entry,
                             body,
-                            start: unix_now(),
+                            start,
                             at: Instant::now(),
                         };
-                        self.note(&format!(
-                            "{GREY_ON}{}{FG_OFF}",
-                            action_line("· ", row.start, &row.body, None)
-                        ));
                         self.stage_rows.insert(slot.clone(), row);
                     }
                     StagePhase::Done | StagePhase::Failed(_) => {
@@ -650,7 +651,7 @@ impl App {
                                 "{GREY_ON}{}{FG_OFF}",
                                 action_line("· ", r.start, &r.body, end)
                             );
-                            self.update_row(r.row, |e| {
+                            self.update_entry(r.entry, |e| {
                                 if let Entry::Notice(text) = e {
                                     *text = line;
                                 }
@@ -920,11 +921,14 @@ impl App {
                 .map(|(_, t)| ("user", t.as_str()))
                 .collect();
             if let Some(cut) = self.rw.key(key, &refs) {
-                self.truncate_transcript(self.prompts[cut.cut].0);
-                self.tool_rows.retain(|_, r| r.row < self.transcript.len());
-                self.stage_rows.retain(|_, r| r.row < self.transcript.len());
-                self.wide.retain(|&i| i < self.transcript.len());
-                self.linked.retain(|&i| i < self.transcript.len());
+                let entry = self.prompts[cut.cut].0;
+                self.truncate_transcript(self.row_of_entry(entry));
+                let n = self.entries.len();
+                self.tool_rows.retain(|_, r| r.entry < n);
+                self.stage_rows.retain(|_, r| r.entry < n);
+                self.resume_rows.retain(|_, r| r.entry < n);
+                self.wide.retain(|&e| e < n);
+                self.linked.retain(|&e| e < n);
                 self.prompts.truncate(cut.cut);
                 self.editor.clear();
                 self.editor.insert_str(&cut.text);
@@ -1283,7 +1287,7 @@ impl App {
         }
     }
 
-    // Empties the transcript and the row indexes that point into it (Go m.blocks = nil).
+    // Empties the transcript and the entry and row maps that point into it (Go m.blocks = nil).
     fn clear_transcript(&mut self) {
         self.transcript.clear();
         self.entries = Transcript::default();
@@ -1291,6 +1295,9 @@ impl App {
         self.wide.clear();
         self.linked.clear();
         self.prompts.clear();
+        self.tool_rows.clear();
+        self.stage_rows.clear();
+        self.resume_rows.clear();
     }
 
     // Go importedMsg: replaces the transcript with the imported view (importBlocks), then the install note.
@@ -1421,17 +1428,15 @@ impl App {
     // path as live output does (asst_text); other kinds are plain note rows.
     fn record_block(&mut self, kind: &str, text: &str) {
         if kind == "user" {
-            let at = self.transcript.len();
-            self.push_entry(Entry::User(text.to_string()));
-            self.link_from(at);
+            let e = self.push_entry(Entry::User(text.to_string()));
+            self.linked.insert(e);
         } else if kind == "asst" {
-            let at = self.transcript.len();
-            self.push_entry(Entry::Text {
+            let e = self.push_entry(Entry::Text {
                 role: Role::Main,
                 text: text.to_string(),
                 done: true,
             });
-            self.link_from(at);
+            self.linked.insert(e);
         } else {
             self.note(text);
         }
@@ -1608,13 +1613,14 @@ impl App {
     // entry of a main block that is already open continues it with the "  " lead, as the live path did.
     fn append_text(&mut self, role: &Role, lines: &[String]) {
         let joined = lines.join("\n");
-        let start = match self.open_tail(role) {
+        let idx = match self.open_tail(role) {
             Some(idx) => {
                 if let Entry::Text { text, .. } = &mut self.entries.entries[idx] {
                     text.push('\n');
                     text.push_str(&joined);
                 }
-                self.redraw_text(idx)
+                self.redraw_text(idx);
+                idx
             }
             None => {
                 self.close_text(role);
@@ -1624,19 +1630,17 @@ impl App {
                     Role::Agent(_) => AGENT_PREFIX,
                 };
                 let rows = text_rows(role, &joined, first);
-                let start = self.transcript.len();
                 let e = Entry::Text {
                     role: role.clone(),
                     text: joined,
                     done: false,
                 };
-                self.push_entry_rows(e, rows);
-                start
+                self.push_entry_rows(e, rows)
             }
         };
         if matches!(role, Role::Main) {
             self.main_open = true;
-            self.link_from(start);
+            self.linked.insert(idx);
         }
     }
 
@@ -1652,8 +1656,8 @@ impl App {
         (open && tail).then_some(last)
     }
 
-    // Redraws the rows of the Text entry at `idx` from its text; returns the first row it drew.
-    fn redraw_text(&mut self, idx: usize) -> usize {
+    // Redraws the rows of the Text entry at `idx` from its text.
+    fn redraw_text(&mut self, idx: usize) {
         let end = self
             .row_entry
             .iter()
@@ -1676,7 +1680,6 @@ impl App {
         let n = rows.len();
         self.transcript.splice(start..end, rows);
         self.row_entry.splice(start..end, vec![idx; n]);
-        start
     }
 
     // Marks the open Text entry of `role` done. Its rows stay as they are.
@@ -1701,17 +1704,19 @@ impl App {
     }
 
     // Pushes one core entry and the rows it draws, recording each row's entry.
-    fn push_entry(&mut self, e: Entry) {
+    // Returns the index of the new entry.
+    fn push_entry(&mut self, e: Entry) -> usize {
         let rows = entry_rows(&e);
-        self.push_entry_rows(e, rows);
+        self.push_entry_rows(e, rows)
     }
 
-    fn push_entry_rows(&mut self, e: Entry, rows: Vec<String>) {
+    fn push_entry_rows(&mut self, e: Entry, rows: Vec<String>) -> usize {
         self.sync_rows();
         debug_assert!(!rows.is_empty(), "entry kind not switched to the TUI yet");
         self.row_entry.extend(vec![self.entries.len(); rows.len()]);
         self.transcript.extend(rows);
         self.entries.push(e);
+        self.entries.len() - 1
     }
 
     // The entry that drew transcript row `r`, if an entry drew it.
@@ -1719,34 +1724,51 @@ impl App {
         self.row_entry.get(r).copied().filter(|&e| e != NO_ENTRY)
     }
 
-    // True while the Tool entry drawn at transcript row `row` has no end time yet.
-    fn tool_open(&self, row: usize) -> bool {
+    // True while the Tool entry `e` has no end time yet.
+    fn tool_open(&self, e: usize) -> bool {
         matches!(
-            self.entry_of_row(row).map(|e| &self.entries.entries[e]),
+            self.entries.entries.get(e),
             Some(Entry::Tool { end: None, .. })
         )
     }
 
-    // Edits the entry drawn at transcript row `row` (a one-row entry), then redraws that row from it. Rows no entry drew are left alone.
-    fn update_row(&mut self, row: usize, f: impl FnOnce(&mut Entry)) {
-        let Some(e) = self.entry_of_row(row) else {
+    // The first transcript row that entry `e` drew (the transcript length when none did).
+    fn row_of_entry(&self, e: usize) -> usize {
+        self.row_entry
+            .iter()
+            .position(|&x| x == e)
+            .unwrap_or(self.transcript.len())
+    }
+
+    // True when transcript row `r` was drawn by an entry in `set` (the wide or linked entries).
+    fn row_in(&self, set: &HashSet<usize>, r: usize) -> bool {
+        self.entry_of_row(r).is_some_and(|e| set.contains(&e))
+    }
+
+    // Edits entry `e` (a one-row entry), then redraws its row from it.
+    fn update_entry(&mut self, e: usize, f: impl FnOnce(&mut Entry)) {
+        if e >= self.entries.len() {
             return;
-        };
+        }
         f(&mut self.entries.entries[e]);
         let line = entry_rows(&self.entries.entries[e]).into_iter().next();
+        let row = self.row_of_entry(e);
         if let (Some(line), Some(slot)) = (line, self.transcript.get_mut(row)) {
             *slot = line;
         }
     }
 
-    // Inserts entries at transcript row `at`, directly under the row of the entry drawn at at-1. The entries go
-    // right after that entry, so entry order matches row order; the row and entry maps shift with them.
-    fn insert_entries(&mut self, at: usize, es: Vec<Entry>) {
+    // Inserts entries at entry index `at_entry`, after the rows of the entries before it, so entry order matches
+    // row order. The row and entry maps shift with them.
+    fn insert_entries(&mut self, at_entry: usize, es: Vec<Entry>) {
         self.sync_rows();
-        let at_entry = self
-            .entry_of_row(at - 1)
-            .map_or(self.entries.len(), |e| e + 1);
+        let at = self
+            .row_entry
+            .iter()
+            .rposition(|&e| e < at_entry)
+            .map_or(0, |r| r + 1);
         let k = es.len();
+        self.shift_entries(at_entry, k);
         for v in self.row_entry.iter_mut() {
             if *v != NO_ENTRY && *v >= at_entry {
                 *v += k;
@@ -1762,6 +1784,26 @@ impl App {
         self.entries.entries.splice(at_entry..at_entry, es);
         self.insert_rows(at, rows);
         self.row_entry[at..at + map.len()].copy_from_slice(&map);
+    }
+
+    // Shifts the entry-keyed records at or after entry `at` by `k`, for k entries inserted there.
+    fn shift_entries(&mut self, at: usize, k: usize) {
+        let shift = |e: usize| if e >= at { e + k } else { e };
+        for r in self
+            .tool_rows
+            .values_mut()
+            .chain(self.resume_rows.values_mut())
+        {
+            r.entry = shift(r.entry);
+        }
+        for r in self.stage_rows.values_mut() {
+            r.entry = shift(r.entry);
+        }
+        for p in self.prompts.iter_mut() {
+            p.0 = shift(p.0);
+        }
+        self.wide = self.wide.iter().map(|&e| shift(e)).collect();
+        self.linked = self.linked.iter().map(|&e| shift(e)).collect();
     }
 
     // Cuts the transcript back to `n` rows and drops the entries that drew the cut rows.
@@ -1825,7 +1867,7 @@ impl App {
         // A resumed agent's timed row gets its end time and elapsed, like the other timed rows.
         if let Some(r) = self.resume_rows.remove(id) {
             let end = Some((unix_now(), r.at.elapsed().as_secs()));
-            self.update_row(r.row, |e| {
+            self.update_entry(r.entry, |e| {
                 if let Entry::Tool { end: slot, .. } = e {
                     *slot = end;
                 }
@@ -1842,15 +1884,14 @@ impl App {
     // Go tui.go render(): the user block is grey, "> " on its first row, and is followed by a blank row.
     // Used when a prompt is sent: at once when idle, or when a queued prompt starts as the next turn.
     fn echo_prompt(&mut self, text: &str) {
-        self.prompts.push((self.transcript.len(), text.to_string()));
-        let at = self.transcript.len();
-        self.push_entry(Entry::User(text.to_string()));
-        self.link_from(at);
+        let e = self.push_entry(Entry::User(text.to_string()));
+        self.prompts.push((e, text.to_string()));
+        self.linked.insert(e);
         self.push_entry(Entry::Blank);
         self.follow_tail();
     }
 
-    // Inserts rows at transcript index `at` and shifts every index-keyed row record at or below it.
+    // Inserts rows at transcript index `at`; the row->entry map shifts with them.
     fn insert_rows(&mut self, at: usize, rows: Vec<String>) {
         // Off the agent pane, the body rows above the insert keep their place: the view and selection below it move
         // by the rows that wrapped in (the view when it is held above the tail).
@@ -1860,22 +1901,6 @@ impl App {
         self.sync_rows();
         self.row_entry.splice(at..at, vec![NO_ENTRY; n]);
         self.transcript.splice(at..at, rows);
-        let shift = |i: usize| if i >= at { i + n } else { i };
-        for r in self
-            .tool_rows
-            .values_mut()
-            .chain(self.resume_rows.values_mut())
-        {
-            r.row = shift(r.row);
-        }
-        for r in self.stage_rows.values_mut() {
-            r.row = shift(r.row);
-        }
-        for p in self.prompts.iter_mut() {
-            p.0 = shift(p.0);
-        }
-        self.wide = self.wide.iter().map(|&i| shift(i)).collect();
-        self.linked = self.linked.iter().map(|&i| shift(i)).collect();
         if let Some((start, before)) = anchor {
             let grown = self.total_rows(self.cols).saturating_sub(before);
             if !self.follow && start <= self.top {
@@ -1898,16 +1923,10 @@ impl App {
         head + cache.rows[..at].iter().map(|r| r.1.len()).sum::<usize>()
     }
 
-    // Marks the rows pushed since `at` as assistant or user rows, whose links body() styles.
-    fn link_from(&mut self, at: usize) {
-        self.linked.extend(at..self.transcript.len());
-    }
-
     // A note whose rows wrap at the full width instead of the chat width.
     fn note_wide(&mut self, text: &str) {
-        let at = self.transcript.len();
-        self.note(text);
-        self.wide.extend(at..self.transcript.len());
+        let e = self.push_entry(Entry::Notice(text.to_string()));
+        self.wide.insert(e);
     }
 
     // Agent and Task tool calls, which launch a subagent. Checked by the name the ToolStart row was given.
@@ -1980,11 +1999,11 @@ impl App {
         let mut cache = self.wraps.borrow_mut();
         cache.rows.truncate(self.transcript.len());
         let is_linked = |i: usize| {
-            self.linked.contains(&i)
+            self.row_in(&self.linked, i)
                 || (i == self.transcript.len() && !self.pending_main.is_empty())
         };
         let mut tables = md_tables(&lines, is_linked, |i| {
-            if self.wide.contains(&i) {
+            if self.row_in(&self.wide, i) {
                 width + 1
             } else {
                 width
@@ -1992,7 +2011,7 @@ impl App {
         });
         let mut table_end = 0;
         for (i, l) in lines.into_iter().enumerate() {
-            let w = if self.wide.contains(&i) {
+            let w = if self.row_in(&self.wide, i) {
                 width + 1
             } else {
                 width
@@ -2015,7 +2034,7 @@ impl App {
             }
             // Transcript rows come from the cache: rewrapped only when their text, width or style changed.
             if i < self.transcript.len() {
-                let linked = self.linked.contains(&i);
+                let linked = self.row_in(&self.linked, i);
                 let key = wrap_key(l, w, linked);
                 if cache.rows.len() <= i {
                     cache.rows.push((key, wrap_row(l, w, linked)));
@@ -2029,7 +2048,7 @@ impl App {
             }
             // Go wrapLinked (tui.go:374, 376) styles links in assistant and user rows only; the live row is assistant text.
             let live = i == self.transcript.len() && !self.pending_main.is_empty();
-            rows.extend(wrap_row(l, w, live || self.linked.contains(&i)));
+            rows.extend(wrap_row(l, w, live || self.row_in(&self.linked, i)));
         }
         rows
     }
@@ -4192,9 +4211,8 @@ mod tests {
     fn double_esc_rewinds_to_selected_prompt() {
         let mut app = App::new(100, 30);
         for (i, text) in ["first", "second"].iter().enumerate() {
-            app.prompts.push((app.transcript.len(), text.to_string()));
-            app.transcript.push(format!("> {text}"));
-            app.transcript.push(format!("answer {i}"));
+            app.echo_prompt(text);
+            app.note(&format!("answer {i}"));
         }
         assert!(matches!(
             app.on_key(key(KeyCode::Esc, KeyModifiers::NONE)),
@@ -4218,6 +4236,50 @@ mod tests {
         );
         assert!(app.transcript.iter().any(|l| l.contains("rewound")));
         assert_eq!(app.editor.text(), "first");
+    }
+
+    // Entry indexes follow a height change above them: the echoed prompt and the wide note keep their flags and rows,
+    // a press and release on the wide note's screen row select its text, and Esc Esc rewinds to the prompt by entry.
+    #[test]
+    fn wide_and_linked_entries_follow_a_height_change() {
+        let mut app = App::new(40, 30);
+        let w = text_width(app.cols);
+        let wide = "w".repeat(w + 1);
+        app.note("head");
+        app.echo_prompt("hello");
+        app.note_wide(&wide);
+        assert_eq!(app.prompts, vec![(1, "hello".to_string())]);
+        // Two blank entries above the prompt add two rows: the prompt and the wide note move to entries 3 and 5.
+        app.insert_entries(1, vec![Entry::Blank, Entry::Blank]);
+        assert_eq!(app.prompts, vec![(3, "hello".to_string())]);
+        assert!(app.row_in(&app.linked, app.row_of_entry(3)));
+        assert!(app.row_in(&app.wide, app.row_of_entry(5)));
+        assert!(!app.row_in(&app.wide, app.row_of_entry(3)));
+        // The wide note wraps at width + 1, so it is one body row.
+        let rows: Vec<String> = app.body(w).iter().map(|r| render::strip_sgr(r)).collect();
+        assert_eq!(rows.iter().filter(|r| r.starts_with("www")).count(), 1);
+        // Press and release on the wide note's screen row select its first five cells.
+        let y = screen(&app, 40, 30)
+            .iter()
+            .position(|l| l.contains(&wide))
+            .expect("wide note on screen") as u16;
+        app.select_press(0, y);
+        assert_eq!(app.select_release(5, y), Some("wwwww".to_string()));
+        // Esc Esc opens the picker; Enter cuts at the prompt's entry and the wide note goes with it.
+        app.on_key(key(KeyCode::Esc, KeyModifiers::NONE));
+        app.on_key(key(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.rw.is_open());
+        app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!app.rw.is_open());
+        assert_eq!(app.editor.text(), "hello");
+        assert!(app.prompts.is_empty() && app.wide.is_empty() && app.linked.is_empty());
+        assert!(app.tool_rows.is_empty() && app.stage_rows.is_empty());
+        assert_eq!(app.transcript[0], "head");
+        assert!(
+            app.transcript
+                .iter()
+                .all(|l| !l.contains("hello") && !l.contains(&wide))
+        );
     }
 
     // An app at 30x5 (two viewport rows) with lines "line 0" .. "line {n-1}".
@@ -6612,8 +6674,8 @@ mod tests {
             started_at: 0,
             send_id: send.into(),
         });
-        let row = app.resume_rows.get(agent).expect("resume row opens").row;
-        let line = &app.transcript[row];
+        let entry = app.resume_rows.get(agent).expect("resume row opens").entry;
+        let line = &app.transcript[app.row_of_entry(entry)];
         let plain = render::strip_sgr(line);
         assert!(line.starts_with(TOOL_ON), "{line:?}");
         assert!(
@@ -6649,7 +6711,7 @@ mod tests {
             summary: "README updated".into(),
         });
         assert!(app.resume_rows.is_empty());
-        let plain = render::strip_sgr(&app.transcript[row]);
+        let plain = render::strip_sgr(&app.transcript[app.row_of_entry(entry)]);
         assert!(
             plain.starts_with("● ")
                 && plain.contains(" SendMessage(ab5377649aa7c5a8f) → ")
@@ -8532,11 +8594,11 @@ mod tests {
     fn bench_frame_large_history_streaming() {
         let mut app = App::new(120, 40);
         for i in 0..2000 {
-            app.transcript.push(format!(
+            let e = app.push_entry(Entry::User(format!(
                 "**row {i}** see crates/cli/src/tui/mod.rs:{i} and https://example.com/a/{i} then more words to wrap"
-            ));
+            )));
+            app.linked.insert(e);
         }
-        app.linked.extend(0..2000);
         let mut prev = Vec::new();
         let mut buf: Vec<u8> = Vec::new();
         draw(&mut buf, &app, &mut prev).unwrap();
