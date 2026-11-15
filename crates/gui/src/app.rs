@@ -181,6 +181,10 @@ impl ChaudeApp {
                     engine.submit(&format!("/lang {code}"));
                 }
             }
+            Effect::OpenSettings => {
+                let cwd = self.state.cwd.clone();
+                self.state.open_settings(Some(Path::new(&cwd)));
+            }
             Effect::Doctor => {
                 self.state
                     .transcript
@@ -251,6 +255,78 @@ impl ChaudeApp {
             && let Some(engine) = &self.engine
         {
             engine.submit(&format!("/lang {code}"));
+        }
+    }
+
+    // Keys of the open /settings picker (TUI settings.rs key): Up/Down (k/j) move the row, Left/Right (h/l) and Enter
+    // change its value, Esc, q and Ctrl+C save and close; the close note goes to the transcript.
+    fn settings_keys(&mut self, ctx: &egui::Context) {
+        if self.state.permission.is_some() || self.state.settings.is_none() {
+            return;
+        }
+        let (mut up, mut down, mut left, mut right, mut close) =
+            (false, false, false, false, false);
+        ctx.input_mut(|i| {
+            up |= i.consume_key(Modifiers::NONE, Key::ArrowUp);
+            up |= i.consume_key(Modifiers::NONE, Key::K);
+            down |= i.consume_key(Modifiers::NONE, Key::ArrowDown);
+            down |= i.consume_key(Modifiers::NONE, Key::J);
+            left |= i.consume_key(Modifiers::NONE, Key::ArrowLeft);
+            left |= i.consume_key(Modifiers::NONE, Key::H);
+            right |= i.consume_key(Modifiers::NONE, Key::ArrowRight);
+            right |= i.consume_key(Modifiers::NONE, Key::L);
+            right |= i.consume_key(Modifiers::NONE, Key::Enter);
+            close |= i.consume_key(Modifiers::NONE, Key::Escape);
+            close |= i.consume_key(Modifiers::NONE, Key::Q);
+            close |= i.consume_key(Modifiers::CTRL, Key::C);
+        });
+        if close {
+            self.close_settings();
+            return;
+        }
+        if up {
+            self.state.settings_step(true);
+        }
+        if down {
+            self.state.settings_step(false);
+        }
+        if left {
+            self.state.settings_change(-1);
+        }
+        if right {
+            self.state.settings_change(1);
+        }
+    }
+
+    // Saves the /settings working copy and closes it; the note says what applies when (TUI close).
+    fn close_settings(&mut self) {
+        if let Some(note) = self.state.close_settings() {
+            self.state.transcript.push_notice(note);
+        }
+    }
+
+    // The /settings window (TUI settings.rs): the three value rows with the cursor row marked. The X button saves
+    // and closes it too.
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        let Some((sel, rows)) = self.state.settings.as_ref().map(|p| (p.sel, p.rows())) else {
+            return;
+        };
+        let mut open = true;
+        egui::Window::new("Settings")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                for (i, row) in rows.iter().enumerate() {
+                    let mark = if sel == i { "> " } else { "  " };
+                    ui.monospace(format!("{mark}{row}"));
+                }
+                ui.weak("↑/↓ move · ←/→ or enter change · esc save & close");
+                ui.weak(i18n::t(Msg::SettingsNextSession));
+            });
+        if !open {
+            self.close_settings();
         }
     }
 
@@ -571,11 +647,12 @@ impl ChaudeApp {
     }
 
     fn input_box(&mut self, ui: &mut egui::Ui) {
-        // No input while a permission prompt or a /usage or /lang window is open; they take the keys.
+        // No input while a permission prompt or a /usage, /lang or /settings window is open; they take the keys.
         let ready = self.engine.is_some()
             && self.state.permission.is_none()
             && self.state.usage.is_none()
-            && self.state.lang.is_none();
+            && self.state.lang.is_none()
+            && self.state.settings.is_none();
         let focused = ready && self.input_focused;
         let single_line = self.input.is_single_line();
         // Slash popup: the matches for a command word being typed (none while busy or a permission prompt is open).
@@ -710,6 +787,7 @@ impl ChaudeApp {
 impl eframe::App for ChaudeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain(ui.ctx());
+        self.settings_keys(ui.ctx());
         self.lang_keys(ui.ctx());
         self.window_keys(ui.ctx());
         self.shortcuts(ui.ctx());
@@ -737,6 +815,7 @@ impl eframe::App for ChaudeApp {
         self.permission_dialog(ui.ctx());
         self.usage_window(ui.ctx());
         self.lang_window(ui.ctx());
+        self.settings_window(ui.ctx());
     }
 }
 

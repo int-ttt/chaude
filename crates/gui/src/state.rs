@@ -2,6 +2,7 @@
 //! No egui types here, so the reducer is unit-tested without a window.
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::time::Instant;
 
 use chaude_core::api::{AgentRow, Role, UiEvent};
@@ -10,7 +11,7 @@ use chaude_core::handoff;
 use chaude_core::i18n::{self, Msg};
 use chaude_core::localtime::{clock_hhmmss, unix_now};
 use chaude_core::resident::StagePhase;
-use chaude_core::settings::pickers::LangPicker;
+use chaude_core::settings::pickers::{LangPicker, SettingsPicker};
 use chaude_core::ui_state::{
     BarInput, Entry, RunState, Transcript, stage_line, stage_text, tool_result_text, tool_summary,
 };
@@ -57,6 +58,8 @@ pub struct GuiState {
     usage_pending: bool,
     // The open /lang picker (None = closed). Keys and the apply live in the app; the model is core (settings::pickers).
     pub lang: Option<LangPicker>,
+    // The open /settings picker over a working copy (None = closed). Closing saves it (core settings::pickers).
+    pub settings: Option<SettingsPicker>,
 }
 
 impl GuiState {
@@ -92,6 +95,30 @@ impl GuiState {
     // Closes the /lang picker without a pick (TUI Key::Cancel).
     pub fn close_lang(&mut self) {
         self.lang = None;
+    }
+
+    // Opens the /settings picker on the project settings of cwd (TUI settings::Picker::open). Only reads the file.
+    pub fn open_settings(&mut self, cwd: Option<&Path>) {
+        self.settings = Some(SettingsPicker::open(cwd));
+    }
+
+    // Moves the /settings cursor up or down (no-op while closed).
+    pub fn settings_step(&mut self, up: bool) {
+        if let Some(p) = self.settings.as_mut() {
+            p.step(up);
+        }
+    }
+
+    // Steps the value under the /settings cursor by dir (+1 or -1), wrapping (no-op while closed).
+    pub fn settings_change(&mut self, dir: i64) {
+        if let Some(p) = self.settings.as_mut() {
+            p.change(dir);
+        }
+    }
+
+    // Saves the /settings working copy and closes the picker (TUI close). Returns the note to append; None when closed.
+    pub fn close_settings(&mut self) -> Option<String> {
+        self.settings.take().map(|mut p| p.close())
     }
 
     // Picks a row (Some(index) for 1/2 or a click, None for Enter on the cursor row) and closes the picker.
@@ -1053,6 +1080,28 @@ mod tests {
         st.open_lang();
         st.close_lang();
         assert!(st.lang.is_none(), "esc closes without a pick");
+    }
+
+    #[test]
+    fn settings_window_steps_changes_and_closes_once() {
+        let mut st = GuiState::default();
+        st.settings_step(true);
+        assert!(st.settings.is_none(), "stepping while closed does nothing");
+        // A missing file loads the defaults and nothing is written.
+        st.open_settings(Some(Path::new("/nonexistent/chaude-gui-test")));
+        assert_eq!(st.settings.as_ref().map(|p| p.sel), Some(0));
+        st.settings_step(true);
+        assert_eq!(st.settings.as_ref().map(|p| p.sel), Some(2), "up wraps");
+        let before = st.settings.as_ref().map(|p| p.s.main_model.clone());
+        st.settings_change(1);
+        assert_ne!(st.settings.as_ref().map(|p| p.s.main_model.clone()), before);
+        // The path is cleared so closing never writes a settings file from a test.
+        if let Some(p) = st.settings.as_mut() {
+            p.path = None;
+        }
+        assert!(st.close_settings().is_some(), "close returns the note");
+        assert!(st.settings.is_none());
+        assert_eq!(st.close_settings(), None, "a second close does nothing");
     }
 
     #[test]

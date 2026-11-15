@@ -23,6 +23,8 @@ pub enum Effect {
     OpenLang,
     // Saves the language typed as /lang CODE and switches the UI (the TUI lang::apply).
     SetLang(String),
+    // Opens the /settings picker on the project settings file (it saves when closed).
+    OpenSettings,
     // The update check runs off the UI thread; its answer comes back as a notice.
     Update,
     // Plain prompts and the engine-side commands (/clear, /rotate, /model, /cost and the other passthroughs).
@@ -53,7 +55,7 @@ pub fn effect(outcome: SlashOutcome, cwd: &Path) -> Effect {
         SlashOutcome::OpenUsage => Effect::OpenUsage,
         SlashOutcome::OpenLang => Effect::OpenLang,
         SlashOutcome::SetLang(code) => Effect::SetLang(code),
-        SlashOutcome::OpenSettings => Effect::Note(not_yet("/settings")),
+        SlashOutcome::OpenSettings => Effect::OpenSettings,
         SlashOutcome::OpenView { .. } => Effect::Note(not_yet("/view")),
         SlashOutcome::Resume { .. } => Effect::Note(not_yet("/resume")),
         SlashOutcome::Import { .. } => Effect::Note(not_yet("/import")),
@@ -111,6 +113,14 @@ mod tests {
     }
 
     #[test]
+    fn settings_opens_its_picker() {
+        assert_eq!(
+            effect(SlashOutcome::OpenSettings, cwd()),
+            Effect::OpenSettings
+        );
+    }
+
+    #[test]
     fn lang_opens_its_picker_or_sets_the_code() {
         assert_eq!(effect(SlashOutcome::OpenLang, cwd()), Effect::OpenLang);
         assert_eq!(
@@ -142,7 +152,6 @@ mod tests {
     #[test]
     fn pickers_without_a_gui_window_say_so() {
         for (o, name) in [
-            (SlashOutcome::OpenSettings, "/settings"),
             (SlashOutcome::OpenView { arg: String::new() }, "/view"),
             (SlashOutcome::Resume { args: vec![] }, "/resume"),
             (
