@@ -1,9 +1,8 @@
 //! GUI side of the slash commands. Core dispatch decides what a line means; this maps each outcome to a GUI effect.
 //! The effect is plain data, so the mapping is unit-tested here without egui.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use chaude_core::record;
 use chaude_core::slash::{self, Ctx, PermMode, SlashOutcome};
 use chaude_core::ui_state::BarInput;
 
@@ -26,8 +25,9 @@ pub enum Effect {
     SetLang(String),
     // Opens the /settings picker on the project settings file (it saves when closed).
     OpenSettings,
-    // Opens the /resume record picker over the record folder of this project (the folder is the path).
-    OpenRecords(PathBuf),
+    // /resume with its args (none for bare): a killed run's session, the record picker or the session group picker
+    // (the TUI resume; the state decides and returns any import for the engine).
+    Resume(Vec<String>),
     // The update check runs off the UI thread; its answer comes back as a notice.
     Update,
     // Plain prompts and the engine-side commands (/clear, /rotate, /model, /cost and the other passthroughs).
@@ -60,10 +60,7 @@ pub fn effect(outcome: SlashOutcome, cwd: &Path) -> Effect {
         SlashOutcome::SetLang(code) => Effect::SetLang(code),
         SlashOutcome::OpenSettings => Effect::OpenSettings,
         SlashOutcome::OpenView { .. } => Effect::Note(not_yet("/view")),
-        SlashOutcome::Resume { args } if args.is_empty() => {
-            Effect::OpenRecords(record::dir_for(cwd))
-        }
-        SlashOutcome::Resume { .. } => Effect::Note(not_yet("/resume")),
+        SlashOutcome::Resume { args } => Effect::Resume(args),
         SlashOutcome::Import { .. } => Effect::Note(not_yet("/import")),
         SlashOutcome::ToggleMouse => {
             Effect::Note("/mouse: the GUI always scrolls with the wheel".into())
@@ -172,16 +169,13 @@ mod tests {
     }
 
     #[test]
-    fn bare_resume_opens_the_record_picker_and_arguments_do_not() {
+    fn resume_maps_bare_and_arguments_to_the_state_resume() {
         let o = SlashOutcome::Resume { args: vec![] };
-        assert_eq!(
-            effect(o, cwd()),
-            Effect::OpenRecords(record::dir_for(cwd()))
-        );
+        assert_eq!(effect(o, cwd()), Effect::Resume(vec![]));
         let o = SlashOutcome::Resume {
             args: vec!["2".into()],
         };
-        assert_eq!(effect(o, cwd()), Effect::Note(not_yet("/resume")));
+        assert_eq!(effect(o, cwd()), Effect::Resume(vec!["2".into()]));
     }
 
     #[test]

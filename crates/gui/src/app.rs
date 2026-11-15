@@ -110,6 +110,8 @@ impl ChaudeApp {
         let mut state = GuiState::default();
         let cwd = std::env::current_dir().unwrap_or_default();
         state.cwd = cwd.display().to_string();
+        // Read before the engine starts: its live marker would hide a killed run (TUI killed_sid).
+        state.killed_sid = chaude_core::group_pick::killed_session(&state.cwd);
         let (engine, rx) = match engine::start(ctx) {
             Ok((handle, rx)) => (Some(handle), Some(rx)),
             Err(e) => {
@@ -191,7 +193,12 @@ impl ChaudeApp {
                 let cwd = self.state.cwd.clone();
                 self.state.open_settings(Some(Path::new(&cwd)));
             }
-            Effect::OpenRecords(root) => self.state.open_records(&root),
+            Effect::Resume(args) => {
+                if let Some(imp) = self.state.resume(&args) {
+                    engine.install_import(imp);
+                }
+                self.jump_tail = true;
+            }
             Effect::Doctor => {
                 self.state
                     .transcript
@@ -505,56 +512,119 @@ impl ChaudeApp {
         }
     }
 
-    // Keys of the open /resume picker (TUI records key): Up/Down (or k/j) move, 1-9 select that row, Enter loads the
-    // cursor row, Esc, q and Ctrl+C close. They run before shortcuts, so Esc does not interrupt or count as a double Esc.
+    // Loads the picked session group (row as in state.groups_pick): its import goes to the engine and the transcript
+    // follows the tail.
+    fn finish_groups(&mut self, row: Option<usize>) {
+        if let Some(imp) = self.state.groups_pick(row) {
+            if let Some(engine) = &self.engine {
+                engine.install_import(imp);
+            }
+            self.jump_tail = true;
+        }
+    }
+
+    // Keys of the open /resume session picker (TUI resume_pick key): the same keys as the record picker.
+    fn groups_keys(&mut self, ctx: &egui::Context) {
+        if self.state.permission.is_some() || self.state.groups.is_none() {
+            return;
+        }
+        let k = picker_keys(ctx);
+        if k.cancel {
+            self.state.close_groups();
+            return;
+        }
+        if k.up {
+            self.state.groups_step(true);
+        }
+        if k.down {
+            self.state.groups_step(false);
+        }
+        if let Some(i) = k.digit {
+            self.state.groups_select(i);
+        }
+        if k.enter {
+            self.finish_groups(None);
+        }
+    }
+
+    // The /resume session picker window (TUI resume_pick lines): the groups with their date and first prompt, the
+    // cursor row highlighted. A click imports that row; the X button closes it.
+    fn groups_window(&mut self, ctx: &egui::Context) {
+        if self.state.groups.is_none() {
+            return;
+        }
+        let rows = self.state.groups_rows();
+        let sel = self.state.groups.as_ref().map_or(0, |p| p.sel);
+        let mut open = true;
+        let mut click = None;
+        egui::Window::new("Resume a session")
+            .collapsible(false)
+            .default_size([560.0, 360.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    for (i, row) in rows.iter().enumerate() {
+                        if ui.selectable_label(sel == i, row).clicked() {
+                            click = Some(i);
+                        }
+                    }
+                });
+                ui.weak("↑/↓ wheel or 1-9 select · enter resume · esc cancel");
+            });
+        if let Some(i) = click {
+            self.finish_groups(Some(i));
+        }
+        if !open {
+            self.state.close_groups();
+        }
+    }
+
+    // Keys of the open /resume record picker (TUI records key): Up/Down (or k/j) move, 1-9 select that row, Enter loads
+    // the cursor row, Esc, q and Ctrl+C close. They run before shortcuts, so Esc does not interrupt or count as a double Esc.
     fn records_keys(&mut self, ctx: &egui::Context) {
         if self.state.permission.is_some() || self.state.records.is_none() {
             return;
         }
-        const DIGITS: [Key; 9] = [
-            Key::Num1,
-            Key::Num2,
-            Key::Num3,
-            Key::Num4,
-            Key::Num5,
-            Key::Num6,
-            Key::Num7,
-            Key::Num8,
-            Key::Num9,
-        ];
-        let (mut up, mut down, mut enter, mut cancel) = (false, false, false, false);
-        let mut digit = None;
-        ctx.input_mut(|i| {
-            up |= i.consume_key(Modifiers::NONE, Key::ArrowUp);
-            up |= i.consume_key(Modifiers::NONE, Key::K);
-            down |= i.consume_key(Modifiers::NONE, Key::ArrowDown);
-            down |= i.consume_key(Modifiers::NONE, Key::J);
-            enter |= i.consume_key(Modifiers::NONE, Key::Enter);
-            cancel |= i.consume_key(Modifiers::NONE, Key::Escape);
-            cancel |= i.consume_key(Modifiers::NONE, Key::Q);
-            cancel |= i.consume_key(Modifiers::CTRL, Key::C);
-            digit = DIGITS
-                .iter()
-                .position(|&k| i.consume_key(Modifiers::NONE, k));
-        });
-        if cancel {
+        let k = picker_keys(ctx);
+        if k.cancel {
             self.state.close_records();
             return;
         }
-        if up {
+        if k.up {
             self.state.records_step(true);
         }
-        if down {
+        if k.down {
             self.state.records_step(false);
         }
-        if let Some(i) = digit {
+        if let Some(i) = k.digit {
             self.state.records_select(i);
         }
-        if enter {
+        if k.enter {
             self.finish_records(None);
         }
     }
 
+    // Keys of the open /usage window (TUI usage.rs usageKey): Esc, q, Enter and Ctrl+C close it. They run before
+    // shortcuts, so Esc does not interrupt a turn and Ctrl+C does not quit while the window is open.
+    fn window_keys(&mut self, ctx: &egui::Context) {
+        if self.state.permission.is_some() || self.state.usage.is_none() {
+            return;
+        }
+        let mut close = false;
+        ctx.input_mut(|i| {
+            for (m, k) in [
+                (Modifiers::NONE, Key::Escape),
+                (Modifiers::NONE, Key::Q),
+                (Modifiers::NONE, Key::Enter),
+                (Modifiers::CTRL, Key::C),
+            ] {
+                close |= i.consume_key(m, k);
+            }
+        });
+        if close {
+            self.state.usage = None;
+        }
+    }
     // The /resume record picker window (TUI records draw): the folders with their file count and date, the cursor row
     // highlighted. A click loads that row; the X button closes it.
     fn records_window(&mut self, ctx: &egui::Context) {
@@ -586,29 +656,55 @@ impl ChaudeApp {
             self.state.close_records();
         }
     }
+}
 
-    // Keys of the open /usage window (TUI usage.rs usageKey): Esc, q, Enter and Ctrl+C close it. They run before
-    // shortcuts, so Esc does not interrupt a turn and Ctrl+C does not quit while the window is open.
-    fn window_keys(&mut self, ctx: &egui::Context) {
-        if self.state.permission.is_some() || self.state.usage.is_none() {
-            return;
-        }
-        let mut close = false;
-        ctx.input_mut(|i| {
-            for (m, k) in [
-                (Modifiers::NONE, Key::Escape),
-                (Modifiers::NONE, Key::Q),
-                (Modifiers::NONE, Key::Enter),
-                (Modifiers::CTRL, Key::C),
-            ] {
-                close |= i.consume_key(m, k);
-            }
-        });
-        if close {
-            self.state.close_usage();
-        }
+// The keys of an open session picker, read once per frame: Up/Down (or k/j) step, 1-9 select a row (its index),
+// Enter picks the cursor row, Esc, q and Ctrl+C close. Read before shortcuts, so Esc does not interrupt a turn.
+struct PickerKeys {
+    up: bool,
+    down: bool,
+    digit: Option<usize>,
+    enter: bool,
+    cancel: bool,
+}
+
+fn picker_keys(ctx: &egui::Context) -> PickerKeys {
+    const DIGITS: [Key; 9] = [
+        Key::Num1,
+        Key::Num2,
+        Key::Num3,
+        Key::Num4,
+        Key::Num5,
+        Key::Num6,
+        Key::Num7,
+        Key::Num8,
+        Key::Num9,
+    ];
+    let (mut up, mut down, mut enter, mut cancel) = (false, false, false, false);
+    let mut digit = None;
+    ctx.input_mut(|i| {
+        up |= i.consume_key(Modifiers::NONE, Key::ArrowUp);
+        up |= i.consume_key(Modifiers::NONE, Key::K);
+        down |= i.consume_key(Modifiers::NONE, Key::ArrowDown);
+        down |= i.consume_key(Modifiers::NONE, Key::J);
+        enter |= i.consume_key(Modifiers::NONE, Key::Enter);
+        cancel |= i.consume_key(Modifiers::NONE, Key::Escape);
+        cancel |= i.consume_key(Modifiers::NONE, Key::Q);
+        cancel |= i.consume_key(Modifiers::CTRL, Key::C);
+        digit = DIGITS
+            .iter()
+            .position(|&k| i.consume_key(Modifiers::NONE, k));
+    });
+    PickerKeys {
+        up,
+        down,
+        digit,
+        enter,
+        cancel,
     }
+}
 
+impl ChaudeApp {
     // Global keys, consumed before any widget sees them. While a permission prompt is open: y/Enter allow,
     // n/Esc deny, Ctrl+C deny and interrupt. Otherwise Esc cancels a held reply's wait or interrupts a busy turn,
     // Ctrl+C interrupts or quits, Ctrl+D quits, Shift+Tab cycles the mode, and PageUp/PageDown (plus Home/End on an
@@ -842,7 +938,8 @@ impl ChaudeApp {
             && self.state.lang.is_none()
             && self.state.settings.is_none()
             && !self.state.rewind.is_open()
-            && self.state.records.is_none();
+            && self.state.records.is_none()
+            && self.state.groups.is_none();
         let focused = ready && self.input_focused;
         let single_line = self.input.is_single_line();
         // Slash popup: the matches for a command word being typed (none while busy or a permission prompt is open).
@@ -981,6 +1078,7 @@ impl eframe::App for ChaudeApp {
         self.lang_keys(ui.ctx());
         self.rewind_keys(ui.ctx());
         self.records_keys(ui.ctx());
+        self.groups_keys(ui.ctx());
         self.window_keys(ui.ctx());
         self.shortcuts(ui.ctx());
         // Bottom panels stack in show order (later is higher). Bottom to top this is the TUI chrome order reversed:
@@ -1009,6 +1107,7 @@ impl eframe::App for ChaudeApp {
         self.lang_window(ui.ctx());
         self.rewind_window(ui.ctx());
         self.records_window(ui.ctx());
+        self.groups_window(ui.ctx());
         self.settings_window(ui.ctx());
     }
 }

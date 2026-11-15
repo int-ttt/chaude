@@ -7,9 +7,12 @@ use std::time::Instant;
 
 use chaude_core::api::{AgentRow, Role, UiEvent};
 use chaude_core::bar_text;
+use chaude_core::group_pick::{self, GroupPicker};
 use chaude_core::handoff;
 use chaude_core::i18n::{self, Msg};
+use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::localtime::{clock_hhmmss, unix_now};
+use chaude_core::record;
 use chaude_core::record_folder;
 use chaude_core::record_pick::{self, Picker};
 use chaude_core::record_turn;
@@ -68,7 +71,16 @@ pub struct GuiState {
     pub rewind: Rewind,
     // The open /resume record picker (TUI m.recs). Its folder list and cursor are the core model (chaude_core::record_pick).
     pub records: Option<Picker>,
+    // The open /resume session group picker (TUI pick). Its list and cursor are the core model (chaude_core::group_pick).
+    pub groups: Option<GroupPicker>,
+    // The session id the previous run did not finish, read by the app before the engine starts (TUI killed_sid).
+    // A bare /resume imports it.
+    pub killed_sid: Option<String>,
 }
+
+// Notice after an import replaces the transcript (TUI IMPORT_INSTALL_NOTE).
+const IMPORT_INSTALL_NOTE: &str =
+    "import: the next prompt starts from this transcript (Go applyImport)";
 
 // The transcript as the core rewind model reads it: each user prompt is a "user" block, the rest carry no text.
 fn rewind_blocks(t: &Transcript) -> Vec<(&str, &str)> {
@@ -133,21 +145,130 @@ impl GuiState {
         Some(cut.text)
     }
 
-    // Opens the /resume record picker over the folders under root (TUI resume with no argument). With no folder it
-    // notes what the core resume answers instead.
-    pub fn open_records(&mut self, root: &Path) {
-        match Picker::open(root, "") {
+    // /resume <args> (TUI resume): a bare /resume after a killed run imports that session; a query that no record
+    // answers opens the session group picker; otherwise the record folders answer. Returns the import the engine installs.
+    pub fn resume(&mut self, args: &[String]) -> Option<ClaudeImport> {
+        if args.is_empty()
+            && let Some(sid) = self.killed_sid.clone()
+        {
+            let key = group_pick::killed_key(&self.cwd, &sid);
+            return self.import_view(&key);
+        }
+        let root = record::dir_for(Path::new(&self.cwd));
+        let (terms, record) = record_turn::resume_target_in(&root, args);
+        if !record {
+            return self.open_groups(&terms);
+        }
+        self.open_records(&root, &args.join(" "));
+        None
+    }
+
+    // Opens the /resume record picker over the folders under root for arg (TUI resume). With no folder that matches,
+    // the core resume answers instead: its notes and blocks go to the transcript.
+    pub fn open_records(&mut self, root: &Path, arg: &str) {
+        match Picker::open(root, arg) {
             Err(e) => self.transcript.push_notice(e.to_string()),
             Ok(Some(p)) => self.records = Some(p),
-            Ok(None) => match record_turn::resume(root, "", &record_pick::list_date) {
+            Ok(None) => match record_turn::resume(root, arg, &record_pick::list_date) {
                 Err(e) => self.transcript.push_notice(e.to_string()),
-                Ok((lines, _)) => {
+                Ok((lines, entries)) => {
                     for l in lines {
                         self.transcript.push_notice(l);
+                    }
+                    for e in &entries {
+                        self.record_block(&e.kind, &e.text);
                     }
                 }
             },
         }
+    }
+
+    // Lists the session groups for terms (TUI open_groups): one group imports at once, several open the picker, an
+    // error is a notice.
+    fn open_groups(&mut self, terms: &[String]) -> Option<ClaudeImport> {
+        match group_pick::groups(&self.cwd, terms) {
+            Err(e) => {
+                self.transcript.push_notice(e);
+                None
+            }
+            Ok(gs) if gs.len() == 1 => {
+                let key = gs[0].key();
+                self.import_view(&key)
+            }
+            Ok(gs) => {
+                self.groups = Some(GroupPicker::new(gs));
+                None
+            }
+        }
+    }
+
+    // Reads the import of key (TUI import_view, with the digest). The transcript shows its blocks; the import is
+    // returned for the engine. A read error is a notice.
+    fn import_view(&mut self, key: &str) -> Option<ClaudeImport> {
+        match import_claude::import_for_resume(key, &self.cwd, true) {
+            Err(e) => {
+                self.transcript.push_notice(e.to_string());
+                None
+            }
+            Ok(imp) => {
+                self.show_import(&imp);
+                Some(imp)
+            }
+        }
+    }
+
+    // Replaces the transcript with the blocks of an import (TUI show_import): the last 100 turns, with a note first.
+    fn show_import(&mut self, imp: &ClaudeImport) {
+        self.transcript.entries.clear();
+        self.stage_rows.clear();
+        for (kind, text) in import_claude::import_blocks(&imp.view) {
+            self.record_block(kind, &text);
+        }
+        self.transcript.push_notice(IMPORT_INSTALL_NOTE);
+    }
+
+    // Moves the session group cursor up or down (no-op while closed).
+    pub fn groups_step(&mut self, up: bool) {
+        if let Some(p) = self.groups.as_mut() {
+            p.move_by(if up { -1 } else { 1 });
+        }
+    }
+
+    // A digit key: moves the session group cursor to row i (out-of-range rows are ignored by the model).
+    pub fn groups_select(&mut self, i: usize) {
+        if let Some(p) = self.groups.as_mut() {
+            p.select(i);
+        }
+    }
+
+    // Closes the session group picker without a pick (TUI Close).
+    pub fn close_groups(&mut self) {
+        self.groups = None;
+    }
+
+    // The group rows as the window shows them: "N) <files> · date · first prompt" (TUI resume_pick::lines).
+    pub fn groups_rows(&self) -> Vec<String> {
+        self.groups
+            .as_ref()
+            .map(|p| {
+                p.groups
+                    .iter()
+                    .enumerate()
+                    .map(|(i, g)| format!("{:>2}) {}", i + 1, g.label(&group_pick::stamp)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    // Imports the group at row (Some for a click, None for Enter on the cursor row) and closes the picker (TUI Pick).
+    // An empty list keeps the picker open and imports nothing.
+    pub fn groups_pick(&mut self, row: Option<usize>) -> Option<ClaudeImport> {
+        if let Some(i) = row {
+            self.groups_select(i);
+        }
+        let key = self.groups.as_ref()?.chosen_key()?;
+        self.groups = None;
+        self.import_view(&key)
     }
 
     // Moves the record cursor up or down (no-op while closed).
@@ -1363,7 +1484,7 @@ mod tests {
         let mut st = GuiState::default();
         st.records_step(true);
         assert!(st.records.is_none(), "stepping while closed does nothing");
-        st.open_records(&root);
+        st.open_records(&root, "");
         assert!(st.records.is_some());
         let rows = st.records_rows();
         assert_eq!(rows.len(), 2);
@@ -1392,7 +1513,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         let mut st = GuiState::default();
-        st.open_records(&root);
+        st.open_records(&root, "");
         assert!(st.records.is_none(), "no folder, no window");
         assert!(
             matches!(st.transcript.entries.last(), Some(Entry::Notice(_))),
@@ -1405,18 +1526,70 @@ mod tests {
     fn records_cancel_closes_without_loading() {
         let root = records_root("cancel");
         let mut st = GuiState::default();
-        st.open_records(&root);
+        st.open_records(&root, "");
         st.close_records();
         assert!(st.records.is_none(), "cancel closes");
         assert!(st.transcript.is_empty(), "nothing loaded");
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    fn session_group(id: &str) -> chaude_core::resume_group::SessionGroup {
+        chaude_core::resume_group::SessionGroup {
+            files: vec![chaude_core::resume_group::SessionInfo {
+                id: id.into(),
+                path: std::path::PathBuf::new(),
+                modified: std::time::SystemTime::UNIX_EPOCH,
+                turns: 2,
+                first: "first prompt".into(),
+                last: "last prompt".into(),
+                start: None,
+                cwd: String::new(),
+                name: String::new(),
+                cleared: false,
+                clear_head: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn groups_window_steps_selects_and_closes() {
+        let mut st = GuiState::default();
+        st.groups_step(true);
+        assert!(st.groups.is_none(), "stepping while closed does nothing");
+        st.groups = Some(GroupPicker::new(vec![
+            session_group("a"),
+            session_group("b"),
+        ]));
+        assert_eq!(st.groups_rows().len(), 2);
+        assert!(st.groups_rows()[1].starts_with(" 2) "));
+        st.groups_step(true); // wraps to the last row
+        assert_eq!(st.groups.as_ref().unwrap().sel, 1);
+        st.groups_select(9);
+        assert_eq!(
+            st.groups.as_ref().unwrap().sel,
+            1,
+            "past the list is ignored"
+        );
+        st.close_groups();
+        assert!(st.groups.is_none(), "cancel closes");
+        assert!(st.transcript.is_empty(), "nothing imported");
+    }
+
+    #[test]
+    fn groups_enter_on_an_empty_list_keeps_the_picker_open() {
+        let mut st = GuiState {
+            groups: Some(GroupPicker::new(Vec::new())),
+            ..Default::default()
+        };
+        assert!(st.groups_pick(None).is_none());
+        assert!(st.groups.is_some(), "nothing to pick, so it stays open");
+    }
+
     #[test]
     fn records_enter_loads_the_cursor_folder_into_the_transcript() {
         let root = records_root("enter");
         let mut st = GuiState::default();
-        st.open_records(&root);
+        st.open_records(&root, "");
         st.records_step(false);
         let name = st.records.as_ref().unwrap().projects[1].name.clone();
         assert!(st.records_pick(None), "enter loads the cursor row");
@@ -1442,7 +1615,7 @@ mod tests {
     fn records_click_loads_the_clicked_row() {
         let root = records_root("click");
         let mut st = GuiState::default();
-        st.open_records(&root);
+        st.open_records(&root, "");
         let name = st.records.as_ref().unwrap().projects[0].name.clone();
         assert!(st.records_pick(Some(0)), "a click loads that row");
         assert!(st.records.is_none());
