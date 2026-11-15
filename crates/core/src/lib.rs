@@ -33,6 +33,7 @@ pub mod orch;
 pub mod osenv;
 pub mod pick_child;
 pub mod proc;
+pub mod recent_folders;
 pub mod record;
 pub mod record_folder;
 pub mod record_pick;
