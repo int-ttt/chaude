@@ -8378,3 +8378,157 @@ mod tests {
         );
     }
 }
+
+// Byte snapshots of the rendered transcript body (SGR kept). UPDATE_SNAP=1 rewrites the files under testdata/transcript.
+#[cfg(test)]
+mod transcript_snapshots {
+    use super::*;
+    use serde_json::json;
+
+    // Replaces each HH:MM:SS clock stamp with HH:MM:SS, so a snapshot does not depend on when it ran.
+    fn mask_clock(row: &str) -> String {
+        let is_clock = |b: &[u8]| {
+            b.iter().enumerate().all(|(i, c)| match i {
+                2 | 5 => *c == b':',
+                _ => c.is_ascii_digit(),
+            })
+        };
+        let mut out = String::new();
+        let mut i = 0;
+        while i < row.len() {
+            if row.len() - i >= 8 && is_clock(&row.as_bytes()[i..i + 8]) {
+                out.push_str("HH:MM:SS");
+                i += 8;
+            } else {
+                let ch = row[i..].chars().next().unwrap();
+                out.push(ch);
+                i += ch.len_utf8();
+            }
+        }
+        out
+    }
+
+    // A 60x24 app whose welcome cwd is fixed, so the welcome box does not depend on the machine running the test.
+    fn new_app() -> App {
+        let mut app = App::new(60, 24);
+        app.welcome.cwd = "/work/project".into();
+        app
+    }
+
+    // The transcript body at width `w`, one line per row, ending with a newline.
+    fn snap(app: &App, w: usize) -> String {
+        app.body(w)
+            .iter()
+            .map(|r| format!("{}\n", mask_clock(r)))
+            .collect()
+    }
+
+    fn check(name: &str, actual: &str) {
+        let path = format!(
+            "{}/src/tui/testdata/transcript/{name}.snap",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        if std::env::var_os("UPDATE_SNAP").is_some() {
+            std::fs::write(&path, actual).unwrap();
+        }
+        let want = std::fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(actual, want, "snapshot {name} differs");
+    }
+
+    // One prompt, a streamed markdown answer with a list.
+    fn text_turn() -> App {
+        let mut app = new_app();
+        app.echo_prompt("explain the **build** step\nplease");
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "The build has **three** steps, and each one is `cheap`.\n\n- compile\n- link\n- test\n".into(),
+        });
+        app.apply(UiEvent::MessageDone { role: Role::Main });
+        app
+    }
+
+    // Tool rows with input summaries, results (ok and failed) and an answer after the calls.
+    fn tool_turn() -> App {
+        let mut app = new_app();
+        app.echo_prompt("read a.rs and run ls");
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "Reading the file first.\n".into(),
+        });
+        app.apply(UiEvent::ToolStart {
+            id: "t1".into(),
+            name: "Read".into(),
+            summary: String::new(),
+        });
+        app.apply(UiEvent::ToolInput {
+            id: "t1".into(),
+            input: json!({"file_path": "src/a.rs"}),
+        });
+        app.apply(UiEvent::ToolEnd {
+            id: "t1".into(),
+            ok: true,
+        });
+        app.apply(UiEvent::ToolResult {
+            id: "t1".into(),
+            text: "fn main() {}\nmore lines".into(),
+        });
+        app.apply(UiEvent::ToolStart {
+            id: "t2".into(),
+            name: "Bash".into(),
+            summary: "ls".into(),
+        });
+        app.apply(UiEvent::ToolEnd {
+            id: "t2".into(),
+            ok: false,
+        });
+        app.apply(UiEvent::ToolResult {
+            id: "t2".into(),
+            text: "exit 1\nno such file".into(),
+        });
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: "Done.\n".into(),
+        });
+        app.apply(UiEvent::MessageDone { role: Role::Main });
+        app
+    }
+
+    // Dim notes: error, mode change, interrupt, multi-line notice, rotation and turn end.
+    fn notice_turn() -> App {
+        let mut app = new_app();
+        app.echo_prompt("first");
+        app.apply(UiEvent::Error("rate limited".into()));
+        app.apply(UiEvent::ModeChanged {
+            mode: "plan".into(),
+        });
+        app.apply(UiEvent::Interrupted);
+        app.apply(UiEvent::Notice {
+            text: "saved\nsecond line".into(),
+        });
+        app.apply(UiEvent::Rotated {
+            reason: "context".into(),
+        });
+        app.apply(UiEvent::TurnEnd { duration_ms: 1200 });
+        app
+    }
+
+    #[test]
+    fn text_turn_snapshot() {
+        let app = text_turn();
+        check("text_turn", &snap(&app, 48));
+        check("text_turn_narrow", &snap(&app, 20));
+    }
+
+    #[test]
+    fn tool_turn_snapshot() {
+        let app = tool_turn();
+        check("tool_turn", &snap(&app, 48));
+        check("tool_turn_narrow", &snap(&app, 22));
+    }
+
+    #[test]
+    fn notice_turn_snapshot() {
+        let app = notice_turn();
+        check("notice_turn", &snap(&app, 48));
+    }
+}

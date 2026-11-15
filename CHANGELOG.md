@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- tui: the rendered transcript (prompt echo, streamed answer, tool rows and results, notes, mode, interrupt) has byte snapshot tests under `testdata/transcript`, the baseline before the transcript moves onto core `Entry` rows; the output is unchanged.
+  - tui: 렌더링된 트랜스크립트(프롬프트 에코, 스트리밍 답변, 도구 행과 결과, 알림, 모드, 중단)에 바이트 스냅샷 테스트를 `testdata/transcript`에 추가했습니다. 트랜스크립트를 코어 `Entry` 행으로 옮기기 전의 기준선이며 출력은 그대로입니다.
 - core: the shared transcript model covers every row kind the TUI pushes (user, assistant text, tool call, tool result, agent, notice, status, error, blank) as `chaude_core::ui_state::Entry`, with a `Transcript` list and push helpers; the TUI is unchanged and still draws its own rows, and the GUI keeps its behavior.
   - core: 공용 트랜스크립트 모델이 TUI가 쌓는 모든 행 종류(사용자, 어시스턴트 텍스트, 도구 호출, 도구 결과, 에이전트, 알림, 상태, 오류, 빈 줄)를 `chaude_core::ui_state::Entry`로 담고, `Transcript` 목록과 push 도우미를 제공합니다. TUI는 그대로이며 자체 행을 계속 그리고, GUI 동작도 같습니다.
 - core: the GUI's transcript row type (`Entry`: user, text, tool, agent, notice, error) moved from the GUI to `chaude_core::ui_state::Entry`, so both front ends can embed it; no behavior change. The TUI transcript is still pre-rendered ANSI lines and stays in the TUI for now.
