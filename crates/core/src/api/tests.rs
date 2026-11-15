@@ -1591,3 +1591,20 @@ fn idle_send_clock_keeps_phase_idle() {
     assert_eq!(Phase::Idle.start_clock(now), Phase::Idle);
     assert_eq!(Phase::Idle.clear_clock(), Phase::Idle);
 }
+
+#[test]
+fn chat_mode_is_minimal_and_starts_no_agents() {
+    let chat = Config {
+        chat: true,
+        ..Config::default()
+    };
+    let shape = main_shape(&chat);
+    assert!(shape.minimal && shape.rule.is_empty());
+    let cfg = chat_normal(chat);
+    assert!(!cfg.residents);
+    assert_eq!(cfg.extra_coders, 0);
+    let full = Config::default();
+    assert!(!main_shape(&full).minimal && !main_shape(&full).rule.is_empty());
+    let kept = chat_normal(full);
+    assert!(kept.residents && kept.extra_coders > 0);
+}

@@ -503,6 +503,9 @@ pub struct Config {
     // Resident slots are running (Go len(resident) > 0): the engine emits UiEvent::Stage rows for the main turn
     // and each agent call. Off = no stage rows.
     pub residents: bool,
+    // GUI New chat: the main child runs with no tools, no MCP, no slash commands, no setting sources and no harness
+    // rule (Shape minimal), and no residents or extra coders start (chat_normal). Off = the full harness.
+    pub chat: bool,
     // Go extra_coders (.chaude/settings.json): coders coder2..coder(1+n) beyond the always-on coder, 0-8.
     // Extra coders start on demand and expire after 3570 s idle (N14 idle sweep).
     pub extra_coders: usize,
@@ -622,6 +625,7 @@ impl Default for Config {
             idle_rotate: Duration::from_secs(3570),
             perm_mode: PermMode::Auto,
             residents: true,
+            chat: false,
             extra_coders: 4,
             coder_idle_ttl: Duration::from_secs(CODER_IDLE_TTL_SECS),
             base_idle_exit_secs: CODER_IDLE_TTL_SECS,
@@ -806,6 +810,7 @@ impl Engine {
         Receiver<UiEvent>,
         Receiver<Result<(), String>>,
     ) {
+        let cfg = chat_normal(cfg);
         let (in_tx, in_rx) = mpsc::channel::<Input>();
         let (ui_tx, ui_rx) = mpsc::channel::<UiEvent>();
         let (boot_tx, boot_rx) = mpsc::channel();
@@ -1452,7 +1457,6 @@ fn actor(
             }
         }
     }
-    let rule = main_rule(&cfg);
     let restore_sid = main_resume.clone();
     let opts = SpawnOpts {
         claude_bin: resolve_bin(&cfg.claude_bin),
@@ -1462,10 +1466,7 @@ fn actor(
         cache_ttl: cfg.cache_ttl.clone(),
         compact_window: cfg.compact_window,
         max_budget_usd: cfg.task_budget_usd,
-        shape: Shape {
-            rule,
-            ..Shape::default()
-        },
+        shape: main_shape(&cfg),
     };
     let model = cfg.model.clone();
     let budget = (cfg.task_budget_usd > 0.0).then(|| Budget::new(cfg.task_budget_usd));
@@ -1768,6 +1769,31 @@ fn answer(waiter: Option<Sender<Result<String, String>>>, out: Result<String, St
 fn main_rule(cfg: &Config) -> String {
     let orch_mode = std::env::var(orch::ENV_KEY).unwrap_or_default();
     main_rule_with(cfg, &orch_mode)
+}
+
+// Shape of the main child. Chat mode is the minimal shape (no tools, MCP, slash commands or setting sources) with no
+// harness rule; the full harness gets the rule as --append-system-prompt.
+fn main_shape(cfg: &Config) -> Shape {
+    if cfg.chat {
+        Shape {
+            minimal: true,
+            ..Shape::default()
+        }
+    } else {
+        Shape {
+            rule: main_rule(cfg),
+            ..Shape::default()
+        }
+    }
+}
+
+// Chat mode starts no residents and no extra coders (the harness agents). Other configs pass through unchanged.
+fn chat_normal(mut cfg: Config) -> Config {
+    if cfg.chat {
+        cfg.residents = false;
+        cfg.extra_coders = 0;
+    }
+    cfg
 }
 
 // Go start() rule order: delegation, forward, category, orch. orch_mode is the CHAUDE_ORCH value.
