@@ -12,15 +12,18 @@ pub fn handoff_path(cwd: &Path) -> PathBuf {
     handoff::handoff_file(&tmp_layout::long_dir(cwd))
 }
 
-// Starts the engine in the current directory. Boot blocks until ready; Err carries the boot failure text.
+// Starts the engine with cwd as its folder (code) or in chat mode (no tools, no harness agents; cwd is the scratch
+// dir). Boot blocks until ready; Err carries the boot failure text.
 // A pump thread moves events to the returned channel and calls `wake` for each one (the window asks for a redraw).
 pub fn start(
+    cwd: PathBuf,
+    chat: bool,
     wake: impl Fn() + Send + 'static,
 ) -> Result<(EngineHandle, Receiver<UiEvent>), String> {
-    let cwd = std::env::current_dir().ok();
     let cfg = Config {
-        handoff_path: cwd.as_deref().map(handoff_path),
-        cwd,
+        handoff_path: Some(handoff_path(&cwd)),
+        cwd: Some(cwd),
+        chat,
         ..Config::default()
     };
     let (handle, core_rx) = Engine::try_start(cfg)?;

@@ -5,7 +5,17 @@
 use serde::{Deserialize, Serialize};
 
 use crate::api::Role;
+use crate::recent_folders::RecentFolder;
 use crate::ui_state::{BarInput, Entry, RunState, Transcript};
+
+// The session kind the window runs. Chat: a scratch dir, no tools, no harness agents. Code: the folder is the cwd
+// and the full harness runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    Chat,
+    Code,
+}
 
 // One transcript row as the page gets it (serde mirror of ui_state::Entry; text rows carry the agent id when the
 // row is an agent's, and no agent for the main session).
@@ -130,6 +140,8 @@ pub struct StateView {
     pub tokens: u64,
     pub cost_usd: f64,
     pub context_pct: u32,
+    // The rate window text (BarInput rate); None hides it.
+    pub rate: Option<String>,
     pub session_id: String,
     pub permission: Option<PermissionView>,
 }
@@ -151,6 +163,7 @@ impl StateView {
             tokens: bar.tokens,
             cost_usd: bar.cost_usd,
             context_pct: bar.context_pct,
+            rate: bar.rate.clone(),
             session_id: session_id.to_string(),
             permission,
         }
@@ -162,13 +175,36 @@ impl StateView {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     Pong,
-    EntryPush { index: usize, entry: EntryView },
-    EntryUpdate { index: usize, entry: EntryView },
-    EntryCut { len: usize },
-    State { state: StateView },
-    PickerOpen { picker: String },
-    PickerClose { picker: String },
-    Note { text: String },
+    EntryPush {
+        index: usize,
+        entry: EntryView,
+    },
+    EntryUpdate {
+        index: usize,
+        entry: EntryView,
+    },
+    EntryCut {
+        len: usize,
+    },
+    State {
+        state: StateView,
+    },
+    PickerOpen {
+        picker: String,
+    },
+    PickerClose {
+        picker: String,
+    },
+    Note {
+        text: String,
+    },
+    // The session on screen. mode None = the start screen (recent folders listed). folder is the code cwd ("" for
+    // chat).
+    Session {
+        mode: Option<Mode>,
+        folder: String,
+        recent: Vec<RecentFolder>,
+    },
 }
 
 impl Event {
@@ -183,6 +219,7 @@ impl Event {
             Event::PickerOpen { .. } => "picker_open",
             Event::PickerClose { .. } => "picker_close",
             Event::Note { .. } => "note",
+            Event::Session { .. } => "session",
         }
     }
 }
@@ -219,6 +256,15 @@ pub enum Command {
     Copy {
         text: String,
     },
+    // Starts a session: chat in a new scratch dir, or code with `folder` as the engine cwd (a recent-folder row or
+    // the smoke hook). The folder is ignored for chat.
+    Start {
+        mode: Mode,
+        #[serde(default)]
+        folder: String,
+    },
+    // Opens the native folder dialog; a picked folder starts a code session.
+    OpenFolder,
 }
 
 // Keeps the page in step with the core. Each sync compares the new core state with the last one it returned and
@@ -362,8 +408,53 @@ mod tests {
     fn state_snapshot() {
         assert_eq!(
             json(&Event::State { state: idle() }),
-            r#"{"type":"state","state":{"busy":false,"running":0,"queued":0,"held":null,"rotations":0,"model":"","tokens":0,"cost_usd":0.0,"context_pct":0,"session_id":"","permission":null}}"#
+            r#"{"type":"state","state":{"busy":false,"running":0,"queued":0,"held":null,"rotations":0,"model":"","tokens":0,"cost_usd":0.0,"context_pct":0,"rate":null,"session_id":"","permission":null}}"#
         );
+    }
+
+    #[test]
+    fn session_snapshot() {
+        let recent = vec![RecentFolder {
+            path: "/w/a".into(),
+            used: 7,
+        }];
+        assert_eq!(
+            json(&Event::Session {
+                mode: Some(Mode::Code),
+                folder: "/w/a".into(),
+                recent: recent.clone(),
+            }),
+            r#"{"type":"session","mode":"code","folder":"/w/a","recent":[{"path":"/w/a","used":7}]}"#
+        );
+        assert_eq!(
+            json(&Event::Session {
+                mode: None,
+                folder: String::new(),
+                recent,
+            }),
+            r#"{"type":"session","mode":null,"folder":"","recent":[{"path":"/w/a","used":7}]}"#
+        );
+    }
+
+    #[test]
+    fn start_commands_parse_from_page_json() {
+        let parse = |s: &str| serde_json::from_str::<Command>(s).unwrap();
+        assert_eq!(
+            parse(r#"{"type":"start","mode":"chat"}"#),
+            Command::Start {
+                mode: Mode::Chat,
+                folder: String::new()
+            }
+        );
+        assert_eq!(
+            parse(r#"{"type":"start","mode":"code","folder":"/w/a"}"#),
+            Command::Start {
+                mode: Mode::Code,
+                folder: "/w/a".into()
+            }
+        );
+        assert_eq!(parse(r#"{"type":"open_folder"}"#), Command::OpenFolder);
+        assert!(serde_json::from_str::<Command>(r#"{"type":"start","mode":"x"}"#).is_err());
     }
 
     #[test]

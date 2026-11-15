@@ -1,5 +1,6 @@
 //! chaude GUI entry point. One native window (tao) with the embedded page (wry webview).
 //! CHAUDE_GUI_QUIT_AFTER_SECS=<n> closes the window after n seconds (smoke runs only).
+//! CHAUDE_GUI_SMOKE_START=chat|code:<folder> starts a session 1 second after launch (smoke runs only).
 //! CHAUDE_GUI_SMOKE_SUBMIT=<text> sends that text as a submit command 2 seconds after start (smoke runs only).
 
 use std::sync::{Arc, Mutex};
@@ -77,12 +78,30 @@ fn main() {
         .and_then(|s| s.parse::<u64>().ok())
         .map(|s| Instant::now() + Duration::from_secs(s));
 
-    if let Ok(text) = std::env::var("CHAUDE_GUI_SMOKE_SUBMIT") {
+    // Smoke only: CHAUDE_GUI_SMOKE_START=chat or code:<folder> starts a session at 1 second, then the submit at 2.
+    let smoke_start =
+        std::env::var("CHAUDE_GUI_SMOKE_START")
+            .ok()
+            .map(|s| match s.strip_prefix("code:") {
+                Some(folder) => {
+                    serde_json::json!({ "type": "start", "mode": "code", "folder": folder })
+                        .to_string()
+                }
+                None => serde_json::json!({ "type": "start", "mode": "chat" }).to_string(),
+            });
+    let smoke_submit = std::env::var("CHAUDE_GUI_SMOKE_SUBMIT").ok();
+    if smoke_start.is_some() || smoke_submit.is_some() {
         let proxy = event_loop.create_proxy();
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(2));
-            let body = serde_json::json!({ "type": "submit", "text": text }).to_string();
-            let _ = proxy.send_event(UserEvent::FromPage(body));
+            std::thread::sleep(Duration::from_secs(1));
+            if let Some(body) = smoke_start {
+                let _ = proxy.send_event(UserEvent::FromPage(body));
+            }
+            std::thread::sleep(Duration::from_secs(1));
+            if let Some(text) = smoke_submit {
+                let body = serde_json::json!({ "type": "submit", "text": text }).to_string();
+                let _ = proxy.send_event(UserEvent::FromPage(body));
+            }
         });
     }
 
