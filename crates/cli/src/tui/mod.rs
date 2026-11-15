@@ -1287,7 +1287,7 @@ impl App {
         for (kind, text) in import_claude::import_blocks(&imp.view) {
             self.record_block(kind, &text);
         }
-        self.note(IMPORT_INSTALL_NOTE);
+        self.note(import_claude::INSTALL_NOTE);
         self.follow_tail();
     }
 
@@ -3291,9 +3291,6 @@ pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Resu
 }
 
 // Assistant text as Go shows it: **bold** pairs here; links are styled after wrapping in body() (tui.go:374).
-const IMPORT_INSTALL_NOTE: &str =
-    "import: the next prompt starts from this transcript (Go applyImport)";
-
 fn asst_text(line: &str) -> String {
     render::md_bold(line)
 }

@@ -46,6 +46,11 @@ pub struct ClaudeImport {
 
 // Go claudeProjectDir: ~/.claude/projects/<project key of cwd>. An empty cwd means the current directory.
 pub fn claude_project_dir(cwd: &str) -> PathBuf {
+    claude_project_dir_in(&home_dir(), cwd)
+}
+
+// claude_project_dir under home (the GUI passes its home; tests a temp dir).
+pub fn claude_project_dir_in(home: &Path, cwd: &str) -> PathBuf {
     let cwd = if cwd.is_empty() {
         std::env::current_dir()
             .map(|p| p.to_string_lossy().into_owned())
@@ -53,8 +58,7 @@ pub fn claude_project_dir(cwd: &str) -> PathBuf {
     } else {
         cwd.to_string()
     };
-    home_dir()
-        .join(".claude")
+    home.join(".claude")
         .join("projects")
         .join(project_key(&cwd))
 }
@@ -68,10 +72,15 @@ pub fn project_key(cwd: &str) -> String {
 
 // Maps "latest", a session id or a path to a .jsonl file. A value with ".jsonl" or a separator is a path.
 pub fn resolve_claude_transcript(arg: &str, cwd: &str) -> Result<PathBuf, Error> {
+    resolve_claude_transcript_in(&home_dir(), arg, cwd)
+}
+
+// resolve_claude_transcript under home.
+pub fn resolve_claude_transcript_in(home: &Path, arg: &str, cwd: &str) -> Result<PathBuf, Error> {
     if arg.ends_with(".jsonl") || arg.contains(MAIN_SEPARATOR) {
         return Ok(PathBuf::from(arg));
     }
-    let dir = claude_project_dir(cwd);
+    let dir = claude_project_dir_in(home, cwd);
     if arg != "latest" {
         return Ok(dir.join(format!("{arg}.jsonl")));
     }
@@ -97,17 +106,31 @@ pub fn resolve_claude_transcript(arg: &str, cwd: &str) -> Result<PathBuf, Error>
 // /resume claude import (TUI import_view): reads arg and, with digest, writes the resume note of the sessions it
 // names (the note path is the digest hint). A failed note write leaves the import without the hint.
 pub fn import_for_resume(arg: &str, cwd: &str, digest: bool) -> Result<ClaudeImport, Error> {
-    let (_, mut imp) = load_import_arg(arg, cwd)?;
+    import_for_resume_in(&home_dir(), arg, cwd, digest)
+}
+
+// import_for_resume under home (the GUI passes its home; tests a temp dir).
+pub fn import_for_resume_in(
+    home: &Path,
+    arg: &str,
+    cwd: &str,
+    digest: bool,
+) -> Result<ClaudeImport, Error> {
+    let (_, mut imp) = load_import_arg_in(home, arg, cwd)?;
     if digest {
         let sids: Vec<String> = arg
             .split(',')
-            .filter_map(|a| resolve_claude_transcript(a, cwd).ok())
+            .filter_map(|a| resolve_claude_transcript_in(home, a, cwd).ok())
             .map(|p| session_stem(&p))
             .collect();
         imp.note_path = resume_note::write(Path::new(cwd), &imp, &sids).ok();
     }
     Ok(imp)
 }
+
+// Notice after an import replaces the transcript (TUI and GUI; Go applyImport).
+pub const INSTALL_NOTE: &str =
+    "import: the next prompt starts from this transcript (Go applyImport)";
 
 // R19 importBlocks (tui.go:283): (kind, text) blocks; only the last 100 turns are shown, with a note first.
 pub fn import_blocks(turns: &[(String, String)]) -> Vec<(&'static str, String)> {
@@ -130,9 +153,18 @@ pub fn import_blocks(turns: &[(String, String)]) -> Vec<(&'static str, String)> 
 // Resolves arg (one id/path/"latest", or a comma-separated list for a /resume group) and reads it.
 // Several files are merged in time order; the returned path is the newest file's.
 pub fn load_import_arg(arg: &str, cwd: &str) -> Result<(PathBuf, ClaudeImport), Error> {
+    load_import_arg_in(&home_dir(), arg, cwd)
+}
+
+// load_import_arg under home.
+pub fn load_import_arg_in(
+    home: &Path,
+    arg: &str,
+    cwd: &str,
+) -> Result<(PathBuf, ClaudeImport), Error> {
     let mut imps = Vec::new();
     for a in arg.split(',') {
-        let path = resolve_claude_transcript(a, cwd)?;
+        let path = resolve_claude_transcript_in(home, a, cwd)?;
         imps.push(read_claude_transcript(&path)?);
     }
     if imps.len() == 1 {
