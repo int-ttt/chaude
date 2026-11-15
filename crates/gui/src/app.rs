@@ -200,6 +200,12 @@ impl ChaudeApp {
                 }
                 self.jump_tail = true;
             }
+            Effect::Import(arg) => {
+                if let Some(imp) = self.state.import(&arg) {
+                    engine.install_import(imp);
+                }
+                self.jump_tail = true;
+            }
             Effect::Doctor => {
                 self.state
                     .transcript

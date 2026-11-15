@@ -28,6 +28,9 @@ pub enum Effect {
     // /resume with its args (none for bare): a killed run's session, the record picker or the session group picker
     // (the TUI resume; the state decides and returns any import for the engine).
     Resume(Vec<String>),
+    // /import with its argument (id, latest or a comma list): the state reads the transcript and returns the import
+    // for the engine (the TUI import_view without the digest).
+    Import(String),
     // The update check runs off the UI thread; its answer comes back as a notice.
     Update,
     // /view with its argument (empty for the list): the state opens the session browser (a prefix opens its prompts).
@@ -63,7 +66,7 @@ pub fn effect(outcome: SlashOutcome, cwd: &Path) -> Effect {
         SlashOutcome::OpenSettings => Effect::OpenSettings,
         SlashOutcome::OpenView { arg } => Effect::OpenView(arg),
         SlashOutcome::Resume { args } => Effect::Resume(args),
-        SlashOutcome::Import { .. } => Effect::Note(not_yet("/import")),
+        SlashOutcome::Import { arg, .. } => Effect::Import(arg),
         SlashOutcome::ToggleMouse => {
             Effect::Note("/mouse: the GUI always scrolls with the wheel".into())
         }
@@ -155,12 +158,12 @@ mod tests {
     }
 
     #[test]
-    fn pickers_without_a_gui_window_say_so() {
+    fn import_maps_its_argument_to_the_state_import() {
         let o = SlashOutcome::Import {
             line: "/import".into(),
             arg: "latest".into(),
         };
-        assert_eq!(effect(o, cwd()), Effect::Note(not_yet("/import")));
+        assert_eq!(effect(o, cwd()), Effect::Import("latest".into()));
     }
 
     #[test]

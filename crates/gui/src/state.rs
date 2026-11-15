@@ -12,6 +12,7 @@ use chaude_core::handoff;
 use chaude_core::i18n::{self, Msg};
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::localtime::{clock_hhmmss, unix_now};
+use chaude_core::osenv;
 use chaude_core::record;
 use chaude_core::record_folder;
 use chaude_core::record_pick::{self, Picker};
@@ -86,10 +87,6 @@ pub struct GuiState {
     pub home: Option<PathBuf>,
 }
 
-// Notice after an import replaces the transcript (TUI IMPORT_INSTALL_NOTE).
-const IMPORT_INSTALL_NOTE: &str =
-    "import: the next prompt starts from this transcript (Go applyImport)";
-
 // The transcript as the core rewind model reads it: each user prompt is a "user" block, the rest carry no text.
 fn rewind_blocks(t: &Transcript) -> Vec<(&str, &str)> {
     t.entries
@@ -160,7 +157,7 @@ impl GuiState {
             && let Some(sid) = self.killed_sid.clone()
         {
             let key = group_pick::killed_key(self.home().as_deref(), &self.cwd, &sid);
-            return self.import_view(&key);
+            return self.import_view(&key, true);
         }
         let root = record::dir_for(Path::new(&self.cwd));
         let (terms, record) = record_turn::resume_target_in(&root, args);
@@ -169,6 +166,12 @@ impl GuiState {
         }
         self.open_records(&root, &args.join(" "));
         None
+    }
+
+    // /import [id|latest|a,b] (TUI import_view without the digest): the transcript replaces the view and the import
+    // goes to the engine for the next prompt. A read error is a notice.
+    pub fn import(&mut self, arg: &str) -> Option<ClaudeImport> {
+        self.import_view(arg, false)
     }
 
     // Opens the /resume record picker over the folders under root for arg (TUI resume). With no folder that matches,
@@ -201,7 +204,7 @@ impl GuiState {
             }
             Ok(gs) if gs.len() == 1 => {
                 let key = gs[0].key();
-                self.import_view(&key)
+                self.import_view(&key, true)
             }
             Ok(gs) => {
                 self.groups = Some(GroupPicker::new(gs));
@@ -210,10 +213,11 @@ impl GuiState {
         }
     }
 
-    // Reads the import of key (TUI import_view, with the digest). The transcript shows its blocks; the import is
-    // returned for the engine. A read error is a notice.
-    fn import_view(&mut self, key: &str) -> Option<ClaudeImport> {
-        match import_claude::import_for_resume(key, &self.cwd, true) {
+    // Reads the import of key (TUI import_view). digest writes the resume note of a /resume pick. The transcript shows
+    // its blocks; the import is returned for the engine. A read error is a notice.
+    fn import_view(&mut self, key: &str, digest: bool) -> Option<ClaudeImport> {
+        let home = self.home().unwrap_or_else(osenv::home_dir);
+        match import_claude::import_for_resume_in(&home, key, &self.cwd, digest) {
             Err(e) => {
                 self.transcript.push_notice(e.to_string());
                 None
@@ -232,7 +236,7 @@ impl GuiState {
         for (kind, text) in import_claude::import_blocks(&imp.view) {
             self.record_block(kind, &text);
         }
-        self.transcript.push_notice(IMPORT_INSTALL_NOTE);
+        self.transcript.push_notice(import_claude::INSTALL_NOTE);
     }
 
     // Moves the session group cursor up or down (no-op while closed).
@@ -276,7 +280,7 @@ impl GuiState {
         }
         let key = self.groups.as_ref()?.chosen_key()?;
         self.groups = None;
-        self.import_view(&key)
+        self.import_view(&key, true)
     }
 
     // SessionIds (TUI SessionIds arm): the purposes of this run's sessions and the set of ids it owns.
@@ -1851,6 +1855,33 @@ mod view_tests {
         );
         st.close_sess();
         assert!(st.sess.is_none(), "cancel closes the browser");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // /import (TUI import_view without the digest): a known id reads its transcript, shows it and returns the import
+    // for the engine; a miss is a notice and returns nothing. The temp home holds the transcripts.
+    #[test]
+    fn import_reads_the_transcript_and_a_miss_is_a_notice() {
+        let cwd = "/chaude-gui-view/work-import";
+        let home = home_with("import", cwd, &sessions());
+        let mut st = owned_state(&home, cwd);
+        let imp = st.import("bbbb2222").expect("a known id imports");
+        assert_eq!(imp.view[0].0, "only one", "the import holds the prompt");
+        assert!(
+            st.transcript.entries.iter().any(
+                |e| matches!(e, Entry::Notice(t) if t.as_str() == import_claude::INSTALL_NOTE)
+            ),
+            "the install note follows the view"
+        );
+        st.transcript.entries.clear();
+        assert!(st.import("zzzz").is_none(), "a miss returns nothing");
+        assert!(
+            st.transcript
+                .entries
+                .iter()
+                .any(|e| matches!(e, Entry::Notice(_))),
+            "the miss is a notice"
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 

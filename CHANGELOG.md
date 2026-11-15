@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- gui: `/import [id|latest|a,b]` reads the Claude Code transcript into the view as the TUI does (without the /resume digest) and installs it for the next prompt; the "not in the GUI yet" note for /import is gone.
+  - gui: `/import [id|latest|a,b]`는 TUI처럼 Claude Code 기록을 트랜스크립트에 읽어 보여 주고(/resume의 요약 기록 없이), 다음 프롬프트를 위해 엔진에 설치합니다. /import의 "GUI에 아직 없음" 안내는 없어졌습니다.
+- core: the /resume group lookup and the transcript reads for /resume and /import take the home (`group_pick::groups`, `import_claude::*_in`), so tests use a temp dir and never the real $HOME; the import install note is shared as `import_claude::INSTALL_NOTE`. The TUI output is unchanged.
+  - core: /resume 그룹 조회와 /resume·/import의 기록 읽기가 홈 디렉터리를 인수로 받아(`group_pick::groups`, `import_claude::*_in`), 테스트는 임시 폴더를 쓰고 실제 $HOME을 읽지 않습니다. 가져오기 설치 안내는 `import_claude::INSTALL_NOTE`로 공유합니다. TUI 출력은 그대로입니다.
 - core: the Esc Esc rewind model (prompt list, selection, cut and restored prompt text) moved from the TUI into shared `chaude_core::rewind`; the TUI calls it and its output is unchanged.
   - core: Esc Esc 되감기 모델(프롬프트 목록, 선택, 자르기와 복원할 프롬프트 문구)을 TUI에서 공용 `chaude_core::rewind`로 옮겼습니다. TUI는 이를 호출하며 출력은 그대로입니다.
 - core: the /resume record picker model (project folder list, cursor, row text, and the folder a pick loads) moved from the TUI into shared `chaude_core::record_pick`; the TUI calls it and its output is unchanged. Folders with the same write time now list in name order, as the TUI already did.
