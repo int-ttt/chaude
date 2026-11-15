@@ -8,10 +8,27 @@
 <!--style-->
 </head>
 <body>
+<section id="start" class="start" aria-label="Start" hidden>
+  <h1>chaude</h1>
+  <div class="start-actions">
+    <button id="new-chat" type="button" class="primary">New chat</button>
+    <button id="open-folder" type="button">Open folder</button>
+  </div>
+  <h2 class="start-recent-title">Recent folders</h2>
+  <ul id="recent" class="recent"></ul>
+  <p id="recent-empty" class="recent-empty" hidden>No recent folders yet.</p>
+</section>
+<header id="head" class="head" hidden>
+  <span id="head-mode" class="head-mode"></span>
+  <span id="head-folder" class="head-folder" hidden></span>
+  <span id="head-model" class="head-item"></span>
+  <span id="head-context" class="head-item"></span>
+  <span id="head-rate" class="head-item" hidden></span>
+</header>
 <main id="chat" aria-label="Conversation">
   <div id="column" class="column"></div>
 </main>
-<footer class="dock">
+<footer id="dock" class="dock">
   <div id="toast" class="toast" role="status" hidden></div>
   <div id="permission" class="permission" hidden>
     <div class="permission-text"><span class="permission-label">Permission needed</span> <span id="permission-text"></span></div>

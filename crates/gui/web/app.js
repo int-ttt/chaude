@@ -13,6 +13,16 @@
   const permission = document.getElementById("permission");
   const permissionText = document.getElementById("permission-text");
   const toast = document.getElementById("toast");
+  const dock = document.getElementById("dock");
+  const start = document.getElementById("start");
+  const head = document.getElementById("head");
+  const recent = document.getElementById("recent");
+  const recentEmpty = document.getElementById("recent-empty");
+  const headMode = document.getElementById("head-mode");
+  const headFolder = document.getElementById("head-folder");
+  const headModel = document.getElementById("head-model");
+  const headContext = document.getElementById("head-context");
+  const headRate = document.getElementById("head-rate");
 
   // One DOM node per transcript row, by index (the same index as Rust's transcript).
   const rows = [];
@@ -158,6 +168,44 @@
     if (card) {
       permissionText.textContent = card.tool + (card.summary ? ": " + card.summary : "");
     }
+    headModel.textContent = state.model || "";
+    headModel.hidden = !state.model;
+    headContext.textContent = "context " + state.context_pct + "%";
+    headRate.textContent = state.rate || "";
+    headRate.hidden = !state.rate;
+  }
+
+  // The start screen (mode null) or the chat with its header. The folder's last path part names it; a path that is
+  // only a root keeps the whole path.
+  function showSession(ev) {
+    const onStart = !ev.mode;
+    start.hidden = !onStart;
+    chat.hidden = onStart;
+    dock.hidden = onStart;
+    head.hidden = onStart;
+    if (onStart) {
+      renderRecent(ev.recent || []);
+      return;
+    }
+    headMode.textContent = ev.mode === "code" ? "Code" : "Chat";
+    const name = ev.folder ? ev.folder.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || ev.folder : "";
+    headFolder.textContent = name;
+    headFolder.title = ev.folder;
+    headFolder.hidden = !name;
+  }
+
+  function renderRecent(rows) {
+    recent.replaceChildren();
+    rows.forEach((row) => {
+      const item = el("li");
+      const pick = el("button", "recent-row", row.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || row.path);
+      pick.type = "button";
+      pick.title = row.path;
+      pick.addEventListener("click", () => send({ type: "start", mode: "code", folder: row.path }));
+      item.appendChild(pick);
+      recent.appendChild(item);
+    });
+    recentEmpty.hidden = rows.length > 0;
   }
 
   function submit() {
@@ -185,6 +233,8 @@
   stopBtn.addEventListener("click", () => send({ type: "interrupt" }));
   allowBtn.addEventListener("click", () => send({ type: "permission_answer", allow: true, interrupt: false }));
   denyBtn.addEventListener("click", () => send({ type: "permission_answer", allow: false, interrupt: false }));
+  document.getElementById("new-chat").addEventListener("click", () => send({ type: "start", mode: "chat" }));
+  document.getElementById("open-folder").addEventListener("click", () => send({ type: "open_folder" }));
 
   // Rust calls onEvent for each event. An unknown type is ignored rather than thrown.
   const handlers = {
@@ -200,6 +250,9 @@
     },
     state(ev) {
       showState(ev.state);
+    },
+    session(ev) {
+      showSession(ev);
     },
     picker_open() {},
     picker_close() {},

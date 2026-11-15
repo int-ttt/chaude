@@ -185,3 +185,31 @@ button:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
   padding: 4px 0;
 }
 .composer-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+.start {
+  height: 100%;
+  overflow-y: auto;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 64px 24px 32px;
+}
+.start h1 { font-size: 26px; font-weight: 600; margin: 0 0 24px; }
+.start-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.start-actions button { font-size: 14px; padding: 8px 18px; }
+.start-recent-title { font-size: 13px; font-weight: 600; color: var(--muted); margin: 32px 0 8px; }
+.recent { list-style: none; margin: 0; padding: 0; }
+.recent li + li { margin-top: 4px; }
+.recent-row { border: 0; border-radius: 8px; padding: 6px 10px; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+.recent-empty { font-size: 13px; color: var(--muted); }
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: baseline;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+}
+.head-mode { font-weight: 600; color: var(--fg); }
+.head-folder { color: var(--fg); overflow-wrap: anywhere; }
