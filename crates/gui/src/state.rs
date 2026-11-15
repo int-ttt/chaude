@@ -979,4 +979,41 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn usage_window_opens_loading_then_takes_the_answer_once() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        st.open_usage();
+        assert_eq!(st.usage.as_deref(), Some(i18n::t(Msg::UsageLoading)));
+        st.apply(
+            UiEvent::Usage {
+                text: "Current session: 45% used".into(),
+            },
+            now,
+        );
+        assert!(st.usage.as_deref().is_some_and(|t| t.contains("45%")));
+        st.apply(
+            UiEvent::Usage {
+                text: "late".into(),
+            },
+            now,
+        );
+        assert!(!st.usage.as_deref().unwrap_or("").contains("late"));
+        st.close_usage();
+        assert_eq!(st.usage, None);
+        assert!(
+            st.transcript.entries.is_empty(),
+            "a closed window adds no notice"
+        );
+    }
+
+    #[test]
+    fn usage_failure_goes_into_the_open_window() {
+        let mut st = GuiState::default();
+        st.open_usage();
+        st.apply(UiEvent::Error("boom".into()), Instant::now());
+        assert_eq!(st.usage, Some(usage_text::usage_failed("boom")));
+        assert!(st.transcript.entries.is_empty());
+    }
 }

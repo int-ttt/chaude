@@ -17,6 +17,8 @@ pub enum Effect {
     SetMode(PermMode),
     // Doctor checks run off the UI thread; the report comes back as a notice.
     Doctor,
+    // Opens the /usage window and asks the engine for the one-shot run; its answer fills the window.
+    OpenUsage,
     // The update check runs off the UI thread; its answer comes back as a notice.
     Update,
     // Plain prompts and the engine-side commands (/clear, /rotate, /model, /cost and the other passthroughs).
@@ -44,7 +46,7 @@ pub fn effect(outcome: SlashOutcome, cwd: &Path) -> Effect {
         | SlashOutcome::Rotate { .. }
         | SlashOutcome::Model { .. }
         | SlashOutcome::Passthrough { .. } => Effect::Send,
-        SlashOutcome::OpenUsage => Effect::Note(not_yet("/usage")),
+        SlashOutcome::OpenUsage => Effect::OpenUsage,
         SlashOutcome::OpenLang | SlashOutcome::SetLang(_) => Effect::Note(not_yet("/lang")),
         SlashOutcome::OpenSettings => Effect::Note(not_yet("/settings")),
         SlashOutcome::OpenView { .. } => Effect::Note(not_yet("/view")),
@@ -99,6 +101,11 @@ mod tests {
     }
 
     #[test]
+    fn usage_opens_its_window() {
+        assert_eq!(effect(SlashOutcome::OpenUsage, cwd()), Effect::OpenUsage);
+    }
+
+    #[test]
     fn prompts_and_engine_routes_go_to_the_engine() {
         for o in [
             SlashOutcome::SendPrompt,
@@ -121,7 +128,6 @@ mod tests {
     #[test]
     fn pickers_without_a_gui_window_say_so() {
         for (o, name) in [
-            (SlashOutcome::OpenUsage, "/usage"),
             (SlashOutcome::OpenLang, "/lang"),
             (SlashOutcome::SetLang("ko".into()), "/lang"),
             (SlashOutcome::OpenSettings, "/settings"),

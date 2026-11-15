@@ -164,6 +164,10 @@ impl ChaudeApp {
             Effect::Note(s) => self.state.transcript.push_notice(s),
             Effect::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Effect::SetMode(p) => engine.set_mode(p.name()),
+            Effect::OpenUsage => {
+                self.state.open_usage();
+                engine.usage();
+            }
             Effect::Doctor => {
                 self.state
                     .transcript
@@ -222,6 +226,28 @@ impl ChaudeApp {
             if interrupt {
                 engine.interrupt(InterruptSource::CtrlC);
             }
+        }
+    }
+
+    // Keys of the open /usage window (TUI usage.rs usageKey): Esc, q, Enter and Ctrl+C close it. They run before
+    // shortcuts, so Esc does not interrupt a turn and Ctrl+C does not quit while the window is open.
+    fn window_keys(&mut self, ctx: &egui::Context) {
+        if self.state.permission.is_some() || self.state.usage.is_none() {
+            return;
+        }
+        let mut close = false;
+        ctx.input_mut(|i| {
+            for (m, k) in [
+                (Modifiers::NONE, Key::Escape),
+                (Modifiers::NONE, Key::Q),
+                (Modifiers::NONE, Key::Enter),
+                (Modifiers::CTRL, Key::C),
+            ] {
+                close |= i.consume_key(m, k);
+            }
+        });
+        if close {
+            self.state.close_usage();
         }
     }
 
@@ -298,6 +324,26 @@ impl ChaudeApp {
         }
         if mode && let Some(engine) = &self.engine {
             engine.set_mode("next");
+        }
+    }
+
+    // The /usage window (TUI usage.rs): the text of the one-shot run, scrollable. Its X button closes it too.
+    fn usage_window(&mut self, ctx: &egui::Context) {
+        let Some(text) = self.state.usage.clone() else {
+            return;
+        };
+        let mut open = true;
+        egui::Window::new("Usage")
+            .collapsible(false)
+            .default_size([560.0, 360.0])
+            .open(&mut open)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.label(text);
+                });
+            });
+        if !open {
+            self.state.close_usage();
         }
     }
 
@@ -427,8 +473,9 @@ impl ChaudeApp {
     }
 
     fn input_box(&mut self, ui: &mut egui::Ui) {
-        // No input while a permission prompt is open; the dialog takes the keys.
-        let ready = self.engine.is_some() && self.state.permission.is_none();
+        // No input while a permission prompt or a /usage window is open; they take the keys.
+        let ready =
+            self.engine.is_some() && self.state.permission.is_none() && self.state.usage.is_none();
         let focused = ready && self.input_focused;
         let single_line = self.input.is_single_line();
         // Slash popup: the matches for a command word being typed (none while busy or a permission prompt is open).
@@ -563,6 +610,7 @@ impl ChaudeApp {
 impl eframe::App for ChaudeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.drain(ui.ctx());
+        self.window_keys(ui.ctx());
         self.shortcuts(ui.ctx());
         // Bottom panels stack in show order (later is higher). Bottom to top this is the TUI chrome order reversed:
         // status, background agents, foreground agents, coder line, input, tasks, queue.
@@ -586,6 +634,7 @@ impl eframe::App for ChaudeApp {
         }
         egui::CentralPanel::default().show(ui, |ui| self.output(ui));
         self.permission_dialog(ui.ctx());
+        self.usage_window(ui.ctx());
     }
 }
 
