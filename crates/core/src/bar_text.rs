@@ -216,56 +216,6 @@ pub fn coder_text(coders: &[CoderContext]) -> Option<String> {
     )
 }
 
-// Single-line status for the GUI: model, context percent, tokens, cost, then mode (when not default), rotations and
-// the rate window.
-pub fn status_line(lang: Lang, b: &BarInput) -> String {
-    let mut parts = vec![
-        b.model.clone(),
-        fill_in(lang, Msg::BarCtx, &[&b.context_pct]),
-        fill_in(lang, Msg::BarTok, &[&fmt_tokens(b.tokens)]),
-        format!("${:.2}", b.cost_usd),
-    ];
-    if !b.mode.is_empty() && b.mode != "default" {
-        parts.push(fill_in(lang, Msg::BarMode, &[&b.mode]));
-    }
-    if b.rot > 0 {
-        parts.push(fill_in(lang, Msg::BarRot, &[&b.rot]));
-    }
-    if let Some(rate) = &b.rate {
-        parts.push(rate.clone());
-    }
-    parts.join(" · ")
-}
-
-// Single-line activity for the GUI: turn timer, agents, queue, held reply, per-role context and the last turn's
-// tokens. Empty when idle.
-pub fn activity_line(lang: Lang, b: &BarInput) -> String {
-    let mut parts = Vec::new();
-    if let Some(secs) = b.turn_secs {
-        parts.push(fill_in(lang, Msg::BarTurn, &[&secs]));
-    }
-    if b.fg + b.bg > 0 {
-        parts.push(fill_in(lang, Msg::BarAgentsFgBg, &[&b.fg, &b.bg]));
-    }
-    if b.queued > 0 {
-        parts.push(fill_in(lang, Msg::BarQueued, &[&b.queued]));
-    }
-    if let Some(n) = b.waiting {
-        parts.push(fill_in(lang, Msg::BarHeld, &[&n]));
-    }
-    for (role, tokens) in &b.role_tokens {
-        parts.push(format!("{role} {}", fmt_tokens(*tokens)));
-    }
-    if let Some((input, output, cache)) = b.turn_tokens {
-        parts.push(fill_in(
-            lang,
-            Msg::BarLastTokens,
-            &[&fmt_tokens(input), &fmt_tokens(output), &fmt_tokens(cache)],
-        ));
-    }
-    parts.join(" · ")
-}
-
 // The agent's model as the row shows it: "claude-haiku-5-5" → "haiku 5.5", "claude-3-5-sonnet-20241022" →
 // "sonnet 3.5", "haiku" → "haiku". Empty stays empty, so the caller omits the segment (no session-model fallback).
 pub fn short_model(model: &str) -> String {
@@ -461,38 +411,6 @@ mod tests {
     fn fmt_k_keeps_small_and_shortens_large() {
         assert_eq!(fmt_k(999), "999");
         assert_eq!(fmt_k(1500), "1.50k");
-    }
-
-    #[test]
-    fn status_line_hides_default_mode() {
-        let bar = BarInput {
-            model: "opus".into(),
-            context_pct: 12,
-            tokens: 2500,
-            cost_usd: 0.5,
-            mode: "default".into(),
-            ..Default::default()
-        };
-        assert_eq!(
-            status_line(Lang::En, &bar),
-            "opus · ctx 12% · 2.5k tok · $0.50"
-        );
-        let plan = BarInput {
-            mode: "plan".into(),
-            ..bar
-        };
-        assert!(status_line(Lang::En, &plan).ends_with("· mode plan"));
-    }
-
-    #[test]
-    fn activity_line_is_empty_when_idle() {
-        assert_eq!(activity_line(Lang::En, &BarInput::default()), "");
-        let busy = BarInput {
-            turn_secs: Some(7),
-            queued: 2,
-            ..Default::default()
-        };
-        assert_eq!(activity_line(Lang::En, &busy), "turn 7s · queued 2");
     }
 
     #[test]

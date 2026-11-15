@@ -1,7 +1,7 @@
 //! The eframe app: drains engine events into GuiState once per frame, draws the output pane and the input box.
 
 use std::sync::mpsc::Receiver;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{EngineHandle, InterruptSource, Role, UiEvent};
 use chaude_core::bar_text;
@@ -187,18 +187,42 @@ impl ChaudeApp {
         }
     }
 
-    // Two status rows from the core BarInput: model, context, tokens and cost; then turn, agents and queue.
+    // The status rows drawn from the core bar text (TUI bar.rs): the busy row while a turn runs, the running state
+    // with its agent segments, then M/P/T/C with the rate window and the queue. The spinner turns while busy.
     fn status_bar(&self, ui: &mut egui::Ui) {
+        let now = Instant::now();
         let now_unix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        let bar = self.state.bar_at(Instant::now(), now_unix);
+        let bar = self.state.bar_at(now, now_unix);
+        let run = &self.state.run;
         let lang = i18n::current();
-        ui.weak(bar_text::status_line(lang, &bar));
-        let activity = bar_text::activity_line(lang, &bar);
-        if !activity.is_empty() {
-            ui.weak(activity);
+        if run.busy {
+            let model = if bar.model.is_empty() {
+                WELCOME_MODEL
+            } else {
+                &bar.model
+            };
+            let busy = bar_text::busy_text(
+                lang,
+                model,
+                &run.turn_prompt,
+                bar.turn_secs,
+                &run.last_tool,
+                true,
+            );
+            ui.weak(busy);
+            ui.ctx().request_repaint_after(Duration::from_millis(125));
         }
+        let spin = run.turn_start.map_or(' ', |t| {
+            bar_text::spinner_frame(now.saturating_duration_since(t))
+        });
+        let mut top = bar_text::top_text(lang, &bar, spin);
+        for (desc, secs) in &bar.agents {
+            top.push_str(&bar_text::agent_segment(lang, desc, *secs));
+        }
+        ui.weak(top);
+        ui.weak(bar_text::bottom_text(lang, &bar));
     }
 
     fn input_box(&mut self, ui: &mut egui::Ui) {
@@ -295,6 +319,10 @@ impl eframe::App for ChaudeApp {
         self.shortcuts(ui.ctx());
         // Bottom panels stack in show order: the status bar sits below the input box.
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+        // The coder line sits under the input box, above the status rows (TUI chrome order).
+        if let Some(line) = bar_text::coder_text(&self.state.bar.coders) {
+            egui::Panel::bottom("coders").show(ui, |ui| ui.weak(line));
+        }
         egui::Panel::bottom("input").show(ui, |ui| self.input_box(ui));
         egui::CentralPanel::default().show(ui, |ui| self.output(ui));
         self.permission_dialog(ui.ctx());

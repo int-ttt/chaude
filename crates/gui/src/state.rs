@@ -229,6 +229,10 @@ impl GuiState {
                 self.bar.role_tokens.insert(role, tokens);
             }
             UiEvent::CoderContexts { coders } => self.bar.coders = coders,
+            // Go repl.go setRate: the rate text is recomputed on every rate_limit_event (shared with the TUI).
+            UiEvent::RateLimit { info } => {
+                self.bar.rate = bar_text::rate_status(&info, unix_now()).filter(|s| !s.is_empty());
+            }
             UiEvent::RotatedFrom { old_session } => self.rot_from = old_session,
             UiEvent::Rotated { reason } => {
                 self.run.rot += 1;
@@ -727,6 +731,17 @@ mod tests {
         st.apply(UiEvent::TurnEnd { duration_ms: 1 }, t0);
         assert_eq!(st.bar_at(t0, 0).turn_secs, None);
         assert!(!st.run.busy);
+    }
+
+    #[test]
+    fn rate_limit_event_sets_the_rate_window_text() {
+        let mut st = GuiState::default();
+        let info = serde_json::json!({"unifiedWindows": {"five_hour": {"utilization": 0.37}}});
+        st.apply(UiEvent::RateLimit { info }, Instant::now());
+        let rate = st.bar.rate.clone().expect("rate text");
+        assert!(rate.ends_with(" · 37%"), "{rate}");
+        let text = bar_text::bottom_text(i18n::Lang::En, &st.bar_at(Instant::now(), 0));
+        assert!(text.contains(&rate), "{text}");
     }
 
     #[test]
