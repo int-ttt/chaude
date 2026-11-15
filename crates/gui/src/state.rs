@@ -1,10 +1,18 @@
 //! Pure GUI state: applies core UiEvents to the transcript, the status-bar data and the open permission prompt.
 //! No egui types here, so the reducer is unit-tested without a window.
 
+use std::collections::HashMap;
 use std::time::Instant;
 
 use chaude_core::api::{AgentRow, Role, UiEvent};
-use chaude_core::ui_state::{BarInput, Entry, RunState, Transcript};
+use chaude_core::bar_text;
+use chaude_core::handoff;
+use chaude_core::i18n;
+use chaude_core::localtime::unix_now;
+use chaude_core::resident::StagePhase;
+use chaude_core::ui_state::{
+    BarInput, Entry, RunState, Transcript, stage_line, stage_text, tool_result_text,
+};
 
 // A can_use_tool request waiting for the user (UiEvent::PermissionRequest).
 #[derive(Debug, Clone, PartialEq)]
@@ -12,6 +20,15 @@ pub struct Permission {
     pub id: String,
     pub tool: String,
     pub summary: String,
+}
+
+// An open stage row (Working) waiting for its Done or Failed; idx is its transcript index.
+#[derive(Debug, Clone)]
+struct StageRow {
+    idx: usize,
+    text: String,
+    start: i64,
+    at: Instant,
 }
 
 #[derive(Debug, Default)]
@@ -22,6 +39,12 @@ pub struct GuiState {
     // Engine progress shared with the TUI: busy turn, agent rows, tasks, rotations (core ui_state::RunState).
     pub run: RunState,
     pub permission: Option<Permission>,
+    // Working directory shown in the orphan notice (set by the app at start).
+    pub cwd: String,
+    // Session id the next rotation replaces (UiEvent::RotatedFrom), read by the Rotated notice.
+    rot_from: String,
+    // Open stage rows by resident slot.
+    stage_rows: HashMap<String, StageRow>,
 }
 
 impl GuiState {
@@ -47,19 +70,80 @@ impl GuiState {
                 }
             }
             UiEvent::ToolStart { id, name, summary } => {
-                // The GUI draws no time, so the start stays 0 (the TUI stamps its own rows).
-                self.transcript.push_tool(id, name, summary, 0);
+                self.transcript.push_tool(id, name, summary, unix_now());
             }
+            // The tool row gets its end time and elapsed seconds, as the TUI stamps them.
             UiEvent::ToolEnd { id, ok } => {
-                if let Some(Entry::Tool { ok: slot, .. }) = self
-                    .transcript
-                    .entries
-                    .iter_mut()
-                    .rev()
-                    .find(|e| matches!(e, Entry::Tool { id: i, .. } if *i == id))
+                let now_unix = unix_now();
+                if let Some(Entry::Tool {
+                    ok: slot,
+                    start,
+                    end,
+                    ..
+                }) = self.find_tool(&id)
                 {
                     *slot = Some(ok);
+                    if end.is_none() {
+                        *end = Some((now_unix, (now_unix - *start).max(0) as u64));
+                    }
                 }
+            }
+            // Tool result under its call (first line, the TUI rule); a caveman return is hidden.
+            UiEvent::ToolResult { id, text } => {
+                if let Some(head) = tool_result_text(&text) {
+                    let rows = vec![
+                        Entry::ToolResult {
+                            id: id.clone(),
+                            text: head,
+                            at: unix_now(),
+                        },
+                        Entry::Blank,
+                    ];
+                    let at = self
+                        .transcript
+                        .entries
+                        .iter()
+                        .rposition(|e| matches!(e, Entry::Tool { id: i, .. } if *i == id))
+                        .map_or(self.transcript.len(), |i| i + 1);
+                    self.insert_rows(at, rows);
+                }
+            }
+            // Resident stage: a Working row is stamped and closed on Done or Failed, then a note line (TUI stage()).
+            UiEvent::Stage { slot, phase } => {
+                let text = stage_text(i18n::current(), &slot, &phase);
+                match &phase {
+                    StagePhase::Working => {
+                        let start = unix_now();
+                        let idx = self.transcript.len();
+                        self.transcript
+                            .push(Entry::Notice(stage_line(start, &text, None)));
+                        self.stage_rows.insert(
+                            slot,
+                            StageRow {
+                                idx,
+                                text,
+                                start,
+                                at: now,
+                            },
+                        );
+                    }
+                    StagePhase::Done | StagePhase::Failed(_) => {
+                        if let Some(r) = self.stage_rows.remove(&slot) {
+                            let end = (unix_now(), now.saturating_duration_since(r.at).as_secs());
+                            if let Some(Entry::Notice(line)) =
+                                self.transcript.entries.get_mut(r.idx)
+                            {
+                                *line = stage_line(r.start, &r.text, Some(end));
+                            }
+                        }
+                        self.transcript.push_notice(text);
+                    }
+                }
+                self.transcript.push_blank();
+            }
+            UiEvent::Interrupted => {
+                self.transcript.push_status("[interrupted]");
+                self.transcript.push_blank();
             }
             UiEvent::AgentStart {
                 id, description, ..
@@ -109,7 +193,11 @@ impl GuiState {
             // TurnEnd ends the turn only; a held reply is cleared by ReplyReleased, as before.
             UiEvent::TurnEnd { .. } => self.run.set_busy(false, now),
             UiEvent::Queued(n) => self.bar.queued = n,
-            UiEvent::ModeChanged { mode } => self.bar.mode = mode,
+            UiEvent::ModeChanged { mode } => {
+                self.transcript.push_status(format!("mode: {mode}"));
+                self.transcript.push_blank();
+                self.bar.mode = mode;
+            }
             UiEvent::TurnTokens {
                 input,
                 output,
@@ -119,9 +207,29 @@ impl GuiState {
                 self.bar.role_tokens.insert(role, tokens);
             }
             UiEvent::CoderContexts { coders } => self.bar.coders = coders,
+            UiEvent::RotatedFrom { old_session } => self.rot_from = old_session,
             UiEvent::Rotated { reason } => {
                 self.run.rot += 1;
-                self.transcript.push_notice(reason);
+                let old = std::mem::take(&mut self.rot_from);
+                let lang = i18n::current();
+                let text = bar_text::rotated_notice(lang, self.run.rot, &reason, &old);
+                self.transcript.push_notice(text);
+            }
+            // A claude child a dead harness left running: an empty model falls back to the main model or the role name.
+            UiEvent::OrphanNotice { role, pid, model } => {
+                let model = if !model.is_empty() {
+                    model
+                } else if role == handoff::MAIN_ROLE {
+                    self.bar.model.clone()
+                } else {
+                    role
+                };
+                let text = bar_text::orphan_notice(i18n::current(), pid, &model, &self.cwd);
+                self.transcript.push_notice(text);
+            }
+            UiEvent::BudgetStop { spent_usd, cap_usd } => {
+                let text = bar_text::budget_notice(i18n::current(), spent_usd, cap_usd);
+                self.transcript.push_notice(text);
             }
             UiEvent::Notice { text } => self.transcript.push_notice(text),
             UiEvent::Error(text) => self.transcript.push_error(text),
@@ -178,6 +286,25 @@ impl GuiState {
             .iter_mut()
             .rev()
             .find(|e| matches!(e, Entry::Agent { id: i, .. } if i == id))
+    }
+
+    fn find_tool(&mut self, id: &str) -> Option<&mut Entry> {
+        self.transcript
+            .entries
+            .iter_mut()
+            .rev()
+            .find(|e| matches!(e, Entry::Tool { id: i, .. } if i == id))
+    }
+
+    // Inserts rows at a transcript index and moves open stage rows that sit after it.
+    fn insert_rows(&mut self, at: usize, rows: Vec<Entry>) {
+        let n = rows.len();
+        for r in self.stage_rows.values_mut() {
+            if r.idx >= at {
+                r.idx += n;
+            }
+        }
+        self.transcript.entries.splice(at..at, rows);
     }
 }
 
@@ -243,6 +370,196 @@ mod tests {
             &st.transcript.entries[1],
             Entry::Text { done: true, .. }
         ));
+    }
+
+    #[test]
+    fn tool_rows_are_stamped_and_closed_with_an_end_time() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        st.apply(
+            UiEvent::ToolStart {
+                id: "a".into(),
+                name: "Read".into(),
+                summary: "x.rs".into(),
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::ToolEnd {
+                id: "a".into(),
+                ok: true,
+            },
+            now,
+        );
+        match &st.transcript.entries[0] {
+            Entry::Tool {
+                name,
+                summary,
+                ok,
+                start,
+                end,
+                ..
+            } => {
+                assert_eq!(
+                    (name.as_str(), summary.as_str(), *ok),
+                    ("Read", "x.rs", Some(true))
+                );
+                assert!(*start > 0);
+                let (at, secs) = end.expect("end stamped");
+                assert!(at >= *start && secs == (at - *start) as u64);
+            }
+            other => panic!("expected Tool, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_result_follows_its_tool_and_hides_caveman_returns() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        let start = |id: &str| UiEvent::ToolStart {
+            id: id.into(),
+            name: "Bash".into(),
+            summary: "ls".into(),
+        };
+        st.apply(start("a"), now);
+        st.apply(start("b"), now);
+        st.apply(
+            UiEvent::ToolResult {
+                id: "a".into(),
+                text: "one\ntwo".into(),
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::ToolResult {
+                id: "b".into(),
+                text: "status: done\nreason: -\nclaim: a.go:1 | x".into(),
+            },
+            now,
+        );
+        assert!(
+            matches!(&st.transcript.entries[1], Entry::ToolResult { id, text, .. }
+            if id == "a" && text == "one … (+1 lines)")
+        );
+        assert_eq!(st.transcript.entries[2], Entry::Blank);
+        // The caveman return adds no row: only the two tool rows and the first result pair remain.
+        assert_eq!(st.transcript.len(), 4);
+    }
+
+    #[test]
+    fn stage_row_is_closed_by_done_and_keeps_its_slot_index() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        st.apply(
+            UiEvent::ToolStart {
+                id: "a".into(),
+                name: "Read".into(),
+                summary: "x".into(),
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::Stage {
+                slot: "agent:haiku-coder".into(),
+                phase: StagePhase::Working,
+            },
+            now,
+        );
+        // A tool result inserted before the stage row moves its index.
+        st.apply(
+            UiEvent::ToolResult {
+                id: "a".into(),
+                text: "ok".into(),
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::Stage {
+                slot: "agent:haiku-coder".into(),
+                phase: StagePhase::Done,
+            },
+            now,
+        );
+        let lang = i18n::current();
+        let done = stage_text(lang, "agent:haiku-coder", &StagePhase::Done);
+        assert_eq!(st.transcript.entries.last(), Some(&Entry::Blank));
+        assert_eq!(
+            st.transcript.entries[st.transcript.len() - 2],
+            Entry::Notice(done)
+        );
+        // The working row (moved to index 3 by the result pair) is rewritten with an end stamp.
+        match &st.transcript.entries[3] {
+            Entry::Notice(line) => assert!(line.starts_with("· "), "{line}"),
+            other => panic!("expected stage Notice, got {other:?}"),
+        }
+        assert!(st.stage_rows.is_empty());
+    }
+
+    #[test]
+    fn interrupted_and_mode_rows_are_status_lines_with_a_blank() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        st.apply(
+            UiEvent::ModeChanged {
+                mode: "auto".into(),
+            },
+            now,
+        );
+        st.apply(UiEvent::Interrupted, now);
+        assert_eq!(
+            st.transcript.entries,
+            [
+                Entry::Status("mode: auto".into()),
+                Entry::Blank,
+                Entry::Status("[interrupted]".into()),
+                Entry::Blank,
+            ]
+        );
+        assert_eq!(st.bar.mode, "auto");
+    }
+
+    #[test]
+    fn rotation_orphan_and_budget_notices_use_the_shared_text() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        let lang = i18n::current();
+        st.apply(
+            UiEvent::RotatedFrom {
+                old_session: "s1".into(),
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::Rotated {
+                reason: "context".into(),
+            },
+            now,
+        );
+        st.cwd = "/work".into();
+        st.apply(
+            UiEvent::OrphanNotice {
+                role: "main".into(),
+                pid: 42,
+                model: String::new(),
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::BudgetStop {
+                spent_usd: 2.0,
+                cap_usd: 1.0,
+            },
+            now,
+        );
+        assert_eq!(st.run.rot, 1);
+        assert_eq!(
+            st.transcript.entries,
+            [
+                Entry::Notice(bar_text::rotated_notice(lang, 1, "context", "s1")),
+                Entry::Notice(bar_text::orphan_notice(lang, 42, "", "/work")),
+                Entry::Notice(bar_text::budget_notice(lang, 2.0, 1.0)),
+            ]
+        );
     }
 
     #[test]

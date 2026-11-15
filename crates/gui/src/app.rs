@@ -6,7 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use chaude_core::api::{EngineHandle, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::i18n::{self, Msg};
-use chaude_core::ui_state::Entry;
+use chaude_core::ui_state::{Entry, tool_line, tool_result_line};
 use eframe::egui::text::{CCursor, CCursorRange};
 use eframe::egui::{self, Key, Modifiers};
 use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
@@ -36,6 +36,7 @@ impl ChaudeApp {
     pub fn new(ctx: egui::Context) -> Self {
         let mut state = GuiState::default();
         let cwd = std::env::current_dir().unwrap_or_default();
+        state.cwd = cwd.display().to_string();
         let (engine, rx) = match engine::start(ctx) {
             Ok((handle, rx)) => (Some(handle), Some(rx)),
             Err(e) => {
@@ -241,14 +242,13 @@ fn render_entry(ui: &mut egui::Ui, md: &mut CommonMarkCache, entry: &Entry) {
             CommonMarkViewer::new().show(ui, md, text);
         }
         Entry::Tool {
-            name, summary, ok, ..
+            name,
+            summary,
+            start,
+            end,
+            ..
         } => {
-            let status = match ok {
-                None => "...",
-                Some(true) => "ok",
-                Some(false) => "failed",
-            };
-            ui.weak(format!("{name} {summary} [{status}]"));
+            ui.weak(tool_line(*start, name, summary, *end));
         }
         Entry::Agent {
             description,
@@ -259,8 +259,8 @@ fn render_entry(ui: &mut egui::Ui, md: &mut CommonMarkCache, entry: &Entry) {
             let status = if *done { "done" } else { "running" };
             ui.weak(format!("agent {description} [{status}] {summary}"));
         }
-        Entry::ToolResult { text, .. } => {
-            ui.weak(format!("  ⎿  {text}"));
+        Entry::ToolResult { text, at, .. } => {
+            ui.weak(tool_result_line(*at, text));
         }
         Entry::Notice(t) => {
             ui.label(t);
