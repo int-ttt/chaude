@@ -213,6 +213,23 @@ impl GuiState {
             // Busy keeps the start of a turn already running and clears the last tool (core RunState::set_busy, shared with the TUI).
             UiEvent::Busy(on) => self.run.set_busy(on, now),
             // TurnEnd ends the turn only; a held reply is cleared by ReplyReleased, as before.
+            // The engine drains the queue into the next turn: the merged prompt is echoed once here and becomes the
+            // turn's label (the TUI's QueueTexts arm).
+            UiEvent::QueueTexts(texts) => {
+                let drained = std::mem::replace(&mut self.run.queue_texts, texts);
+                if !drained.is_empty() && self.run.queue_texts.is_empty() && self.run.busy {
+                    let merged = drained.join("\n\n");
+                    self.run.turn_prompt = merged
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .chars()
+                        .take(60)
+                        .collect();
+                    self.push_user(&merged);
+                }
+            }
             UiEvent::TurnEnd { .. } => self.run.set_busy(false, now),
             UiEvent::Queued(n) => self.bar.queued = n,
             UiEvent::ModeChanged { mode } => {
@@ -742,6 +759,30 @@ mod tests {
         assert!(rate.ends_with(" · 37%"), "{rate}");
         let text = bar_text::bottom_text(i18n::Lang::En, &st.bar_at(Instant::now(), 0));
         assert!(text.contains(&rate), "{text}");
+    }
+
+    // The merged queue is echoed once, when the engine drains the queue into a busy turn (the TUI's QueueTexts arm).
+    #[test]
+    fn queued_prompts_echo_once_when_the_turn_takes_them() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        st.apply(UiEvent::Busy(true), now);
+        st.apply(UiEvent::QueueTexts(vec!["one".into(), "two".into()]), now);
+        assert_eq!(st.run.queue_texts.len(), 2);
+        assert_eq!(user_echoes(&st), 0);
+        st.apply(UiEvent::QueueTexts(vec![]), now);
+        assert_eq!(user_echoes(&st), 1);
+        assert_eq!(st.run.turn_prompt, "one");
+        st.apply(UiEvent::QueueTexts(vec![]), now);
+        assert_eq!(user_echoes(&st), 1);
+    }
+
+    fn user_echoes(st: &GuiState) -> usize {
+        st.transcript
+            .entries
+            .iter()
+            .filter(|e| matches!(e, chaude_core::ui_state::Entry::User(_)))
+            .count()
     }
 
     #[test]

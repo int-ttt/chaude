@@ -3,7 +3,7 @@
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use chaude_core::api::{EngineHandle, InterruptSource, Role, UiEvent};
+use chaude_core::api::{AgentRow, EngineHandle, InterruptSource, Role, UiEvent};
 use chaude_core::bar_text;
 use chaude_core::i18n::{self, Msg};
 use chaude_core::ui_state::{
@@ -20,6 +20,25 @@ use crate::state::GuiState;
 
 // Stable id so the input box's TextEdit state (cursor) can be set from the editor.
 const INPUT_ID: &str = "chaude-input";
+
+// Row caps of the panels above the input box (the TUI's MAX_QUEUE_ROWS, MAX_TASK_ROWS, MAX_PANEL_ROWS).
+const MAX_QUEUE_ROWS: usize = 5;
+const MAX_TASK_ROWS: usize = 8;
+const MAX_PANEL_ROWS: usize = 4;
+
+// Desktop notification for a finished turn (sent only while the window is in the background). A failed send is
+// ignored: the transcript already shows the reply.
+fn turn_notice() {
+    let _ = notify_rust::Notification::new()
+        .summary("chaude")
+        .body(i18n::t(Msg::NotifyTurnDone))
+        .show();
+}
+
+// One dim row that is clipped to the panel width (the TUI clips its panel rows the same way).
+fn weak_row(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.add(egui::Label::new(egui::RichText::new(text).weak()).truncate());
+}
 
 pub struct ChaudeApp {
     // Kept alive for the app's lifetime; dropping it shuts the engine down.
@@ -99,11 +118,15 @@ impl ChaudeApp {
         }
     }
 
-    fn drain(&mut self) {
+    fn drain(&mut self, ctx: &egui::Context) {
         if let Some(rx) = &self.rx {
             while let Ok(ev) = rx.try_recv() {
                 if !self.follow && adds_output(&ev) {
                     self.unseen = true;
+                }
+                // A turn that ends while the window is in the background notifies the desktop.
+                if matches!(ev, UiEvent::TurnEnd { .. }) && !ctx.input(|i| i.focused) {
+                    turn_notice();
                 }
                 self.state.apply(ev, Instant::now());
             }
@@ -298,7 +321,63 @@ impl ChaudeApp {
             top = format!("{top} · {}", i18n::t(Msg::NewMessage));
         }
         ui.weak(top);
-        ui.weak(bar_text::bottom_text(lang, &bar));
+        ui.weak(format!(
+            "{} · {}",
+            bar_text::bottom_text(lang, &bar),
+            bar_text::cost_text(bar.cost_usd)
+        ));
+    }
+
+    // Foreground (bg false) or background agent rows: running agents, busy residents (foreground only), then the
+    // restored rows of that kind (the TUI panel order).
+    fn agent_rows(&self, bg: bool) -> Vec<&AgentRow> {
+        let run = &self.state.run;
+        run.agent_rows
+            .iter()
+            .filter(|r| r.background == bg && !r.done)
+            .chain(run.resident_busy.iter().filter(|_| !bg))
+            .chain(run.restored_rows.iter().filter(|r| r.background == bg))
+            .collect()
+    }
+
+    // Agent panel rows; past MAX_PANEL_ROWS the last row is the scroll range text (the GUI has no panel scroll yet, so
+    // the window starts at the first row).
+    fn agent_panel(&self, ui: &mut egui::Ui, bg: bool) {
+        let list = self.agent_rows(bg);
+        let lang = i18n::current();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let shown = if list.len() > MAX_PANEL_ROWS {
+            MAX_PANEL_ROWS - 1
+        } else {
+            list.len()
+        };
+        for r in list.iter().take(shown) {
+            let text = format!("● {}", bar_text::agent_row_text(lang, r, now));
+            weak_row(ui, text);
+        }
+        if list.len() > shown {
+            weak_row(ui, bar_text::scroll_range_text(lang, 0, shown, list.len()));
+        }
+    }
+
+    // Queued prompts above the input box, oldest first (core queue_rows).
+    fn queue_panel(&self, ui: &mut egui::Ui) {
+        let rows =
+            bar_text::queue_rows(i18n::current(), &self.state.run.queue_texts, MAX_QUEUE_ROWS);
+        for row in rows {
+            weak_row(ui, row);
+        }
+    }
+
+    // Main's Agent/Task calls grouped 대기 / 진행 중 / 완료 / 실패 above the input box (core task_rows).
+    fn task_panel(&self, ui: &mut egui::Ui) {
+        let lang = i18n::current();
+        weak_row(ui, i18n::t(Msg::TasksTitle));
+        for row in bar_text::task_rows(lang, &self.state.run.tasks, MAX_TASK_ROWS - 1) {
+            weak_row(ui, row);
+        }
     }
 
     fn input_box(&mut self, ui: &mut egui::Ui) {
@@ -405,15 +484,28 @@ impl ChaudeApp {
 
 impl eframe::App for ChaudeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.drain();
+        self.drain(ui.ctx());
         self.shortcuts(ui.ctx());
-        // Bottom panels stack in show order: the status bar sits below the input box.
+        // Bottom panels stack in show order (later is higher). Bottom to top this is the TUI chrome order reversed:
+        // status, background agents, foreground agents, coder line, input, tasks, queue.
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
+        if !self.agent_rows(true).is_empty() {
+            egui::Panel::bottom("agents_bg").show(ui, |ui| self.agent_panel(ui, true));
+        }
+        if !self.agent_rows(false).is_empty() {
+            egui::Panel::bottom("agents_fg").show(ui, |ui| self.agent_panel(ui, false));
+        }
         // The coder line sits under the input box, above the status rows (TUI chrome order).
         if let Some(line) = bar_text::coder_text(&self.state.bar.coders) {
             egui::Panel::bottom("coders").show(ui, |ui| ui.weak(line));
         }
         egui::Panel::bottom("input").show(ui, |ui| self.input_box(ui));
+        if !self.state.run.tasks.is_empty() {
+            egui::Panel::bottom("tasks").show(ui, |ui| self.task_panel(ui));
+        }
+        if !self.state.run.queue_texts.is_empty() {
+            egui::Panel::bottom("queue").show(ui, |ui| self.queue_panel(ui));
+        }
         egui::CentralPanel::default().show(ui, |ui| self.output(ui));
         self.permission_dialog(ui.ctx());
     }
