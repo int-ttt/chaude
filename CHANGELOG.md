@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: the shared transcript model covers every row kind the TUI pushes (user, assistant text, tool call, tool result, agent, notice, status, error, blank) as `chaude_core::ui_state::Entry`, with a `Transcript` list and push helpers; the TUI is unchanged and still draws its own rows, and the GUI keeps its behavior.
+  - core: 공용 트랜스크립트 모델이 TUI가 쌓는 모든 행 종류(사용자, 어시스턴트 텍스트, 도구 호출, 도구 결과, 에이전트, 알림, 상태, 오류, 빈 줄)를 `chaude_core::ui_state::Entry`로 담고, `Transcript` 목록과 push 도우미를 제공합니다. TUI는 그대로이며 자체 행을 계속 그리고, GUI 동작도 같습니다.
 - core: the GUI's transcript row type (`Entry`: user, text, tool, agent, notice, error) moved from the GUI to `chaude_core::ui_state::Entry`, so both front ends can embed it; no behavior change. The TUI transcript is still pre-rendered ANSI lines and stays in the TUI for now.
   - core: GUI 트랜스크립트 행 타입(`Entry`: 사용자, 텍스트, 도구, 에이전트, 알림, 오류)을 GUI에서 `chaude_core::ui_state::Entry`로 옮겨 두 프론트엔드가 함께 쓸 수 있게 했습니다. 동작은 그대로입니다. TUI 트랜스크립트는 아직 미리 렌더링된 ANSI 줄이므로 당분간 TUI에 남아 있습니다.
 - tui: a repeated `Busy(true)` while a turn runs keeps its start time, as the GUI does; the TUI and GUI now share core `RunState::set_busy` (busy, turn start, last tool cleared on each turn start).

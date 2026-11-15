@@ -259,11 +259,20 @@ fn render_entry(ui: &mut egui::Ui, md: &mut CommonMarkCache, entry: &Entry) {
             let status = if *done { "done" } else { "running" };
             ui.weak(format!("agent {description} [{status}] {summary}"));
         }
+        Entry::ToolResult { text, .. } => {
+            ui.weak(format!("  ⎿  {text}"));
+        }
         Entry::Notice(t) => {
             ui.label(t);
         }
+        Entry::Status(t) => {
+            ui.weak(t);
+        }
         Entry::Error(t) => {
             ui.colored_label(egui::Color32::RED, format!("error: {t}"));
+        }
+        Entry::Blank => {
+            ui.add_space(ui.spacing().item_spacing.y);
         }
     }
 }

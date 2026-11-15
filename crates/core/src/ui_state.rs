@@ -7,30 +7,116 @@ use std::time::Instant;
 use crate::api::{AgentRow, CoderContext, InterruptSource, Role, TaskStatus, UiEvent};
 use crate::slash::PermMode;
 
-// One row of a front end's transcript (GUI output pane). Text rows keep the role so main and agent text stay in
-// their own blocks. Renderer-free: each front end draws it its own way.
+// One row of a front end's transcript (GUI output pane, TUI transcript model). Text rows keep the role so main and
+// agent text stay in their own blocks. Renderer-free: each front end draws it its own way (the TUI wraps and colours
+// them; the GUI shows them as widgets). Kinds map 1:1 to the TUI push sites in tui/mod.rs (see the S4 step-1 note).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Entry {
+    // Prompt echo (TUI echo_prompt, record "user" block).
     User(String),
+    // Assistant markdown (main or agent), streamed then done. TUI feed_main/feed/flush, record "asst" block.
     Text {
         role: Role,
         text: String,
         done: bool,
     },
+    // Tool call row (TUI ToolStart, resume row); ToolInput/ToolEnd update summary and ok in place.
     Tool {
         id: String,
         name: String,
         summary: String,
         ok: Option<bool>,
     },
+    // Tool result under its call (TUI ToolResult: "  ⎿  <time> <head>"), the first line only.
+    ToolResult {
+        id: String,
+        text: String,
+    },
+    // Background or foreground agent summary row (GUI). The TUI shows agents in its panel and writes a Notice plus an
+    // in-place Tool update on AgentEnd (agent_done).
     Agent {
         id: String,
         description: String,
         done: bool,
         summary: String,
     },
+    // Dim note line (TUI note/note_wide: Notice, SessionResumed, PermissionRequest, BudgetStop, record other kinds).
     Notice(String),
+    // Short state line (TUI ModeChanged "mode: x", Interrupted "[interrupted]", permission answer "allowed"/"denied").
+    Status(String),
+    // Error line (TUI UiEvent::Error, dim note block).
     Error(String),
+    // Blank separator row (TUI String::new() pushes between blocks).
+    Blank,
+}
+
+// The shared transcript: an ordered list of Entry rows. Push helpers keep call sites one line per kind.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Transcript {
+    pub entries: Vec<Entry>,
+}
+
+impl Transcript {
+    pub fn push(&mut self, entry: Entry) {
+        self.entries.push(entry);
+    }
+
+    pub fn push_user(&mut self, text: impl Into<String>) {
+        self.push(Entry::User(text.into()));
+    }
+
+    pub fn push_text(&mut self, role: Role, text: impl Into<String>, done: bool) {
+        self.push(Entry::Text {
+            role,
+            text: text.into(),
+            done,
+        });
+    }
+
+    pub fn push_tool(
+        &mut self,
+        id: impl Into<String>,
+        name: impl Into<String>,
+        summary: impl Into<String>,
+    ) {
+        self.push(Entry::Tool {
+            id: id.into(),
+            name: name.into(),
+            summary: summary.into(),
+            ok: None,
+        });
+    }
+
+    pub fn push_tool_result(&mut self, id: impl Into<String>, text: impl Into<String>) {
+        self.push(Entry::ToolResult {
+            id: id.into(),
+            text: text.into(),
+        });
+    }
+
+    pub fn push_notice(&mut self, text: impl Into<String>) {
+        self.push(Entry::Notice(text.into()));
+    }
+
+    pub fn push_status(&mut self, text: impl Into<String>) {
+        self.push(Entry::Status(text.into()));
+    }
+
+    pub fn push_error(&mut self, text: impl Into<String>) {
+        self.push(Entry::Error(text.into()));
+    }
+
+    pub fn push_blank(&mut self) {
+        self.push(Entry::Blank);
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 // history.go maxHistory
@@ -429,5 +515,87 @@ mod tests {
             Action::SetMode(PermMode::Plan),
             Action::SetMode(PermMode::Plan)
         );
+    }
+
+    #[test]
+    fn transcript_user_and_text_kinds() {
+        let mut t = Transcript::default();
+        t.push_user("hi");
+        t.push_text(Role::Main, "answer", true);
+        t.push_text(Role::Agent("a1".into()), "partial", false);
+        assert_eq!(
+            t.entries,
+            vec![
+                Entry::User("hi".into()),
+                Entry::Text {
+                    role: Role::Main,
+                    text: "answer".into(),
+                    done: true
+                },
+                Entry::Text {
+                    role: Role::Agent("a1".into()),
+                    text: "partial".into(),
+                    done: false
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn transcript_tool_call_and_result_kinds() {
+        let mut t = Transcript::default();
+        t.push_tool("t1", "Read", "a.rs");
+        t.push_tool_result("t1", "12 lines");
+        assert_eq!(
+            t.entries,
+            vec![
+                Entry::Tool {
+                    id: "t1".into(),
+                    name: "Read".into(),
+                    summary: "a.rs".into(),
+                    ok: None
+                },
+                Entry::ToolResult {
+                    id: "t1".into(),
+                    text: "12 lines".into()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn transcript_agent_kind_keeps_fields() {
+        let mut t = Transcript::default();
+        t.push(Entry::Agent {
+            id: "g1".into(),
+            description: "scan".into(),
+            done: true,
+            summary: "ok".into(),
+        });
+        assert_eq!(t.len(), 1);
+        assert!(matches!(
+            &t.entries[0],
+            Entry::Agent { id, done: true, .. } if id == "g1"
+        ));
+    }
+
+    #[test]
+    fn transcript_notice_status_error_blank_kinds() {
+        let mut t = Transcript::default();
+        assert!(t.is_empty());
+        t.push_notice("session resumed");
+        t.push_status("mode: plan");
+        t.push_error("boom");
+        t.push_blank();
+        assert_eq!(
+            t.entries,
+            vec![
+                Entry::Notice("session resumed".into()),
+                Entry::Status("mode: plan".into()),
+                Entry::Error("boom".into()),
+                Entry::Blank,
+            ]
+        );
+        assert!(!t.is_empty());
     }
 }
