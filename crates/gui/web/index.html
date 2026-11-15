@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chaude</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; padding: 24px; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 16px; }
+  button { font: inherit; padding: 6px 14px; border-radius: 8px; border: 1px solid #8884; background: none; cursor: pointer; }
+  pre { margin: 16px 0 0; padding: 12px; border-radius: 8px; background: #8881; min-height: 120px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>chaude</h1>
+<button id="ping" type="button">Ping Rust</button>
+<pre id="log"></pre>
+<script>
+  // Rust calls window.chaude.onEvent(message) for each message it sends (see src/bridge.rs ToPage).
+  const log = (text) => {
+    const el = document.getElementById("log");
+    el.textContent += text + "\n";
+  };
+  window.chaude = {
+    send(message) {
+      window.ipc.postMessage(JSON.stringify(message));
+    },
+    onEvent(message) {
+      log("rust -> page: " + message.type);
+    },
+  };
+  document.getElementById("ping").addEventListener("click", () => {
+    window.chaude.send({ type: "ping" });
+    log("page -> rust: ping");
+  });
+  window.chaude.send({ type: "ping" });
+  log("page -> rust: ping (on load)");
+</script>
+</body>
+</html>

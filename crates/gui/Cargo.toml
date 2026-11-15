@@ -17,9 +17,10 @@ test = false
 [dependencies]
 chaude-core = { path = "../core" }
 chaude-update = { path = "../update" }
-eframe = "0.37"
-egui_commonmark = "0.26"
 notify-rust = "4.19"
+serde.workspace = true
+serde_json.workspace = true
+tao = "0.37.2"
+wry = "0.57.2"
 
 [dev-dependencies]
-serde_json.workspace = true

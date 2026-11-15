@@ -6,7 +6,6 @@ use std::sync::mpsc::{self, Receiver};
 use chaude_core::api::{Config, Engine, EngineHandle, UiEvent};
 use chaude_core::handoff;
 use chaude_core::tmp_layout;
-use eframe::egui;
 
 // The exit handoff of a project (the TUI's <cwd>/notes/tmp/long/handoff file): the previous run loads from it.
 pub fn handoff_path(cwd: &Path) -> PathBuf {
@@ -14,8 +13,10 @@ pub fn handoff_path(cwd: &Path) -> PathBuf {
 }
 
 // Starts the engine in the current directory. Boot blocks until ready; Err carries the boot failure text.
-// A pump thread moves events to the returned channel and wakes egui for each one.
-pub fn start(ctx: egui::Context) -> Result<(EngineHandle, Receiver<UiEvent>), String> {
+// A pump thread moves events to the returned channel and calls `wake` for each one (the window asks for a redraw).
+pub fn start(
+    wake: impl Fn() + Send + 'static,
+) -> Result<(EngineHandle, Receiver<UiEvent>), String> {
     let cwd = std::env::current_dir().ok();
     let cfg = Config {
         handoff_path: cwd.as_deref().map(handoff_path),
@@ -29,7 +30,7 @@ pub fn start(ctx: egui::Context) -> Result<(EngineHandle, Receiver<UiEvent>), St
             if tx.send(ev).is_err() {
                 break;
             }
-            ctx.request_repaint();
+            wake();
         }
     });
     Ok((handle, rx))

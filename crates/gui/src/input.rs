@@ -1,4 +1,4 @@
-//! The input box's text, cursor and prompt history live in core `Editor`. egui's TextEdit draws the box and
+//! The input box's text, cursor and prompt history live in core `Editor`. The page draws the box and
 //! handles IME composition and paste; what it changes is copied back into the editor as edits.
 
 use std::path::Path;
@@ -25,7 +25,7 @@ impl Input {
         self.editor.cursor()
     }
 
-    // Applies one editor key by name (the names app.rs maps from egui keys); the core Editor does the edit.
+    // Applies one editor key by name (the names the page sends); the core Editor does the edit.
     pub fn apply_key(&mut self, op: &str) {
         match op {
             "newline" => self.editor.newline(),

@@ -1,8 +1,9 @@
-//! Helpers for the chaude GUI (eframe, see main.rs). Uses the chaude-core public API only.
+//! Helpers for the chaude GUI (tao + wry window, see main.rs). Uses the chaude-core public API only.
 
-pub mod app;
+pub mod bridge;
 pub mod commands;
 pub mod engine;
+pub mod guard;
 pub mod input;
 pub mod state;
 
