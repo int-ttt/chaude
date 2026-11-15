@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- gui: the busy turn and the held-reply count (`bar.waiting`) now come from core `RunState` (`set_busy`, `held`) instead of GUI-only fields; a running turn keeps its start and the TUI behavior is unchanged.
+  - gui: 진행 중 턴과 보류 응답 대기 수(`bar.waiting`)를 GUI 전용 필드 대신 코어 `RunState`(`set_busy`, `held`)에서 읽습니다. 이미 진행 중인 턴은 시작 시각을 유지하며 TUI 동작은 그대로입니다.
 - core: engine progress (busy turn, running agents and their rows, background ids, opus and resident busy, restored rows, queue, Agent/Task list, held reply, rotations, last tool) moved from the TUI `App` into shared `chaude_core::ui_state::RunState`, with its own `apply` and unit tests. The TUI embeds it as `run` and the GUI's `GuiState` embeds it too; the GUI's own copies of busy, agent rows and task list were removed. The TUI output is unchanged. The GUI task list now follows the TUI rule that a new round clears the settled tasks (the GUI does not draw tasks yet).
   - core: 엔진 진행 상태(메인 턴 진행, 실행 중 에이전트와 행, 백그라운드 id, opus·resident 진행, 복원된 행, 대기열, Agent/Task 목록, 보류 응답, 회전, 마지막 도구)를 TUI `App`에서 공용 `chaude_core::ui_state::RunState`로 옮겼습니다. 자체 `apply`와 단위 테스트가 있습니다. TUI는 `run`으로 이를 포함하고, GUI의 `GuiState`도 포함합니다. GUI의 busy, 에이전트 행, 작업 목록 사본은 없앴습니다. TUI 출력은 그대로입니다. GUI 작업 목록은 새 라운드가 시작되면 끝난 작업을 지우는 TUI 규칙을 따릅니다(GUI는 아직 작업을 그리지 않습니다).
 - gui: the input box's text, cursor and prompt history now live in core `chaude_core::editor::Editor` (the TUI's editor); egui still draws the box and handles IME and paste, and its edits are copied into the editor. Submitted text is trimmed like the TUI, and the GUI's own history copy was removed.

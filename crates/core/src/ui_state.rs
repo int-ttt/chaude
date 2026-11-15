@@ -141,6 +141,17 @@ impl RunState {
         self.agent_rows.iter().filter(|r| !r.done).count() + self.resident_busy.len()
     }
 
+    // Busy flag and turn start for the GUI: a turn already running keeps its start (the TUI's apply restarts it).
+    // Off clears the start. Other effects of Busy/TurnEnd (last tool, held reply) are the caller's to apply.
+    pub fn set_busy(&mut self, on: bool, now: Instant) {
+        self.busy = on;
+        self.turn_start = match (on, self.turn_start) {
+            (false, _) => None,
+            (true, Some(t)) => Some(t),
+            (true, None) => Some(now),
+        };
+    }
+
     // Folds the progress events that touch only this state; other events are ignored. now is the arrival time
     // (turn start, agent start). A front end that also writes a transcript row for an event does that itself.
     pub fn apply(&mut self, ev: UiEvent, now: Instant) {
@@ -260,6 +271,20 @@ mod tests {
         assert_eq!(run.turn_start, Some(now));
         assert!(run.last_tool.is_empty());
         run.apply(UiEvent::Busy(false), now);
+        assert!(!run.busy);
+        assert_eq!(run.turn_start, None);
+    }
+
+    #[test]
+    fn run_state_set_busy_keeps_a_running_turn_start() {
+        let mut run = RunState::default();
+        let t0 = Instant::now();
+        let t1 = t0 + std::time::Duration::from_secs(5);
+        run.set_busy(true, t0);
+        run.set_busy(true, t1);
+        assert!(run.busy);
+        assert_eq!(run.turn_start, Some(t0));
+        run.set_busy(false, t1);
         assert!(!run.busy);
         assert_eq!(run.turn_start, None);
     }

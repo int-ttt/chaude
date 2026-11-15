@@ -132,19 +132,10 @@ impl GuiState {
                 self.bar.cost_usd = cost_usd;
                 self.bar.context_pct = context_pct;
             }
-            // The GUI keeps the start of a turn already running (the TUI restarts it; both read run.turn_start).
-            UiEvent::Busy(on) => {
-                self.run.busy = on;
-                self.run.turn_start = match (on, self.run.turn_start) {
-                    (false, _) => None,
-                    (true, Some(t)) => Some(t),
-                    (true, None) => Some(now),
-                };
-            }
-            UiEvent::TurnEnd { .. } => {
-                self.run.busy = false;
-                self.run.turn_start = None;
-            }
+            // Busy keeps the start of a turn already running (core RunState::set_busy; the TUI's apply restarts it).
+            UiEvent::Busy(on) => self.run.set_busy(on, now),
+            // TurnEnd ends the turn only; a held reply is cleared by ReplyReleased, as before.
+            UiEvent::TurnEnd { .. } => self.run.set_busy(false, now),
             UiEvent::Queued(n) => self.bar.queued = n,
             UiEvent::ModeChanged { mode } => self.bar.mode = mode,
             UiEvent::TurnTokens {
@@ -152,8 +143,6 @@ impl GuiState {
                 output,
                 cache,
             } => self.bar.turn_tokens = Some((input, output, cache)),
-            UiEvent::ReplyHeld { pending } => self.bar.waiting = Some(pending),
-            UiEvent::ReplyReleased => self.bar.waiting = None,
             UiEvent::RoleContext { role, tokens } => {
                 self.bar.role_tokens.insert(role, tokens);
             }
@@ -180,6 +169,7 @@ impl GuiState {
             .turn_start
             .map(|t| now.saturating_duration_since(t).as_secs());
         bar.rot = self.run.rot;
+        bar.waiting = self.run.held;
         let running: Vec<&AgentRow> = self.run.agent_rows.iter().filter(|r| !r.done).collect();
         bar.fg = running.iter().filter(|r| !r.background).count();
         bar.bg = running.iter().filter(|r| r.background).count();
