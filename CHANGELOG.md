@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- tui: streamed assistant and agent text is pushed as core `Entry::Text` rows: the open entry grows in place as lines complete and is redrawn from its text; the output is unchanged (snapshots stay byte-identical, including a multi-chunk stream split mid-line).
+  - tui: 스트리밍되는 어시스턴트·에이전트 텍스트를 코어 `Entry::Text` 행으로 쌓습니다. 열린 항목은 줄이 완성될 때마다 자라고 그 텍스트로 다시 그립니다. 출력은 그대로입니다(줄 중간에서 나뉜 여러 청크 스트림을 포함해 스냅샷은 바이트 단위로 동일).
 - tui: notes, prompt echo, status and error lines and blank rows are pushed as core `Entry` rows, and the TUI keeps a row-to-entry map through inserts and rewind cuts; the output is unchanged (snapshots stay byte-identical).
   - tui: 알림, 프롬프트 에코, 상태·오류 행과 빈 줄을 코어 `Entry` 행으로 쌓고, 삽입과 되감기 절단 때도 행→항목 매핑을 유지합니다. 출력은 그대로입니다(스냅샷은 바이트 단위로 동일).
 - tui: permission answers, the stage rows (working and done), the flush-time blank row, the /view error reset row, and recorded assistant blocks (imports and saved records) are pushed as core `Entry` rows (`Status`, `Notice`, `Blank`, `Text`); the output is unchanged (snapshots stay byte-identical).

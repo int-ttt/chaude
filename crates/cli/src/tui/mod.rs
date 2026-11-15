@@ -356,26 +356,13 @@ impl App {
                 self.end_main_block();
             }
             UiEvent::TextDelta {
-                role: Role::Agent(_),
+                role: role @ Role::Agent(_),
                 text,
-            } => feed(
-                &mut self.pending_agent,
-                &text,
-                (AGENT_PREFIX, AGENT_PREFIX),
-                &mut false,
-                &mut self.transcript,
-                plain_text,
-            ),
+            } => self.feed_text(role, &text),
             UiEvent::MessageDone { role: Role::Main } => self.end_main_block(),
             UiEvent::MessageDone {
-                role: Role::Agent(_),
-            } => flush(
-                &mut self.pending_agent,
-                (AGENT_PREFIX, AGENT_PREFIX),
-                &mut false,
-                &mut self.transcript,
-                plain_text,
-            ),
+                role: role @ Role::Agent(_),
+            } => self.flush_text(role),
             UiEvent::ToolStart { id, name, summary } => {
                 self.open_tools.insert(id.clone());
                 self.end_main_block();
@@ -1572,34 +1559,136 @@ impl App {
         )
     }
 
-    // Closes the open assistant block: flushes its unfinished line and adds Go's blank row after it.
     fn feed_main(&mut self, text: &str) {
-        let at = self.transcript.len();
-        feed(
-            &mut self.pending_main,
-            text,
-            (ASST_FIRST, "  "),
-            &mut self.main_open,
-            &mut self.transcript,
-            asst_text,
-        );
-        self.link_from(at);
+        self.feed_text(Role::Main, text);
     }
 
+    // Closes the open assistant block: flushes its unfinished line and adds Go's blank row after it.
     fn end_main_block(&mut self) {
-        let at = self.transcript.len();
-        flush(
-            &mut self.pending_main,
-            (ASST_FIRST, "  "),
-            &mut self.main_open,
-            &mut self.transcript,
-            asst_text,
-        );
-        self.link_from(at);
+        self.flush_text(Role::Main);
         if self.main_open {
             self.push_entry(Entry::Blank);
         }
         self.main_open = false;
+    }
+
+    // The unfinished-line buffer of a streamed role.
+    fn pending_text(&mut self, role: &Role) -> &mut String {
+        match role {
+            Role::Main => &mut self.pending_main,
+            Role::Agent(_) => &mut self.pending_agent,
+        }
+    }
+
+    // Streamed text of one role: each completed line joins the role's Text entry; the unfinished line waits in the buffer.
+    fn feed_text(&mut self, role: Role, text: &str) {
+        let buf = self.pending_text(&role);
+        buf.push_str(text);
+        let mut lines = Vec::new();
+        while let Some(i) = buf.find('\n') {
+            let line: String = buf.drain(..=i).collect();
+            lines.push(line.trim_end_matches('\n').to_string());
+        }
+        if !lines.is_empty() {
+            self.append_text(&role, &lines);
+        }
+    }
+
+    // Emits the unfinished line as a last line and closes the role's Text entry.
+    fn flush_text(&mut self, role: Role) {
+        let rest = std::mem::take(self.pending_text(&role));
+        if !rest.is_empty() {
+            self.append_text(&role, &[rest]);
+        }
+        self.close_text(&role);
+    }
+
+    // Appends completed lines to the Text entry of `role`. The open entry grows in place while it is the last entry
+    // and its rows are the last rows; otherwise (an agent line came after it) the lines open a new entry. A new
+    // entry of a main block that is already open continues it with the "  " lead, as the live path did.
+    fn append_text(&mut self, role: &Role, lines: &[String]) {
+        let joined = lines.join("\n");
+        let start = match self.open_tail(role) {
+            Some(idx) => {
+                if let Entry::Text { text, .. } = &mut self.entries.entries[idx] {
+                    text.push('\n');
+                    text.push_str(&joined);
+                }
+                self.redraw_text(idx)
+            }
+            None => {
+                self.close_text(role);
+                let first = match role {
+                    Role::Main if self.main_open => "  ",
+                    Role::Main => ASST_FIRST,
+                    Role::Agent(_) => AGENT_PREFIX,
+                };
+                let rows = text_rows(role, &joined, first);
+                let start = self.transcript.len();
+                let e = Entry::Text {
+                    role: role.clone(),
+                    text: joined,
+                    done: false,
+                };
+                self.push_entry_rows(e, rows);
+                start
+            }
+        };
+        if matches!(role, Role::Main) {
+            self.main_open = true;
+            self.link_from(start);
+        }
+    }
+
+    // The open Text entry of `role` when it is the last entry and its rows are the last rows: it can grow in place.
+    fn open_tail(&self, role: &Role) -> Option<usize> {
+        let last = self.entries.len().checked_sub(1)?;
+        let open = matches!(
+            &self.entries.entries[last],
+            Entry::Text { role: r, done: false, .. } if r == role
+        );
+        let tail =
+            self.row_entry.len() == self.transcript.len() && self.row_entry.last() == Some(&last);
+        (open && tail).then_some(last)
+    }
+
+    // Redraws the rows of the Text entry at `idx` from its text; returns the first row it drew.
+    fn redraw_text(&mut self, idx: usize) -> usize {
+        let end = self
+            .row_entry
+            .iter()
+            .rposition(|&e| e == idx)
+            .map_or(0, |r| r + 1);
+        let start = self.row_entry[..end]
+            .iter()
+            .rposition(|&e| e != idx)
+            .map_or(0, |r| r + 1);
+        // The first row keeps its lead: ASST_FIRST when the block opened here, "  " when it continues a block.
+        let first = if self.transcript[start].starts_with(ASST_FIRST) {
+            ASST_FIRST
+        } else {
+            "  "
+        };
+        let rows = match &self.entries.entries[idx] {
+            Entry::Text { role, text, .. } => text_rows(role, text, first),
+            _ => Vec::new(),
+        };
+        let n = rows.len();
+        self.transcript.splice(start..end, rows);
+        self.row_entry.splice(start..end, vec![idx; n]);
+        start
+    }
+
+    // Marks the open Text entry of `role` done. Its rows stay as they are.
+    fn close_text(&mut self, role: &Role) {
+        let open = self
+            .entries
+            .entries
+            .iter()
+            .rposition(|e| matches!(e, Entry::Text { role: r, done: false, .. } if r == role));
+        if let Some(Entry::Text { done, .. }) = open.map(|i| &mut self.entries.entries[i]) {
+            *done = true;
+        }
     }
 
     fn note(&mut self, text: &str) {
@@ -1613,8 +1702,12 @@ impl App {
 
     // Pushes one core entry and the rows it draws, recording each row's entry.
     fn push_entry(&mut self, e: Entry) {
-        self.sync_rows();
         let rows = entry_rows(&e);
+        self.push_entry_rows(e, rows);
+    }
+
+    fn push_entry_rows(&mut self, e: Entry, rows: Vec<String>) {
+        self.sync_rows();
         debug_assert!(!rows.is_empty(), "entry kind not switched to the TUI yet");
         self.row_entry.extend(vec![self.entries.len(); rows.len()]);
         self.transcript.extend(rows);
@@ -2900,21 +2993,21 @@ fn entry_rows(e: &Entry) -> Vec<String> {
             )]
         }
         Entry::Blank => vec![String::new()],
-        // Main assistant text draws as the live path does: ASST_FIRST on the first row, bold markdown per line.
-        Entry::Text {
-            role: Role::Main,
-            text,
-            ..
-        } => text
-            .split('\n')
-            .enumerate()
-            .map(|(i, line)| {
-                let lead = if i == 0 { ASST_FIRST } else { "  " };
-                format!("{lead}{}", asst_text(line))
-            })
-            .collect(),
-        Entry::Text { .. } | Entry::Agent { .. } => Vec::new(),
+        Entry::Text { role, text, .. } => text_rows(role, text, ASST_FIRST),
+        Entry::Agent { .. } => Vec::new(),
     }
+}
+
+// The rows of a Text entry, one per line of `text`. Main lines are bold markdown, the first row led by `first` (ASST_FIRST
+// when the block opens, "  " when it continues one); agent lines are plain behind AGENT_PREFIX.
+fn text_rows(role: &Role, text: &str, first: &str) -> Vec<String> {
+    text.split('\n')
+        .enumerate()
+        .map(|(i, line)| match role {
+            Role::Main => format!("{}{}", if i == 0 { first } else { "  " }, asst_text(line)),
+            Role::Agent(_) => format!("{AGENT_PREFIX}{line}"),
+        })
+        .collect()
 }
 
 // A tool row as the transcript holds it: the green "● " tool block with its time. The head is "name(summary)", or the
@@ -3300,56 +3393,12 @@ pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Resu
     out.flush()
 }
 
-// Appends text to `buf`, emitting each completed line to `out`. `lead` is (first line, later lines); `open`
-// records whether the block already has a line, so the first-line lead is written only once per block.
-fn feed(
-    buf: &mut String,
-    text: &str,
-    lead: (&str, &str),
-    open: &mut bool,
-    out: &mut Vec<String>,
-    style: fn(&str) -> String,
-) {
-    buf.push_str(text);
-    while let Some(i) = buf.find('\n') {
-        let line: String = buf.drain(..=i).collect();
-        out.push(format!(
-            "{}{}",
-            if *open { lead.1 } else { lead.0 },
-            style(line.trim_end_matches('\n'))
-        ));
-        *open = true;
-    }
-}
-
 // Assistant text as Go shows it: **bold** pairs here; links are styled after wrapping in body() (tui.go:374).
 const IMPORT_INSTALL_NOTE: &str =
     "import: the next prompt starts from this transcript (Go applyImport)";
 
 fn asst_text(line: &str) -> String {
     render::md_bold(line)
-}
-
-fn plain_text(line: &str) -> String {
-    line.to_string()
-}
-
-// Emits whatever is left in `buf` as a final line.
-fn flush(
-    buf: &mut String,
-    lead: (&str, &str),
-    open: &mut bool,
-    out: &mut Vec<String>,
-    style: fn(&str) -> String,
-) {
-    if !buf.is_empty() {
-        out.push(format!(
-            "{}{}",
-            if *open { lead.1 } else { lead.0 },
-            style(&std::mem::take(buf))
-        ));
-        *open = true;
-    }
 }
 
 fn restore_terminal() {
@@ -8776,6 +8825,94 @@ mod transcript_snapshots {
         });
         app.apply(UiEvent::TurnEnd { duration_ms: 1200 });
         app
+    }
+
+    // Main text in chunks, one split mid-line; a note lands while the main line is open (the rest of the
+    // line continues below it); an agent text stream interleaves; the last line closes at MessageDone.
+    fn stream_turn() -> App {
+        let mut app = new_app();
+        app.echo_prompt("stream it");
+        for chunk in [
+            "The build has **thr",
+            "ee** steps\nsecond",
+            " line is split mid",
+            "-line\n\n- last",
+        ] {
+            app.apply(UiEvent::TextDelta {
+                role: Role::Main,
+                text: chunk.into(),
+            });
+        }
+        app.apply(UiEvent::Notice {
+            text: "agent a1 done".into(),
+        });
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: " item\nthen a tail".into(),
+        });
+        app.apply(UiEvent::TextDelta {
+            role: Role::Agent("a1".into()),
+            text: "agent says hi\nagent par".into(),
+        });
+        app.apply(UiEvent::MessageDone {
+            role: Role::Agent("a1".into()),
+        });
+        app.apply(UiEvent::TextDelta {
+            role: Role::Main,
+            text: " and ends".into(),
+        });
+        app.apply(UiEvent::MessageDone { role: Role::Main });
+        app
+    }
+
+    #[test]
+    fn stream_turn_snapshot() {
+        let app = stream_turn();
+        check("stream_turn", &snap(&app, 48));
+        check("stream_turn_narrow", &snap(&app, 20));
+    }
+
+    // The streamed text lands in Text entries: a block split by an agent line continues in a new entry.
+    #[test]
+    fn stream_turn_maps_to_entries() {
+        let app = stream_turn();
+        let texts: Vec<(bool, &str)> = app
+            .entries
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                Entry::Text {
+                    role: Role::Main,
+                    text,
+                    ..
+                } => Some((true, text.as_str())),
+                Entry::Text {
+                    role: Role::Agent(_),
+                    text,
+                    ..
+                } => Some((false, text.as_str())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            vec![
+                (
+                    true,
+                    "The build has **three** steps\nsecond line is split mid-line\n\n- last"
+                ),
+                (true, " item"),
+                (false, "agent says hi\nagent par"),
+                (true, "then a tail and ends"),
+            ]
+        );
+        assert!(
+            app.entries
+                .entries
+                .iter()
+                .all(|e| !matches!(e, Entry::Text { done: false, .. }))
+        );
+        assert_eq!(app.row_entry.len(), app.transcript.len());
     }
 
     #[test]
