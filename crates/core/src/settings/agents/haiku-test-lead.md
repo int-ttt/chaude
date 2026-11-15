@@ -27,7 +27,7 @@ Step 2: ONE message with all Agent calls at once (subagent_type `haiku-runner`, 
 - G3 tests core lib: `cargo test -p chaude-core --lib`
 - G4 tests engine + parity_harness_p3: `cargo test -p chaude-core --test engine --test parity_harness_p3`
 - G5 tests cli + update: `cargo test -p chaude-cli -p chaude-update`
-- one live runner per `live:` check: tmux session name `chaude-test-<name>` (unique), scratch dir `notes/tmp/test/<name>/`, uses `target/release` binary, kills only its own tmux session at the end.
+- one live runner per `live:` check: tmux session name `chaude-test-<name>` (unique), scratch dir `notes/tmp/test/<name>/`, uses `target/release` binary, kills only its own tmux session at the end. Drive input in separate calls: `tmux send-keys -t <session> "<text>"`, pause 1 s, then `tmux send-keys -t <session> Enter` (never text and Enter in one call; a combined call did not submit). Then poll `tmux capture-pane -p -t <session>` every 2 s, up to 60 s, for the reply; no reply = FAIL.
 
 Each runner brief (you write it, short): group id, exact command(s) above, each wrapped as `python3 scripts/squeeze-run.py -- <cmd>` (Windows: `py -3`, else `python`) (a `then` chain becomes one wrapped command per step; the full log lands in `logs/runs/`; live: its scratch dir), no code edits, no fixes, no unbounded wait loops, foreground Bash timeout 600000 ms. Return exactly one line: `group: <id> · result: PASS|FAIL · counts: <passed/failed/ignored per test binary> · failing: <test names or -> · log: <logs/runs paths>`.
 

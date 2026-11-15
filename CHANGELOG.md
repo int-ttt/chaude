@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- agents: the haiku-test-lead live gate sends text and Enter as separate `tmux send-keys` calls (pause 1 s between), then polls `capture-pane` for up to 60 s for the reply; both agent copies stay identical.
+  - agents: haiku-test-lead 라이브 게이트가 텍스트와 Enter를 별도의 `tmux send-keys` 호출로 보내고(사이 1초 대기), 응답을 `capture-pane`으로 최대 60초 폴링합니다. 두 에이전트 사본은 계속 동일합니다.
 - gui: the transcript is the shared core `chaude_core::ui_state::Transcript` instead of a GUI-only list; the GUI pushes user, tool, notice, error and text rows through the same core helpers the TUI uses. Rendering is unchanged.
   - gui: 트랜스크립트가 GUI 전용 목록 대신 공용 코어 `chaude_core::ui_state::Transcript`입니다. GUI는 사용자, 도구, 알림, 오류, 텍스트 행을 TUI와 같은 코어 도우미로 쌓습니다. 화면 그리기는 그대로입니다.
 - tui: the transcript keeps an entry-to-first-row index, so looking up an entry's row no longer scans every row; it is kept in step on push, redraw, insert and rewind cut. The output is unchanged (snapshots stay byte-identical).
