@@ -20,17 +20,21 @@ pub enum Entry {
         text: String,
         done: bool,
     },
-    // Tool call row (TUI ToolStart, resume row); ToolInput/ToolEnd update summary and ok in place.
+    // Tool call row (TUI ToolStart, resume row); ToolInput/ToolEnd update summary, ok and end in place.
+    // start is the local arrival time (unix seconds); end is (unix seconds, elapsed seconds) once the call finished.
     Tool {
         id: String,
         name: String,
         summary: String,
         ok: Option<bool>,
+        start: i64,
+        end: Option<(i64, u64)>,
     },
-    // Tool result under its call (TUI ToolResult: "  ⎿  <time> <head>"), the first line only.
+    // Tool result under its call (TUI ToolResult: "  ⎿  <time> <head>"), the first line only. at is the unix arrival time.
     ToolResult {
         id: String,
         text: String,
+        at: i64,
     },
     // Background or foreground agent summary row (GUI). The TUI shows agents in its panel and writes a Notice plus an
     // in-place Tool update on AgentEnd (agent_done).
@@ -78,19 +82,23 @@ impl Transcript {
         id: impl Into<String>,
         name: impl Into<String>,
         summary: impl Into<String>,
+        start: i64,
     ) {
         self.push(Entry::Tool {
             id: id.into(),
             name: name.into(),
             summary: summary.into(),
             ok: None,
+            start,
+            end: None,
         });
     }
 
-    pub fn push_tool_result(&mut self, id: impl Into<String>, text: impl Into<String>) {
+    pub fn push_tool_result(&mut self, id: impl Into<String>, text: impl Into<String>, at: i64) {
         self.push(Entry::ToolResult {
             id: id.into(),
             text: text.into(),
+            at,
         });
     }
 
@@ -544,8 +552,8 @@ mod tests {
     #[test]
     fn transcript_tool_call_and_result_kinds() {
         let mut t = Transcript::default();
-        t.push_tool("t1", "Read", "a.rs");
-        t.push_tool_result("t1", "12 lines");
+        t.push_tool("t1", "Read", "a.rs", 100);
+        t.push_tool_result("t1", "12 lines", 101);
         assert_eq!(
             t.entries,
             vec![
@@ -553,11 +561,14 @@ mod tests {
                     id: "t1".into(),
                     name: "Read".into(),
                     summary: "a.rs".into(),
-                    ok: None
+                    ok: None,
+                    start: 100,
+                    end: None
                 },
                 Entry::ToolResult {
                     id: "t1".into(),
-                    text: "12 lines".into()
+                    text: "12 lines".into(),
+                    at: 101
                 },
             ]
         );

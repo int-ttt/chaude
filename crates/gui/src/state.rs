@@ -47,11 +47,14 @@ impl GuiState {
                 }
             }
             UiEvent::ToolStart { id, name, summary } => {
+                // The GUI draws no time, so the start stays 0 (the TUI stamps its own rows).
                 self.transcript.push(Entry::Tool {
                     id,
                     name,
                     summary,
                     ok: None,
+                    start: 0,
+                    end: None,
                 });
             }
             UiEvent::ToolEnd { id, ok } => {

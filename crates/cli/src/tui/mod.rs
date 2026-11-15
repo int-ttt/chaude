@@ -87,13 +87,12 @@ const TOOL_ON: &str = "\x1b[38;2;95;175;135m";
 
 pub use chaude_core::ui_state::Action;
 
-// A tool row in the transcript: its index, tool name and head text, the wall-clock start and the Instant it started
-// (elapsed), and the finish (wall-clock end, elapsed seconds) once ToolEnd arrives.
+// A tool row in the transcript: its index, tool name and head text, and the Instant it started (elapsed). The wall-clock
+// start and end live on its Tool entry.
 struct ToolRow {
     row: usize,
     name: String,
     head: String,
-    start: i64,
     at: Instant,
     end: Option<(i64, u64)>,
 }
@@ -387,30 +386,40 @@ impl App {
                     format!("{name}({summary})")
                 };
                 self.run.last_tool = trunc_runes(&head, LAST_TOOL_RUNES);
+                let start = unix_now();
                 let row = ToolRow {
                     row: self.transcript.len(),
-                    name,
-                    head: head.clone(),
-                    start: unix_now(),
+                    name: name.clone(),
+                    head,
                     at: Instant::now(),
                     end: None,
                 };
-                self.transcript.push(tool_line(&row));
+                self.push_entry(Entry::Tool {
+                    id: id.clone(),
+                    name,
+                    summary,
+                    ok: None,
+                    start,
+                    end: None,
+                });
                 self.tool_rows.insert(id, row);
             }
             // Go tool_summary: the input JSON gives the row its argument summary. Rewrites only a row still in place.
             UiEvent::ToolInput { id, input } => {
                 let summary = render::tool_summary(&input);
-                if let Some(r) = self.tool_rows.get_mut(&id)
-                    && let Some(line) = self.transcript.get_mut(r.row)
-                {
+                if let Some(r) = self.tool_rows.get_mut(&id) {
                     r.head = if summary.is_empty() {
                         r.name.clone()
                     } else {
                         format!("{}({summary})", r.name)
                     };
                     self.run.last_tool = trunc_runes(&r.head, LAST_TOOL_RUNES);
-                    *line = tool_line(r);
+                    let row = r.row;
+                    self.update_tool(row, |e| {
+                        if let Entry::Tool { summary: s, .. } = e {
+                            *s = summary;
+                        }
+                    });
                 }
             }
             // Go shows the tool_result text, not a done/failed word; that row comes from ToolResult.
@@ -419,10 +428,14 @@ impl App {
                 if let Some(r) = self.tool_rows.get_mut(&id)
                     && r.end.is_none()
                 {
-                    r.end = Some((unix_now(), r.at.elapsed().as_secs()));
-                    if let Some(line) = self.transcript.get_mut(r.row) {
-                        *line = tool_line(r);
-                    }
+                    let end = Some((unix_now(), r.at.elapsed().as_secs()));
+                    r.end = end;
+                    let row = r.row;
+                    self.update_tool(row, |e| {
+                        if let Entry::Tool { end: slot, .. } = e {
+                            *slot = end;
+                        }
+                    });
                 }
                 self.open_tools.remove(&id);
                 if !ok && self.is_agent_tool(&id) {
@@ -436,15 +449,19 @@ impl App {
                     return;
                 };
                 // The result row carries its local arrival time after the lead, as the action rows do.
-                let rows = [
-                    format!("{GREY_ON}  ⎿  {} {head}{FG_OFF}", clock_hhmmss(unix_now())),
-                    String::new(),
-                ];
+                let result = Entry::ToolResult {
+                    id: id.clone(),
+                    text: head,
+                    at: unix_now(),
+                };
                 // The result sits directly under its own tool row (matched by tool id), so parallel calls keep
                 // their results; a result with no open tool row is appended.
                 match self.tool_rows.get(&id).map(|r| r.row) {
-                    Some(at) => self.insert_rows(at + 1, rows.to_vec()),
-                    None => self.transcript.extend(rows),
+                    Some(at) => self.insert_entries(at + 1, vec![result, Entry::Blank]),
+                    None => {
+                        self.push_entry(result);
+                        self.push_entry(Entry::Blank);
+                    }
                 }
             }
             // A background agent resumed by SendMessage runs again under its original tool id (core keeps background=true).
@@ -473,11 +490,13 @@ impl App {
                 // A resume while its row is still open adds none; the AgentEnd closes and removes the row.
                 // The SendMessage row (ToolStart..) moves to resume_rows, so the call and the agent share one row.
                 if self.resume_rows.contains_key(&id) {
-                    if let Some(mut r) = self.tool_rows.remove(&send_id) {
-                        r.end = Some((unix_now(), r.at.elapsed().as_secs()));
-                        if let Some(line) = self.transcript.get_mut(r.row) {
-                            *line = tool_line(&r);
-                        }
+                    if let Some(r) = self.tool_rows.remove(&send_id) {
+                        let end = Some((unix_now(), r.at.elapsed().as_secs()));
+                        self.update_tool(r.row, |e| {
+                            if let Entry::Tool { end: slot, .. } = e {
+                                *slot = end;
+                            }
+                        });
                     }
                 } else if let Some(row) = self.tool_rows.remove(&send_id) {
                     self.resume_rows.insert(id, row);
@@ -489,15 +508,22 @@ impl App {
                     } else {
                         format!("resume({description})")
                     };
+                    let start = unix_now();
                     let row = ToolRow {
                         row: self.transcript.len(),
                         name: "resume".to_string(),
                         head,
-                        start: unix_now(),
                         at: Instant::now(),
                         end: None,
                     };
-                    self.transcript.push(tool_line(&row));
+                    self.push_entry(Entry::Tool {
+                        id: id.clone(),
+                        name: "resume".to_string(),
+                        summary: description,
+                        ok: None,
+                        start,
+                        end: None,
+                    });
                     self.resume_rows.insert(id, row);
                 }
             }
@@ -705,7 +731,7 @@ impl App {
             // Go repl.go budgetStop: one dim line in the transcript (no blank row after it).
             UiEvent::BudgetStop { spent_usd, cap_usd } => {
                 let notice = bar::budget_notice(spent_usd, cap_usd);
-                self.transcript.push(format!("{GREY_ON}{notice}{FG_OFF}"));
+                self.note(&format!("{GREY_ON}{notice}{FG_OFF}"));
             }
             // Core log lines carry no time, so each gets this arrival's local stamp (agentview::stamp_lines).
             UiEvent::AgentLog {
@@ -1596,9 +1622,45 @@ impl App {
     }
 
     // The entry that drew transcript row `r`, if an entry drew it.
-    #[allow(dead_code)]
     fn entry_of_row(&self, r: usize) -> Option<usize> {
         self.row_entry.get(r).copied().filter(|&e| e != NO_ENTRY)
+    }
+
+    // Edits the Tool entry drawn at transcript row `row`, then redraws that row from it. Rows no Tool entry drew are left alone.
+    fn update_tool(&mut self, row: usize, f: impl FnOnce(&mut Entry)) {
+        let Some(e) = self.entry_of_row(row) else {
+            return;
+        };
+        f(&mut self.entries.entries[e]);
+        let line = entry_rows(&self.entries.entries[e]).into_iter().next();
+        if let (Some(line), Some(slot)) = (line, self.transcript.get_mut(row)) {
+            *slot = line;
+        }
+    }
+
+    // Inserts entries at transcript row `at`, directly under the row of the entry drawn at at-1. The entries go
+    // right after that entry, so entry order matches row order; the row and entry maps shift with them.
+    fn insert_entries(&mut self, at: usize, es: Vec<Entry>) {
+        self.sync_rows();
+        let at_entry = self
+            .entry_of_row(at - 1)
+            .map_or(self.entries.len(), |e| e + 1);
+        let k = es.len();
+        for v in self.row_entry.iter_mut() {
+            if *v != NO_ENTRY && *v >= at_entry {
+                *v += k;
+            }
+        }
+        let mut map = Vec::new();
+        let mut rows = Vec::new();
+        for (i, e) in es.iter().enumerate() {
+            let drawn = entry_rows(e);
+            map.extend(vec![at_entry + i; drawn.len()]);
+            rows.extend(drawn);
+        }
+        self.entries.entries.splice(at_entry..at_entry, es);
+        self.insert_rows(at, rows);
+        self.row_entry[at..at + map.len()].copy_from_slice(&map);
     }
 
     // Cuts the transcript back to `n` rows and drops the entries that drew the cut rows.
@@ -1660,11 +1722,13 @@ impl App {
         self.run.agents.retain(|(aid, _, _, _)| aid != id);
         self.run.bg_agents.retain(|aid| aid != id);
         // A resumed agent's timed row gets its end time and elapsed, like the other timed rows.
-        if let Some(mut r) = self.resume_rows.remove(id) {
-            r.end = Some((unix_now(), r.at.elapsed().as_secs()));
-            if let Some(line) = self.transcript.get_mut(r.row) {
-                *line = tool_line(&r);
-            }
+        if let Some(r) = self.resume_rows.remove(id) {
+            let end = Some((unix_now(), r.at.elapsed().as_secs()));
+            self.update_tool(r.row, |e| {
+                if let Entry::Tool { end: slot, .. } = e {
+                    *slot = end;
+                }
+            });
         }
         // The done line starts with the local HH:MM:SS of its arrival; the wording after it is unchanged.
         let notice = bar::done_line(failed, model, name, what);
@@ -2814,17 +2878,33 @@ fn entry_rows(e: &Entry) -> Vec<String> {
                 format!("{GREY_ON}{lead}{line}{FG_OFF}")
             })
             .collect(),
+        Entry::Tool {
+            name,
+            summary,
+            start,
+            end,
+            ..
+        } => vec![tool_entry_line(*start, name, summary, *end)],
+        Entry::ToolResult { text, at, .. } => {
+            vec![format!(
+                "{GREY_ON}  ⎿  {} {text}{FG_OFF}",
+                clock_hhmmss(*at)
+            )]
+        }
         Entry::Blank => vec![String::new()],
-        Entry::Text { .. }
-        | Entry::Tool { .. }
-        | Entry::ToolResult { .. }
-        | Entry::Agent { .. } => Vec::new(),
+        Entry::Text { .. } | Entry::Agent { .. } => Vec::new(),
     }
 }
 
-// A tool row as the transcript holds it: the green "● " tool block with its time.
-fn tool_line(r: &ToolRow) -> String {
-    tool_color(&action_line("● ", r.start, &r.head, r.end))
+// A tool row as the transcript holds it: the green "● " tool block with its time. The head is "name(summary)", or the
+// name alone when there is no summary (the ToolRow head rule).
+fn tool_entry_line(start: i64, name: &str, summary: &str, end: Option<(i64, u64)>) -> String {
+    let head = if summary.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}({summary})")
+    };
+    tool_color(&action_line("● ", start, &head, end))
 }
 
 // Go inputBox.View window (input.go:211): at most MAX_INPUT_ROWS rows, scrolled so the cursor row stays visible.
@@ -6641,14 +6721,7 @@ mod tests {
             let end = start + s[start..].find('m').expect("sgr end") + 1;
             s[start..end].to_string()
         };
-        let main = tool_line(&ToolRow {
-            row: 0,
-            name: "Bash".into(),
-            head: "Bash(ls)".into(),
-            start: 0,
-            at: Instant::now(),
-            end: None,
-        });
+        let main = tool_entry_line(0, "Bash", "ls", None);
         let rec = agentview::AgentRec {
             log: vec!["● 10:00:00 Bash(ls)".into(), "  ⎿  a.txt".into()],
             ..Default::default()
@@ -8468,6 +8541,55 @@ mod transcript_rows {
         assert_eq!(app.entries.entries.len(), 1);
         assert_eq!(app.row_entry.len(), 3);
         assert_eq!(app.transcript, ["x", "a", "b"]);
+    }
+
+    #[test]
+    fn tool_result_entries_sit_under_their_call() {
+        let mut app = App::new(60, 24);
+        app.apply(UiEvent::ToolStart {
+            id: "a".into(),
+            name: "Read".into(),
+            summary: String::new(),
+        });
+        app.apply(UiEvent::ToolStart {
+            id: "b".into(),
+            name: "Grep".into(),
+            summary: "x".into(),
+        });
+        app.apply(UiEvent::ToolResult {
+            id: "a".into(),
+            text: "ok".into(),
+        });
+        // The result and its blank go right under call a, before call b's row.
+        let kinds: Vec<&str> = app
+            .entries
+            .entries
+            .iter()
+            .map(|e| match e {
+                Entry::Tool { .. } => "tool",
+                Entry::ToolResult { .. } => "result",
+                Entry::Blank => "blank",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["tool", "result", "blank", "tool"]);
+        let map: Vec<Option<usize>> = (0..app.transcript.len())
+            .map(|r| app.entry_of_row(r))
+            .collect();
+        assert_eq!(map, [0, 1, 2, 3].map(Some).to_vec());
+        assert!(app.transcript[1].contains("  ⎿  "));
+        assert!(app.transcript[1].ends_with(&format!(" ok{FG_OFF}")));
+
+        // ToolEnd rewrites call b's entry and its row in place.
+        app.apply(UiEvent::ToolEnd {
+            id: "b".into(),
+            ok: true,
+        });
+        assert!(matches!(
+            &app.entries.entries[3],
+            Entry::Tool { end: Some(_), .. }
+        ));
+        assert!(app.transcript[3].contains(" → "));
     }
 }
 

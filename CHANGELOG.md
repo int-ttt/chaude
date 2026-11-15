@@ -3,6 +3,8 @@
 ## Unreleased
 - tui: notes, prompt echo, status and error lines and blank rows are pushed as core `Entry` rows, and the TUI keeps a row-to-entry map through inserts and rewind cuts; the output is unchanged (snapshots stay byte-identical).
   - tui: 알림, 프롬프트 에코, 상태·오류 행과 빈 줄을 코어 `Entry` 행으로 쌓고, 삽입과 되감기 절단 때도 행→항목 매핑을 유지합니다. 출력은 그대로입니다(스냅샷은 바이트 단위로 동일).
+- tui: tool rows, tool results, resume rows and budget stops are pushed as core `Entry` rows (`Tool` and `ToolResult` carry their start, end and arrival times); tool rows are rewritten through their entry; the output is unchanged (snapshots stay byte-identical).
+  - tui: 도구 행, 도구 결과, 재개 행과 예산 중단을 코어 `Entry` 행으로 쌓습니다(`Tool`과 `ToolResult`에 시작·종료·도착 시각이 들어갑니다). 도구 행은 해당 항목을 통해 다시 씁니다. 출력은 그대로입니다(스냅샷은 바이트 단위로 동일).
 - tui: the rendered transcript (prompt echo, streamed answer, tool rows and results, notes, mode, interrupt) has byte snapshot tests under `testdata/transcript`, the baseline before the transcript moves onto core `Entry` rows; the output is unchanged.
   - tui: 렌더링된 트랜스크립트(프롬프트 에코, 스트리밍 답변, 도구 행과 결과, 알림, 모드, 중단)에 바이트 스냅샷 테스트를 `testdata/transcript`에 추가했습니다. 트랜스크립트를 코어 `Entry` 행으로 옮기기 전의 기준선이며 출력은 그대로입니다.
 - core: the shared transcript model covers every row kind the TUI pushes (user, assistant text, tool call, tool result, agent, notice, status, error, blank) as `chaude_core::ui_state::Entry`, with a `Transcript` list and push helpers; the TUI is unchanged and still draws its own rows, and the GUI keeps its behavior.
