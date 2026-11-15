@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: the tool stamps and summaries, tool result rows, stage rows and the time helpers moved from the TUI into shared `chaude_core::ui_state` (`action_line`, `tool_line`, `tool_result_line`, `stage_text`, `tool_result_text`, `is_caveman_block`) and `chaude_core::localtime::clock_hhmmss`/`unix_now`; the TUI calls them and its output is unchanged (snapshots stay byte-identical).
+  - core: 도구 시각과 요약, 도구 결과 행, 단계 행과 시각 도우미를 TUI에서 공용 `chaude_core::ui_state`(`action_line`, `tool_line`, `tool_result_line`, `stage_text`, `tool_result_text`, `is_caveman_block`)와 `chaude_core::localtime::clock_hhmmss`/`unix_now`로 옮겼습니다. TUI는 이를 호출하며 출력은 그대로입니다(스냅샷은 바이트 단위로 동일).
 - agents: the haiku-test-lead live gate sends text and Enter as separate `tmux send-keys` calls (pause 1 s between), then polls `capture-pane` for up to 60 s for the reply; both agent copies stay identical.
   - agents: haiku-test-lead 라이브 게이트가 텍스트와 Enter를 별도의 `tmux send-keys` 호출로 보내고(사이 1초 대기), 응답을 `capture-pane`으로 최대 60초 폴링합니다. 두 에이전트 사본은 계속 동일합니다.
 - gui: the transcript is the shared core `chaude_core::ui_state::Transcript` instead of a GUI-only list; the GUI pushes user, tool, notice, error and text rows through the same core helpers the TUI uses. Rendering is unchanged.

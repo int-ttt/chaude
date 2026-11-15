@@ -124,6 +124,20 @@ fn platform_offset_secs(_secs: i64) -> i64 {
     0
 }
 
+/// Local "HH:MM:SS" of unix seconds `secs` (the action rows' start and end stamps).
+pub fn clock_hhmmss(secs: i64) -> String {
+    let [_, _, _, h, m, s] = local_civil(secs);
+    format!("{h:02}:{m:02}:{s:02}")
+}
+
+/// Current unix seconds; 0 when the clock is before the epoch.
+pub fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,9 +2,14 @@
 //! prompt-history push rule. No terminal, render or editor types here; the TUI keeps Editor, RefCell and render.
 
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::time::Instant;
 
 use crate::api::{AgentRow, CoderContext, InterruptSource, Role, TaskStatus, UiEvent};
+use crate::bar_text::fmt_secs;
+use crate::i18n::{self, Lang, Msg};
+use crate::localtime::clock_hhmmss;
+use crate::resident::StagePhase;
 use crate::slash::PermMode;
 
 // One row of a front end's transcript (GUI output pane, TUI transcript model). Text rows keep the role so main and
@@ -125,6 +130,104 @@ impl Transcript {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+// Tool row head: "name(summary)", or the name alone when there is no summary (the ToolRow head rule).
+pub fn tool_head(name: &str, summary: &str) -> String {
+    if summary.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}({summary})")
+    }
+}
+
+// An action row with its time: `<lead>HH:MM:SS <body>`, and once finished ` → HH:MM:SS (elapsed)` at the end.
+// The lead ("● " or "· ") stays first, so the wrap hang and the "● Name(arg)" text are unchanged.
+pub fn action_line(lead: &str, start: i64, body: &str, end: Option<(i64, u64)>) -> String {
+    let mut s = format!("{lead}{} {body}", clock_hhmmss(start));
+    if let Some((at, secs)) = end {
+        s.push_str(&format!(" → {} ({})", clock_hhmmss(at), fmt_secs(secs)));
+    }
+    s
+}
+
+// A tool call row as plain text (the TUI colours it green): "● HH:MM:SS name(summary)", with the end stamp once done.
+pub fn tool_line(start: i64, name: &str, summary: &str, end: Option<(i64, u64)>) -> String {
+    action_line("● ", start, &tool_head(name, summary), end)
+}
+
+// A tool result row as plain text: "  ⎿  HH:MM:SS <first line>", stamped with its arrival time.
+pub fn tool_result_line(at: i64, text: &str) -> String {
+    format!("  ⎿  {} {text}", clock_hhmmss(at))
+}
+
+// A stage row as plain text: "· HH:MM:SS <stage text>". The stage text's own "· " lead is not repeated.
+pub fn stage_line(start: i64, text: &str, end: Option<(i64, u64)>) -> String {
+    action_line("· ", start, text.strip_prefix("· ").unwrap_or(text), end)
+}
+
+// Go repl.go stage(): "· <slot> 처리중" on start, "· <slot> 완료" on success, "· <slot> 실패: <err>" on failure.
+// Agent slots use Go's "호출" on start and "agent <label>" as the name, where the label is Go subagentLabel.
+pub fn stage_text(lang: Lang, slot: &str, phase: &StagePhase) -> String {
+    let (name, start) = match slot.strip_prefix("agent:") {
+        Some(desc) => (format!("agent {desc}"), Msg::StageCall),
+        None if slot == "tui" => (slot.to_string(), Msg::StageTranslate),
+        None => (slot.to_string(), Msg::StageStart),
+    };
+    let fill = |msg: Msg, args: &[&dyn Display]| i18n::fill(i18n::text(lang, msg), args);
+    match phase {
+        StagePhase::Working => fill(start, &[&name]),
+        StagePhase::Done => fill(Msg::StageDone, &[&name]),
+        StagePhase::Failed(err) => fill(Msg::StageFailed, &[&name, err]),
+    }
+}
+
+// R04 cavemanStatusRe (tui.go:97): ^status:\s*(done|partial|fail|blocked)\b, applied to a trimmed line.
+fn is_status_line(ln: &str) -> bool {
+    let Some(rest) = ln.strip_prefix("status:") else {
+        return false;
+    };
+    let rest = rest.trim_start_matches([' ', '\t', '\n', '\x0c', '\r']);
+    for word in ["done", "partial", "fail", "blocked"] {
+        if let Some(tail) = rest.strip_prefix(word) {
+            return !tail
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        }
+    }
+    false
+}
+
+// R04 isCavemanBlock (tui.go:100): a status line and a reason line anywhere in the text.
+pub fn is_caveman_block(s: &str) -> bool {
+    let mut status = false;
+    let mut reason = false;
+    for ln in s.split('\n') {
+        let ln = ln.trim();
+        if is_status_line(ln) {
+            status = true;
+        }
+        if ln.starts_with("reason:") {
+            reason = true;
+        }
+    }
+    status && reason
+}
+
+// R05 tool result text (toolResultMsg, tui.go:485): None when hidden as a caveman block; otherwise the first
+// line cut to 160 chars, plus " … (+N lines)" when there is more.
+pub fn tool_result_text(s: &str) -> Option<String> {
+    let s = s.trim();
+    if is_caveman_block(s) {
+        return None;
+    }
+    let lines: Vec<&str> = s.split('\n').collect();
+    let mut t: String = lines[0].chars().take(160).collect();
+    if lines.len() > 1 {
+        t.push_str(&format!(" … (+{} lines)", lines.len() - 1));
+    }
+    Some(t)
 }
 
 // history.go maxHistory
@@ -376,6 +479,79 @@ impl RunState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caveman_blocks_are_detected_and_hidden() {
+        let cases = [
+            ("status: done\nreason: -\nclaim: a.go:1 | x", true),
+            ("[harness: note]\nstatus: partial\nreason: cap", true),
+            ("status: done", false),
+            ("status: running\nreason: -", false),
+            ("읽기 결과입니다.", false),
+            ("", false),
+        ];
+        for (input, want) in cases {
+            assert_eq!(is_caveman_block(input), want, "input {input:?}");
+        }
+        assert_eq!(
+            tool_result_text("status: done\nreason: -\nclaim: a.go:1 | x"),
+            None
+        );
+        assert_eq!(
+            tool_result_text("ok\nmore").as_deref(),
+            Some("ok … (+1 lines)")
+        );
+        assert_eq!(tool_result_text("  one  ").as_deref(), Some("one"));
+    }
+
+    #[test]
+    fn tool_and_result_rows_stamp_their_times() {
+        let start = 1_700_000_000;
+        assert_eq!(tool_head("Bash", ""), "Bash");
+        assert_eq!(tool_head("Read", "a.rs"), "Read(a.rs)");
+        assert_eq!(
+            tool_line(start, "Read", "a.rs", None),
+            format!("● {} Read(a.rs)", clock_hhmmss(start))
+        );
+        assert_eq!(
+            tool_line(start, "Read", "a.rs", Some((start + 89, 89))),
+            format!(
+                "● {} Read(a.rs) → {} (1m29s)",
+                clock_hhmmss(start),
+                clock_hhmmss(start + 89)
+            )
+        );
+        assert_eq!(
+            tool_result_line(start, "one line"),
+            format!("  ⎿  {} one line", clock_hhmmss(start))
+        );
+    }
+
+    #[test]
+    fn stage_rows_drop_the_stage_lead_and_follow_the_phase() {
+        let start = 1_700_000_000;
+        assert_eq!(
+            stage_line(start, "· tui 번역중", None),
+            format!("· {} tui 번역중", clock_hhmmss(start))
+        );
+        assert_eq!(
+            stage_text(Lang::Ko, "agent:haiku-coder", &StagePhase::Working),
+            "· agent haiku-coder 호출"
+        );
+        assert_eq!(
+            stage_text(Lang::Ko, "agent:agent", &StagePhase::Done),
+            "· agent agent 완료"
+        );
+        let failed = stage_text(Lang::Ko, "prompter", &StagePhase::Failed("boom".into()));
+        assert!(
+            failed.starts_with("· prompter") && failed.ends_with("boom"),
+            "{failed}"
+        );
+        assert_eq!(
+            stage_text(Lang::En, "prompter", &StagePhase::Working),
+            "· prompter working"
+        );
+    }
 
     #[test]
     fn run_state_busy_sets_turn_start_and_clears_last_tool() {

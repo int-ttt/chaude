@@ -29,11 +29,15 @@ use std::time::{Duration, Instant};
 
 use chaude_core::api::{AgentRow, Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::handoff;
-use chaude_core::i18n::{Msg, t, tf};
+use chaude_core::i18n::{Msg, current, t, tf};
 use chaude_core::import_claude::{self, ClaudeImport};
+use chaude_core::localtime::{clock_hhmmss, unix_now};
 use chaude_core::resident::StagePhase;
 use chaude_core::resume_note;
-use chaude_core::ui_state::{Entry, RunState, TaskRow, TaskState, Transcript};
+use chaude_core::ui_state::{
+    Entry, RunState, TaskRow, TaskState, Transcript, action_line, stage_text, tool_line,
+    tool_result_line, tool_result_text,
+};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
@@ -433,7 +437,7 @@ impl App {
             // Go toolResultMsg: the first line cut to 160 runes, then "… (+N lines)" for the rest.
             UiEvent::ToolResult { id, text } => {
                 // Go hides an agent's caveman return from the transcript (tui.go:481); None means hidden.
-                let Some(head) = render::tool_result_text(&text) else {
+                let Some(head) = tool_result_text(&text) else {
                     return;
                 };
                 // The result row carries its local arrival time after the lead, as the action rows do.
@@ -631,7 +635,7 @@ impl App {
             // The Working row carries its start time and, once the slot finishes, its end time and elapsed.
             UiEvent::Stage { slot, phase } => {
                 self.end_main_block();
-                let text = stage_text(&slot, &phase);
+                let text = stage_text(current(), &slot, &phase);
                 match phase {
                     StagePhase::Working => {
                         let body = text.strip_prefix("· ").unwrap_or(&text).to_string();
@@ -2966,36 +2970,6 @@ fn wrap_row(line: &str, w: usize, linked: bool) -> Vec<String> {
         .collect()
 }
 
-// Go stage lines (repl.go stage calls): "· <slot> 처리중" on start, "· <slot> 완료" on success,
-// "· <slot> 실패: <err>" on failure. Agent slots use Go's "호출" on start and "agent <label>" as the name,
-// where the label is Go subagentLabel (subagent_type, else "agent").
-fn stage_text(slot: &str, phase: &StagePhase) -> String {
-    let (name, start) = match slot.strip_prefix("agent:") {
-        Some(desc) => (format!("agent {desc}"), Msg::StageCall),
-        None if slot == "tui" => (slot.to_string(), Msg::StageTranslate),
-        None => (slot.to_string(), Msg::StageStart),
-    };
-    match phase {
-        StagePhase::Working => tf(start, &[&name]),
-        StagePhase::Done => tf(Msg::StageDone, &[&name]),
-        StagePhase::Failed(err) => tf(Msg::StageFailed, &[&name, err]),
-    }
-}
-
-// An action row with its time: `<lead>HH:MM:SS <body>`, and once finished ` → HH:MM:SS (elapsed)` at the end.
-// The lead ("● " or "· ") stays first, so the wrap hang and the "● Name(arg)" text are unchanged.
-fn action_line(lead: &str, start: i64, body: &str, end: Option<(i64, u64)>) -> String {
-    let mut s = format!("{lead}{} {body}", clock_hhmmss(start));
-    if let Some((at, secs)) = end {
-        s.push_str(&format!(
-            " → {} ({})",
-            clock_hhmmss(at),
-            bar::fmt_secs(secs)
-        ));
-    }
-    s
-}
-
 // The green tool block colour (Go tool block). Shared by the main pane's tool rows and the agent pane's call lines.
 pub(super) fn tool_color(s: &str) -> String {
     format!("{TOOL_ON}{s}{FG_OFF}")
@@ -3025,10 +2999,7 @@ fn entry_rows(e: &Entry) -> Vec<String> {
             ..
         } => vec![tool_entry_line(*start, name, summary, *end)],
         Entry::ToolResult { text, at, .. } => {
-            vec![format!(
-                "{GREY_ON}  ⎿  {} {text}{FG_OFF}",
-                clock_hhmmss(*at)
-            )]
+            vec![format!("{GREY_ON}{}{FG_OFF}", tool_result_line(*at, text))]
         }
         Entry::Blank => vec![String::new()],
         Entry::Text { role, text, .. } => text_rows(role, text, ASST_FIRST),
@@ -3048,15 +3019,9 @@ fn text_rows(role: &Role, text: &str, first: &str) -> Vec<String> {
         .collect()
 }
 
-// A tool row as the transcript holds it: the green "● " tool block with its time. The head is "name(summary)", or the
-// name alone when there is no summary (the ToolRow head rule).
+// A tool row as the transcript holds it: the green "● " tool block with its time (core ui_state::tool_line).
 fn tool_entry_line(start: i64, name: &str, summary: &str, end: Option<(i64, u64)>) -> String {
-    let head = if summary.is_empty() {
-        name.to_string()
-    } else {
-        format!("{name}({summary})")
-    };
-    tool_color(&action_line("● ", start, &head, end))
+    tool_color(&tool_line(start, name, summary, end))
 }
 
 // Go inputBox.View window (input.go:211): at most MAX_INPUT_ROWS rows, scrolled so the cursor row stays visible.
@@ -4114,13 +4079,6 @@ fn rate_status(info: &serde_json::Value, now: i64) -> Option<String> {
     ))
 }
 
-fn unix_now() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 // Local (hour, minute, second) of a unix time, from the shared core localtime helper.
 fn clock_hms(secs: i64) -> (i64, i64, i64) {
     let [_, _, _, h, m, s] = chaude_core::localtime::local_civil(secs);
@@ -4131,12 +4089,6 @@ fn clock_hms(secs: i64) -> (i64, i64, i64) {
 fn clock_hhmm(secs: i64) -> String {
     let (h, m, _) = clock_hms(secs);
     format!("{h:02}:{m:02}")
-}
-
-// Local "HH:MM:SS" for the action rows' start and end stamps.
-fn clock_hhmmss(secs: i64) -> String {
-    let (h, m, s) = clock_hms(secs);
-    format!("{h:02}:{m:02}:{s:02}")
 }
 
 #[cfg(test)]
@@ -7254,11 +7206,19 @@ mod tests {
     #[test]
     fn agent_stage_and_done_follow_go_labels() {
         assert_eq!(
-            stage_text("agent:haiku-coder", &StagePhase::Working),
+            stage_text(
+                chaude_core::i18n::Lang::Ko,
+                "agent:haiku-coder",
+                &StagePhase::Working
+            ),
             "· agent haiku-coder 호출"
         );
         assert_eq!(
-            stage_text("agent:agent", &StagePhase::Done),
+            stage_text(
+                chaude_core::i18n::Lang::Ko,
+                "agent:agent",
+                &StagePhase::Done
+            ),
             "· agent agent 완료"
         );
         let mut app = App::new(80, 24);

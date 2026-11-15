@@ -500,54 +500,6 @@ fn table_edge(cols: &[usize], left: char, mid: char, right: char) -> String {
     format!("{left}{}{right}", segs.join(&mid.to_string()))
 }
 
-// R04 cavemanStatusRe (tui.go:97): ^status:\s*(done|partial|fail|blocked)\b, applied to a trimmed line.
-fn is_status_line(ln: &str) -> bool {
-    let Some(rest) = ln.strip_prefix("status:") else {
-        return false;
-    };
-    let rest = rest.trim_start_matches([' ', '\t', '\n', '\x0c', '\r']);
-    for word in ["done", "partial", "fail", "blocked"] {
-        if let Some(tail) = rest.strip_prefix(word) {
-            return !tail
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
-        }
-    }
-    false
-}
-
-// R04 isCavemanBlock (tui.go:100): a status line and a reason line anywhere in the text.
-pub fn is_caveman_block(s: &str) -> bool {
-    let mut status = false;
-    let mut reason = false;
-    for ln in s.split('\n') {
-        let ln = ln.trim();
-        if is_status_line(ln) {
-            status = true;
-        }
-        if ln.starts_with("reason:") {
-            reason = true;
-        }
-    }
-    status && reason
-}
-
-// R05 tool result text (toolResultMsg, tui.go:485): None when hidden as a caveman block; otherwise the first
-// line cut to 160 chars, plus " … (+N lines)" when there is more.
-pub fn tool_result_text(s: &str) -> Option<String> {
-    let s = s.trim();
-    if is_caveman_block(s) {
-        return None;
-    }
-    let lines: Vec<&str> = s.split('\n').collect();
-    let mut t: String = lines[0].chars().take(160).collect();
-    if lines.len() > 1 {
-        t.push_str(&format!(" … (+{} lines)", lines.len() - 1));
-    }
-    Some(t)
-}
-
 // R06 toolSummary (tui.go:67): the first priority key whose string value is non-empty, newlines turned
 // into spaces, cut to 100 chars. Otherwise the compact JSON of the input (Go jsonStr), cut to 100 chars.
 // Empty for no input.
@@ -1465,30 +1417,6 @@ mod tests {
         for (input, want) in cases {
             assert_eq!(md_bold(input), want, "input {input:?}");
         }
-    }
-
-    #[test]
-    fn caveman_blocks_are_detected_and_hidden() {
-        let cases = [
-            ("status: done\nreason: -\nclaim: a.go:1 | x", true),
-            ("[harness: note]\nstatus: partial\nreason: cap", true),
-            ("status: done", false),
-            ("status: running\nreason: -", false),
-            ("읽기 결과입니다.", false),
-            ("", false),
-        ];
-        for (input, want) in cases {
-            assert_eq!(is_caveman_block(input), want, "input {input:?}");
-        }
-        assert_eq!(
-            tool_result_text("status: done\nreason: -\nclaim: a.go:1 | x"),
-            None
-        );
-        assert_eq!(
-            tool_result_text("ok\nmore").as_deref(),
-            Some("ok … (+1 lines)")
-        );
-        assert_eq!(tool_result_text("  one  ").as_deref(), Some("one"));
     }
 
     #[test]
