@@ -1,4 +1,6 @@
 testdata/smoke/** -text
+# TUI snapshots are compared byte for byte; keep them LF on a Windows checkout
+crates/cli/src/tui/testdata/** -text
 # shell launchers and hooks must stay LF even on a Windows checkout (a CRLF shebang breaks Git Bash)
 *.sh text eol=lf
 *.py text eol=lf

@@ -186,6 +186,7 @@ mod tests {
 
     #[test]
     fn resume_lists_then_rejects_bad_numbers() {
+        let _lang = crate::test_support::lang_lock();
         let root = fixture("resume");
         let (lines, blocks) = resume(&root, "").unwrap();
         assert_eq!(lines[0], LIST_TITLE);
