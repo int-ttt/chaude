@@ -29,6 +29,14 @@
   const headModel = document.getElementById("head-model");
   const headContext = document.getElementById("head-context");
   const headRate = document.getElementById("head-rate");
+  const usageBtn = document.getElementById("usage");
+  const usageSession = document.getElementById("usage-session");
+  const usageSessionBar = document.getElementById("usage-session-bar");
+  const usageWeekLine = document.getElementById("usage-week-line");
+  const usageWeek = document.getElementById("usage-week");
+  const usageWeekTrack = document.getElementById("usage-week-track");
+  const usageWeekBar = document.getElementById("usage-week-bar");
+  const usageResets = document.getElementById("usage-resets");
 
   // One DOM node per transcript row, by index (the same index as Rust's transcript).
   const rows = [];
@@ -181,6 +189,34 @@
     headRate.hidden = !state.rate;
   }
 
+  // The sidebar footer: session and week percentages with a bar each, and the session's reset time. No meter yet
+  // shows dashes. The numbers are the /usage text's own (core usage_meter).
+  function showUsage(meter) {
+    if (!meter) {
+      usageSession.textContent = "--";
+      usageSessionBar.style.width = "0%";
+      usageWeekLine.hidden = true;
+      usageWeekTrack.hidden = true;
+      usageResets.textContent = "";
+      return;
+    }
+    const bar = (node, pct) => {
+      node.style.width = Math.min(100, Math.max(0, pct)) + "%";
+    };
+    usageSession.textContent = meter.session_pct + "% used";
+    bar(usageSessionBar, meter.session_pct);
+    const hasWeek = meter.week_pct !== null && meter.week_pct !== undefined;
+    usageWeekLine.hidden = !hasWeek;
+    usageWeekTrack.hidden = !hasWeek;
+    if (hasWeek) {
+      usageWeek.textContent = meter.week_pct + "% used";
+      bar(usageWeekBar, meter.week_pct);
+    }
+    const resets = [meter.session_resets, meter.week_resets].filter(Boolean);
+    usageResets.textContent = resets.length ? "resets " + resets.join(" / ") : "";
+    usageBtn.title = usageResets.textContent || "Usage";
+  }
+
   // The start screen (mode null) or the chat with its header. The folder's last path part names it; a path that is
   // only a root keeps the whole path.
   function showSession(ev) {
@@ -284,6 +320,7 @@
   denyBtn.addEventListener("click", () => send({ type: "permission_answer", allow: false, interrupt: false }));
   document.getElementById("new-chat").addEventListener("click", () => send({ type: "start", mode: "chat" }));
   document.getElementById("open-folder").addEventListener("click", () => send({ type: "open_folder" }));
+  usageBtn.addEventListener("click", () => send({ type: "usage" }));
   // Collapsed: a narrow rail with the icons; the lists are hidden (CSS). The toggle keeps its state in aria-expanded.
   sidebarToggle.addEventListener("click", () => {
     const collapsed = shell.classList.toggle("collapsed");
@@ -310,6 +347,9 @@
     },
     session(ev) {
       showSession(ev);
+    },
+    usage(ev) {
+      showUsage(ev.meter);
     },
     picker_open() {},
     picker_close() {},

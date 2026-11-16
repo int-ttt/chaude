@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- gui: the sidebar foot shows the usage meter (session and week percentages with the session's reset time, from the same /usage numbers the TUI shows); a click opens the /usage window. It refreshes at start and after each turn, with at most one background /usage run per 5 minutes; `HARNESS_USAGE_POLL=0` turns the background runs off. The GUI palette is now claude-like: a warm off-white light theme, a warm dark gray dark theme, a terracotta accent, a rounded composer card, and a muted sidebar.
+  - gui: 사이드바 아래쪽에 사용량이 항상 보입니다(세션과 주간 사용률, 세션 초기화 시각; TUI가 보여 주는 /usage 값과 같음). 누르면 /usage 창이 열립니다. 시작할 때와 턴이 끝날 때 갱신되며, 백그라운드 /usage 실행은 5분에 최대 한 번이고 `HARNESS_USAGE_POLL=0`이면 끕니다. GUI 색상은 Claude 데스크톱과 비슷하게 바뀌었습니다: 따뜻한 밝은 배경, 따뜻한 어두운 회색 다크 테마, 테라코타 강조색, 둥근 입력 카드, 차분한 사이드바.
 - gui: the GUI has a left sidebar (New chat, Open folder, the recent folders and the chat scratch dirs, and a collapse toggle); the start screen is a centered greeting with a composer, and typing there starts a New chat. Clicking a recent folder opens it; a chat row only shows for now (resuming a chat is not in core yet).
   - gui: GUI에 왼쪽 사이드바가 생겼습니다(새 채팅, 폴더 열기, 최근 폴더와 채팅 임시 폴더 목록, 접기 버튼). 시작 화면은 가운데 인사말과 입력창이며, 여기에 입력하면 새 채팅이 시작됩니다. 최근 폴더를 누르면 그 폴더가 열리고, 채팅 항목은 당분간 표시만 하며 채팅 이어 쓰기는 아직 core에 없습니다.
 - gui: the GUI opens on a start screen with New chat, Open folder (a native folder dialog) and the recent folders. Open folder starts the full harness in that folder; New chat starts a chat with no file or shell tools and no harness agents, in a scratch dir under `~/.chaude/chat/`. The header shows the mode, the folder name, the model, the context and the rate; a finished reply sends an OS notification.

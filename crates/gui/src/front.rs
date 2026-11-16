@@ -14,6 +14,7 @@ use chaude_core::i18n::{self, Msg};
 use chaude_core::recent_folders::{self, RecentFolder};
 use chaude_core::settings::pickers;
 use chaude_core::slash;
+use chaude_core::usage_poll::UsageMeter;
 
 use crate::commands::{self, Effect};
 use crate::engine;
@@ -51,6 +52,8 @@ pub struct Front {
     chats: Vec<RecentFolder>,
     // The Session event the page last got, so it is sent only when it changes.
     sent_session: Option<Event>,
+    // The sidebar meter the page last got (Event::Usage), so it is sent only when it changes.
+    sent_usage: Option<UsageMeter>,
     // Engine busy at the last sync; a true -> false edge is the turn end that notifies.
     was_busy: bool,
 }
@@ -80,6 +83,7 @@ impl Front {
             recent,
             chats,
             sent_session: None,
+            sent_usage: None,
             was_busy: false,
         }
     }
@@ -136,6 +140,7 @@ impl Front {
         let w = self.wake.clone();
         match engine::start(cwd, chat, move || w()) {
             Ok((handle, rx)) => {
+                handle.usage_meter();
                 self.engine = Some(handle);
                 self.rx = Some(rx);
             }
@@ -208,6 +213,12 @@ impl Front {
                 }
             }
             Command::Submit { text } => self.submit(&text),
+            // The sidebar meter's click: the same window as /usage, without a line in the transcript.
+            Command::Usage => {
+                if self.engine.is_some() {
+                    self.run(Effect::OpenUsage, "");
+                }
+            }
             Command::Slash { name, arg } => {
                 let line = if arg.is_empty() {
                     format!("/{name}")
@@ -400,6 +411,10 @@ impl Front {
         let busy = self.state.run.busy;
         if self.was_busy && !busy && self.session.is_some() {
             self.notify_turn_end();
+            // The core throttles this to one background /usage run per interval.
+            if let Some(engine) = &self.engine {
+                engine.usage_meter();
+            }
         }
         self.was_busy = busy;
         let mut out = Vec::new();
@@ -407,6 +422,12 @@ impl Front {
         if self.sent_session.as_ref() != Some(&session) {
             self.sent_session = Some(session.clone());
             out.push(session);
+        }
+        if self.state.meter != self.sent_usage {
+            self.sent_usage = self.state.meter.clone();
+            out.push(Event::Usage {
+                meter: self.sent_usage.clone(),
+            });
         }
         out.extend(
             self.mirror

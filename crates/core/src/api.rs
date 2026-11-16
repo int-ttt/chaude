@@ -670,6 +670,8 @@ enum Cmd {
     Import(Box<ClaudeImport>),
     Permission { id: String, allow: bool },
     Usage,
+    // The GUI sidebar meter: a background /usage run that answers UiEvent::Usage on success only.
+    UsageMeter,
     Shutdown,
 }
 
@@ -755,6 +757,11 @@ impl EngineHandle {
     // Go /usage: answers UiEvent::Usage or Error from a one-shot run. Works while a turn is busy.
     pub fn usage(&self) {
         let _ = self.tx.send(Input::Cmd(Cmd::Usage));
+    }
+
+    // The GUI sidebar meter: at most one background /usage run per interval; the answer comes as UiEvent::Usage.
+    pub fn usage_meter(&self) {
+        let _ = self.tx.send(Input::Cmd(Cmd::UsageMeter));
     }
 
     // Abandons the wait of a held reply: the held text goes through the usual end of turn now.
@@ -965,6 +972,9 @@ struct State {
     // Go usagePollAt/usagePolling: last background /usage poll start, and whether one is in flight.
     usage_poll_at: Option<Instant>,
     usage_polling: Arc<AtomicBool>,
+    // The GUI sidebar meter's own throttle and in-flight flag (usage_meter); the metrics poll keeps its pair.
+    meter_poll_at: Option<Instant>,
+    meter_polling: Arc<AtomicBool>,
     // Go setRate metrics state: last five-hour utilization logged, and whether rate_raw was written.
     rate_log: RateLog,
     // Go r.reg: client rows in clients.json; None when cfg.clients_file is unset.
@@ -1596,6 +1606,8 @@ fn actor(
         coder_epoch: 0,
         usage_poll_at: None,
         usage_polling: Arc::new(AtomicBool::new(false)),
+        meter_poll_at: None,
+        meter_polling: Arc::new(AtomicBool::new(false)),
         rate_log: RateLog::default(),
         clients,
     };
@@ -1650,6 +1662,7 @@ fn actor(
             Input::Cmd(Cmd::Import(imp)) => st.install_import(*imp),
             Input::Cmd(Cmd::Permission { id, allow }) => st.answer_permission(&id, allow),
             Input::Cmd(Cmd::Usage) => st.usage(),
+            Input::Cmd(Cmd::UsageMeter) => st.usage_meter(),
             Input::Cmd(Cmd::CancelWait) => st.cancel_wait(),
             Input::Proc(epoch, msg) if epoch == st.epoch => match msg {
                 ProcMsg::Line(line) => st.on_line(&line),

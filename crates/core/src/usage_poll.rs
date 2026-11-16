@@ -2,6 +2,7 @@
 //! `proc::one_shot_usage`; the throttle (usagePollEvery, usagePolling) belongs to the caller. This module
 //! only turns the /usage text, or its error, into the stage=usage metrics row.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::io;
 
@@ -69,6 +70,20 @@ pub fn parse_usage(text: &str) -> Option<Map<String, Value>> {
     Some(rec)
 }
 
+// The /usage numbers the GUI sidebar meter shows: the same parse as the poll row (parse_usage), typed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UsageMeter {
+    pub session_pct: f64,
+    pub session_resets: Option<String>,
+    pub week_pct: Option<f64>,
+    pub week_resets: Option<String>,
+}
+
+// The meter for one /usage text; None when the session line does not parse (the caller keeps its last meter).
+pub fn usage_meter(text: &str) -> Option<UsageMeter> {
+    serde_json::from_value(Value::Object(parse_usage(text)?)).ok()
+}
+
 // The stage=usage row for one poll (Go pollUsageSync). `result` is the /usage text or the run error.
 pub fn usage_row(result: Result<&str, &str>) -> Value {
     let text = match result {
@@ -133,6 +148,27 @@ Current week (all models): 27% used · resets Nov 1 at 4:59pm (Asia/Seoul)";
         let rec = parse_usage("Current session: 5% used").expect("no resets part is ok");
         assert_eq!(rec["session_pct"], 5.0);
         assert!(!rec.contains_key("session_resets"));
+    }
+
+    #[test]
+    fn usage_meter_matches_the_poll_numbers() {
+        let m = usage_meter(LIVE).expect("live sample is ok");
+        assert_eq!(m.session_pct, 18.0);
+        assert_eq!(
+            m.session_resets.as_deref(),
+            Some("Oct 30 at 12:49pm (Asia/Seoul)")
+        );
+        assert_eq!(m.week_pct, Some(27.0));
+        assert_eq!(
+            m.week_resets.as_deref(),
+            Some("Nov 1 at 4:59pm (Asia/Seoul)")
+        );
+        let session_only = usage_meter("Current session: 5% used").expect("week is optional");
+        assert_eq!(
+            (session_only.week_pct, session_only.week_resets),
+            (None, None)
+        );
+        assert!(usage_meter("Current week (all models): 27% used").is_none());
     }
 
     #[test]

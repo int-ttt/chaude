@@ -58,6 +58,34 @@ impl State {
         });
     }
 
+    // The GUI sidebar meter: one background /usage run per interval (the metrics poll gate), off when
+    // HARNESS_USAGE_POLL=0. Only a success is sent, as UiEvent::Usage, so a failure stays out of the transcript.
+    pub(super) fn usage_meter(&mut self) {
+        if std::env::var("HARNESS_USAGE_POLL").as_deref() == Ok("0") {
+            return;
+        }
+        let now = Instant::now();
+        if !usage_poll_due(
+            self.meter_poll_at,
+            now,
+            self.meter_polling.load(Ordering::SeqCst),
+        ) {
+            return;
+        }
+        self.meter_poll_at = Some(now);
+        self.meter_polling.store(true, Ordering::SeqCst);
+        let bin = resolve_bin(&self.cfg.claude_bin);
+        let cwd = self.engine_cwd();
+        let ui = self.ui.clone();
+        let polling = Arc::clone(&self.meter_polling);
+        thread::spawn(move || {
+            if let Ok(text) = proc::one_shot_usage(&bin, &cwd) {
+                let _ = ui.send(UiEvent::Usage { text });
+            }
+            polling.store(false, Ordering::SeqCst);
+        });
+    }
+
     // Records a session id this run started (Go noteOwn), once.
     pub(super) fn note_own(&mut self, id: &str) {
         if !self.owned.iter().any(|o| o == id) {

@@ -24,6 +24,7 @@ use chaude_core::settings::pickers::{LangPicker, SettingsPicker};
 use chaude_core::ui_state::{
     BarInput, Entry, RunState, Transcript, stage_line, stage_text, tool_result_text, tool_summary,
 };
+use chaude_core::usage_poll::{UsageMeter, usage_meter};
 use chaude_core::usage_text;
 
 // A can_use_tool request waiting for the user (UiEvent::PermissionRequest).
@@ -70,6 +71,8 @@ pub struct GuiState {
     pub usage: Option<String>,
     // True from open until the one-shot run answers; its failure then goes into the window (TUI usage.pending).
     usage_pending: bool,
+    // The sidebar meter: the numbers of the last /usage answer that parsed (None until one does).
+    pub meter: Option<UsageMeter>,
     // The open /lang picker (None = closed). Keys and the apply live in the app; the model is core (settings::pickers).
     pub lang: Option<LangPicker>,
     // The open /settings picker over a working copy (None = closed). Closing saves it (core settings::pickers).
@@ -746,17 +749,22 @@ impl GuiState {
                 self.session_id.clear();
                 self.rot_from = old_session;
             }
-            // The /usage answer fills the open window (TUI UiEvent::Usage); a late answer after close is dropped.
-            UiEvent::Usage { text } if self.usage_pending => {
-                self.usage_pending = false;
-                let text = if text.trim().is_empty() {
-                    i18n::t(Msg::UsageEmpty).to_string()
-                } else {
-                    usage_text::decorate_usage(&text, self.bar.tokens as i64)
-                };
-                self.usage = Some(text);
+            // The /usage answer fills the open window (TUI UiEvent::Usage); a late answer after close is dropped. Every
+            // answer, the sidebar meter's background run included, updates the meter.
+            UiEvent::Usage { text } => {
+                if let Some(meter) = usage_meter(&text) {
+                    self.meter = Some(meter);
+                }
+                if self.usage_pending {
+                    self.usage_pending = false;
+                    let text = if text.trim().is_empty() {
+                        i18n::t(Msg::UsageEmpty).to_string()
+                    } else {
+                        usage_text::decorate_usage(&text, self.bar.tokens as i64)
+                    };
+                    self.usage = Some(text);
+                }
             }
-            UiEvent::Usage { .. } => {}
             UiEvent::Rotated { reason } => {
                 self.run.rot += 1;
                 let old = std::mem::take(&mut self.rot_from);
@@ -1576,6 +1584,15 @@ mod tests {
         assert!(st.close_settings().is_some(), "close returns the note");
         assert!(st.settings.is_none());
         assert_eq!(st.close_settings(), None, "a second close does nothing");
+    }
+
+    #[test]
+    fn usage_answer_updates_the_meter_without_a_window() {
+        let mut st = GuiState::default();
+        let text = "Current session: 18% used · resets Oct 30 at 12:49pm (Asia/Seoul)";
+        st.apply(UiEvent::Usage { text: text.into() }, Instant::now());
+        assert_eq!(st.meter.as_ref().map(|m| m.session_pct), Some(18.0));
+        assert!(st.usage.is_none());
     }
 
     #[test]

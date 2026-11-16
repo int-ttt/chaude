@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::api::Role;
 use crate::recent_folders::RecentFolder;
 use crate::ui_state::{BarInput, Entry, RunState, Transcript};
+use crate::usage_poll::UsageMeter;
 
 // The session kind the window runs. Chat: a scratch dir, no tools, no harness agents. Code: the folder is the cwd
 // and the full harness runs.
@@ -206,6 +207,10 @@ pub enum Event {
         recent: Vec<RecentFolder>,
         chats: Vec<RecentFolder>,
     },
+    // The /usage numbers for the sidebar footer; None until a /usage answer parses. Sent only when it changes.
+    Usage {
+        meter: Option<UsageMeter>,
+    },
 }
 
 impl Event {
@@ -221,6 +226,7 @@ impl Event {
             Event::PickerClose { .. } => "picker_close",
             Event::Note { .. } => "note",
             Event::Session { .. } => "session",
+            Event::Usage { .. } => "usage",
         }
     }
 }
@@ -269,6 +275,8 @@ pub enum Command {
     },
     // Opens the native folder dialog; a picked folder starts a code session.
     OpenFolder,
+    // Opens the /usage window (the sidebar meter's click). Needs a running session; nothing happens without one.
+    Usage,
 }
 
 // Keeps the page in step with the core. Each sync compares the new core state with the last one it returned and
@@ -443,6 +451,28 @@ mod tests {
                 chats: Vec::new(),
             }),
             r#"{"type":"session","mode":null,"folder":"","recent":[{"path":"/w/a","used":7}],"chats":[]}"#
+        );
+    }
+
+    #[test]
+    fn usage_snapshot() {
+        let meter = UsageMeter {
+            session_pct: 18.0,
+            session_resets: Some("Oct 30 at 12:49pm (Asia/Seoul)".into()),
+            week_pct: Some(27.0),
+            week_resets: None,
+        };
+        assert_eq!(
+            json(&Event::Usage { meter: Some(meter) }),
+            r#"{"type":"usage","meter":{"session_pct":18.0,"session_resets":"Oct 30 at 12:49pm (Asia/Seoul)","week_pct":27.0,"week_resets":null}}"#
+        );
+        assert_eq!(
+            json(&Event::Usage { meter: None }),
+            r#"{"type":"usage","meter":null}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<Command>(r#"{"type":"usage"}"#).unwrap(),
+            Command::Usage
         );
     }
 

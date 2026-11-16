@@ -32,6 +32,13 @@
     <ul id="chats" class="sb-list"></ul>
     <p id="chats-empty" class="sb-empty" hidden>No chats yet.</p>
   </div>
+  <button id="usage" type="button" class="sb-usage" title="Usage">
+    <span class="usage-line"><span class="usage-label sb-text">Session</span> <span id="usage-session" class="usage-value sb-text">--</span></span>
+    <span class="usage-bar"><span id="usage-session-bar"></span></span>
+    <span class="usage-line sb-text" id="usage-week-line" hidden><span class="usage-label">Week</span> <span id="usage-week" class="usage-value"></span></span>
+    <span class="usage-bar" id="usage-week-track" hidden><span id="usage-week-bar"></span></span>
+    <span id="usage-resets" class="usage-resets sb-text"></span>
+  </button>
 </aside>
 <div class="main">
 <section id="start" class="start" aria-label="Start" hidden>
