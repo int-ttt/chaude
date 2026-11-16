@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- gui: the sidebar folder rows no longer list past sessions under them (no sub-rows and no "more" toggle), and opening a folder no longer reads its session files. Chat rows and folder rows still open as before.
+  - gui: 사이드바의 폴더 행 아래에 지난 세션이 나열되지 않습니다(하위 항목과 "more" 토글 없음). 폴더를 열 때 세션 파일을 읽지 않습니다. 채팅 행과 폴더 행은 전과 같이 열립니다.
 - gui: New chat makes its scratch dir, sidebar entry and recent record only when the first non-empty message is sent; an empty New chat just shows the centered composer. The open folder's past sessions list only the user's top-level sessions (sub-agent, empty and harness-sent ones such as rotation carry-overs, prompter summaries and handoff notes are left out), the newest 5 with a "more" toggle, each row showing its first prompt (truncated) and date.
   - gui: 새 채팅은 첫 메시지(공백 제외)를 보낼 때에만 임시 폴더, 사이드바 항목, 최근 기록을 만듭니다. 빈 새 채팅은 가운데 입력창만 보여 줍니다. 열린 폴더의 지난 세션은 사용자의 최상위 세션만 나열합니다(하위 에이전트, 빈 세션, 회전 이어쓰기·프롬프터 요약·인수인계 노트 같은 하네스가 보낸 세션은 제외). 최근 5개를 보여 주고 "more"로 펼치며, 각 행에는 첫 프롬프트(잘림)와 날짜가 보입니다.
 - gui: the code session header shows the folder path (home shortened to ~, the full path on hover, a click copies it), and each sidebar folder row shows its path. The open folder lists its past sessions under its row, and a past chat row opens its scratch dir; clicking a past session loads its transcript into the chat and resumes it in the same folder or chat dir, so the mode follows.

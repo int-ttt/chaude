@@ -20,10 +20,6 @@
   const recentEmpty = document.getElementById("recent-empty");
   const chatList = document.getElementById("chats");
   const chatsEmpty = document.getElementById("chats-empty");
-  // The open folder's past sessions: the newest SESSIONS_SHOWN, or all of them after "more" (reset per folder).
-  const SESSIONS_SHOWN = 5;
-  let sessionsFolder = null;
-  let sessionsAll = false;
   const shell = document.getElementById("shell");
   const sidebarToggle = document.getElementById("sidebar-toggle");
   const startInput = document.getElementById("start-input");
@@ -260,15 +256,10 @@
   }
 
   // The sidebar lists. A recent folder opens that folder (a code session) and shows its path; the open one is marked
-  // active and lists its past sessions under it. A past session opens and resumes it; a chat row opens its scratch
-  // dir and the newest session there (the open one is marked active).
+  // active. A chat row opens its scratch dir and the newest session there (the open one is marked active).
   function renderSidebar(ev) {
     const folders = ev.recent || [];
     const chats = ev.chats || [];
-    if (ev.folder !== sessionsFolder) {
-      sessionsFolder = ev.folder;
-      sessionsAll = false;
-    }
     recent.replaceChildren();
     folders.forEach((row) => {
       const item = el("li");
@@ -277,30 +268,6 @@
       if (active) pick.classList.add("active");
       pick.addEventListener("click", () => send({ type: "start", mode: "code", folder: row.path }));
       item.appendChild(pick);
-      if (active && (ev.sessions || []).length) {
-        const sub = el("ul", "sb-sub");
-        const past = ev.sessions;
-        const shown = sessionsAll ? past : past.slice(0, SESSIONS_SHOWN);
-        shown.forEach((s) => {
-          const sessionItem = el("li");
-          const open = sidebarButton(s.first || "(no prompt)", formatTime(s.used), row.path);
-          open.addEventListener("click", () => send({ type: "open_session", mode: "code", folder: row.path, id: s.id }));
-          sessionItem.appendChild(open);
-          sub.appendChild(sessionItem);
-        });
-        if (past.length > SESSIONS_SHOWN) {
-          const moreItem = el("li");
-          const more = el("button", "sb-item sb-more", sessionsAll ? "less" : "more (" + (past.length - SESSIONS_SHOWN) + ")");
-          more.type = "button";
-          more.addEventListener("click", () => {
-            sessionsAll = !sessionsAll;
-            renderSidebar(ev);
-          });
-          moreItem.appendChild(more);
-          sub.appendChild(moreItem);
-        }
-        item.appendChild(sub);
-      }
       recent.appendChild(item);
     });
     recentEmpty.hidden = folders.length > 0;

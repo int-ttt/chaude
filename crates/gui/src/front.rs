@@ -8,9 +8,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{Config, EngineHandle, InterruptSource, UiEvent};
-use chaude_core::gui_bridge::{
-    Command, Event, Mirror, Mode, PastSession, PermissionView, StateView, open_plan, past_sessions,
-};
+use chaude_core::gui_bridge::{Command, Event, Mirror, Mode, PermissionView, StateView, open_plan};
 use chaude_core::handoff::session_mode_note;
 use chaude_core::i18n::{self, Msg};
 use chaude_core::osenv;
@@ -49,11 +47,9 @@ pub struct Front {
     config: PathBuf,
     // The session on screen: its mode and the code folder ("" for chat). None = the start screen.
     session: Option<(Mode, String)>,
-    // The engine's dir (the scratch dir for chat), the user's home (paths show as ~) and the past sessions of the
-    // code folder on screen (the sidebar lists them under it).
+    // The engine's dir (the scratch dir for chat) and the user's home (paths show as ~).
     cwd: String,
     home: String,
-    sessions: Vec<PastSession>,
     // Recent folders, newest first, as recent.json holds them.
     recent: Vec<RecentFolder>,
     // Chat scratch dirs, newest first (the sidebar's chats).
@@ -90,7 +86,6 @@ impl Front {
             session: None,
             cwd: String::new(),
             home: osenv::home_dir().display().to_string(),
-            sessions: Vec::new(),
             recent,
             chats,
             sent_session: None,
@@ -128,7 +123,6 @@ impl Front {
         self.rx = None;
         self.state = GuiState::default();
         self.cwd.clear();
-        self.sessions.clear();
         self.session = None;
         self.was_busy = false;
     }
@@ -142,13 +136,9 @@ impl Front {
         self.rx = None;
         self.state = GuiState::default();
         self.cwd.clear();
-        self.sessions.clear();
         match cwd {
             Ok(cwd) => {
                 self.cwd = cwd.display().to_string();
-                if mode == Mode::Code {
-                    self.sessions = past_sessions(&osenv::home_dir(), folder);
-                }
                 self.boot(cwd, mode == Mode::Chat, now);
             }
             Err(e) => self.state.apply(UiEvent::Error(e), now),
@@ -240,7 +230,6 @@ impl Front {
             home: self.home.clone(),
             recent: self.recent.clone(),
             chats: self.chats.clone(),
-            sessions: self.sessions.clone(),
         }
     }
 
@@ -570,7 +559,6 @@ mod tests {
             home: osenv::home_dir().display().to_string(),
             recent: Vec::new(),
             chats: Vec::new(),
-            sessions: Vec::new(),
         }));
         let again = f.pump(now);
         assert!(!again.iter().any(|e| matches!(e, Event::Session { .. })));

@@ -185,7 +185,7 @@ pub struct PastSession {
     pub used: u64,
 }
 
-// How many past sessions the sidebar keeps under a folder (the page shows the newest few and a more toggle).
+// How many past sessions past_sessions keeps (the newest; open_plan takes the first).
 pub const MAX_PAST: usize = 50;
 
 // First prompts the harness sends itself, not the user: a rotated session's carry-over, the prompter and relay
@@ -308,7 +308,7 @@ pub enum Event {
     },
     // The session on screen. mode None = the start screen. folder is the code cwd ("" for chat); cwd is the engine's
     // dir (the scratch dir for chat); home shortens paths to ~. recent = the recent folders (code); chats = the chat
-    // scratch dirs, newest first (used = the dir's mtime); sessions = the past sessions of the code folder on screen.
+    // scratch dirs, newest first (used = the dir's mtime).
     Session {
         mode: Option<Mode>,
         folder: String,
@@ -316,7 +316,6 @@ pub enum Event {
         home: String,
         recent: Vec<RecentFolder>,
         chats: Vec<RecentFolder>,
-        sessions: Vec<PastSession>,
     },
     // The /usage numbers for the sidebar footer; None until a /usage answer parses. Sent only when it changes.
     Usage {
@@ -553,12 +552,6 @@ mod tests {
             path: "/h/.chaude/chat/c1".into(),
             used: 9,
         }];
-        let sessions = vec![PastSession {
-            id: "s1".into(),
-            turns: 2,
-            first: "hi".into(),
-            used: 5,
-        }];
         assert_eq!(
             json(&Event::Session {
                 mode: Some(Mode::Code),
@@ -567,9 +560,8 @@ mod tests {
                 home: "/h".into(),
                 recent: recent.clone(),
                 chats: chats.clone(),
-                sessions: sessions.clone(),
             }),
-            r#"{"type":"session","mode":"code","folder":"/w/a","cwd":"/w/a","home":"/h","recent":[{"path":"/w/a","used":7}],"chats":[{"path":"/h/.chaude/chat/c1","used":9}],"sessions":[{"id":"s1","turns":2,"first":"hi","used":5}]}"#
+            r#"{"type":"session","mode":"code","folder":"/w/a","cwd":"/w/a","home":"/h","recent":[{"path":"/w/a","used":7}],"chats":[{"path":"/h/.chaude/chat/c1","used":9}]}"#
         );
         assert_eq!(
             json(&Event::Session {
@@ -579,9 +571,8 @@ mod tests {
                 home: "/h".into(),
                 recent,
                 chats: Vec::new(),
-                sessions: Vec::new(),
             }),
-            r#"{"type":"session","mode":null,"folder":"","cwd":"","home":"/h","recent":[{"path":"/w/a","used":7}],"chats":[],"sessions":[]}"#
+            r#"{"type":"session","mode":null,"folder":"","cwd":"","home":"/h","recent":[{"path":"/w/a","used":7}],"chats":[]}"#
         );
     }
 
