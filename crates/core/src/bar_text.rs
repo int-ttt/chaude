@@ -179,9 +179,14 @@ pub fn bottom_text(lang: Lang, b: &BarInput) -> String {
         .as_ref()
         .map(|r| format!(" · {r}"))
         .unwrap_or_default();
+    let usage = b
+        .usage
+        .as_ref()
+        .map(|u| format!(" · {u}"))
+        .unwrap_or_default();
     let role = |k: &str| fmt_k(b.role_tokens.get(k).copied().unwrap_or(0));
     let mut bottom = format!(
-        " M {}/{} P {}/{r} T {}/{r} C {}/{r}{rate}{}",
+        " M {}/{} P {}/{r} T {}/{r} C {}/{r}{rate}{usage}{}",
         fmt_k(b.tokens),
         fmt_limit(b.limit),
         role("prompter"),

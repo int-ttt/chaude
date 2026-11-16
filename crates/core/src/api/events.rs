@@ -80,6 +80,9 @@ impl State {
         let polling = Arc::clone(&self.meter_polling);
         thread::spawn(move || {
             if let Ok(text) = proc::one_shot_usage(&bin, &cwd) {
+                if let Some(meter) = crate::usage_poll::usage_meter(&text) {
+                    let _ = crate::usage_poll::save_cache(&meter);
+                }
                 let _ = ui.send(UiEvent::Usage { text });
             }
             polling.store(false, Ordering::SeqCst);

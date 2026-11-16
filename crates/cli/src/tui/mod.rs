@@ -613,6 +613,9 @@ impl App {
                 self.note(&bar::rotated_notice(self.run.rot, &reason, &old));
             }
             UiEvent::Usage { text } => {
+                if let Some(meter) = chaude_core::usage_poll::usage_meter(&text) {
+                    self.bar.usage = Some(chaude_core::usage_poll::meter_text(&meter));
+                }
                 let (w, h) = self.usage_geom();
                 let text = if text.trim().is_empty() {
                     t(Msg::UsageEmpty).to_string()
@@ -3559,6 +3562,10 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     let (cols, rows) = terminal::size().unwrap_or((80, 24));
     let mut app = App::new(cols as usize, rows as usize);
     app.set_start_mode(start_mode);
+    // The status line shows the cached meter at once; the background /usage run replaces it (GUI boot does the same).
+    app.bar.usage =
+        chaude_core::usage_poll::load_cache().map(|m| chaude_core::usage_poll::meter_text(&m));
+    engine.usage_meter();
     app.set_agent_source(engine.agent_rows());
     app.ime_shift = ime_col_shift(
         std::env::var("CHAUDE_IME_SHIFT").ok(),

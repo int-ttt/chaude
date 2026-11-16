@@ -4,7 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::fs;
 use std::io;
+use std::path::{Path, PathBuf};
 
 use crate::metrics::Metrics;
 
@@ -82,6 +84,44 @@ pub struct UsageMeter {
 // The meter for one /usage text; None when the session line does not parse (the caller keeps its last meter).
 pub fn usage_meter(text: &str) -> Option<UsageMeter> {
     serde_json::from_value(Value::Object(parse_usage(text)?)).ok()
+}
+
+// The last meter that parsed, kept across launches (~/.chaude/usage.json) so the usage shows at once until a
+// fresh /usage run answers. A missing or unreadable file is None.
+pub fn cache_path() -> PathBuf {
+    crate::recent_folders::config_dir().join("usage.json")
+}
+
+pub fn load_cache_from(path: &Path) -> Option<UsageMeter> {
+    serde_json::from_str(&fs::read_to_string(path).ok()?).ok()
+}
+
+pub fn save_cache_to(path: &Path, meter: &UsageMeter) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let text = serde_json::to_string(meter).map_err(io::Error::other)?;
+    fs::write(path, text)
+}
+
+pub fn load_cache() -> Option<UsageMeter> {
+    load_cache_from(&cache_path())
+}
+
+pub fn save_cache(meter: &UsageMeter) -> io::Result<()> {
+    save_cache_to(&cache_path(), meter)
+}
+
+// The status-line form of a meter: "session 18% · week 27% · resets Oct 30 at 12:49pm (Asia/Seoul)".
+pub fn meter_text(m: &UsageMeter) -> String {
+    let mut parts = vec![format!("session {}%", m.session_pct)];
+    if let Some(w) = m.week_pct {
+        parts.push(format!("week {w}%"));
+    }
+    if let Some(r) = &m.session_resets {
+        parts.push(format!("resets {r}"));
+    }
+    parts.join(" · ")
 }
 
 // The stage=usage row for one poll (Go pollUsageSync). `result` is the /usage text or the run error.
@@ -169,6 +209,22 @@ Current week (all models): 27% used · resets Nov 1 at 4:59pm (Asia/Seoul)";
             (None, None)
         );
         assert!(usage_meter("Current week (all models): 27% used").is_none());
+    }
+
+    #[test]
+    fn meter_cache_round_trips_and_bad_or_missing_file_is_none() {
+        let dir = TempDir::new("usage-cache");
+        let path = dir.path().join("sub").join("usage.json");
+        assert!(load_cache_from(&path).is_none());
+        let m = usage_meter(LIVE).expect("live sample is ok");
+        save_cache_to(&path, &m).expect("save creates the dir");
+        assert_eq!(load_cache_from(&path), Some(m.clone()));
+        assert_eq!(
+            meter_text(&m),
+            "session 18% · week 27% · resets Oct 30 at 12:49pm (Asia/Seoul)"
+        );
+        std::fs::write(&path, "{not json").expect("write");
+        assert!(load_cache_from(&path).is_none());
     }
 
     #[test]

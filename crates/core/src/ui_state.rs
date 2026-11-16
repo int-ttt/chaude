@@ -364,6 +364,8 @@ pub struct BarInput {
     pub coders: Vec<CoderContext>,
     // Main's token counts of the last finished turn as (input, output, cache) (UiEvent::TurnTokens); shown on the idle row.
     pub turn_tokens: Option<(u64, u64, u64)>,
+    // The usage meter as status text (usage_poll::meter_text); None until a /usage answer or the cache loads.
+    pub usage: Option<String>,
 }
 
 // One main Agent/Task call in the task list. Queued until its launch ack (TaskResolved Running), then Running.

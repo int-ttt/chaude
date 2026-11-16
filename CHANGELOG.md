@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- core: the usage meter shows at startup in both the TUI and the GUI. The last good /usage numbers are cached in `~/.chaude/usage.json` and shown at once; the background /usage run replaces them (about 5 seconds). The TUI status line shows session %, week %, and the session reset time.
+  - core: 사용량이 TUI와 GUI 모두에서 시작할 때 바로 보입니다. 마지막으로 성공한 /usage 값을 `~/.chaude/usage.json`에 저장해 바로 보여 주며, 백그라운드 /usage 실행(약 5초)이 끝나면 새 값으로 바뀝니다. TUI 상태 행에는 세션 %, 주간 %, 세션 초기화 시각이 나옵니다.
 - gui: the sidebar folder rows no longer list past sessions under them (no sub-rows and no "more" toggle), and opening a folder no longer reads its session files. Chat rows and folder rows still open as before.
   - gui: 사이드바의 폴더 행 아래에 지난 세션이 나열되지 않습니다(하위 항목과 "more" 토글 없음). 폴더를 열 때 세션 파일을 읽지 않습니다. 채팅 행과 폴더 행은 전과 같이 열립니다.
 - gui: New chat makes its scratch dir, sidebar entry and recent record only when the first non-empty message is sent; an empty New chat just shows the centered composer. The open folder's past sessions list only the user's top-level sessions (sub-agent, empty and harness-sent ones such as rotation carry-overs, prompter summaries and handoff notes are left out), the newest 5 with a "more" toggle, each row showing its first prompt (truncated) and date.

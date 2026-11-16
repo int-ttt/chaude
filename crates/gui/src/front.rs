@@ -184,6 +184,8 @@ impl Front {
         self.state.cwd = cwd.display().to_string();
         // Read before the engine starts: its live marker would hide a killed run (TUI killed_sid).
         self.state.killed_sid = chaude_core::group_pick::killed_session(&self.state.cwd);
+        // The last good meter shows at once; the /usage run that handle.usage_meter() starts replaces it.
+        self.state.meter = chaude_core::usage_poll::load_cache();
         let cfg = Config::default();
         let handoff = engine::handoff_path(&cwd);
         self.state.session_mode =
