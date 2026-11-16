@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- gui: the GUI has a left sidebar (New chat, Open folder, the recent folders and the chat scratch dirs, and a collapse toggle); the start screen is a centered greeting with a composer, and typing there starts a New chat. Clicking a recent folder opens it; a chat row only shows for now (resuming a chat is not in core yet).
+  - gui: GUI에 왼쪽 사이드바가 생겼습니다(새 채팅, 폴더 열기, 최근 폴더와 채팅 임시 폴더 목록, 접기 버튼). 시작 화면은 가운데 인사말과 입력창이며, 여기에 입력하면 새 채팅이 시작됩니다. 최근 폴더를 누르면 그 폴더가 열리고, 채팅 항목은 당분간 표시만 하며 채팅 이어 쓰기는 아직 core에 없습니다.
 - gui: the GUI opens on a start screen with New chat, Open folder (a native folder dialog) and the recent folders. Open folder starts the full harness in that folder; New chat starts a chat with no file or shell tools and no harness agents, in a scratch dir under `~/.chaude/chat/`. The header shows the mode, the folder name, the model, the context and the rate; a finished reply sends an OS notification.
   - gui: GUI는 이제 시작 화면에서 새 채팅, 폴더 열기(네이티브 폴더 선택 창), 최근 폴더를 고릅니다. 폴더 열기는 그 폴더에서 전체 하네스를 시작하고, 새 채팅은 파일·셸 도구와 하네스 에이전트 없이 `~/.chaude/chat/` 아래 임시 폴더에서 채팅을 시작합니다. 헤더에는 모드, 폴더 이름, 모델, 컨텍스트, 속도 제한이 표시되며, 답변이 끝나면 OS 알림을 보냅니다.
 - core: chat mode config flag (`Config.chat`) starts the claude child minimal (`--tools ""`, no MCP, no slash commands, no settings sources) with no residents and no extra coders; recent folders are kept in `~/.chaude/recent.json` (newest 10).

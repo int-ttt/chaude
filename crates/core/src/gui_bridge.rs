@@ -198,12 +198,13 @@ pub enum Event {
     Note {
         text: String,
     },
-    // The session on screen. mode None = the start screen (recent folders listed). folder is the code cwd ("" for
-    // chat).
+    // The session on screen. mode None = the start screen. folder is the code cwd ("" for chat). recent = the recent
+    // folders (code); chats = the chat scratch dirs, newest first (used = the dir's mtime).
     Session {
         mode: Option<Mode>,
         folder: String,
         recent: Vec<RecentFolder>,
+        chats: Vec<RecentFolder>,
     },
 }
 
@@ -257,11 +258,14 @@ pub enum Command {
         text: String,
     },
     // Starts a session: chat in a new scratch dir, or code with `folder` as the engine cwd (a recent-folder row or
-    // the smoke hook). The folder is ignored for chat.
+    // the smoke hook). The folder is ignored for chat. A non-empty `text` is submitted in the new session (the start
+    // screen's composer).
     Start {
         mode: Mode,
         #[serde(default)]
         folder: String,
+        #[serde(default)]
+        text: String,
     },
     // Opens the native folder dialog; a picked folder starts a code session.
     OpenFolder,
@@ -418,21 +422,27 @@ mod tests {
             path: "/w/a".into(),
             used: 7,
         }];
+        let chats = vec![RecentFolder {
+            path: "/h/.chaude/chat/c1".into(),
+            used: 9,
+        }];
         assert_eq!(
             json(&Event::Session {
                 mode: Some(Mode::Code),
                 folder: "/w/a".into(),
                 recent: recent.clone(),
+                chats: chats.clone(),
             }),
-            r#"{"type":"session","mode":"code","folder":"/w/a","recent":[{"path":"/w/a","used":7}]}"#
+            r#"{"type":"session","mode":"code","folder":"/w/a","recent":[{"path":"/w/a","used":7}],"chats":[{"path":"/h/.chaude/chat/c1","used":9}]}"#
         );
         assert_eq!(
             json(&Event::Session {
                 mode: None,
                 folder: String::new(),
                 recent,
+                chats: Vec::new(),
             }),
-            r#"{"type":"session","mode":null,"folder":"","recent":[{"path":"/w/a","used":7}]}"#
+            r#"{"type":"session","mode":null,"folder":"","recent":[{"path":"/w/a","used":7}],"chats":[]}"#
         );
     }
 
@@ -443,14 +453,24 @@ mod tests {
             parse(r#"{"type":"start","mode":"chat"}"#),
             Command::Start {
                 mode: Mode::Chat,
-                folder: String::new()
+                folder: String::new(),
+                text: String::new()
             }
         );
         assert_eq!(
             parse(r#"{"type":"start","mode":"code","folder":"/w/a"}"#),
             Command::Start {
                 mode: Mode::Code,
-                folder: "/w/a".into()
+                folder: "/w/a".into(),
+                text: String::new()
+            }
+        );
+        assert_eq!(
+            parse(r#"{"type":"start","mode":"chat","text":"hi"}"#),
+            Command::Start {
+                mode: Mode::Chat,
+                folder: String::new(),
+                text: "hi".into()
             }
         );
         assert_eq!(parse(r#"{"type":"open_folder"}"#), Command::OpenFolder);

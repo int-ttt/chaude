@@ -77,6 +77,30 @@ pub fn new_chat_dir(config: &Path, id: &str) -> io::Result<PathBuf> {
     Ok(dir)
 }
 
+// The chat scratch dirs under config/chat, newest first (used = the dir's modified time in unix seconds), capped at
+// MAX_RECENT. A missing or unreadable dir lists nothing. Only directories count; stray files are skipped.
+pub fn chat_dirs(config: &Path) -> Vec<RecentFolder> {
+    let Ok(entries) = fs::read_dir(config.join("chat")) else {
+        return Vec::new();
+    };
+    let mut rows: Vec<RecentFolder> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| RecentFolder {
+            path: e.path().display().to_string(),
+            used: e
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs()),
+        })
+        .collect();
+    rows.sort_by(|a, b| b.used.cmp(&a.used).then_with(|| b.path.cmp(&a.path)));
+    rows.truncate(MAX_RECENT);
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,6 +158,21 @@ mod tests {
         let chat = new_chat_dir(&dir, "c1").unwrap();
         assert_eq!(chat, dir.join("chat").join("c1"));
         assert!(chat.is_dir());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chat_dirs_list_only_dirs_capped_and_missing_is_empty() {
+        let dir = temp("chat-list");
+        assert!(chat_dirs(&dir).is_empty());
+        for i in 0..12 {
+            new_chat_dir(&dir, &format!("c{i:02}")).unwrap();
+        }
+        fs::write(dir.join("chat").join("stray.txt"), "x").unwrap();
+        let rows = chat_dirs(&dir);
+        assert_eq!(rows.len(), MAX_RECENT);
+        assert!(rows.iter().all(|r| Path::new(&r.path).is_dir()));
+        assert!(!rows.iter().any(|r| r.path.ends_with("stray.txt")));
         let _ = fs::remove_dir_all(&dir);
     }
 }

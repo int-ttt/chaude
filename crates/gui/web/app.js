@@ -18,6 +18,12 @@
   const head = document.getElementById("head");
   const recent = document.getElementById("recent");
   const recentEmpty = document.getElementById("recent-empty");
+  const chatList = document.getElementById("chats");
+  const chatsEmpty = document.getElementById("chats-empty");
+  const shell = document.getElementById("shell");
+  const sidebarToggle = document.getElementById("sidebar-toggle");
+  const startInput = document.getElementById("start-input");
+  const startSend = document.getElementById("start-send");
   const headMode = document.getElementById("head-mode");
   const headFolder = document.getElementById("head-folder");
   const headModel = document.getElementById("head-model");
@@ -183,29 +189,55 @@
     chat.hidden = onStart;
     dock.hidden = onStart;
     head.hidden = onStart;
+    renderSidebar(ev);
     if (onStart) {
-      renderRecent(ev.recent || []);
+      startInput.focus();
       return;
     }
     headMode.textContent = ev.mode === "code" ? "Code" : "Chat";
-    const name = ev.folder ? ev.folder.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || ev.folder : "";
+    const name = ev.folder ? folderLabel(ev.folder) : "";
     headFolder.textContent = name;
     headFolder.title = ev.folder;
     headFolder.hidden = !name;
   }
 
-  function renderRecent(rows) {
+  // The last part of a path; a path that is only a root keeps the whole path.
+  function folderLabel(path) {
+    return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  }
+
+  function formatTime(secs) {
+    if (!secs) return "";
+    return new Date(secs * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  }
+
+  // The sidebar lists. A recent folder opens that folder (a code session) and the open one is marked active. A chat
+  // row only shows: core has no resume for a chat scratch dir yet (TODO).
+  function renderSidebar(ev) {
+    const folders = ev.recent || [];
+    const chats = ev.chats || [];
     recent.replaceChildren();
-    rows.forEach((row) => {
+    folders.forEach((row) => {
       const item = el("li");
-      const pick = el("button", "recent-row", row.path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || row.path);
+      const pick = el("button", "sb-item", folderLabel(row.path));
       pick.type = "button";
       pick.title = row.path;
+      if (ev.mode === "code" && row.path === ev.folder) pick.classList.add("active");
       pick.addEventListener("click", () => send({ type: "start", mode: "code", folder: row.path }));
       item.appendChild(pick);
       recent.appendChild(item);
     });
-    recentEmpty.hidden = rows.length > 0;
+    recentEmpty.hidden = folders.length > 0;
+    chatList.replaceChildren();
+    chats.forEach((row) => {
+      const item = el("li");
+      const label = el("span", "sb-item disabled", "Chat " + formatTime(row.used));
+      label.title = "TODO: resume chats (core has no resume yet)";
+      label.setAttribute("aria-disabled", "true");
+      item.appendChild(label);
+      chatList.appendChild(item);
+    });
+    chatsEmpty.hidden = chats.length > 0;
   }
 
   function submit() {
@@ -213,28 +245,53 @@
     if (!text) return;
     send({ type: "submit", text });
     input.value = "";
-    resize();
+    fit(input);
   }
 
-  function resize() {
-    input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 200) + "px";
+  // The start screen's composer: the first message starts a New chat and goes to it in the same command.
+  function startChat() {
+    const text = startInput.value.trim();
+    if (!text) return;
+    send({ type: "start", mode: "chat", text });
+    startInput.value = "";
+    fit(startInput);
+  }
+
+  function fit(box) {
+    box.style.height = "auto";
+    box.style.height = Math.min(box.scrollHeight, 200) + "px";
   }
 
   // Enter sends; Shift+Enter is a newline. While an IME composes text, Enter confirms the composition and must not
   // send (isComposing; keyCode 229 covers Safari's keydown right after composition ends).
+  const enterSends = (e) => e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229;
   input.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" || e.shiftKey || e.isComposing || e.keyCode === 229) return;
+    if (!enterSends(e)) return;
     e.preventDefault();
     submit();
   });
-  input.addEventListener("input", resize);
+  startInput.addEventListener("keydown", (e) => {
+    if (!enterSends(e)) return;
+    e.preventDefault();
+    startChat();
+  });
+  input.addEventListener("input", () => fit(input));
+  startInput.addEventListener("input", () => fit(startInput));
   sendBtn.addEventListener("click", submit);
+  startSend.addEventListener("click", startChat);
   stopBtn.addEventListener("click", () => send({ type: "interrupt" }));
   allowBtn.addEventListener("click", () => send({ type: "permission_answer", allow: true, interrupt: false }));
   denyBtn.addEventListener("click", () => send({ type: "permission_answer", allow: false, interrupt: false }));
   document.getElementById("new-chat").addEventListener("click", () => send({ type: "start", mode: "chat" }));
   document.getElementById("open-folder").addEventListener("click", () => send({ type: "open_folder" }));
+  // Collapsed: a narrow rail with the icons; the lists are hidden (CSS). The toggle keeps its state in aria-expanded.
+  sidebarToggle.addEventListener("click", () => {
+    const collapsed = shell.classList.toggle("collapsed");
+    const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
+    sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
+    sidebarToggle.setAttribute("aria-label", label);
+    sidebarToggle.title = label;
+  });
 
   // Rust calls onEvent for each event. An unknown type is ignored rather than thrown.
   const handlers = {
@@ -272,5 +329,5 @@
 
   // The first ping makes Rust send the whole transcript and state, so the page starts in step with the core.
   send({ type: "ping" });
-  input.focus();
+  startInput.focus();
 })();

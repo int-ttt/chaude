@@ -47,6 +47,8 @@ pub struct Front {
     session: Option<(Mode, String)>,
     // Recent folders, newest first, as recent.json holds them.
     recent: Vec<RecentFolder>,
+    // Chat scratch dirs, newest first (the sidebar's chats).
+    chats: Vec<RecentFolder>,
     // The Session event the page last got, so it is sent only when it changes.
     sent_session: Option<Event>,
     // Engine busy at the last sync; a true -> false edge is the turn end that notifies.
@@ -62,6 +64,7 @@ impl Front {
 
     fn with_config(wake: Arc<dyn Fn() + Send + Sync>, config: PathBuf) -> Self {
         let recent = recent_folders::load(&recent_folders::recent_file(&config));
+        let chats = recent_folders::chat_dirs(&config);
         let (jobs_tx, jobs_rx) = mpsc::channel();
         Self {
             state: GuiState::default(),
@@ -75,6 +78,7 @@ impl Front {
             config,
             session: None,
             recent,
+            chats,
             sent_session: None,
             was_busy: false,
         }
@@ -84,8 +88,12 @@ impl Front {
     // shut down first. A boot failure shows as an error row in the new session.
     fn start_session(&mut self, mode: Mode, folder: &str, now: Instant) {
         let cwd = match mode {
-            Mode::Chat => recent_folders::new_chat_dir(&self.config, &chat_id())
-                .map_err(|e| format!("chat: cannot make the scratch dir: {e}")),
+            Mode::Chat => {
+                let made = recent_folders::new_chat_dir(&self.config, &chat_id())
+                    .map_err(|e| format!("chat: cannot make the scratch dir: {e}"));
+                self.chats = recent_folders::chat_dirs(&self.config);
+                made
+            }
             Mode::Code => {
                 let file = recent_folders::recent_file(&self.config);
                 if let Ok(rows) = recent_folders::touch(&file, folder, now_secs()) {
@@ -150,7 +158,7 @@ impl Front {
         });
     }
 
-    // The Session event for the page: the mode and folder on screen, and the recent folders.
+    // The Session event for the page: the mode and folder on screen, and the recent folders and chat dirs.
     fn session_event(&self) -> Event {
         let (mode, folder) = match &self.session {
             Some((mode, folder)) => (Some(*mode), folder.clone()),
@@ -160,6 +168,7 @@ impl Front {
             mode,
             folder,
             recent: self.recent.clone(),
+            chats: self.chats.clone(),
         }
     }
 
@@ -185,9 +194,12 @@ impl Front {
                 out.extend(self.sync(now));
                 return out;
             }
-            Command::Start { mode, folder } => {
+            Command::Start { mode, folder, text } => {
                 if mode == Mode::Chat || !folder.is_empty() {
                     self.start_session(mode, &folder, now);
+                    if !text.is_empty() {
+                        self.submit(&text);
+                    }
                 }
             }
             Command::OpenFolder => {
@@ -461,6 +473,7 @@ mod tests {
             mode: None,
             folder: String::new(),
             recent: Vec::new(),
+            chats: Vec::new(),
         }));
         let again = f.pump(now);
         assert!(!again.iter().any(|e| matches!(e, Event::Session { .. })));
@@ -475,6 +488,22 @@ mod tests {
         assert_eq!(f2.recent.len(), 1);
         assert_eq!(f2.recent[0].path, "/w/proj");
         assert!(f.recent.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn chat_dirs_reach_the_session_event() {
+        let (_, dir) = front("chats");
+        recent_folders::new_chat_dir(&dir, "c1").unwrap();
+        let f = Front::with_config(Arc::new(|| {}), dir.clone());
+        match f.session_event() {
+            Event::Session { mode, chats, .. } => {
+                assert_eq!(mode, None);
+                assert_eq!(chats.len(), 1);
+                assert!(chats[0].path.ends_with("c1"));
+            }
+            other => panic!("not a session event: {other:?}"),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
