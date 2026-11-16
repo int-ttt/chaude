@@ -628,7 +628,7 @@ impl App {
             // Go repl.go stage(): one grey note per stage change, then a blank row (Go note block adds "").
             // The Working row carries its start time and, once the slot finishes, its end time and elapsed.
             UiEvent::Stage { slot, phase } => {
-                self.end_main_block();
+                self.pause_main_block();
                 let text = stage_text(current(), &slot, &phase);
                 match phase {
                     StagePhase::Working => {
@@ -666,7 +666,7 @@ impl App {
             }
             // Go resident.go notice(): a failed prompter or tui pass, one note line.
             UiEvent::Notice { text } => {
-                self.end_main_block();
+                self.pause_main_block();
                 self.note(&text);
             }
             UiEvent::Error(msg) if self.usage.pending() => {
@@ -1546,6 +1546,12 @@ impl App {
             self.push_entry(Entry::Blank);
         }
         self.main_open = false;
+    }
+
+    // A note or status row in the middle of a streamed reply: the open Text entry closes around it, but the
+    // unfinished line stays in its buffer and the block stays open, so the reply goes on with the "  " lead.
+    fn pause_main_block(&mut self) {
+        self.close_text(&Role::Main);
     }
 
     // The unfinished-line buffer of a streamed role.
@@ -5578,6 +5584,150 @@ mod tests {
         assert_eq!(screen(&app, 30, 7), want);
     }
 
+    // A long Korean reply that wraps, streamed in small chunks, must lay out exactly as the whole reply at once: the
+    // block keeps its first row and its bullet, and no row of it goes missing while it grows.
+    #[test]
+    fn streamed_wrapped_korean_block_keeps_its_start() {
+        let block: String = (1..=12)
+            .map(|i| {
+                format!("{i}. 한국어 항목을 길게 적어서 줄바꿈이 일어나도록 합니다 번호 {i}\n")
+            })
+            .collect();
+        let plain = |rows: Vec<String>| -> Vec<String> {
+            rows.iter().map(|r| render::strip_sgr(r)).collect()
+        };
+        let mut whole = App::new(30, 40);
+        whole.apply(text(&block));
+        let chars: Vec<char> = block.chars().collect();
+        let mut chunked = App::new(30, 40);
+        for part in chars.chunks(7) {
+            chunked.apply(text(&part.iter().collect::<String>()));
+        }
+        let want = plain(whole.body(29));
+        assert_eq!(plain(chunked.body(29)), want);
+        let first = want
+            .iter()
+            .position(|r| r.starts_with("● "))
+            .expect("bullet row");
+        assert!(want[first].starts_with("● 1. 한국어"), "{want:?}");
+        assert!(want[first + 1].starts_with("  서 줄바꿈"), "{want:?}");
+    }
+
+    // Note and status rows that arrive in the middle of a streamed reply must not split it: the reply keeps one "●"
+    // block and every line of it, in order, whichever of them came between two deltas.
+    #[test]
+    fn interleaved_events_keep_the_reply_whole() {
+        let line = "한국어 항목을 길게 적어서 줄바꿈이 일어나도록 합니다 번호";
+        let first = format!("Intro\n1. {line} 끝\n2. {line} 끝\n3. {line} 번");
+        let rest = format!("호 끝\n4. {line} 끝\n");
+        let plain = |rows: Vec<String>| -> Vec<String> {
+            rows.iter().map(|r| render::strip_sgr(r)).collect()
+        };
+        // The reply rows only: from its first bullet on, so the welcome box (model name) is not compared.
+        let reply = |rows: Vec<String>| -> Vec<String> {
+            let rows = plain(rows);
+            let from = rows
+                .iter()
+                .position(|r| r.starts_with("● "))
+                .unwrap_or(rows.len());
+            rows[from..].to_vec()
+        };
+        let mut whole = App::new(30, 40);
+        whole.apply(text(&format!("{first}{rest}")));
+        let want = reply(whole.body(29));
+        let events = || -> Vec<(&str, UiEvent)> {
+            vec![
+                (
+                    "Status",
+                    UiEvent::Status {
+                        model: "m".into(),
+                        tokens: 10,
+                        cost_usd: 0.1,
+                        context_pct: 5,
+                    },
+                ),
+                ("Busy(true)", UiEvent::Busy(true)),
+                ("Busy(false)", UiEvent::Busy(false)),
+                ("Queued", UiEvent::Queued(1)),
+                (
+                    "TurnTokens",
+                    UiEvent::TurnTokens {
+                        input: 1,
+                        output: 2,
+                        cache: 3,
+                    },
+                ),
+                (
+                    "RoleContext",
+                    UiEvent::RoleContext {
+                        role: "coder".into(),
+                        tokens: 4,
+                    },
+                ),
+                (
+                    "CoderContexts",
+                    UiEvent::CoderContexts { coders: Vec::new() },
+                ),
+                (
+                    "Usage",
+                    UiEvent::Usage {
+                        text: "5h 10%".into(),
+                    },
+                ),
+                ("ReplyHeld", UiEvent::ReplyHeld { pending: 1 }),
+                ("ReplyReleased", UiEvent::ReplyReleased),
+                ("OpusBusy", UiEvent::OpusBusy(true)),
+                (
+                    "TaskQueued",
+                    UiEvent::TaskQueued {
+                        id: "t".into(),
+                        desc: "d".into(),
+                    },
+                ),
+                (
+                    "TaskStats",
+                    UiEvent::TaskStats {
+                        id: "t".into(),
+                        tokens: Some(1),
+                        duration_ms: Some(1),
+                    },
+                ),
+                (
+                    "Notice",
+                    UiEvent::Notice {
+                        text: "note".into(),
+                    },
+                ),
+                (
+                    "Stage",
+                    UiEvent::Stage {
+                        slot: "coder".into(),
+                        phase: chaude_core::resident::StagePhase::Working,
+                    },
+                ),
+            ]
+        };
+        let mut lost = Vec::new();
+        for (name, ev) in events() {
+            let mut app = App::new(30, 40);
+            app.apply(text(&first));
+            app.apply(ev);
+            app.apply(text(&rest));
+            let got = reply(app.body(29));
+            let bullets = got.iter().filter(|r| r.starts_with("● ")).count();
+            // Every reply row, in order, is in the got rows (the note and status rows may sit between them).
+            let mut next = got.iter();
+            let in_order = want.iter().all(|w| next.any(|g| g == w));
+            if bullets != 1 || !in_order {
+                lost.push(name);
+            }
+        }
+        assert!(
+            lost.is_empty(),
+            "events that split or lose the reply: {lost:?}"
+        );
+    }
+
     #[test]
     fn typing_while_scrolled_keeps_position() {
         let mut app = app_with_lines(10);
@@ -8389,6 +8539,48 @@ mod tests {
         draw_and_check(&app, &mut prev, &mut screen);
     }
 
+    // Every wrapped row must fit its cell width, or the terminal wraps it again and the rows below shift.
+    #[test]
+    fn wrapped_korean_rows_fit_the_width() {
+        let line = "한국어 항목을 길게 적어서 줄바꿈이 일어나도록 합니다 번호";
+        let mut app = App::new(30, 40);
+        app.apply(text(&format!("1. {line} 끝\n2. {line} 끝\n")));
+        // The welcome box is drawn at the full width, so only the reply rows (from the bullet on) are checked.
+        let body = app.body(29);
+        let first = body
+            .iter()
+            .position(|r| render::strip_sgr(r).starts_with("● 1."))
+            .expect("bullet row");
+        for row in &body[first..] {
+            let plain = render::strip_sgr(row);
+            assert!(render::cell_width(&plain) <= 29, "{plain:?}");
+        }
+    }
+
+    // A long Korean reply that wraps, streamed in small chunks with a draw after each one: the scroll-region moves
+    // must leave the screen equal to the frame, so the block's start never shows a stale or shifted row.
+    #[test]
+    fn draw_streamed_wrapped_korean_block_matches_the_frame() {
+        let mut app = App::new(30, 12);
+        let mut prev = Vec::new();
+        let mut screen = Screen::new(30, 12);
+        draw_and_check(&app, &mut prev, &mut screen);
+        let block: String = (1..=12)
+            .map(|i| {
+                format!("{i}. 한국어 항목을 길게 적어서 줄바꿈이 일어나도록 합니다 번호 {i}\n")
+            })
+            .collect();
+        let chars: Vec<char> = block.chars().collect();
+        for part in chars.chunks(5) {
+            app.apply(text(&part.iter().collect::<String>()));
+            draw_and_check(&app, &mut prev, &mut screen);
+        }
+        for delta in [-4, -4, 3, 100] {
+            app.scroll(delta);
+            draw_and_check(&app, &mut prev, &mut screen);
+        }
+    }
+
     // Frame bench: 2000-row history, then 200 streamed text events (one frame each) like 200 events/s.
     // Run: cargo test -p chaude-cli --release bench_frame -- --ignored --nocapture
     #[test]
@@ -8763,9 +8955,9 @@ mod transcript_snapshots {
             vec![
                 (
                     true,
-                    "The build has **three** steps\nsecond line is split mid-line\n\n- last"
+                    "The build has **three** steps\nsecond line is split mid-line\n"
                 ),
-                (true, " item"),
+                (true, "- last item"),
                 (false, "agent says hi\nagent par"),
                 (true, "then a tail and ends"),
             ]

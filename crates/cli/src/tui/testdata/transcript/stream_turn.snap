@@ -14,10 +14,8 @@
 [38;2;217;119;87m● [39mThe build has [1mthree[22m steps
   second line is split mid-line
   
-  - last
-
 agent a1 done
-[38;2;217;119;87m● [39m item
+  - last item
   │ agent says hi
   │ agent par
   then a tail and ends
