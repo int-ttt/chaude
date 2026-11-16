@@ -675,7 +675,7 @@ impl App {
             }
             // Go repl.go error paths: a dim note block, then a blank row (tui.go:379 note rendering).
             UiEvent::Error(msg) => {
-                self.end_main_block();
+                self.pause_main_block();
                 self.push_entry(Entry::Error(msg));
                 self.push_entry(Entry::Blank);
             }
@@ -5698,6 +5698,7 @@ mod tests {
                         text: "note".into(),
                     },
                 ),
+                ("Error", UiEvent::Error("boom".into())),
                 (
                     "Stage",
                     UiEvent::Stage {

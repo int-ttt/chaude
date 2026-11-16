@@ -923,6 +923,59 @@ mod tests {
         }
     }
 
+    // Notes, stage and status rows that arrive between two deltas of one reply must not close it: the reply stays one
+    // Text row, and the later deltas land in that row (not in a new one) until MessageDone.
+    #[test]
+    fn interleaved_events_keep_the_reply_one_row() {
+        let mut st = GuiState::default();
+        let now = Instant::now();
+        st.apply(text(Role::Main, "Intro\n1. ab"), now);
+        st.apply(
+            UiEvent::Stage {
+                slot: "tui".into(),
+                phase: StagePhase::Working,
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::Notice {
+                text: "note".into(),
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::Status {
+                model: "m".into(),
+                tokens: 1,
+                cost_usd: 0.0,
+                context_pct: 0,
+            },
+            now,
+        );
+        st.apply(
+            UiEvent::Usage {
+                text: "5h 10%".into(),
+            },
+            now,
+        );
+        st.apply(text(Role::Main, "c\n2. d"), now);
+        let texts: Vec<(&str, bool)> = st
+            .transcript
+            .entries
+            .iter()
+            .filter_map(|e| match e {
+                Entry::Text { text, done, .. } => Some((text.as_str(), *done)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, vec![("Intro\n1. abc\n2. d", false)]);
+        st.apply(UiEvent::MessageDone { role: Role::Main }, now);
+        let done = st.transcript.entries.iter().any(
+            |e| matches!(e, Entry::Text { text, done: true, .. } if text == "Intro\n1. abc\n2. d"),
+        );
+        assert!(done);
+    }
+
     #[test]
     fn tui_answer_is_the_done_main_reply() {
         let mut st = GuiState::default();

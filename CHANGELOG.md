@@ -3,6 +3,8 @@
 ## Unreleased
 - tui: a streamed reply stays one block when a note or stage row comes in the middle of it. The unfinished line is no longer cut in two, so its rest no longer opens a second "●" block; the reply goes on under the same block with the "  " lead.
   - tui: 스트리밍 중인 답변 가운데에 메모나 단계 행이 와도 답변은 한 블록으로 남습니다. 끝나지 않은 줄이 둘로 잘리지 않아, 그 줄의 나머지가 두 번째 "●" 블록을 여는 일이 없습니다. 답변은 같은 블록에서 "  " 들여쓰기로 이어집니다.
+- tui: an error row in the middle of a streamed reply no longer cuts the unfinished line in two either. The error row is drawn between the reply's lines, and the rest of that line completes the same line under the same "●" block.
+  - tui: 스트리밍 중인 답변 가운데에 오류 행이 와도 끝나지 않은 줄이 둘로 잘리지 않습니다. 오류 행은 답변 줄 사이에 그려지고, 그 줄의 나머지는 같은 "●" 블록 안에서 원래 줄을 이어 완성합니다.
 - core: the usage meter refreshes on its own in both the TUI and the GUI: a background /usage run every 5 minutes (a core timer checks every 5 seconds) and right after each finished turn. Only one run is in flight at a time, and a failed run keeps the last good numbers instead of showing "--".
   - core: 사용량 표시가 TUI와 GUI 모두에서 스스로 갱신됩니다. 백그라운드 /usage 실행이 5분마다(core 타이머가 5초마다 확인) 한 번씩 돌고, 턴이 끝난 직후에도 한 번 돕니다. 실행은 한 번에 하나만 진행되며, 실패하면 "--"로 바뀌지 않고 마지막으로 성공한 값을 그대로 둡니다.
 - core: the usage meter shows at startup in both the TUI and the GUI. The last good /usage numbers are cached in `~/.chaude/usage.json` and shown at once; the background /usage run replaces them (about 5 seconds). The TUI status line shows session %, week %, and the session reset time.
