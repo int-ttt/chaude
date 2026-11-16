@@ -120,6 +120,19 @@ impl Front {
         self.enter(mode, folder, cwd, now);
     }
 
+    // Back to the start screen: the engine stops and the session on screen is cleared. Nothing is made on disk.
+    fn show_start(&mut self) {
+        if let Some(old) = self.engine.take() {
+            old.shutdown();
+        }
+        self.rx = None;
+        self.state = GuiState::default();
+        self.cwd.clear();
+        self.sessions.clear();
+        self.session = None;
+        self.was_busy = false;
+    }
+
     // Puts a session on screen (folder is the code folder, "" for chat): the old engine stops, the state resets and the
     // engine starts in cwd. A failed cwd (no scratch dir) shows as an error row.
     fn enter(&mut self, mode: Mode, folder: &str, cwd: Result<PathBuf, String>, now: Instant) {
@@ -253,8 +266,11 @@ impl Front {
                 out.extend(self.sync(now));
                 return out;
             }
+            // A chat makes its scratch dir only with a message; an empty New chat just shows the start screen.
             Command::Start { mode, folder, text } => {
-                if mode == Mode::Chat || !folder.is_empty() {
+                if mode == Mode::Chat && text.trim().is_empty() {
+                    self.show_start();
+                } else if mode == Mode::Chat || !folder.is_empty() {
                     self.start_session(mode, &folder, now);
                     if !text.is_empty() {
                         self.submit(&text);
@@ -607,6 +623,27 @@ mod tests {
             !out.iter()
                 .any(|e| matches!(e, Event::Session { mode: Some(_), .. }))
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_new_chat_makes_no_scratch_dir_and_shows_the_start_screen() {
+        let (mut f, dir) = front("empty-chat");
+        let now = Instant::now();
+        for text in ["", "   \n\t"] {
+            f.command(
+                Command::Start {
+                    mode: Mode::Chat,
+                    folder: String::new(),
+                    text: text.into(),
+                },
+                now,
+            );
+            assert!(f.session.is_none());
+            assert!(f.engine.is_none());
+            assert!(f.chats.is_empty());
+            assert!(!dir.join("chat").exists());
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

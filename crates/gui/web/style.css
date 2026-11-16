@@ -278,6 +278,7 @@ button:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
 .sb-path { font-size: 11px; color: var(--muted); }
 .sb-sub { list-style: none; margin: 0 0 4px 14px; padding: 0 0 0 6px; border-left: 1px solid var(--line); }
 .sb-sub .sb-item { padding: 4px 8px; }
+.sb-more { font-size: 12px; color: var(--muted); }
 .sb-empty { font-size: 12px; color: var(--muted); margin: 0 10px; }
 .shell.collapsed .sidebar { width: 52px; padding: 10px 6px; }
 .shell.collapsed .sb-text, .shell.collapsed .sb-body { display: none; }

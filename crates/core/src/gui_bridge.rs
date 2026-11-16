@@ -185,14 +185,44 @@ pub struct PastSession {
     pub used: u64,
 }
 
-// How many past sessions the sidebar lists under a folder.
-pub const MAX_PAST: usize = 10;
+// How many past sessions the sidebar keeps under a folder (the page shows the newest few and a more toggle).
+pub const MAX_PAST: usize = 50;
 
-// The past sessions of the project dir of cwd under home, newest first (session_view::list_sessions lists only the
-// sessions that hold a prompt).
+// First prompts the harness sends itself, not the user: a rotated session's carry-over, the prompter and relay
+// summaries, handoff notes and the harness's own probes. A session whose first prompt starts with one is no row.
+// Matched on the one-line prompt (whitespace collapsed).
+const HARNESS_PROMPTS: &[&str] = &[
+    "## Previous recommendation (verbatim)",
+    "[Context carried over from a previous session",
+    "[prompter summary",
+    "Opus main return follows",
+    "lang: ko Opus main return follows",
+    "Opus 메인 반환입니다",
+    "Write a handoff note for a fresh session",
+    "Summarize the following user input",
+    "Workstream chaude-",
+    "Remember this codeword",
+    "Count from 1 to",
+    "Count slowly from",
+    "Reply with exactly",
+    "Use the Write tool to create",
+    "Run the bash command `echo harness-ok`",
+    "List the files in the current directory using the Bash tool",
+];
+
+// True when a one-line first prompt is empty or one the harness sent (see HARNESS_PROMPTS).
+pub fn is_harness_prompt(first: &str) -> bool {
+    let first = first.trim();
+    first.is_empty() || HARNESS_PROMPTS.iter().any(|p| first.starts_with(p))
+}
+
+// The user's past sessions of the project dir of cwd under home, newest first. Sub-agent transcripts sit under
+// <session>/subagents/ (not listed) and sidechain-only files hold no prompt, so list_sessions drops them; this also
+// drops the empty and harness-sent sessions.
 pub fn past_sessions(home: &Path, cwd: &str) -> Vec<PastSession> {
     session_view::list_sessions(&session_view::project_dir(home, cwd))
         .into_iter()
+        .filter(|s| !is_harness_prompt(&s.first))
         .take(MAX_PAST)
         .map(|s| PastSession {
             id: s.id,
@@ -824,6 +854,55 @@ mod tests {
         // Not a chat dir, or no folder: nothing is opened.
         assert_eq!(open_plan(Mode::Chat, cwd, "", &home, &chat_root), None);
         assert_eq!(open_plan(Mode::Code, "", "", &home, &chat_root), None);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn past_sessions_lists_only_the_users_top_level_sessions() {
+        let home =
+            std::env::temp_dir().join(format!("chaude-bridge-filter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let cwd = "/w/filter";
+        let dir = session_view::project_dir(&home, cwd);
+        std::fs::create_dir_all(dir.join("real").join("subagents")).unwrap();
+        let user = |p: &str| {
+            format!("{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"{p}\"}}}}\n")
+        };
+        let side = |p: &str| {
+            format!(
+                "{{\"type\":\"user\",\"isSidechain\":true,\"message\":{{\"role\":\"user\",\"content\":\"{p}\"}}}}\n"
+            )
+        };
+        let write = |name: &str, body: &str| std::fs::write(dir.join(name), body).unwrap();
+        write("real.jsonl", &user("the user's real prompt"));
+        write("helper.jsonl", &user("[prompter summary] Intent: x"));
+        write(
+            "carry.jsonl",
+            &user("[Context carried over from a previous session that was rotated"),
+        );
+        write("side.jsonl", &side("only a sub-agent prompt"));
+        write("blank.jsonl", &user("   "));
+        write(
+            "empty.jsonl",
+            "{\"type\":\"queue-operation\",\"operation\":\"enqueue\"}\n",
+        );
+        // A sub-agent transcript sits under its session dir; it is never a top-level row.
+        std::fs::write(
+            dir.join("real").join("subagents").join("agent-a.jsonl"),
+            side("a sub-agent"),
+        )
+        .unwrap();
+
+        let past = past_sessions(&home, cwd);
+        assert_eq!(
+            past.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            ["real"]
+        );
+        assert_eq!(past[0].first, "the user's real prompt");
+        assert!(is_harness_prompt(
+            "lang: ko Opus main return follows. Use the relay"
+        ));
+        assert!(!is_harness_prompt("fix the build"));
         let _ = std::fs::remove_dir_all(&home);
     }
 
