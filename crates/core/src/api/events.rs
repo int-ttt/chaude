@@ -58,17 +58,19 @@ impl State {
         });
     }
 
-    // The GUI sidebar meter: one background /usage run per interval (the metrics poll gate), off when
-    // HARNESS_USAGE_POLL=0. Only a success is sent, as UiEvent::Usage, so a failure stays out of the transcript.
-    pub(super) fn usage_meter(&mut self) {
+    // The meter (GUI sidebar, TUI status line): a background /usage run. forced is a finished turn or the boot
+    // (starts at once); the timer tick (forced false) waits for the refresh interval. Never two runs at once. Off
+    // when HARNESS_USAGE_POLL=0. Only a success is sent, as UiEvent::Usage, so a failure keeps the last meter.
+    pub(super) fn usage_meter(&mut self, forced: bool) {
         if std::env::var("HARNESS_USAGE_POLL").as_deref() == Ok("0") {
             return;
         }
         let now = Instant::now();
-        if !usage_poll_due(
+        if !refresh_due(
             self.meter_poll_at,
             now,
             self.meter_polling.load(Ordering::SeqCst),
+            forced,
         ) {
             return;
         }

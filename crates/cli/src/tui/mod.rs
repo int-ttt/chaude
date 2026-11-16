@@ -3653,7 +3653,14 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
         // Every queued wake is applied before one tick and one draw, so a burst of output costs one frame.
         for wake in batch {
             match wake {
-                Wake::Engine(ev) => app.apply(ev),
+                Wake::Engine(ev) => {
+                    // A finished turn refreshes the status-line meter at once (the core timer covers the rest).
+                    let was_busy = app.run.busy;
+                    app.apply(ev);
+                    if was_busy && !app.run.busy {
+                        engine.usage_meter();
+                    }
+                }
                 Wake::Note(text) => app.note(&text),
                 #[cfg(unix)]
                 Wake::Signal => {

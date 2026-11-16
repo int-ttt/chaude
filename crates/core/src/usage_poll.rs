@@ -7,6 +7,7 @@ use serde_json::{Map, Value, json};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::metrics::Metrics;
 
@@ -14,6 +15,17 @@ const SESSION_LABEL: &str = "Current session:";
 const WEEK_LABEL: &str = "Current week (all models):";
 // Go usagePollEvery: at most one /usage poll per this many seconds.
 pub const USAGE_POLL_EVERY_SECS: u64 = 300;
+// The meter (GUI sidebar, TUI status line): a timed /usage run at most every USAGE_REFRESH_SECS. The core timer
+// checks the gate every USAGE_TICK_SECS, so a due run starts within that many seconds.
+pub const USAGE_REFRESH_SECS: u64 = 300;
+pub const USAGE_TICK_SECS: u64 = 5;
+
+// The meter's start gate (State::usage_meter). Nothing starts while a run is in flight. A timer check (forced false)
+// also needs a full refresh interval since the last start; a finished turn (forced true) starts at once.
+pub fn refresh_due(last: Option<Instant>, now: Instant, in_flight: bool, forced: bool) -> bool {
+    let every = Duration::from_secs(USAGE_REFRESH_SECS);
+    !in_flight && (forced || last.is_none_or(|t| now.duration_since(t) >= every))
+}
 
 // Go regex `\s*` in these patterns: ASCII whitespace.
 fn skip_ws(s: &str) -> &str {
@@ -225,6 +237,37 @@ Current week (all models): 27% used · resets Nov 1 at 4:59pm (Asia/Seoul)";
         );
         std::fs::write(&path, "{not json").expect("write");
         assert!(load_cache_from(&path).is_none());
+    }
+
+    #[test]
+    fn refresh_gate_one_in_flight_and_one_per_interval() {
+        let t0 = Instant::now();
+        let every = Duration::from_secs(USAGE_REFRESH_SECS);
+        // Boot: nothing started yet, so a timer check runs.
+        assert!(refresh_due(None, t0, false, false));
+        // Timer inside the interval waits; at the interval it runs.
+        assert!(!refresh_due(
+            Some(t0),
+            t0 + every - Duration::from_secs(1),
+            false,
+            false
+        ));
+        assert!(refresh_due(Some(t0), t0 + every, false, false));
+        // A run in flight blocks both the timer and a turn end.
+        assert!(!refresh_due(Some(t0), t0 + every * 2, true, false));
+        assert!(!refresh_due(
+            Some(t0),
+            t0 + Duration::from_secs(1),
+            true,
+            true
+        ));
+        // A finished turn starts at once when nothing is in flight.
+        assert!(refresh_due(
+            Some(t0),
+            t0 + Duration::from_secs(1),
+            false,
+            true
+        ));
     }
 
     #[test]

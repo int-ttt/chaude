@@ -475,7 +475,7 @@ impl Front {
         let busy = self.state.run.busy;
         if self.was_busy && !busy && self.session.is_some() {
             self.notify_turn_end();
-            // The core throttles this to one background /usage run per interval.
+            // A finished turn refreshes the meter at once; the core never starts a second run while one is in flight.
             if let Some(engine) = &self.engine {
                 engine.usage_meter();
             }

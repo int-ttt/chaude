@@ -54,7 +54,7 @@ use crate::rotate::{
 };
 use crate::rotate_defer::{self, Hold};
 use crate::turn_spend::TurnSpend;
-use crate::usage_poll::{USAGE_POLL_EVERY_SECS, log_usage};
+use crate::usage_poll::{USAGE_POLL_EVERY_SECS, USAGE_TICK_SECS, log_usage, refresh_due};
 
 mod events;
 mod misc;
@@ -672,6 +672,8 @@ enum Cmd {
     Usage,
     // The GUI sidebar meter: a background /usage run that answers UiEvent::Usage on success only.
     UsageMeter,
+    // The core timer's check of the meter gate (usage_poll::USAGE_TICK_SECS): runs /usage only when due.
+    UsageTick,
     Shutdown,
 }
 
@@ -822,6 +824,7 @@ impl Engine {
         let (ui_tx, ui_rx) = mpsc::channel::<UiEvent>();
         let (boot_tx, boot_rx) = mpsc::channel();
         let self_tx = in_tx.clone();
+        spawn_usage_timer(in_tx.clone());
         let agent_rows = Arc::new(Mutex::new(Vec::new()));
         let shared = Arc::clone(&agent_rows);
         let (done_tx, done_rx) = mpsc::channel::<()>();
@@ -1662,7 +1665,8 @@ fn actor(
             Input::Cmd(Cmd::Import(imp)) => st.install_import(*imp),
             Input::Cmd(Cmd::Permission { id, allow }) => st.answer_permission(&id, allow),
             Input::Cmd(Cmd::Usage) => st.usage(),
-            Input::Cmd(Cmd::UsageMeter) => st.usage_meter(),
+            Input::Cmd(Cmd::UsageMeter) => st.usage_meter(true),
+            Input::Cmd(Cmd::UsageTick) => st.usage_meter(false),
             Input::Cmd(Cmd::CancelWait) => st.cancel_wait(),
             Input::Proc(epoch, msg) if epoch == st.epoch => match msg {
                 ProcMsg::Line(line) => st.on_line(&line),
@@ -1720,6 +1724,19 @@ fn actor(
     for mut d in std::mem::take(&mut st.drains) {
         d.proc.kill();
     }
+}
+
+// The meter's timer: a tick every USAGE_TICK_SECS asks the actor to check the gate (usage_meter). It ends when the
+// actor has gone (the send fails once its receiver is dropped).
+fn spawn_usage_timer(tx: Sender<Input>) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_secs(USAGE_TICK_SECS));
+            if tx.send(Input::Cmd(Cmd::UsageTick)).is_err() {
+                break;
+            }
+        }
+    });
 }
 
 // Go usagePollEvery gate: a poll starts when none is in flight and the last start is a full interval ago.
