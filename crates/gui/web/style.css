@@ -274,7 +274,10 @@ button:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
 }
 .sb-item.active { background: var(--hover); font-weight: 600; }
 .sb-item.disabled { color: var(--muted); cursor: default; }
-.sb-item.disabled:hover { background: none; }
+.sb-item .sb-name, .sb-item .sb-path { display: block; }
+.sb-path { font-size: 11px; color: var(--muted); }
+.sb-sub { list-style: none; margin: 0 0 4px 14px; padding: 0 0 0 6px; border-left: 1px solid var(--line); }
+.sb-sub .sb-item { padding: 4px 8px; }
 .sb-empty { font-size: 12px; color: var(--muted); margin: 0 10px; }
 .shell.collapsed .sidebar { width: 52px; padding: 10px 6px; }
 .shell.collapsed .sb-text, .shell.collapsed .sb-body { display: none; }
@@ -294,4 +297,5 @@ button:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
   color: var(--muted);
 }
 .head-mode { font-weight: 600; color: var(--fg); }
-.head-folder { color: var(--fg); overflow-wrap: anywhere; }
+.head-folder { color: var(--fg); overflow-wrap: anywhere; cursor: pointer; }
+.head-folder:hover { text-decoration: underline; }

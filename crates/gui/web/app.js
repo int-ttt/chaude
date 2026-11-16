@@ -231,10 +231,11 @@
       return;
     }
     headMode.textContent = ev.mode === "code" ? "Code" : "Chat";
-    const name = ev.folder ? folderLabel(ev.folder) : "";
-    headFolder.textContent = name;
+    const shown = ev.mode === "code" && ev.folder ? shortPath(ev.folder, ev.home) : "";
+    headFolder.textContent = shown;
     headFolder.title = ev.folder;
-    headFolder.hidden = !name;
+    headFolder.dataset.path = ev.folder || "";
+    headFolder.hidden = !shown;
   }
 
   // The last part of a path; a path that is only a root keeps the whole path.
@@ -242,38 +243,66 @@
     return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
   }
 
+  // The path with the home folder shown as ~ (the full path stays the title). Other paths are unchanged.
+  function shortPath(path, home) {
+    if (!home || !path.startsWith(home)) return path;
+    const rest = path.slice(home.length);
+    return rest === "" || /^[\\/]/.test(rest) ? "~" + rest : path;
+  }
+
   function formatTime(secs) {
     if (!secs) return "";
     return new Date(secs * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   }
 
-  // The sidebar lists. A recent folder opens that folder (a code session) and the open one is marked active. A chat
-  // row only shows: core has no resume for a chat scratch dir yet (TODO).
+  // The sidebar lists. A recent folder opens that folder (a code session) and shows its path; the open one is marked
+  // active and lists its past sessions under it. A past session opens and resumes it; a chat row opens its scratch
+  // dir and the newest session there (the open one is marked active).
   function renderSidebar(ev) {
     const folders = ev.recent || [];
     const chats = ev.chats || [];
     recent.replaceChildren();
     folders.forEach((row) => {
       const item = el("li");
-      const pick = el("button", "sb-item", folderLabel(row.path));
-      pick.type = "button";
-      pick.title = row.path;
-      if (ev.mode === "code" && row.path === ev.folder) pick.classList.add("active");
+      const active = ev.mode === "code" && row.path === ev.folder;
+      const pick = sidebarButton(folderLabel(row.path), shortPath(row.path, ev.home), row.path);
+      if (active) pick.classList.add("active");
       pick.addEventListener("click", () => send({ type: "start", mode: "code", folder: row.path }));
       item.appendChild(pick);
+      if (active && (ev.sessions || []).length) {
+        const sub = el("ul", "sb-sub");
+        ev.sessions.forEach((s) => {
+          const sessionItem = el("li");
+          const open = sidebarButton(s.first || "(no prompt)", formatTime(s.used) + " · " + s.turns + " turns", row.path);
+          open.addEventListener("click", () => send({ type: "open_session", mode: "code", folder: row.path, id: s.id }));
+          sessionItem.appendChild(open);
+          sub.appendChild(sessionItem);
+        });
+        item.appendChild(sub);
+      }
       recent.appendChild(item);
     });
     recentEmpty.hidden = folders.length > 0;
     chatList.replaceChildren();
     chats.forEach((row) => {
       const item = el("li");
-      const label = el("span", "sb-item disabled", "Chat " + formatTime(row.used));
-      label.title = "TODO: resume chats (core has no resume yet)";
-      label.setAttribute("aria-disabled", "true");
-      item.appendChild(label);
+      const pick = sidebarButton("Chat", formatTime(row.used), row.path);
+      if (ev.mode === "chat" && row.path === ev.cwd) pick.classList.add("active");
+      pick.addEventListener("click", () => send({ type: "open_session", mode: "chat", folder: row.path }));
+      item.appendChild(pick);
       chatList.appendChild(item);
     });
     chatsEmpty.hidden = chats.length > 0;
+  }
+
+  // A sidebar row: a name line and a muted detail line; the title is the full path.
+  function sidebarButton(name, detail, title) {
+    const button = el("button", "sb-item");
+    button.type = "button";
+    button.title = title;
+    button.appendChild(el("span", "sb-name", name));
+    button.appendChild(el("span", "sb-path", detail));
+    return button;
   }
 
   function submit() {
@@ -321,6 +350,10 @@
   document.getElementById("new-chat").addEventListener("click", () => send({ type: "start", mode: "chat" }));
   document.getElementById("open-folder").addEventListener("click", () => send({ type: "open_folder" }));
   usageBtn.addEventListener("click", () => send({ type: "usage" }));
+  // The header's folder path copies the full path (the bridge copies it; the note shows the count).
+  headFolder.addEventListener("click", () => {
+    if (headFolder.dataset.path) send({ type: "copy", text: headFolder.dataset.path });
+  });
   // Collapsed: a narrow rail with the icons; the lists are hidden (CSS). The toggle keeps its state in aria-expanded.
   sidebarToggle.addEventListener("click", () => {
     const collapsed = shell.classList.toggle("collapsed");

@@ -2,10 +2,14 @@
 //! the page sends back. Plain serde types, JSON tagged by "type". `Mirror` is the producer: it compares the core
 //! state (Transcript, RunState, BarInput) with what the page already has and returns only the events that changed.
 
+use std::path::Path;
+use std::time::UNIX_EPOCH;
+
 use serde::{Deserialize, Serialize};
 
 use crate::api::Role;
 use crate::recent_folders::RecentFolder;
+use crate::session_view;
 use crate::ui_state::{BarInput, Entry, RunState, Transcript};
 use crate::usage_poll::UsageMeter;
 
@@ -171,6 +175,79 @@ impl StateView {
     }
 }
 
+// One past session of a Claude Code project dir: the row that resumes it. first is its first prompt in one line;
+// used is the transcript's modified time in unix seconds.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PastSession {
+    pub id: String,
+    pub turns: usize,
+    pub first: String,
+    pub used: u64,
+}
+
+// How many past sessions the sidebar lists under a folder.
+pub const MAX_PAST: usize = 10;
+
+// The past sessions of the project dir of cwd under home, newest first (session_view::list_sessions lists only the
+// sessions that hold a prompt).
+pub fn past_sessions(home: &Path, cwd: &str) -> Vec<PastSession> {
+    session_view::list_sessions(&session_view::project_dir(home, cwd))
+        .into_iter()
+        .take(MAX_PAST)
+        .map(|s| PastSession {
+            id: s.id,
+            turns: s.turns,
+            first: s
+                .first
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(60)
+                .collect(),
+            used: s
+                .modified
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+        })
+        .collect()
+}
+
+// What opening a sidebar row does: the mode, the engine cwd (a code folder, or a chat scratch dir under chat_root)
+// and the session to resume (empty when the dir has none yet). None when the row is not one to open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenPlan {
+    pub mode: Mode,
+    pub cwd: String,
+    pub id: String,
+}
+
+// Plans open_session. An empty id takes the newest past session of the folder.
+pub fn open_plan(
+    mode: Mode,
+    folder: &str,
+    id: &str,
+    home: &Path,
+    chat_root: &Path,
+) -> Option<OpenPlan> {
+    if folder.is_empty() || (mode == Mode::Chat && !Path::new(folder).starts_with(chat_root)) {
+        return None;
+    }
+    let id = if id.is_empty() {
+        past_sessions(home, folder)
+            .first()
+            .map(|s| s.id.clone())
+            .unwrap_or_default()
+    } else {
+        id.to_string()
+    };
+    Some(OpenPlan {
+        mode,
+        cwd: folder.to_string(),
+        id,
+    })
+}
+
 // A message to the page (Rust -> JS). entry_cut keeps the first `len` rows.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -199,13 +276,17 @@ pub enum Event {
     Note {
         text: String,
     },
-    // The session on screen. mode None = the start screen. folder is the code cwd ("" for chat). recent = the recent
-    // folders (code); chats = the chat scratch dirs, newest first (used = the dir's mtime).
+    // The session on screen. mode None = the start screen. folder is the code cwd ("" for chat); cwd is the engine's
+    // dir (the scratch dir for chat); home shortens paths to ~. recent = the recent folders (code); chats = the chat
+    // scratch dirs, newest first (used = the dir's mtime); sessions = the past sessions of the code folder on screen.
     Session {
         mode: Option<Mode>,
         folder: String,
+        cwd: String,
+        home: String,
         recent: Vec<RecentFolder>,
         chats: Vec<RecentFolder>,
+        sessions: Vec<PastSession>,
     },
     // The /usage numbers for the sidebar footer; None until a /usage answer parses. Sent only when it changes.
     Usage {
@@ -275,6 +356,14 @@ pub enum Command {
     },
     // Opens the native folder dialog; a picked folder starts a code session.
     OpenFolder,
+    // Opens a past session (a sidebar row): its folder (code) or chat scratch dir becomes the engine cwd, and its
+    // transcript is loaded and installed to resume. An empty id takes the newest session there.
+    OpenSession {
+        mode: Mode,
+        folder: String,
+        #[serde(default)]
+        id: String,
+    },
     // Opens the /usage window (the sidebar meter's click). Needs a running session; nothing happens without one.
     Usage,
 }
@@ -434,23 +523,35 @@ mod tests {
             path: "/h/.chaude/chat/c1".into(),
             used: 9,
         }];
+        let sessions = vec![PastSession {
+            id: "s1".into(),
+            turns: 2,
+            first: "hi".into(),
+            used: 5,
+        }];
         assert_eq!(
             json(&Event::Session {
                 mode: Some(Mode::Code),
                 folder: "/w/a".into(),
+                cwd: "/w/a".into(),
+                home: "/h".into(),
                 recent: recent.clone(),
                 chats: chats.clone(),
+                sessions: sessions.clone(),
             }),
-            r#"{"type":"session","mode":"code","folder":"/w/a","recent":[{"path":"/w/a","used":7}],"chats":[{"path":"/h/.chaude/chat/c1","used":9}]}"#
+            r#"{"type":"session","mode":"code","folder":"/w/a","cwd":"/w/a","home":"/h","recent":[{"path":"/w/a","used":7}],"chats":[{"path":"/h/.chaude/chat/c1","used":9}],"sessions":[{"id":"s1","turns":2,"first":"hi","used":5}]}"#
         );
         assert_eq!(
             json(&Event::Session {
                 mode: None,
                 folder: String::new(),
+                cwd: String::new(),
+                home: "/h".into(),
                 recent,
                 chats: Vec::new(),
+                sessions: Vec::new(),
             }),
-            r#"{"type":"session","mode":null,"folder":"","recent":[{"path":"/w/a","used":7}],"chats":[]}"#
+            r#"{"type":"session","mode":null,"folder":"","cwd":"","home":"/h","recent":[{"path":"/w/a","used":7}],"chats":[],"sessions":[]}"#
         );
     }
 
@@ -504,6 +605,22 @@ mod tests {
             }
         );
         assert_eq!(parse(r#"{"type":"open_folder"}"#), Command::OpenFolder);
+        assert_eq!(
+            parse(r#"{"type":"open_session","mode":"code","folder":"/w/a","id":"s1"}"#),
+            Command::OpenSession {
+                mode: Mode::Code,
+                folder: "/w/a".into(),
+                id: "s1".into()
+            }
+        );
+        assert_eq!(
+            parse(r#"{"type":"open_session","mode":"chat","folder":"/h/.chaude/chat/c1"}"#),
+            Command::OpenSession {
+                mode: Mode::Chat,
+                folder: "/h/.chaude/chat/c1".into(),
+                id: String::new()
+            }
+        );
         assert!(serde_json::from_str::<Command>(r#"{"type":"start","mode":"x"}"#).is_err());
     }
 
@@ -635,6 +752,79 @@ mod tests {
             ["picker_close", "note"]
         );
         assert!(m.sync(&t, idle(), &[], Some("")).is_empty());
+    }
+
+    #[test]
+    fn open_plan_sets_mode_cwd_and_the_session_to_resume() {
+        use std::time::{Duration, SystemTime};
+        let home = std::env::temp_dir().join(format!("chaude-bridge-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let cwd = "/w/proj";
+        let dir = session_view::project_dir(&home, cwd);
+        std::fs::create_dir_all(&dir).unwrap();
+        let line = |p: &str| {
+            format!(
+                "{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"{p}\"}}}}\n{{\"type\":\"assistant\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"ok\"}}]}}}}\n"
+            )
+        };
+        let old = dir.join("old.jsonl");
+        let new = dir.join("new.jsonl");
+        std::fs::write(&old, line("first old prompt")).unwrap();
+        std::fs::write(&new, line("newest prompt")).unwrap();
+        let now = SystemTime::now();
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(now - Duration::from_secs(600))
+            .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&new)
+            .unwrap()
+            .set_modified(now)
+            .unwrap();
+        let chat_root = home.join(".chaude").join("chat");
+        let scratch = chat_root.join("c1").display().to_string();
+
+        let past = past_sessions(&home, cwd);
+        assert_eq!(
+            past.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            ["new", "old"]
+        );
+        assert_eq!(past[0].first, "newest prompt");
+        assert_eq!(past[0].turns, 1);
+
+        // A code folder with no id resumes its newest session; an explicit id is kept.
+        assert_eq!(
+            open_plan(Mode::Code, cwd, "", &home, &chat_root),
+            Some(OpenPlan {
+                mode: Mode::Code,
+                cwd: cwd.into(),
+                id: "new".into()
+            })
+        );
+        assert_eq!(
+            open_plan(Mode::Code, cwd, "old", &home, &chat_root),
+            Some(OpenPlan {
+                mode: Mode::Code,
+                cwd: cwd.into(),
+                id: "old".into()
+            })
+        );
+        // A chat scratch dir keeps chat mode and its own cwd; with no session there the id is empty.
+        assert_eq!(
+            open_plan(Mode::Chat, &scratch, "", &home, &chat_root),
+            Some(OpenPlan {
+                mode: Mode::Chat,
+                cwd: scratch.clone(),
+                id: String::new()
+            })
+        );
+        // Not a chat dir, or no folder: nothing is opened.
+        assert_eq!(open_plan(Mode::Chat, cwd, "", &home, &chat_root), None);
+        assert_eq!(open_plan(Mode::Code, "", "", &home, &chat_root), None);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     fn kinds_of(evs: &[Event]) -> Vec<&'static str> {

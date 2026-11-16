@@ -8,9 +8,12 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use chaude_core::api::{Config, EngineHandle, InterruptSource, UiEvent};
-use chaude_core::gui_bridge::{Command, Event, Mirror, Mode, PermissionView, StateView};
+use chaude_core::gui_bridge::{
+    Command, Event, Mirror, Mode, PastSession, PermissionView, StateView, open_plan, past_sessions,
+};
 use chaude_core::handoff::session_mode_note;
 use chaude_core::i18n::{self, Msg};
+use chaude_core::osenv;
 use chaude_core::recent_folders::{self, RecentFolder};
 use chaude_core::settings::pickers;
 use chaude_core::slash;
@@ -46,6 +49,11 @@ pub struct Front {
     config: PathBuf,
     // The session on screen: its mode and the code folder ("" for chat). None = the start screen.
     session: Option<(Mode, String)>,
+    // The engine's dir (the scratch dir for chat), the user's home (paths show as ~) and the past sessions of the
+    // code folder on screen (the sidebar lists them under it).
+    cwd: String,
+    home: String,
+    sessions: Vec<PastSession>,
     // Recent folders, newest first, as recent.json holds them.
     recent: Vec<RecentFolder>,
     // Chat scratch dirs, newest first (the sidebar's chats).
@@ -80,6 +88,9 @@ impl Front {
             mirror: Mirror::default(),
             config,
             session: None,
+            cwd: String::new(),
+            home: osenv::home_dir().display().to_string(),
+            sessions: Vec::new(),
             recent,
             chats,
             sent_session: None,
@@ -106,13 +117,27 @@ impl Front {
                 Ok(PathBuf::from(folder))
             }
         };
+        self.enter(mode, folder, cwd, now);
+    }
+
+    // Puts a session on screen (folder is the code folder, "" for chat): the old engine stops, the state resets and the
+    // engine starts in cwd. A failed cwd (no scratch dir) shows as an error row.
+    fn enter(&mut self, mode: Mode, folder: &str, cwd: Result<PathBuf, String>, now: Instant) {
         if let Some(old) = self.engine.take() {
             old.shutdown();
         }
         self.rx = None;
         self.state = GuiState::default();
+        self.cwd.clear();
+        self.sessions.clear();
         match cwd {
-            Ok(cwd) => self.boot(cwd, mode == Mode::Chat, now),
+            Ok(cwd) => {
+                self.cwd = cwd.display().to_string();
+                if mode == Mode::Code {
+                    self.sessions = past_sessions(&osenv::home_dir(), folder);
+                }
+                self.boot(cwd, mode == Mode::Chat, now);
+            }
             Err(e) => self.state.apply(UiEvent::Error(e), now),
         }
         self.session = Some((
@@ -123,6 +148,32 @@ impl Front {
             },
         ));
         self.was_busy = false;
+    }
+
+    // Opens a past session (a sidebar row): its folder or chat scratch dir becomes the engine cwd, and the session's
+    // transcript is shown and installed for the next prompt, as /import does. A dir with no session starts empty.
+    fn open_session(&mut self, mode: Mode, folder: &str, id: &str, now: Instant) {
+        let chat_root = self.config.join("chat");
+        let Some(plan) = open_plan(mode, folder, id, &osenv::home_dir(), &chat_root) else {
+            return;
+        };
+        if mode == Mode::Code
+            && let Ok(rows) = recent_folders::touch(
+                &recent_folders::recent_file(&self.config),
+                folder,
+                now_secs(),
+            )
+        {
+            self.recent = rows;
+        }
+        self.enter(mode, folder, Ok(PathBuf::from(&plan.cwd)), now);
+        if plan.id.is_empty() {
+            self.state
+                .transcript
+                .push_notice("no past session in this folder yet".to_string());
+        } else if let (Some(imp), Some(engine)) = (self.state.import(&plan.id), &self.engine) {
+            engine.install_import(imp);
+        }
     }
 
     // Starts the engine in cwd and fills the state the TUI shows at start (the killed-run notice and the session note).
@@ -172,8 +223,11 @@ impl Front {
         Event::Session {
             mode,
             folder,
+            cwd: self.cwd.clone(),
+            home: self.home.clone(),
             recent: self.recent.clone(),
             chats: self.chats.clone(),
+            sessions: self.sessions.clone(),
         }
     }
 
@@ -206,6 +260,9 @@ impl Front {
                         self.submit(&text);
                     }
                 }
+            }
+            Command::OpenSession { mode, folder, id } => {
+                self.open_session(mode, &folder, &id, now);
             }
             Command::OpenFolder => {
                 if let Some(dir) = rfd::FileDialog::new().pick_folder() {
@@ -493,8 +550,11 @@ mod tests {
         assert!(first.contains(&Event::Session {
             mode: None,
             folder: String::new(),
+            cwd: String::new(),
+            home: osenv::home_dir().display().to_string(),
             recent: Vec::new(),
             chats: Vec::new(),
+            sessions: Vec::new(),
         }));
         let again = f.pump(now);
         assert!(!again.iter().any(|e| matches!(e, Event::Session { .. })));
@@ -525,6 +585,28 @@ mod tests {
             }
             other => panic!("not a session event: {other:?}"),
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_session_ignores_a_chat_row_outside_the_chat_dir() {
+        let (mut f, dir) = front("open-session");
+        let now = Instant::now();
+        let out = f.command(
+            Command::OpenSession {
+                mode: Mode::Chat,
+                folder: "/w/proj".into(),
+                id: String::new(),
+            },
+            now,
+        );
+        // No session starts, so no engine and no session on screen; the page still gets the state.
+        assert!(f.session.is_none());
+        assert!(f.engine.is_none());
+        assert!(
+            !out.iter()
+                .any(|e| matches!(e, Event::Session { mode: Some(_), .. }))
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
