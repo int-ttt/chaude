@@ -616,13 +616,17 @@ impl App {
                 if let Some(meter) = chaude_core::usage_poll::usage_meter(&text) {
                     self.bar.usage = Some(chaude_core::usage_poll::meter_text(&meter));
                 }
-                let (w, h) = self.usage_geom();
-                let text = if text.trim().is_empty() {
-                    t(Msg::UsageEmpty).to_string()
-                } else {
-                    render::decorate_usage(&text, self.bar.tokens as i64)
-                };
-                self.usage.set_text(&text, w, h);
+                // The sidebar meter's background run also sends this; only a window that is open takes the text
+                // (a closed /usage window must not reopen on a refresh; GUI state.rs drops it the same way).
+                if self.usage.is_open() {
+                    let (w, h) = self.usage_geom();
+                    let text = if text.trim().is_empty() {
+                        t(Msg::UsageEmpty).to_string()
+                    } else {
+                        render::decorate_usage(&text, self.bar.tokens as i64)
+                    };
+                    self.usage.set_text(&text, w, h);
+                }
             }
             // While the window waits for /usage, its failure goes into the window (Go usageFetch).
             // Go repl.go stage(): one grey note per stage change, then a blank row (Go note block adds "").

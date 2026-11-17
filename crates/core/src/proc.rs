@@ -1,14 +1,14 @@
 // One `claude -p` child in stream-json mode. Argv mirrors sessionArgs, env mirrors cleanEnv and withCacheTTL,
-// stderr is discarded like cmd.Stderr = nil, and the stdin frames match Send, RespondPermission and Interrupt
+// stderr keeps only its last bytes (exit_note), so a child that exits early says why. The stdin frames match Send, RespondPermission and Interrupt
 // in Go tree (v0.11.2) internal/harness/core.go. Owned types only: no lifetimes.
 
 use std::fs;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -189,10 +189,16 @@ pub fn one_shot_usage(claude_bin: &str, cwd: &Path) -> Result<String, Error> {
         .ok_or_else(|| Error::Msg("usage: no result".to_string()))
 }
 
+// Last bytes of claude's stderr kept for exit_note.
+const STDERR_TAIL: usize = 4096;
+
 pub struct ClaudeProc {
     child: Child,
     // None once finish() has closed the child's stdin.
     stdin: Option<ChildStdin>,
+    stderr: Arc<Mutex<Vec<u8>>>,
+    // Set by the stderr thread at its EOF, so exit_note reads the tail only once it is complete.
+    stderr_done: Arc<AtomicBool>,
 }
 
 // Every drop path reaps the child (quit, panic unwind, a dropped slot). After finish() or kill() the child is
@@ -215,7 +221,7 @@ pub fn spawn<T: Send + 'static>(
         .args(budget_args(opts.max_budget_usd))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     if let Some(dir) = &opts.cwd {
         cmd.current_dir(dir);
     }
@@ -229,6 +235,26 @@ pub fn spawn<T: Send + 'static>(
         .stdout
         .take()
         .ok_or_else(|| io::Error::other("claude stdout not piped"))?;
+    let mut err = child
+        .stderr
+        .take()
+        .ok_or_else(|| io::Error::other("claude stderr not piped"))?;
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let stderr_done = Arc::new(AtomicBool::new(false));
+    let (tail, done) = (stderr.clone(), stderr_done.clone());
+    thread::spawn(move || {
+        let mut buf = [0u8; 1024];
+        while let Ok(n) = err.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            let mut t = tail.lock().unwrap_or_else(|e| e.into_inner());
+            t.extend_from_slice(&buf[..n]);
+            let over = t.len().saturating_sub(STDERR_TAIL);
+            t.drain(..over);
+        }
+        done.store(true, Ordering::SeqCst);
+    });
     thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             let Ok(line) = line else { break };
@@ -245,6 +271,8 @@ pub fn spawn<T: Send + 'static>(
     Ok(ClaudeProc {
         child,
         stdin: Some(stdin),
+        stderr,
+        stderr_done,
     })
 }
 
@@ -307,6 +335,28 @@ impl ClaudeProc {
             thread::sleep(Duration::from_millis(20));
         }
         self.kill();
+    }
+
+    // Why the child ended: its exit status and the last stderr bytes. Reaps the child, so call it after the
+    // child's stdout hit EOF and before kill().
+    pub fn exit_note(&mut self) -> String {
+        let status = match self.child.wait() {
+            Ok(s) => s.to_string(),
+            Err(e) => format!("wait failed: {e}"),
+        };
+        let deadline = Instant::now() + Duration::from_millis(200);
+        while !self.stderr_done.load(Ordering::SeqCst) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        let tail = {
+            let t = self.stderr.lock().unwrap_or_else(|e| e.into_inner());
+            String::from_utf8_lossy(&t).trim().to_string()
+        };
+        if tail.is_empty() {
+            status
+        } else {
+            format!("{status}: {tail}")
+        }
     }
 
     // Kills the child and reaps it. Errors are ignored: the child may already have exited.
@@ -506,6 +556,8 @@ mod tests {
         let mut p = ClaudeProc {
             child,
             stdin: Some(stdin),
+            stderr: Arc::new(Mutex::new(Vec::new())),
+            stderr_done: Arc::new(AtomicBool::new(true)),
         };
         p.write_permission("r1", false, Value::Null, "denied: session is draining")
             .unwrap();
@@ -538,6 +590,8 @@ mod tests {
             let _p = ClaudeProc {
                 child,
                 stdin: Some(stdin),
+                stderr: Arc::new(Mutex::new(Vec::new())),
+                stderr_done: Arc::new(AtomicBool::new(true)),
             };
             panic!("unwind with a live child");
         }));
@@ -569,6 +623,8 @@ mod tests {
         let mut p = ClaudeProc {
             child,
             stdin: Some(stdin),
+            stderr: Arc::new(Mutex::new(Vec::new())),
+            stderr_done: Arc::new(AtomicBool::new(true)),
         };
         p.finish(Duration::from_secs(10));
         let body = std::fs::read_to_string(&out).unwrap_or_default();
@@ -650,5 +706,39 @@ mod tests {
             "ran in {ran_in}"
         );
         assert!(!tmp_layout::test_dir(cwd).join(&dir).exists());
+    }
+
+    // A child that exits before answering (bad --resume) must say why: exit status and its stderr, not a bare
+    // "claude exited".
+    #[test]
+    fn exit_note_carries_the_exit_status_and_stderr() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = crate::testutil::TempDir::new("proc-exit-note");
+        let bin = tmp.path().join("fake-claude");
+        let script = "#!/bin/sh\necho 'No conversation found with session ID: s1' >&2\nexit 1\n";
+        fs::write(&bin, script).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let opts = SpawnOpts {
+            claude_bin: bin.to_string_lossy().into_owned(),
+            model: "opus".to_string(),
+            resume: Some("s1".to_string()),
+            cwd: Some(tmp.path().to_path_buf()),
+            cache_ttl: String::new(),
+            compact_window: 0,
+            max_budget_usd: 0.0,
+            shape: Shape::default(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel::<ProcMsg>();
+        let mut p = spawn(&opts, tx, |m| m).unwrap();
+        assert!(matches!(rx.recv().unwrap(), ProcMsg::Eof));
+
+        let note = p.exit_note();
+        p.kill();
+
+        assert!(note.contains("exit status: 1"), "{note}");
+        assert!(
+            note.contains("No conversation found with session ID: s1"),
+            "{note}"
+        );
     }
 }

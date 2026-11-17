@@ -522,6 +522,8 @@ pub struct Config {
     pub prompter_timeout: Duration,
     // Go exit_handoff.go: JSON of this run's session ids, written on shutdown or disconnect. None = off.
     pub handoff_path: Option<PathBuf>,
+    // Home that holds claude's project transcripts (a resume needs one). None = the user's home.
+    pub claude_home: Option<PathBuf>,
     // Go --max-workers (env CHAUDE_MAX_WORKERS): cap on concurrent live worker sessions. Resolve with
     // resolve_max_workers. No engine effect yet: the Rust engine runs no worker pool.
     pub max_workers: usize,
@@ -633,6 +635,7 @@ impl Default for Config {
             tui_timeout: Duration::from_secs(120),
             prompter_timeout: Duration::from_secs(60),
             handoff_path: None,
+            claude_home: None,
             max_workers: DEFAULT_MAX_WORKERS,
             max_auto_rotations: -1,
             tail_turns: 4,
@@ -1457,15 +1460,27 @@ fn actor(
                 .collect();
         }
         let main_thr = threshold_for(&cfg.model, cfg.rotate_threshold);
+        let home = cfg
+            .claude_home
+            .clone()
+            .unwrap_or_else(crate::osenv::home_dir);
+        let cwd = cfg
+            .cwd
+            .as_deref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if let handoff::Load::Resume(sid) =
             handoff::resume_mode(&prev, handoff::MAIN_ROLE, killed, main_thr)
             && cfg.resume.is_none()
+            && handoff::has_transcript(&home, &cwd, &sid)
         {
             main_resume = Some(sid);
         }
         let res_thr = threshold_for("haiku", cfg.rotate_threshold);
         for role in prev.resident_sessions.keys() {
-            if let handoff::Load::Resume(sid) = handoff::resume_mode(&prev, role, killed, res_thr) {
+            if let handoff::Load::Resume(sid) = handoff::resume_mode(&prev, role, killed, res_thr)
+                && handoff::has_transcript(&home, &cwd, &sid)
+            {
                 resume_pending.insert(role.clone(), sid);
             }
         }

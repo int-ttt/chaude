@@ -288,6 +288,22 @@ mod tests {
         assert_eq!(app.transcript.len(), before + 2);
     }
 
+    // Regression: the sidebar meter's background run also sends UiEvent::Usage. With the window closed (e.g. after
+    // /resume) that must update the bar only and must not reopen /usage by itself.
+    #[test]
+    fn meter_refresh_does_not_reopen_closed_window() {
+        let mut app = App::new(W, H);
+        assert!(!app.usage.is_open());
+        app.apply(UiEvent::Usage {
+            text: "Current session: 45% used\n".to_string(),
+        });
+        assert!(
+            !app.usage.is_open(),
+            "closed window reopened by meter refresh"
+        );
+        assert!(app.transcript.is_empty());
+    }
+
     // The answer is decorated with the context bar (Go usageFetch -> decorateUsage) and kept off the transcript.
     #[test]
     fn usage_event_fills_window_and_error_goes_to_window_while_pending() {

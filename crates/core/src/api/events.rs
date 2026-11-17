@@ -233,10 +233,15 @@ impl State {
         self.interrupted_at = None;
         self.stray_results = 0;
         self.handoff = None;
-        self.emit(UiEvent::Error("claude exited".to_string()));
-        if let Some(mut p) = self.proc.take() {
+        let why = self.proc.take().map(|mut p| {
+            let note = p.exit_note();
             p.kill();
-        }
+            note
+        });
+        self.emit(UiEvent::Error(match why {
+            Some(note) => format!("claude exited ({note})"),
+            None => "claude exited".to_string(),
+        }));
         self.queue.clear();
         self.emit_queue();
         if self.busy() {

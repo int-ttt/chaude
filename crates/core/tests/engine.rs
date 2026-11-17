@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use chaude_core::api::{CoderContext, Config, Engine, InterruptSource, Role, UiEvent};
 use chaude_core::clients::{ClientRegistry, PARKED};
 use chaude_core::handoff;
-use chaude_core::import_claude::ClaudeImport;
+use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::resident::StagePhase;
 
 // Scripts are written and exec'd per test; serializing tests avoids ETXTBSY races.
@@ -668,6 +668,30 @@ fn try_start_returns_the_spawn_failure() {
     };
     let err = Engine::try_start(cfg).err().expect("spawn error returned");
     assert!(!err.is_empty(), "spawn error text: {err}");
+}
+
+// Fresh launch with the real defaults (residents on): the main child must still take the first prompt after
+// boot. A resident spawn that takes or drops the main child shows as an Error (claude exited / not running).
+#[test]
+fn main_child_takes_first_prompt_after_resident_boot() {
+    let _g = lock();
+    let f = fake("resident-boot", &["text_turn.jsonl"]);
+    let cfg = Config {
+        residents: true,
+        ..config(&f)
+    };
+    let (h, rx) = Engine::try_start(cfg).expect("engine boots");
+    h.submit("hi");
+    let evs = until_idle(&rx);
+    assert!(
+        !evs.iter().any(|e| matches!(e, UiEvent::Error(_))),
+        "{evs:?}"
+    );
+    assert!(
+        evs.contains(&UiEvent::MessageDone { role: Role::Main }),
+        "{evs:?}"
+    );
+    h.shutdown();
 }
 
 #[test]
@@ -4100,7 +4124,15 @@ fn killed_previous_run_starts_main_with_resume() {
         ..Default::default()
     };
     handoff::write_exit_handoff(&handoff::live_handoff_file(&path), &live).unwrap();
-    let mut cfg = config(&f);
+    // claude keeps a session's transcript under its project dir; the resume needs it to exist.
+    let home = temp_dir("resume_killed_home");
+    let proj = import_claude::claude_project_dir_in(&home, &f.dir.to_string_lossy());
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(proj.join("old1.jsonl"), "{}\n").unwrap();
+    let mut cfg = Config {
+        claude_home: Some(home),
+        ..config(&f)
+    };
     cfg.cwd = Some(f.dir.clone());
     cfg.handoff_path = Some(path.clone());
     let (h, rx) = Engine::start(cfg);
@@ -4125,6 +4157,32 @@ fn clean_exit_above_threshold_starts_fresh() {
     };
     handoff::write_exit_handoff(&path, &prev).unwrap();
     let mut cfg = config(&f);
+    cfg.cwd = Some(f.dir.clone());
+    cfg.handoff_path = Some(path.clone());
+    let (h, rx) = Engine::start(cfg);
+    h.submit("go");
+    until_idle(&rx);
+    h.shutdown();
+    let args = fs::read_to_string(f.dir.join("args.log")).expect("main child ran");
+    assert!(!args.contains("--resume"), "{args}");
+}
+
+// A previous session below the threshold resumes only when claude has its transcript. A recorded id with no
+// transcript (claude never wrote a turn) must start fresh; `--resume` on it made claude exit at once.
+#[test]
+fn resume_skipped_when_the_previous_session_has_no_transcript() {
+    let _g = lock();
+    let f = fake("resume_no_transcript", &["text_turn.jsonl"]);
+    let path = f.dir.join(".exit-handoff.json");
+    let prev = handoff::ExitHandoff {
+        main_session: "s-never-written".into(),
+        ..Default::default()
+    };
+    handoff::write_exit_handoff(&path, &prev).unwrap();
+    let mut cfg = Config {
+        claude_home: Some(temp_dir("resume_no_transcript_home")),
+        ..config(&f)
+    };
     cfg.cwd = Some(f.dir.clone());
     cfg.handoff_path = Some(path.clone());
     let (h, rx) = Engine::start(cfg);

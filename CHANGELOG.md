@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- core: a session with no transcript is no longer resumed at startup (claude exits at once on `--resume` for a session that never ran a turn), which fixes "claude exited" on launch.
+  - core: 전사(transcript)가 없는 세션은 시작할 때 이어 쓰지 않습니다(한 턴도 돌지 않은 세션에 `--resume`을 주면 claude가 바로 종료해 시작할 때 "claude exited"가 나왔습니다).
+- core: when claude exits, the error shows its exit status and the last lines of its stderr (`claude exited (exit status: 1: ...)`) instead of a bare "claude exited".
+  - core: claude가 종료하면 오류에 종료 상태와 stderr 마지막 줄이 함께 나옵니다(예: `claude exited (exit status: 1: ...)`). 이전에는 "claude exited"만 보였습니다.
+- tui: a usage meter refresh no longer reopens a /usage window you closed.
+  - tui: 사용량 미터 갱신이 닫아 둔 /usage 창을 다시 열지 않습니다.
 - gui: the sidebar folder rows no longer list past sessions under them (no sub-rows and no "more" toggle), and opening a folder no longer reads its session files. Chat rows and folder rows still open as before.
   - gui: 사이드바의 폴더 행 아래에 지난 세션이 나열되지 않습니다(하위 항목과 "more" 토글 없음). 폴더를 열 때 세션 파일을 읽지 않습니다. 채팅 행과 폴더 행은 전과 같이 열립니다.
 - gui: New chat makes its scratch dir, sidebar entry and recent record only when the first non-empty message is sent; an empty New chat just shows the centered composer. The open folder's past sessions list only the user's top-level sessions (sub-agent, empty and harness-sent ones such as rotation carry-overs, prompter summaries and handoff notes are left out), the newest 5 with a "more" toggle, each row showing its first prompt (truncated) and date.

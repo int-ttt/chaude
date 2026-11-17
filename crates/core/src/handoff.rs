@@ -286,6 +286,15 @@ pub fn resume_mode(prev: &ExitHandoff, role: &str, killed: bool, threshold: u64)
     }
 }
 
+// claude writes a session's transcript only after its first turn. A recorded id with no transcript under the
+// project dir of `cwd` cannot be resumed: claude exits at once ("No conversation found with session ID"), so
+// such a session starts fresh instead.
+pub fn has_transcript(home: &Path, cwd: &str, sid: &str) -> bool {
+    crate::import_claude::claude_project_dir_in(home, cwd)
+        .join(format!("{sid}.jsonl"))
+        .is_file()
+}
+
 // Which mode the previous session loads with, as core decides it at start (resume_mode, same inputs).
 // None when there is no previous run, or when --resume was given explicitly (core takes that one as is).
 pub fn session_mode_note(
@@ -867,5 +876,19 @@ mod tests {
         assert!(pid_alive(1), "pid 1 is alive even when not ours (EPERM)");
         assert!(!pid_alive(0));
         assert!(!pid_alive(u32::MAX));
+    }
+
+    // A session id with no transcript (claude never wrote its first turn) must not be resumed: claude exits
+    // on `--resume <id>` with "No conversation found", which left the user with a silent "claude exited".
+    #[test]
+    fn resume_needs_the_transcript_under_the_cwd_project_dir() {
+        let home = TempDir::new("handoff-transcript");
+        let cwd = "/work/proj";
+        let proj = crate::import_claude::claude_project_dir_in(home.path(), cwd);
+        fs::create_dir_all(&proj).unwrap();
+        fs::write(proj.join("s-real.jsonl"), "{}\n").unwrap();
+        assert!(has_transcript(home.path(), cwd, "s-real"));
+        assert!(!has_transcript(home.path(), cwd, "s-never-written"));
+        assert!(!has_transcript(home.path(), "/other/cwd", "s-real"));
     }
 }
