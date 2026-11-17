@@ -225,8 +225,12 @@ pub fn ensure_project_settings(cwd: &Path, home: Option<&Path>) -> io::Result<bo
     }
 }
 
-/// Name of the version record in chaude's state dir: the version the last startup ran with.
+/// Name of the global version record in chaude's state dir: the version the last startup ran with. Older builds read
+/// it; the refresh decision reads the per-project stamp instead.
 const VERSION_FILE: &str = "version";
+
+/// Name of the per-project stamp in `<cwd>/.claude`: the chaude version that last refreshed this project.
+const PROJECT_STAMP: &str = ".chaude-version";
 
 /// The guard settings text for this platform: the posix form, or the windows form with `hook_python`.
 pub fn guard_settings_text() -> io::Result<String> {
@@ -237,61 +241,159 @@ pub fn guard_settings_text() -> io::Result<String> {
     }
 }
 
-/// Startup version check. When the record in `state` is not `current` (or there is none), the chaude guard groups in
-/// `<cwd>/.claude/settings.json` are replaced with `guard` (see `reset_guard_settings`), the shipped agent and hook
-/// files are overwritten with their embedded copies where they differ (see `overwrite_shipped`), and `current` is
-/// recorded. The record is written only after a successful reset, so a failed reset runs again on the next start.
-/// cwd == home is not reset (that is the user-global .claude), but the version is still recorded. Returns true when a
-/// reset ran. Update state: none is persisted (the update check always fetches live), so there is nothing to clear.
+/// Startup version check, per project. When `<cwd>/.claude/.chaude-version` is not `current` (or missing), the chaude
+/// guard groups in `<cwd>/.claude/settings.json` are replaced with `guard` (see `reset_guard_settings`), the shipped
+/// agent, hook and script files are overwritten with their embedded copies where they differ (see `overwrite_shipped`),
+/// and `current` is written to the stamp. The stamp is written only after a successful refresh, so a failed one runs
+/// again on the next start. cwd == home is not refreshed (that is the user-global .claude). Returns the files that were
+/// overwritten or created (empty when nothing changed). `state` still gets the global record of `current`, for older
+/// builds. Update state: none is persisted (the update check always fetches live), so there is nothing to clear.
 pub fn refresh_on_version_change(
     state: &Path,
     cwd: &Path,
     home: Option<&Path>,
     current: &str,
     guard: &str,
-) -> io::Result<bool> {
-    let record = state.join(VERSION_FILE);
-    if fs::read_to_string(&record).is_ok_and(|v| v.trim() == current) {
-        return Ok(false);
-    }
+) -> io::Result<Vec<PathBuf>> {
+    let mut changed = Vec::new();
     let project = !cwd.as_os_str().is_empty() && !home.is_some_and(|h| same_dir(cwd, h));
     if project {
         let claude = cwd.join(".claude");
-        reset_guard_settings(&claude.join("settings.json"), guard)?;
-        overwrite_shipped(cwd)?;
+        let stamp = claude.join(PROJECT_STAMP);
+        if !fs::read_to_string(&stamp).is_ok_and(|v| v.trim() == current) {
+            let settings = claude.join("settings.json");
+            if reset_guard_settings(&settings, guard)? {
+                changed.push(settings);
+            }
+            changed.extend(overwrite_shipped(cwd)?);
+            fs::create_dir_all(&claude)?;
+            fs::write(&stamp, format!("{current}\n"))?;
+        }
     }
     fs::create_dir_all(state)?;
-    fs::write(&record, format!("{current}\n"))?;
-    Ok(project)
+    fs::write(state.join(VERSION_FILE), format!("{current}\n"))?;
+    Ok(changed)
 }
 
 /// Overwrites each shipped file under `cwd` (the AGENTS, GUARD_FILES and SCRIPTS set that `ensure_project_settings`
-/// copies) whose content differs from the embedded copy. Files outside that set are never touched.
-fn overwrite_shipped(cwd: &Path) -> io::Result<()> {
+/// copies) whose content differs from the embedded copy, or that is missing. Returns those files. Files outside that
+/// set are never touched.
+fn overwrite_shipped(cwd: &Path) -> io::Result<Vec<PathBuf>> {
     let claude = cwd.join(".claude");
+    let mut changed = Vec::new();
     for (name, body) in AGENTS {
-        overwrite_if_differs(body, &claude.join("agents").join(name))?;
+        let dst = claude.join("agents").join(name);
+        if overwrite_if_differs(body, &dst)? {
+            changed.push(dst);
+        }
     }
     for name in GUARD_FILES {
         let body = embedded_hook(name)
             .ok_or_else(|| io::Error::other(format!("chaude: embedded hook missing: {name}")))?;
-        overwrite_if_differs(body, &claude.join("hooks").join(name))?;
+        let dst = claude.join("hooks").join(name);
+        if overwrite_if_differs(body, &dst)? {
+            changed.push(dst);
+        }
     }
     for (name, body) in SCRIPTS {
-        overwrite_if_differs(body, &cwd.join("scripts").join(name))?;
+        let dst = cwd.join("scripts").join(name);
+        if overwrite_if_differs(body, &dst)? {
+            changed.push(dst);
+        }
     }
-    Ok(())
+    Ok(changed)
 }
 
-/// Writes `body` to `dst` (creating its folder) unless `dst` already holds exactly `body`.
-fn overwrite_if_differs(body: &[u8], dst: &Path) -> io::Result<()> {
+/// Writes `body` to `dst` (creating its folder) unless `dst` already holds exactly `body`. True when it wrote.
+fn overwrite_if_differs(body: &[u8], dst: &Path) -> io::Result<bool> {
     if fs::read(dst).is_ok_and(|old| old == body) {
-        return Ok(());
+        return Ok(false);
     }
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(dst, body)
+    fs::write(dst, body)?;
+    Ok(true)
+}
+
+/// The startup line for a project at `cwd` (TUI and GUI show it once): the per-project refresh for `current`, then the
+/// notice from `refresh_notice`. None when nothing changed, or when the project was just set up (no settings.json yet).
+pub fn startup_refresh(
+    cwd: &Path,
+    home: Option<&Path>,
+    current: &str,
+) -> io::Result<Option<String>> {
+    let guard = guard_settings_text()?;
+    refresh_notice_at(&osenv::state_dir(), cwd, home, current, &guard)
+}
+
+// startup_refresh with the state dir passed in. A project with no .claude/settings.json yet is set up, not updated:
+// its files are written but nothing is announced.
+fn refresh_notice_at(
+    state: &Path,
+    cwd: &Path,
+    home: Option<&Path>,
+    current: &str,
+    guard: &str,
+) -> io::Result<Option<String>> {
+    let fresh = !cwd.join(".claude").join("settings.json").exists();
+    let changed = refresh_on_version_change(state, cwd, home, current, guard)?;
+    Ok(if fresh {
+        None
+    } else {
+        refresh_notice(current, &changed)
+    })
+}
+
+/// The notice for the files a refresh changed, e.g. `hooks updated to 0.12.10: 4 hooks, 12 agents (_lean.py, …)`.
+/// Counts go by the folder a file sits in (hooks, agents, scripts); settings.json is named. The first three file names
+/// are listed. None when nothing changed.
+pub fn refresh_notice(current: &str, changed: &[PathBuf]) -> Option<String> {
+    if changed.is_empty() {
+        return None;
+    }
+    let in_dir = |dir: &str| {
+        changed
+            .iter()
+            .filter(|p| {
+                p.parent()
+                    .and_then(Path::file_name)
+                    .is_some_and(|d| d == dir)
+            })
+            .count()
+    };
+    let mut parts = Vec::new();
+    for (dir, label) in [
+        ("hooks", "hooks"),
+        ("agents", "agents"),
+        ("scripts", "scripts"),
+    ] {
+        let n = in_dir(dir);
+        if n > 0 {
+            parts.push(format!("{n} {label}"));
+        }
+    }
+    if changed
+        .iter()
+        .any(|p| p.file_name().is_some_and(|f| f == "settings.json"))
+    {
+        parts.push("settings.json".to_string());
+    }
+    let mut names: Vec<String> = changed
+        .iter()
+        .filter_map(|p| p.file_name())
+        .map(|f| f.to_string_lossy().into_owned())
+        .collect();
+    let more = names.len() > 3;
+    names.truncate(3);
+    let mut shown = names.join(", ");
+    if more {
+        shown.push_str(", …");
+    }
+    Some(format!(
+        "hooks updated to {current}: {} ({shown})",
+        parts.join(", ")
+    ))
 }
 
 /// Replaces the chaude guard groups in the settings file `dst` with those of `guard`. A group is chaude's when a hook
@@ -478,6 +580,17 @@ mod tests {
     use super::*;
     use crate::testutil::TempDir;
 
+    // refresh_on_version_change for the tests that only ask whether anything changed.
+    fn refreshed(
+        state: &Path,
+        cwd: &Path,
+        home: Option<&Path>,
+        current: &str,
+        guard: &str,
+    ) -> io::Result<bool> {
+        refresh_on_version_change(state, cwd, home, current, guard).map(|c| !c.is_empty())
+    }
+
     #[test]
     fn creates_guard() {
         let root = TempDir::new("guard-create");
@@ -634,9 +747,7 @@ mod tests {
         fs::create_dir_all(&state).expect("mkdir state");
         fs::write(&script, "old script").expect("write");
         fs::write(state.join(VERSION_FILE), "0.12.5\n").expect("record");
-        assert!(
-            refresh_on_version_change(&state, &cwd, None, "0.12.6", GUARD_HOOKS).expect("refresh")
-        );
+        assert!(refreshed(&state, &cwd, None, "0.12.6", GUARD_HOOKS).expect("refresh"));
         let (_, body) = SCRIPTS
             .iter()
             .find(|(n, _)| *n == "squeeze-run.py")
@@ -704,11 +815,9 @@ mod tests {
         fs::create_dir_all(settings.parent().expect("parent")).expect("mkdir");
         fs::create_dir_all(&state).expect("mkdir state");
         fs::write(&settings, STALE_USER).expect("write");
-        fs::write(state.join(VERSION_FILE), "0.11.7\n").expect("record");
+        fs::write(cwd.join(".claude").join(PROJECT_STAMP), "0.11.7\n").expect("stamp");
 
-        assert!(
-            !refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
-        );
+        assert!(!refreshed(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh"));
         assert_eq!(fs::read_to_string(&settings).expect("read"), STALE_USER);
     }
 
@@ -723,9 +832,7 @@ mod tests {
         fs::write(&settings, STALE_USER).expect("write");
         fs::write(state.join(VERSION_FILE), "0.11.6\n").expect("record");
 
-        assert!(
-            refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
-        );
+        assert!(refreshed(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh"));
         let text = fs::read_to_string(&settings).expect("read");
         let cfg: Value = serde_json::from_str(&text).expect("json");
         assert_eq!(cfg["model"], "sonnet", "user key lost:\n{text}");
@@ -758,9 +865,7 @@ mod tests {
         fs::create_dir_all(settings.parent().expect("parent")).expect("mkdir");
         fs::write(&settings, STALE_USER).expect("write");
 
-        assert!(
-            refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
-        );
+        assert!(refreshed(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh"));
         let text = fs::read_to_string(&settings).expect("read");
         assert!(!text.contains("--old"), "stale guard kept:\n{text}");
         assert_eq!(guard_groups(&text), guard_groups(GUARD_HOOKS));
@@ -777,7 +882,7 @@ mod tests {
         fs::write(&settings, STALE_USER).expect("write");
         let win = windows(GUARD_HOOKS.as_bytes(), "py -3").expect("convert");
 
-        assert!(refresh_on_version_change(&state, &cwd, None, "0.11.7", &win).expect("refresh"));
+        assert!(refreshed(&state, &cwd, None, "0.11.7", &win).expect("refresh"));
         let text = fs::read_to_string(&settings).expect("read");
         assert_eq!(
             guard_groups(&text),
@@ -794,10 +899,7 @@ mod tests {
         let state = root.path().join("state");
         fs::create_dir_all(&home).expect("mkdir home");
 
-        assert!(
-            !refresh_on_version_change(&state, &home, Some(&home), "0.11.7", GUARD_HOOKS)
-                .expect("refresh")
-        );
+        assert!(!refreshed(&state, &home, Some(&home), "0.11.7", GUARD_HOOKS).expect("refresh"));
         assert!(!home.join(".claude").exists(), "home was reset");
         assert!(state.join(VERSION_FILE).is_file(), "version not recorded");
     }
@@ -819,9 +921,7 @@ mod tests {
         fs::write(claude.join("agents").join("haiku-coder.md"), "old agent").expect("write");
         fs::write(state.join(VERSION_FILE), "0.11.6\n").expect("record");
 
-        assert!(
-            refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
-        );
+        assert!(refreshed(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh"));
         assert_eq!(
             fs::read(claude.join("hooks").join("main-thread-guard.py")).expect("read"),
             embedded_hook("main-thread-guard.py").expect("embedded"),
@@ -853,9 +953,7 @@ mod tests {
         fs::write(&my_agent, "mine").expect("write");
         fs::write(state.join(VERSION_FILE), "0.11.6\n").expect("record");
 
-        assert!(
-            refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
-        );
+        assert!(refreshed(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh"));
         assert_eq!(fs::read_to_string(&my_hook).expect("read"), "mine");
         assert_eq!(fs::read_to_string(&my_agent).expect("read"), "mine");
     }
@@ -869,11 +967,9 @@ mod tests {
         fs::create_dir_all(agent.parent().expect("parent")).expect("mkdir");
         fs::create_dir_all(&state).expect("mkdir state");
         fs::write(&agent, "edited").expect("write");
-        fs::write(state.join(VERSION_FILE), "0.11.7\n").expect("record");
+        fs::write(cwd.join(".claude").join(PROJECT_STAMP), "0.11.7\n").expect("stamp");
 
-        assert!(
-            !refresh_on_version_change(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh")
-        );
+        assert!(!refreshed(&state, &cwd, None, "0.11.7", GUARD_HOOKS).expect("refresh"));
         assert_eq!(fs::read_to_string(&agent).expect("read"), "edited");
     }
 
@@ -886,11 +982,105 @@ mod tests {
         fs::create_dir_all(agent.parent().expect("parent")).expect("mkdir");
 
         fs::write(&agent, "old agent").expect("write");
-        assert!(
-            !refresh_on_version_change(&state, &home, Some(&home), "0.11.7", GUARD_HOOKS)
-                .expect("refresh")
-        );
+        assert!(!refreshed(&state, &home, Some(&home), "0.11.7", GUARD_HOOKS).expect("refresh"));
         assert_eq!(fs::read_to_string(&agent).expect("read"), "old agent");
+    }
+
+    // A project as an older chaude left it: settings.json, one stale agent, and the older stamp.
+    fn stale_project(cwd: &Path) {
+        let claude = cwd.join(".claude");
+        fs::create_dir_all(claude.join("agents")).expect("mkdir agents");
+        fs::write(claude.join("settings.json"), STALE_USER).expect("write settings");
+        fs::write(claude.join("agents").join("haiku-coder.md"), "old agent").expect("write agent");
+        fs::write(claude.join(PROJECT_STAMP), "0.12.9\n").expect("stamp");
+    }
+
+    #[test]
+    fn two_projects_both_refresh_and_announce() {
+        let root = TempDir::new("refresh-two");
+        let state = root.path().join("state");
+        let a = root.path().join("a");
+        let b = root.path().join("b");
+        stale_project(&a);
+        stale_project(&b);
+
+        let notice_a = refresh_notice_at(&state, &a, None, "0.12.10", GUARD_HOOKS).expect("a");
+        let notice_b = refresh_notice_at(&state, &b, None, "0.12.10", GUARD_HOOKS).expect("b");
+        let counts = format!("{} hooks, {} agents", GUARD_FILES.len(), AGENTS.len());
+        for notice in [&notice_a, &notice_b] {
+            let text = notice.as_deref().expect("project refreshed");
+            assert!(text.starts_with("hooks updated to 0.12.10: "), "{text}");
+            assert!(text.contains(&counts), "{text}");
+        }
+        let (_, agent) = AGENTS
+            .iter()
+            .find(|(n, _)| *n == "haiku-coder.md")
+            .expect("haiku-coder embedded");
+        assert_eq!(
+            fs::read(b.join(".claude").join("agents").join("haiku-coder.md")).expect("read"),
+            *agent,
+            "second project not refreshed"
+        );
+    }
+
+    #[test]
+    fn second_launch_announces_nothing() {
+        let root = TempDir::new("refresh-again");
+        let state = root.path().join("state");
+        let a = root.path().join("a");
+        let b = root.path().join("b");
+        stale_project(&a);
+        stale_project(&b);
+        refresh_notice_at(&state, &a, None, "0.12.10", GUARD_HOOKS).expect("a");
+        refresh_notice_at(&state, &b, None, "0.12.10", GUARD_HOOKS).expect("b");
+
+        assert_eq!(
+            refresh_notice_at(&state, &a, None, "0.12.10", GUARD_HOOKS).expect("a again"),
+            None
+        );
+        assert_eq!(
+            refresh_notice_at(&state, &b, None, "0.12.10", GUARD_HOOKS).expect("b again"),
+            None
+        );
+    }
+
+    #[test]
+    fn fresh_project_is_set_up_without_notice() {
+        let root = TempDir::new("refresh-fresh");
+        let cwd = root.path().join("cwd");
+        let state = root.path().join("state");
+        fs::create_dir_all(&cwd).expect("mkdir cwd");
+
+        assert_eq!(
+            refresh_notice_at(&state, &cwd, None, "0.12.10", GUARD_HOOKS).expect("fresh"),
+            None
+        );
+        assert!(
+            cwd.join(".claude")
+                .join("agents")
+                .join("haiku-coder.md")
+                .is_file()
+        );
+        assert!(cwd.join(".claude").join(PROJECT_STAMP).is_file());
+    }
+
+    #[test]
+    fn notice_counts_and_names_changed_files() {
+        let claude = Path::new("/p/.claude");
+        let changed = vec![
+            claude.join("hooks").join("_lean.py"),
+            claude.join("hooks").join("a.py"),
+            claude.join("agents").join("x.md"),
+            claude.join("agents").join("y.md"),
+            claude.join("settings.json"),
+        ];
+        assert_eq!(
+            refresh_notice("0.12.10", &changed).as_deref(),
+            Some(
+                "hooks updated to 0.12.10: 2 hooks, 2 agents, settings.json (_lean.py, a.py, x.md, …)"
+            )
+        );
+        assert_eq!(refresh_notice("0.12.10", &[]), None);
     }
 
     #[test]

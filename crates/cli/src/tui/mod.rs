@@ -3403,15 +3403,15 @@ fn start_failed(err: &str) -> ! {
 }
 
 // Entry point for `chaude` with no arguments. Non-TTY stdin falls back to plain line mode.
-pub fn run(cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
+pub fn run(cfg: Config, startup: Option<ClaudeImport>, notice: Option<String>) -> io::Result<()> {
     // Go repl.go: the TUI needs an interactive stdin and HARNESS_PLAIN unset (empty counts as unset).
     let plain_forced = !std::env::var("HARNESS_PLAIN")
         .unwrap_or_default()
         .is_empty();
     if stdin_is_char_device() && !plain_forced {
-        tui(cfg, startup)
+        tui(cfg, startup, notice)
     } else {
-        plain(cfg, startup)
+        plain(cfg, startup, notice)
     }
 }
 
@@ -3555,7 +3555,7 @@ fn wait_batch(wakes: &Receiver<Wake>, timeout: Option<Duration>) -> Option<Vec<W
     Some(batch)
 }
 
-fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
+fn tui(mut cfg: Config, startup: Option<ClaudeImport>, notice: Option<String>) -> io::Result<()> {
     // The exit handoff goes into <cwd>/notes/tmp/long on quit; /view reads it back (prev_owned).
     if let (None, Ok(cwd)) = (&cfg.handoff_path, std::env::current_dir()) {
         let long = chaude_core::tmp_layout::long_dir(&cwd);
@@ -3599,6 +3599,9 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
     }
     app.welcome.model = model;
     app.welcome.threshold = threshold;
+    if let Some(line) = &notice {
+        app.note(line);
+    }
     if let Some(mode) = &session_mode {
         app.note(mode);
     }
@@ -3784,9 +3787,12 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
 // Go repl.go loop (1200-1262): one line at a time, answered before the next line is read. Local commands run here
 // through commands::dispatch; the rest goes to the engine as a turn. "> " + line is echoed when stdin is not a char
 // device (Go !interactive); /quit, /rotate and /mode are answered before that echo, as in Go.
-fn plain(mut cfg: Config, startup: Option<ClaudeImport>) -> io::Result<()> {
+fn plain(mut cfg: Config, startup: Option<ClaudeImport>, notice: Option<String>) -> io::Result<()> {
     // Go r.ui == nil: no UI answers permission asks, so idle asks are denied by the engine.
     cfg.no_ui = true;
+    if let Some(line) = &notice {
+        eprintln!("{line}");
+    }
     let interactive = stdin_is_char_device();
     let model = cfg.model.clone();
     let threshold = cfg.rotate_threshold;

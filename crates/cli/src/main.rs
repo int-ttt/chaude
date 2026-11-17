@@ -10,7 +10,7 @@ use std::process;
 use chaude_core::api::Config;
 use chaude_core::import_claude::{self, ClaudeImport};
 use chaude_core::rotate;
-use chaude_core::{i18n, metrics_report, orch, osenv, settings};
+use chaude_core::{i18n, metrics_report, orch, settings};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -146,28 +146,21 @@ fn run_tui(args: &[String]) -> i32 {
             }
         };
     }
-    // Go repl.go: project settings are ensured at startup; a failure is reported and startup continues.
     let home = env::var_os("HOME").map(PathBuf::from);
+    // A new chaude version (or a project with no stamp for it yet) regenerates the chaude guard entries and overwrites
+    // the shipped hook, agent and script files once for this project, then stamps it. It runs before ensure, so files
+    // the new version added are reported too. The notice goes to the TUI (or stderr in plain mode).
+    let notice = match settings::project::startup_refresh(Path::new(&cwd), home.as_deref(), VERSION)
+    {
+        Ok(notice) => notice,
+        Err(e) => {
+            eprintln!("project settings refresh: {e}");
+            None
+        }
+    };
+    // Go repl.go: project settings are ensured at startup; a failure is reported and startup continues.
     if let Err(e) = settings::project::ensure_project_settings(Path::new(&cwd), home.as_deref()) {
         eprintln!("project settings: {e}");
-    }
-    // A new chaude version (or no version record yet) regenerates the chaude guard entries and overwrites the shipped
-    // hook and agent files once, then records itself.
-    let refreshed = settings::project::guard_settings_text().and_then(|guard| {
-        settings::project::refresh_on_version_change(
-            &osenv::state_dir(),
-            Path::new(&cwd),
-            home.as_deref(),
-            VERSION,
-            &guard,
-        )
-    });
-    match refreshed {
-        Ok(true) => {
-            eprintln!("chaude {VERSION}: project guard settings and shipped files refreshed")
-        }
-        Ok(false) => {}
-        Err(e) => eprintln!("project settings refresh: {e}"),
     }
     // Go repl.go:1357: the startup prune of old records uses the loaded SessionRetentionDays.
     let set = tui::settings::load(tui::settings::file_for(Some(Path::new(&cwd))).as_deref());
@@ -181,7 +174,7 @@ fn run_tui(args: &[String]) -> i32 {
     if let Some(line) = gc {
         eprintln!("{line}");
     }
-    match tui::run(cfg, startup.map(|(_, imp)| imp)) {
+    match tui::run(cfg, startup.map(|(_, imp)| imp), notice) {
         Ok(()) => 0,
         Err(e) => {
             // Go tui.go:1408-1412: a program error prints "harness: <err>" and exits 1.

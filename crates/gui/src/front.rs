@@ -193,6 +193,22 @@ impl Front {
         if let Some(mode) = self.state.session_mode.clone() {
             self.state.transcript.push_notice(mode);
         }
+        // A code folder refreshes its shipped files once per chaude version and announces it once. A chat dir is no project.
+        if !chat {
+            let home = osenv::home_dir();
+            match chaude_core::settings::project::startup_refresh(
+                &cwd,
+                Some(&home),
+                env!("CARGO_PKG_VERSION"),
+            ) {
+                Ok(Some(line)) => self.state.transcript.push_notice(line),
+                Ok(None) => {}
+                Err(e) => self
+                    .state
+                    .transcript
+                    .push_notice(format!("project settings refresh: {e}")),
+            }
+        }
         let w = self.wake.clone();
         match engine::start(cwd, chat, move || w()) {
             Ok((handle, rx)) => {
