@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.11 - 2026-11-17
+
 - tui: an agent-done note no longer splits the reply into two blocks; it stays inside the same reply block.
   - tui: 에이전트 완료 알림이 답변 중간에 끼어도 답변이 두 블록으로 나뉘지 않고 한 블록으로 유지됩니다.
 - core,tui,gui: the shipped hooks, agents and scripts refresh per project (stamp `<project>/.claude/.chaude-version`, not one global record), so every project launched after an update is refreshed, and a startup line says what changed (`hooks updated to 0.12.10: 4 hooks, 12 agents (_lean.py, …)`). A project with nothing to update shows no line.
