@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.10 - 2026-11-17
+
 - core: a session with no transcript is no longer resumed at startup (claude exits at once on `--resume` for a session that never ran a turn), which fixes "claude exited" on launch.
   - core: 전사(transcript)가 없는 세션은 시작할 때 이어 쓰지 않습니다(한 턴도 돌지 않은 세션에 `--resume`을 주면 claude가 바로 종료해 시작할 때 "claude exited"가 나왔습니다).
 - core: when claude exits, the error shows its exit status and the last lines of its stderr (`claude exited (exit status: 1: ...)`) instead of a bare "claude exited".
