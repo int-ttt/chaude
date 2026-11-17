@@ -20,10 +20,10 @@
   second line is spl
   it mid-line
   
-agent a1 done
   - last item
-  │ agent says hi
-  │ agent par
   then a tail and en
   ds
+agent a1 done
+  │ agent says hi
+  │ agent par
 

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- tui: an agent-done note no longer splits the reply into two blocks; it stays inside the same reply block.
+  - tui: 에이전트 완료 알림이 답변 중간에 끼어도 답변이 두 블록으로 나뉘지 않고 한 블록으로 유지됩니다.
+
 ## 0.12.10 - 2026-11-17
 
 - core: a session with no transcript is no longer resumed at startup (claude exits at once on `--resume` for a session that never ran a turn), which fixes "claude exited" on launch.

@@ -1552,11 +1552,9 @@ impl App {
         self.main_open = false;
     }
 
-    // A note or status row in the middle of a streamed reply: the open Text entry closes around it, but the
-    // unfinished line stays in its buffer and the block stays open, so the reply goes on with the "  " lead.
-    fn pause_main_block(&mut self) {
-        self.close_text(&Role::Main);
-    }
+    // A note or status row in the middle of a streamed reply: the block stays open and keeps its entry, so the
+    // reply goes on in place (open_tail) and the note lands after the whole reply block, not inside it.
+    fn pause_main_block(&mut self) {}
 
     // The unfinished-line buffer of a streamed role.
     fn pending_text(&mut self, role: &Role) -> &mut String {
@@ -1626,14 +1624,24 @@ impl App {
     }
 
     // The open Text entry of `role` when it is the last entry and its rows are the last rows: it can grow in place.
+    // The main reply is the exception: its open entry grows in place wherever notes put it after the reply's start.
     fn open_tail(&self, role: &Role) -> Option<usize> {
         let last = self.entries.len().checked_sub(1)?;
+        if self.row_entry.len() != self.transcript.len() {
+            return None;
+        }
+        if matches!(role, Role::Main) {
+            return self
+                .entries
+                .entries
+                .iter()
+                .rposition(|e| matches!(e, Entry::Text { role: r, done: false, .. } if r == role));
+        }
         let open = matches!(
             &self.entries.entries[last],
             Entry::Text { role: r, done: false, .. } if r == role
         );
-        let tail =
-            self.row_entry.len() == self.transcript.len() && self.row_entry.last() == Some(&last);
+        let tail = self.row_entry.last() == Some(&last);
         (open && tail).then_some(last)
     }
 
@@ -5733,6 +5741,61 @@ mod tests {
         );
     }
 
+    // An agent's done line (AgentEnd) between two deltas of one reply must not split it: one "●" block, every line in order.
+    #[test]
+    fn agent_done_between_deltas_keeps_the_reply_one_block() {
+        let mut app = App::new(30, 40);
+        app.apply(text("Intro\n1. ab"));
+        app.apply(UiEvent::AgentStart {
+            id: "a1".to_string(),
+            description: "Scan".to_string(),
+            started_at: 0,
+        });
+        app.apply(UiEvent::AgentEnd {
+            id: "a1".to_string(),
+            elapsed_ms: 1000,
+            model: "haiku".to_string(),
+            name: "scan-1".to_string(),
+            summary: "Scan repo".to_string(),
+        });
+        app.apply(text("c\n2. d\n"));
+        let rows: Vec<String> = app.body(29).iter().map(|r| render::strip_sgr(r)).collect();
+        let from = rows
+            .iter()
+            .position(|r| r.starts_with("● "))
+            .expect("bullet row");
+        assert_eq!(
+            rows[from..].iter().filter(|r| r.starts_with("● ")).count(),
+            1,
+            "{rows:?}"
+        );
+        // The reply rows run on without the done line between them; the done line comes after the block.
+        let intro = rows
+            .iter()
+            .position(|r| r.contains("Intro"))
+            .expect("intro");
+        let last = rows
+            .iter()
+            .position(|r| r.contains("2. d"))
+            .expect("last line");
+        assert!(intro < last, "{rows:?}");
+        assert!(
+            rows[intro..=last]
+                .iter()
+                .all(|r| r.starts_with("● ") || r.starts_with("  ")),
+            "{rows:?}"
+        );
+        assert!(
+            rows[intro..=last].iter().any(|r| r.contains("1. abc")),
+            "{rows:?}"
+        );
+        let done = rows
+            .iter()
+            .position(|r| r.contains("[agent 완료]"))
+            .expect("done line");
+        assert!(done > last, "{rows:?}");
+    }
+
     #[test]
     fn typing_while_scrolled_keeps_position() {
         let mut app = app_with_lines(10);
@@ -8960,11 +9023,9 @@ mod transcript_snapshots {
             vec![
                 (
                     true,
-                    "The build has **three** steps\nsecond line is split mid-line\n"
+                    "The build has **three** steps\nsecond line is split mid-line\n\n- last item\nthen a tail and ends"
                 ),
-                (true, "- last item"),
                 (false, "agent says hi\nagent par"),
-                (true, "then a tail and ends"),
             ]
         );
         assert!(
