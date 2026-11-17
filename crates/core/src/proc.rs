@@ -710,6 +710,7 @@ mod tests {
 
     // A child that exits before answering (bad --resume) must say why: exit status and its stderr, not a bare
     // "claude exited".
+    #[cfg(unix)]
     #[test]
     fn exit_note_carries_the_exit_status_and_stderr() {
         use std::os::unix::fs::PermissionsExt;
