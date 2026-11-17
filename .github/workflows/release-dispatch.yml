@@ -45,6 +45,11 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: sh scripts/bump-version.sh "$VERSION"
       - uses: dtolnay/rust-toolchain@stable
+      # cargo test --workspace builds chaude-gui (tao + wry), which needs these on Linux.
+      - name: Linux GUI system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
       - name: Test
         run: cargo test --workspace --locked
       - name: Commit, tag and push
