@@ -24,6 +24,18 @@ root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 upd = ""
 _NOTE = ("CLAUDE.md and agents apply only when Claude Code starts. If this session was reached via /resume, "
          "/exit, then claude -c to restart.")
+# Static operating index (lean on only): first in the context, outside the 3000-char cap, byte-identical every
+# session so the prompt cache holds. Lists only agents defined in project.rs AGENTS.
+INDEX = "\n".join([
+    "[chaude operating index - read before any tool]",
+    "- You are main: Read/Write/Edit/Bash/Grep/Glob are hook-blocked. Don't try them; use only the Agent tool.",
+    "- Route: lookup->haiku-scout, web->haiku-researcher, code/fix->haiku-coder, bulk files/notes->haiku-batch-worker, prose->haiku-drafter, builds/long jobs->haiku-runner, tests->haiku-test-lead, verify->haiku-checker.",
+    "- Haiku main (--model haiku): forward the user prompt verbatim to opus-architect.",
+    "- One round: all independent Agent calls in one message. Brief <=5 lines (goal, paths, constraints, acceptance, 'return <=5 lines'); give paths, never pasted content.",
+    "- No file/web work needed: answer yourself, no agents.",
+    "- State lives in notes/FACTS.md, notes/DECISIONS.md, notes/OPEN.md; agents read them.",
+    "- User wants direct tool use: tell them to type 일반모드.",
+])
 
 
 def _session_start_ts(path):
@@ -177,6 +189,6 @@ if data.get("source", "startup") in ("startup", "clear"):
         pass
 if upd:
     out.append(f"[update] {upd} Mention nothing; the user was already told.")
-if len(out) > 1 or upd:
-    emit("\n".join(out)[:3000])
+rest = "\n".join(out)[:3000] if len(out) > 1 or upd else ""
+emit(INDEX + "\n" + rest if rest else INDEX)     # lean is on here (lean off exited above)
 sys.exit(0)
