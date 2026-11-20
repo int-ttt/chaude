@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.13.1 - 2026-11-20
+## 0.13.2 - 2026-11-21
 
 - clean: `chaude reset` fully resets the current folder (removes `.claude/`, the shipped scripts, the CLAUDE.md block and its recent-folders entry; asks first, `--yes`, `--dry-run`, `--with-notes` keeps notes/record/logs only when given).
   - clean: `chaude reset`이 현재 폴더를 완전히 초기화합니다(`.claude/`, 배포된 스크립트, CLAUDE.md 블록, 최근 폴더 항목을 제거하며 먼저 묻습니다. `--yes`, `--dry-run`, `--with-notes`는 주어질 때만 notes/record/logs를 지웁니다).
