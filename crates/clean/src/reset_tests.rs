@@ -34,6 +34,11 @@ fn write(p: &Path, body: &[u8]) {
     fs::write(p, body).unwrap();
 }
 
+/// Plan lines and keep entries compare with "/" separators, so the asserts hold on Windows too.
+fn slash(s: &str) -> String {
+    s.replace('\\', "/")
+}
+
 fn exists(p: &Path) -> bool {
     fs::symlink_metadata(p).is_ok()
 }
@@ -61,8 +66,16 @@ fn dry_run_lists_and_changes_nothing() {
     installed(&proj);
     let plan = make_plan(&proj, &cfg, &t.path().join("state"), false).unwrap();
     let lines = plan.lines();
-    assert!(lines.contains(&"remove  .claude/settings.json".to_string()));
-    assert!(lines.contains(&"remove  scripts/squeeze-run.py".to_string()));
+    assert!(
+        lines
+            .iter()
+            .any(|l| slash(l) == "remove  .claude/settings.json")
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| slash(l) == "remove  scripts/squeeze-run.py")
+    );
     assert!(lines.iter().any(|l| l.starts_with("policy  CLAUDE.md")));
     assert!(plan.keep().iter().any(|k| k.starts_with("notes/ (kept")));
     assert!(exists(&proj.join(".claude/settings.json")));
@@ -115,7 +128,7 @@ fn modified_script_and_its_folder_are_kept() {
     assert!(
         plan.keep()
             .iter()
-            .any(|k| k.starts_with("scripts/squeeze-run.py"))
+            .any(|k| slash(k).starts_with("scripts/squeeze-run.py"))
     );
     plan.apply().unwrap();
     assert!(exists(&proj.join("scripts/squeeze-run.py")));
@@ -211,7 +224,9 @@ fn forgets_only_this_folder_in_recent() {
     let (proj, cfg) = (t.path().join("proj"), t.path().join("cfg"));
     fs::create_dir_all(&proj).unwrap();
     let mine = proj.display().to_string();
-    let rows = format!(r#"[{{"path":"{mine}","used":2}},{{"path":"/elsewhere/other","used":1}}]"#);
+    let rows =
+        serde_json::json!([{"path": mine, "used": 2}, {"path": "/elsewhere/other", "used": 1}])
+            .to_string();
     write(&cfg.join("recent.json"), rows.as_bytes());
     let plan = make_plan(&proj, &cfg, &t.path().join("state"), false).unwrap();
     assert!(plan.lines().iter().any(|l| l.starts_with("forget  ")));
@@ -280,10 +295,8 @@ fn clients_rows_of_this_folder_removed_others_byte_identical() {
     );
     fs::create_dir_all(&proj).unwrap();
     let other = "{\n  \"cwd\": \"/somewhere/else\",\n  \"model\": \"b\"\n }";
-    let text = format!(
-        "[\n {{\n  \"cwd\": \"{}\",\n  \"model\": \"a\"\n }},\n {other}\n]",
-        proj.display()
-    );
+    let cwd = serde_json::to_string(&proj.display().to_string()).unwrap();
+    let text = format!("[\n {{\n  \"cwd\": {cwd},\n  \"model\": \"a\"\n }},\n {other}\n]");
     write(&state.join("clients.json"), text.as_bytes());
     write(&state.join("agents.json"), b"[]");
     let plan = make_plan(&proj, &cfg, &state, false).unwrap();

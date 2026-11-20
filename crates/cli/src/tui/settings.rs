@@ -312,6 +312,10 @@ mod tests {
     // when there is no folder; a failed save reports the error.
     #[test]
     fn close_saves_and_reports() {
+        // Pin Korean: the notes are localized, and CI's LANG=C.UTF-8 would otherwise pick English.
+        let _lang = crate::test_support::lang_lock();
+        let prev_lang = chaude_core::i18n::current();
+        chaude_core::i18n::set_current(chaude_core::i18n::Lang::Ko);
         let dir = tmp_dir("close");
         let mut p = Picker::open(Some(&dir));
         assert_eq!(
@@ -344,6 +348,7 @@ mod tests {
         };
         let err = bad.close();
         assert!(err.starts_with("설정 저장 실패: "), "{err}");
+        chaude_core::i18n::set_current(prev_lang);
     }
 
     #[test]
