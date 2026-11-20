@@ -2911,6 +2911,8 @@ fn wrap_row(line: &str, w: usize, linked: bool) -> Vec<String> {
     } else {
         " ".repeat(hang)
     };
+    // SGR opened in the lead (e.g. a grey tool result's "  ⎿  ") still applies to the text, so continuation rows re-open it.
+    let carry = render::sgr_state(head);
     wrapped
         .split('\n')
         .enumerate()
@@ -2918,7 +2920,7 @@ fn wrap_row(line: &str, w: usize, linked: bool) -> Vec<String> {
             if i == 0 {
                 format!("{head}{row}")
             } else {
-                format!("{pad}{row}")
+                format!("{pad}{carry}{row}")
             }
         })
         .collect()
@@ -6051,6 +6053,21 @@ mod tests {
         );
         // A pane too narrow for the lead plus two cells wraps without the hang.
         assert_eq!(plain(wrap_row("● ffff", 3, true)), vec!["● f", "fff"]);
+    }
+
+    // A colored span that wraps keeps its color on every row, including a color opened in the lead.
+    #[test]
+    fn wrapped_rows_keep_span_color() {
+        let rows = wrap_row(&format!("{GREY_ON}  ⎿  bbbbbbbbbbbb{FG_OFF}"), 10, false);
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        for r in &rows[1..] {
+            assert!(r.contains(GREY_ON), "{r:?}");
+            assert!(render::strip_sgr(r).starts_with("     b"), "{r:?}");
+        }
+        let rows = wrap_row(&format!("{GREY_ON}> cccccccc{FG_OFF}"), 6, true);
+        for r in &rows {
+            assert!(r.contains(GREY_ON), "{r:?}");
+        }
     }
 
     // An agent row's wrapped rows all keep the "│" bar at column 0, the last row included (no corner glyph).

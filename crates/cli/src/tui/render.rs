@@ -287,21 +287,60 @@ pub fn trunc_ellipsis(s: &str, w: usize) -> String {
     out
 }
 
+// Folds one SGR escape into `state`, the SGR active at a point in the text. A reset (`\x1b[m`, `\x1b[0m`)
+// clears it. Link marks are not screen styles, so they are left out.
+fn sgr_push(state: &mut String, seq: &str) {
+    if [MARK_URL_ON, MARK_PATH_ON, MARK_OFF].contains(&seq) || !seq.ends_with('m') {
+        return;
+    }
+    let params = &seq[2..seq.len() - 1];
+    let first = params.split(';').next().unwrap_or("");
+    if first.is_empty() || first == "0" {
+        state.clear();
+        if let Some(rest) = params.strip_prefix(first).and_then(|r| r.strip_prefix(';')) {
+            state.push_str(&format!("\x1b[{rest}m"));
+        }
+    } else {
+        state.push_str(seq);
+    }
+}
+
+// The SGR active at the end of `s`, to re-open a row that starts after `s` (a wrapped continuation row).
+pub fn sgr_state(s: &str) -> String {
+    let mut state = String::new();
+    let mut i = 0;
+    while i < s.len() {
+        match csi_len(s.as_bytes(), i) {
+            Some(n) => {
+                sgr_push(&mut state, &s[i..i + n]);
+                i += n;
+            }
+            None => i += cur_char(s, i).len_utf8(),
+        }
+    }
+    state
+}
+
 // R12 hard wrap by cell width (input.go rows(): a row breaks before a char that would pass the width,
 // unless the row is still empty). Newlines in `s` are kept. Width is at least 2 (input.go:150).
+// A row that starts after a break (wrapped or a newline) re-opens the SGR style active there, so a colored
+// span keeps its color on every row.
 // Doubt: the Go output pane uses lipgloss word wrap; this is the input-box rule only.
 pub fn wrap_cells(s: &str, width: usize) -> String {
     let w = width.max(2);
     let mut out = String::new();
+    let mut sgr = String::new();
     for (li, line) in s.split('\n').enumerate() {
         if li > 0 {
             out.push('\n');
+            out.push_str(&sgr);
         }
         let mut cur = 0;
         let mut row_empty = true;
         let mut i = 0;
         while i < line.len() {
             if let Some(n) = csi_len(line.as_bytes(), i) {
+                sgr_push(&mut sgr, &line[i..i + n]);
                 out.push_str(&line[i..i + n]);
                 i += n;
                 continue;
@@ -310,6 +349,7 @@ pub fn wrap_cells(s: &str, width: usize) -> String {
             let cw = char_width(c);
             if cur + cw > w && !row_empty {
                 out.push('\n');
+                out.push_str(&sgr);
                 cur = 0;
             }
             out.push(c);
@@ -1355,6 +1395,32 @@ mod tests {
         // input.go TestInputWrapWide: 3 Hangul per 6-cell row.
         assert_eq!(wrap_cells("가나다라마", 6), "가나다\n라마");
         assert_eq!(wrap_cells("ab\ncd", 10), "ab\ncd");
+    }
+
+    #[test]
+    fn wrap_cells_keeps_color_on_every_wrapped_row() {
+        // A colored span longer than the width: each wrapped row re-opens the span's color, and only the source's own reset ends it.
+        let s = format!("{GREY_ON}abcdefgh{FG_OFF}");
+        let out = wrap_cells(&s, 3);
+        let rows: Vec<&str> = out.split('\n').collect();
+        assert_eq!(rows.len(), 3, "{out:?}");
+        for r in &rows {
+            assert!(r.starts_with(GREY_ON), "{r:?}");
+        }
+        assert_eq!(strip_sgr(&out), "abc\ndef\ngh");
+        // A bold span across a hard newline keeps bold on the next source line too.
+        let bold = format!("{BOLD_ON}ab\ncd{BOLD_OFF}");
+        assert_eq!(
+            wrap_cells(&bold, 10),
+            format!("{BOLD_ON}ab\n{BOLD_ON}cd{BOLD_OFF}")
+        );
+        // A reset clears the carried state, so a row after it starts plain.
+        let reset = format!("{GREY_ON}ab\x1b[0mcd");
+        assert_eq!(wrap_cells(&reset, 2), format!("{GREY_ON}ab\x1b[0m\ncd"));
+        assert_eq!(
+            sgr_state(&format!("{GREY_ON}x{FG_OFF}")),
+            format!("{GREY_ON}{FG_OFF}")
+        );
     }
 
     fn table_lines(rows: &[&str], width: usize) -> Vec<String> {
