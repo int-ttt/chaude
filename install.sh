@@ -113,6 +113,9 @@ want="$(awk -v f="$name" '$2 == f {print $1; exit}' "${tmp}/checksums.txt")"
 got="$(sha256 "${tmp}/${name}")"
 [ "$want" = "$got" ] || { echo "checksum mismatch for ${name}" >&2; exit 1; }
 tar -xzf "${tmp}/${name}" -C "$tmp" chaude
+# chaude-gui is in archives from 0.13.0 on; older archives lack it, so it is installed only when present
+gui=""
+if tar -xzf "${tmp}/${name}" -C "$tmp" chaude-gui 2>/dev/null && [ -f "${tmp}/chaude-gui" ]; then gui=1; fi
 
 # user dir: no sudo. Creating it or writing to it must work for this user.
 mkdir -p "$DIR" || { echo "error: cannot create ${DIR}. Check your home folder permissions and run again." >&2; exit 1; }
@@ -125,6 +128,10 @@ if [ -e "${DIR}/chaude" ]; then
 fi
 install -m 755 "${tmp}/chaude" "${DIR}/chaude"
 [ "$os" = darwin ] && xattr -d com.apple.quarantine "${DIR}/chaude" 2>/dev/null || true
+if [ -n "$gui" ]; then
+  install -m 755 "${tmp}/chaude-gui" "${DIR}/chaude-gui"
+  [ "$os" = darwin ] && xattr -d com.apple.quarantine "${DIR}/chaude-gui" 2>/dev/null || true
+fi
 
 # PATH: add DIR to a shell rc file once, only when DIR is not on PATH now. The exact line is never added twice.
 path_line='export PATH="$HOME/.local/bin:$PATH"'
@@ -148,6 +155,7 @@ esac
 
 echo "installed: ${DIR}/chaude"
 "${DIR}/chaude" --version
+if [ -n "$gui" ]; then echo "installed: ${DIR}/chaude-gui (run: chaude-gui)"; fi
 if [ -n "$path_changed" ]; then
   echo "Open a new terminal (or run: ${path_line}) to use chaude."
 fi

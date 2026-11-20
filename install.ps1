@@ -125,6 +125,10 @@ function Install-Chaude {
             Write-Host "backed up previous binary to $bak"
         }
         Copy-Item -Force $src $dest
+        # chaude-gui.exe is in archives from 0.13.0 on; older archives lack it, so it is installed only when present
+        $guiSrc = Join-Path $tmp 'chaude-gui.exe'
+        $guiDest = Join-Path $dir 'chaude-gui.exe'
+        if (Test-Path $guiSrc) { Copy-Item -Force $guiSrc $guiDest; Write-Host "installed: $guiDest (run: chaude-gui)" }
 
         # user PATH (registry, HKCU\Environment): add the folder once; an existing entry is left alone
         $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')

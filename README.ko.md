@@ -119,6 +119,15 @@ cargo build --release -p chaude-cli
 
 바이너리는 `target/release/chaude`에 생깁니다. `PATH`에 있는 폴더로 복사해서 쓰세요.
 
+## GUI
+
+`chaude-gui`는 같은 엔진 위에서 동작하는 데스크톱 창입니다. 설치 후 `chaude-gui`를 실행하세요(설치 스크립트가 `chaude`와 같은 폴더에 둡니다). 모드는 두 가지입니다.
+
+- **채팅**: 비공개 임시 폴더(`~/.chaude/chat/`)에서 일반 대화를 합니다. 파일·셸 도구는 꺼져 있고 하네스 에이전트는 실행되지 않습니다.
+- **코드**: 네이티브 대화상자로 폴더를 고릅니다. 그 폴더를 작업 디렉터리로 전체 하네스가 실행되며, 파일 트리, 파일 뷰어, 턴별 diff 패널을 씁니다.
+
+창이 백그라운드에 있을 때 턴이 끝나면 데스크톱 알림을 보냅니다. Linux에서는 webkit2gtk 런타임이 필요합니다(예: Debian/Ubuntu의 `libwebkit2gtk-4.1-0`, `libgtk-3-0`). 설계 문서: `plan/html-gui.md`.
+
 ## 빠른 시작
 
 ```sh
@@ -293,7 +302,7 @@ Rust 포트 기간 동안 장기 프로젝트를 실제로 쓴 양입니다. 메
 
 ## Go 버전에서 업그레이드
 
-> **Go 빌드 삭제:** `deprecated/` 아래의 Go 구현은 0.10.0 이후 6번째 릴리스인 0.11.3에서 삭제했습니다. 0.11.0부터 릴리스 아카이브는 저장소 루트의 Rust 워크스페이스(`crates/cli`, 바이너리 `chaude`)에서 빌드하며, 에셋 이름은 같습니다. Go 소스는 태그 `v0.11.2`의 git 이력에 있습니다. Rust 버전은 아직 Go의 모든 기능을 다루지 않습니다. `plan/rust-port.md`를 보세요.
+> **Go 빌드 삭제:** `deprecated/` 아래의 Go 구현은 0.10.0 이후 6번째 릴리스인 0.11.3에서 삭제했습니다. 0.11.0부터 릴리스 아카이브는 저장소 루트의 Rust 워크스페이스(`crates/cli`, 바이너리 `chaude`)에서 빌드하며, 에셋 이름은 같습니다. 0.13.0부터 각 아카이브에는 `chaude-gui`(`crates/gui`)도 들어 있습니다. Go 소스는 태그 `v0.11.2`의 git 이력에 있습니다. Rust 버전은 아직 Go의 모든 기능을 다루지 않습니다. `plan/rust-port.md`를 보세요.
 
 
 업그레이드하려면 설치 스크립트를 다시 실행하거나 `chaude update`를 실행하세요. 설치 위치는 macOS/Linux에서 `~/.local/bin`, Windows에서 `%USERPROFILE%\.local\bin`입니다. `/usr/local/bin/chaude`나 `%LOCALAPPDATA%\Programs\chaude`에 남은 설치본은 자동으로 지우지 않으며, 지우는 방법을 설치 스크립트가 출력합니다.

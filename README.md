@@ -119,6 +119,15 @@ cargo build --release -p chaude-cli
 
 The binary is `target/release/chaude`. Copy it to a folder on your `PATH`.
 
+## GUI
+
+`chaude-gui` is a desktop window over the same engine. Run `chaude-gui` after installing (the installers put it next to `chaude`). It has two modes:
+
+- **Chat**: a plain conversation in a private scratch folder (`~/.chaude/chat/`). File and shell tools are off and no harness agents run.
+- **Code**: pick a folder with the native dialog. The full harness runs with that folder as its working directory, with a file tree, file viewer and per-turn diff panel.
+
+It shows a desktop notification when a turn ends while the window is in the background. On Linux it needs the webkit2gtk runtime (for example `libwebkit2gtk-4.1-0` and `libgtk-3-0` on Debian or Ubuntu). Design notes: `plan/html-gui.md`.
+
 ## Quick start
 
 ```sh
@@ -293,7 +302,7 @@ The user guide is written in Korean.
 
 ## Upgrading from Go
 
-> **Go build removed:** The Go implementation under `deprecated/` was deleted in 0.11.3, the 6th release after 0.10.0. Release archives are built from the Rust workspace at the repo root (`crates/cli`, binary `chaude`) since 0.11.0, with the same asset names. The Go source is in git history at tag `v0.11.2`. The Rust version does not yet cover every Go feature; see `plan/rust-port.md`.
+> **Go build removed:** The Go implementation under `deprecated/` was deleted in 0.11.3, the 6th release after 0.10.0. Release archives are built from the Rust workspace at the repo root (`crates/cli`, binary `chaude`) since 0.11.0, with the same asset names. Since 0.13.0 each archive also contains `chaude-gui` (`crates/gui`). The Go source is in git history at tag `v0.11.2`. The Rust version does not yet cover every Go feature; see `plan/rust-port.md`.
 
 
 To upgrade, run the installer again or run `chaude update`. The installers now use `~/.local/bin` (macOS/Linux) and `%USERPROFILE%\.local\bin` (Windows). An install at `/usr/local/bin/chaude` or `%LOCALAPPDATA%\Programs\chaude` is not removed automatically; the installer prints how to remove it.

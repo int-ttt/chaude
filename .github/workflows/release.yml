@@ -18,7 +18,7 @@ on:
 permissions:
   contents: write
 jobs:
-  # Rust build (crates/cli, binary chaude) for the four release targets. Artifacts only; the release job publishes them.
+  # Rust build (crates/cli, binary chaude; crates/gui, binary chaude-gui) for the four release targets. Artifacts only; the release job publishes them.
   # Asset names must match crates/update asset_name and install.sh / install.ps1.
   rust-build:
     strategy:
@@ -60,22 +60,24 @@ jobs:
       # A failing test fails this job, so the release job never publishes.
       - name: Test
         run: cargo test --locked --workspace
-      - name: Build chaude
-        run: cargo build --release --locked -p chaude-cli --target "${{ matrix.target }}"
+      - name: Build chaude and chaude-gui
+        run: |
+          cargo build --release --locked -p chaude-cli --target "${{ matrix.target }}"
+          cargo build --release --locked -p chaude-gui --target "${{ matrix.target }}"
       - name: Package (unix)
         if: matrix.os != 'windows'
         shell: bash
         run: |
           version="${TAG#v}"
           mkdir -p dist-rust
-          tar -C "target/${{ matrix.target }}/release" -czf "dist-rust/chaude_${version}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz" chaude
+          tar -C "target/${{ matrix.target }}/release" -czf "dist-rust/chaude_${version}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz" chaude chaude-gui
       - name: Package (windows)
         if: matrix.os == 'windows'
         shell: pwsh
         run: |
           $version = $env:TAG.TrimStart('v')
           New-Item -ItemType Directory -Force -Path dist-rust | Out-Null
-          Compress-Archive -Force -Path "target/${{ matrix.target }}/release/chaude.exe" -DestinationPath "dist-rust/chaude_${version}_${{ matrix.os }}_${{ matrix.arch }}.zip"
+          Compress-Archive -Force -Path "target/${{ matrix.target }}/release/chaude.exe", "target/${{ matrix.target }}/release/chaude-gui.exe" -DestinationPath "dist-rust/chaude_${version}_${{ matrix.os }}_${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: chaude-rust-${{ matrix.os }}-${{ matrix.arch }}

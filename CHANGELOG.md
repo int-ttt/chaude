@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- gui: the HTML GUI (`chaude-gui`) is now included in the release archives, next to `chaude`. The installers install it when present.
+  - gui: HTML GUI(`chaude-gui`)가 이제 릴리스 아카이브에 `chaude`와 함께 들어갑니다. 설치 스크립트는 있으면 함께 설치합니다.
+- gui: a desktop completion notification when a turn ends while the GUI window is in the background.
+  - gui: GUI 창이 백그라운드에 있을 때 턴이 끝나면 데스크톱 완료 알림을 보냅니다.
+
 ## 0.12.11 - 2026-11-17
 
 - tui: an agent-done note no longer splits the reply into two blocks; it stays inside the same reply block.
