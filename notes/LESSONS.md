@@ -4,3 +4,4 @@
 - [measure] 261031: claude spawned inside a Claude session inherits CLAUDE_CODE_CHILD_SESSION -> "Transcript saving is off", no JSONL. Pop CLAUDECODE/CLAUDE_CODE_CHILD_SESSION/SESSION_ID/SESSION_ATTENDED/ENTRYPOINT/MESSAGING_*/CLAUDE_PID in child env; keep config CLAUDE_CODE_* vars. Trust dialog default "No, exit": send Down+Enter.
 - [release] 261031: opus-architect/sonnet-analyst cannot call sonnet-reviewer (agent-model-pin v0.8.2 = haiku-* only); pre-merge/release review must be dispatched by the main thread. Plan: notes/runs/261031-plan-release-v082-v090.md
 - 261105 temp HOME without pinned CARGO_HOME/RUSTUP_HOME re-downloads the registry and fills the disk; scripts/test-isolated.sh pins them.
+- 2026-11-21 [runner] gh run watch + no timeout on macOS -> silent 10-min stalls; use the bounded poll (haiku-runner "Waiting").

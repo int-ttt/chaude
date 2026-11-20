@@ -5,6 +5,7 @@ CI does the version bump, the `release: X.Y.Z` commit, the tag, and the build (`
 
 1. Run the release: Actions → release-dispatch → Run workflow on master, or `gh workflow run release-dispatch.yml -f version=X.Y.Z`.
    It runs `scripts/bump-version.sh X.Y.Z`, commits `release: X.Y.Z`, tags `vX.Y.Z`, pushes, then calls release.yml.
+   Wait for both runs with the bounded poll in `.claude/agents/haiku-runner.md` ("Waiting"). Never `gh run watch`: it hangs silently after a job fails. Stop at the first failed job and read `gh run view <id> --log-failed | tail -n 80`.
 2. Locally, `git pull --tags` so the new tag exists.
 3. Usage stats for the cycle (this project only, local transcripts; not run in CI):
    `python3 -I scripts/release-usage.py --from <prev tag> --to vX.Y.Z --out notes/usage/X.Y.Z.md`
