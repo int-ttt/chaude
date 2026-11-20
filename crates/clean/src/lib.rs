@@ -611,5 +611,7 @@ fn parse_bool(s: &str) -> Option<bool> {
     }
 }
 
+pub mod reset;
+
 #[cfg(test)]
 mod tests;

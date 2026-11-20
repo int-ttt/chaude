@@ -27,6 +27,7 @@ const USAGE: &str = "usage: chaude <command> [args]
   lang [ko|en|auto]      print the language, or save it to .chaude/settings.json (same as /lang in the repl)
   gen-settings <os>      print/write OS-specific .claude/settings.json (mac|linux|windows) [--out FILE]
   clean [dir] [--yes]    remove the claude-lean harness from a project (dry-run; --yes backs up then removes)
+  reset [--yes] [--dry-run] [--with-notes]   fully reset this folder: remove .claude/, shipped scripts, CLAUDE.md block (asks first; notes/ kept)
   update                 check GitHub for a newer release and replace this binary (same as /update in the REPL)
   charcount | claude-history | compress-archive | export-history | extract-transcript | search-history | usage-report   helper scripts (run with -h for flags)";
 
@@ -294,6 +295,7 @@ fn main() {
         Some("metrics") => metrics_main(&args[1..]),
         Some("lang") => lang_main(&args[1..]),
         Some("clean") => chaude_clean::main(&args[1..]),
+        Some("reset") => chaude_clean::reset::main(&args[1..]),
         Some("update") => chaude_update::run_cli(VERSION, &args[1..]),
         Some("doctor") => doctor::run(),
         Some(cmd) if chaude_scripts::has(cmd) => chaude_scripts::run(cmd, &args[1..]),

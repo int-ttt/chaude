@@ -205,11 +205,16 @@ chaude
 | `chaude search-history "<검색어>"` | 입력 기록 검색 |
 | `chaude gen-settings mac\|linux\|windows [--out FILE]` | OS에 맞는 `.claude/settings.json`을 만듭니다 |
 | `chaude clean [dir] [--yes]` | 프로젝트에서 하네스를 제거합니다. 기본은 dry-run입니다. `--yes`는 백업한 뒤 제거합니다 |
+| `chaude reset [--yes] [--dry-run] [--with-notes]` | 현재 폴더를 완전히 초기화합니다(아래 Reset 참고) |
 | `chaude doctor` | 설치, PATH 순서, 훅 연결, Claude 로그인, `target/` 크기를 점검합니다. OK, WARN, FAIL과 조치 안내를 보여 줍니다 |
 | `chaude update` | 새 릴리스를 확인하고 이 바이너리를 교체합니다 |
 | `chaude --version` | 버전 출력 |
 
 모든 REPL 플래그는 `chaude repl -h`로 확인하세요.
+
+### Reset
+
+`chaude reset`은 현재 폴더를 완전히 초기화합니다. `.claude/`, 배포된 `scripts/` 파일, `CLAUDE.md`의 claude-lean 블록, `~/.chaude/recent.json`에 있는 이 폴더 항목을 제거합니다. 지울 경로를 전부 출력하고 `[y/N]`을 묻습니다. `--yes`는 확인을 건너뛰고 `--dry-run`은 목록만 출력합니다. `notes/`, `record/`, `logs/`는 `--with-notes`를 주지 않으면 남깁니다. 홈 폴더나 파일시스템 루트에서는 실행을 거부합니다.
 
 ### 업데이트
 

@@ -205,11 +205,16 @@ While an answer is running, only `/usage`, `/version`, `/help`, `/status`, `/mod
 | `chaude search-history "<terms>"` | Search prompt history |
 | `chaude gen-settings mac\|linux\|windows [--out FILE]` | Write a `.claude/settings.json` for an OS |
 | `chaude clean [dir] [--yes]` | Remove the harness from a project. Dry run by default. `--yes` backs up and removes |
+| `chaude reset [--yes] [--dry-run] [--with-notes]` | Fully reset the current folder (see Reset below) |
 | `chaude doctor` | Check the install, PATH order, hook wiring, Claude login, and `target/` size. Prints OK, WARN, or FAIL with a fix hint |
 | `chaude update` | Check for a newer release and replace this binary |
 | `chaude --version` | Print the version |
 
 Run `chaude repl -h` for all REPL flags.
+
+### Reset
+
+`chaude reset` fully resets the current folder: it removes `.claude/`, the shipped `scripts/` files, the claude-lean block in `CLAUDE.md`, and this folder's entry in `~/.chaude/recent.json`. It prints the exact list and asks `[y/N]`. `--yes` skips the prompt and `--dry-run` only prints. `notes/`, `record/` and `logs/` are kept unless you pass `--with-notes`. It refuses to run in your home folder or a filesystem root.
 
 ### Updating
 

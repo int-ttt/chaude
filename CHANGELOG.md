@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- clean: `chaude reset` fully resets the current folder (removes `.claude/`, the shipped scripts, the CLAUDE.md block and its recent-folders entry; asks first, `--yes`, `--dry-run`, `--with-notes` keeps notes/record/logs only when given).
+  - clean: `chaude reset`이 현재 폴더를 완전히 초기화합니다(`.claude/`, 배포된 스크립트, CLAUDE.md 블록, 최근 폴더 항목을 제거하며 먼저 묻습니다. `--yes`, `--dry-run`, `--with-notes`는 주어질 때만 notes/record/logs를 지웁니다).
+- tui: a colored span that wraps keeps its color on every row, including a color opened in the grey tool-result lead.
+  - tui: 색이 들어간 줄이 줄바꿈되면 모든 줄에서 색이 유지됩니다. 회색 도구 결과 머리글에서 연 색도 포함합니다.
+- hooks: at session start, with lean on, a static operating index (who handles what, routing, state files) comes first in the context; it is byte-identical every session so the prompt cache holds.
+  - hooks: lean이 켜진 세션 시작 시 컨텍스트 맨 앞에 고정 운영 색인(역할 분담, 라우팅, 상태 파일)을 보여 줍니다. 매 세션 바이트가 같아 프롬프트 캐시가 유지됩니다.
+
 ## 0.13.0 - 2026-11-20
 
 - gui: the HTML GUI (`chaude-gui`) is now included in the release archives, next to `chaude`. The installers install it when present.

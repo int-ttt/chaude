@@ -57,6 +57,27 @@ pub fn touch(path: &Path, folder: &str, now: u64) -> io::Result<Vec<RecentFolder
     Ok(rows)
 }
 
+// Every row of the file as saved (no sort, no cap). A missing or unreadable file gives none.
+pub fn all_rows(path: &Path) -> Vec<RecentFolder> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+// Drops the rows whose path is one of `folders` and saves the file when any went. Returns how many rows went. A
+// missing file or no matching row changes nothing; other rows are kept as they are.
+pub fn forget(path: &Path, folders: &[String]) -> io::Result<usize> {
+    let mut rows = all_rows(path);
+    let before = rows.len();
+    rows.retain(|r| !folders.contains(&r.path));
+    let gone = before - rows.len();
+    if gone > 0 {
+        save(path, &rows)?;
+    }
+    Ok(gone)
+}
+
 // Writes the rows through a tmp file and rename, so a crash never leaves half a file.
 fn save(path: &Path, rows: &[RecentFolder]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
