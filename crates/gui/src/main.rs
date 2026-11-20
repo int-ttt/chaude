@@ -146,6 +146,10 @@ fn main() {
                 event: WindowEvent::CloseRequested,
                 ..
             } => *control_flow = ControlFlow::Exit,
+            Event::WindowEvent {
+                event: WindowEvent::Focused(on),
+                ..
+            } => front.set_focused(on),
             _ => {}
         }
         if !quitting && front.quit {

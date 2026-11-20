@@ -52,6 +52,12 @@
 
   const nearBottom = () => chat.scrollHeight - chat.scrollTop - chat.clientHeight < 120;
 
+  // The jump button shows while the view is scrolled up from the newest output.
+  const jumpBtn = document.getElementById("jump-bottom");
+  function updateJump() {
+    jumpBtn.hidden = nearBottom();
+  }
+
   // Markdown as sanitized HTML. Images are dropped (no remote loads); links lose their href so a click cannot
   // navigate the webview away (the URL stays in the title).
   function renderMarkdown(target, text) {
@@ -147,6 +153,7 @@
       rows.splice(index, 0, node);
     }
     if (stick) chat.scrollTop = chat.scrollHeight;
+    updateJump();
   }
 
   // A streaming text row keeps its node and only re-renders its markdown; other rows are replaced in place (a
@@ -169,10 +176,12 @@
       rows[index] = node;
     }
     if (stick) chat.scrollTop = chat.scrollHeight;
+    updateJump();
   }
 
   function cutRows(len) {
     while (rows.length > len) rows.pop().remove();
+    updateJump();
   }
 
   function showState(state) {
@@ -333,6 +342,20 @@
   sendBtn.addEventListener("click", submit);
   startSend.addEventListener("click", startChat);
   stopBtn.addEventListener("click", () => send({ type: "interrupt" }));
+  chat.addEventListener("scroll", updateJump);
+  jumpBtn.addEventListener("click", () => {
+    chat.scrollTop = chat.scrollHeight;
+  });
+  // Esc (not while an IME composes): denies an open permission card, else stops a busy turn (the Stop button shows
+  // exactly while busy).
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || e.isComposing) return;
+    if (!permission.hidden) {
+      send({ type: "permission_answer", allow: false, interrupt: false });
+    } else if (!stopBtn.hidden) {
+      send({ type: "interrupt" });
+    }
+  });
   allowBtn.addEventListener("click", () => send({ type: "permission_answer", allow: true, interrupt: false }));
   denyBtn.addEventListener("click", () => send({ type: "permission_answer", allow: false, interrupt: false }));
   document.getElementById("new-chat").addEventListener("click", () => send({ type: "start", mode: "chat" }));

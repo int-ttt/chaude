@@ -16,7 +16,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      # chaude-gui (eframe) links X11/Wayland/GL/xkbcommon on Linux.
+      # chaude-gui (tao + wry) links the GTK/WebKitGTK stack on Linux.
       - name: Linux GUI system deps
         if: matrix.os == 'ubuntu-latest'
         run: |

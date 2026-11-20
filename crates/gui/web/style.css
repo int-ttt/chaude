@@ -152,6 +152,7 @@ button:focus-visible { outline: 2px solid var(--muted); outline-offset: 2px; }
 
 .dock { padding: 8px 24px 20px; }
 .dock > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+.jump-bottom { display: block; border-radius: 999px; padding: 2px 12px; margin-bottom: 6px; color: var(--muted); }
 .toast { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 6px; }
 .permission {
   display: flex;

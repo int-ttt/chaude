@@ -817,6 +817,28 @@ impl GuiState {
         self.copy_note = Some((i18n::tf(Msg::CopyDone, &[&chars]), now));
     }
 
+    // The start of the last main reply for the completion notification: whitespace collapsed, at most 80 characters
+    // (then "…"). None when the transcript has no main reply text.
+    pub fn reply_preview(&self) -> Option<String> {
+        const MAX: usize = 80;
+        let text = self.transcript.entries.iter().rev().find_map(|e| match e {
+            Entry::Text {
+                role: Role::Main,
+                text,
+                ..
+            } => Some(text.as_str()),
+            _ => None,
+        })?;
+        let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if flat.is_empty() {
+            return None;
+        }
+        if flat.chars().count() <= MAX {
+            return Some(flat);
+        }
+        Some(format!("{}…", flat.chars().take(MAX).collect::<String>()))
+    }
+
     // The copy note while it is fresh: shown for COPY_NOTE_TTL after it was set (TUI copy_note expiry).
     pub fn copy_note_text(&self, now: Instant) -> Option<&str> {
         self.copy_note
@@ -921,6 +943,23 @@ mod tests {
             role,
             text: s.into(),
         }
+    }
+
+    #[test]
+    fn reply_preview_is_the_last_main_reply_cut_to_80_chars() {
+        let mut st = GuiState::default();
+        assert_eq!(st.reply_preview(), None);
+        let now = Instant::now();
+        st.apply(text(Role::Main, "first\nreply"), now);
+        st.apply(UiEvent::MessageDone { role: Role::Main }, now);
+        st.apply(text(Role::Main, "  second   reply  "), now);
+        assert_eq!(st.reply_preview().as_deref(), Some("second reply"));
+        st.apply(UiEvent::MessageDone { role: Role::Main }, now);
+        let long = "word ".repeat(30);
+        st.apply(text(Role::Main, &long), now);
+        let got = st.reply_preview().unwrap();
+        assert_eq!(got.chars().count(), 81);
+        assert!(got.ends_with('…'));
     }
 
     // Notes, stage and status rows that arrive between two deltas of one reply must not close it: the reply stays one

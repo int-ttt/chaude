@@ -37,6 +37,7 @@ mod tests {
         assert!(page.contains("DOMPurify 3.2.6"));
         assert!(page.contains("Highlight.js v11.11.1"));
         assert!(page.contains("id=\"column\""));
+        assert!(page.contains("id=\"jump-bottom\""));
         assert!(page.contains("window.ipc.postMessage"));
     }
 

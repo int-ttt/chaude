@@ -60,6 +60,8 @@ pub struct Front {
     sent_usage: Option<UsageMeter>,
     // Engine busy at the last sync; a true -> false edge is the turn end that notifies.
     was_busy: bool,
+    // The window has focus (WindowEvent::Focused). No completion notification while it does.
+    focused: bool,
 }
 
 impl Front {
@@ -91,6 +93,7 @@ impl Front {
             sent_session: None,
             sent_usage: None,
             was_busy: false,
+            focused: true,
         }
     }
 
@@ -220,17 +223,29 @@ impl Front {
         }
     }
 
-    // One OS notification when a turn ends (the window may be behind). A failed notification is ignored.
+    // Window focus from the window thread. A turn that ends while the window has focus gets no notification.
+    pub fn set_focused(&mut self, focused: bool) {
+        self.focused = focused;
+    }
+
+    // One OS notification when a turn ends while the window is not focused: the reply's first words, or the session
+    // name when there is no reply text. A failed notification is ignored.
     fn notify_turn_end(&self) {
-        let name = match &self.session {
-            Some((Mode::Code, folder)) => folder_name(folder),
-            _ => "chat".to_string(),
-        };
+        if self.focused {
+            return;
+        }
+        let body = self.state.reply_preview().unwrap_or_else(|| {
+            let name = match &self.session {
+                Some((Mode::Code, folder)) => folder_name(folder),
+                _ => "chat".to_string(),
+            };
+            format!("Reply ready in {name}")
+        });
         // The macOS send blocks on the notification center, so it runs off the window thread.
         std::thread::spawn(move || {
             let _ = notify_rust::Notification::new()
                 .summary("chaude")
-                .body(&format!("Reply ready in {name}"))
+                .body(&body)
                 .show();
         });
     }
