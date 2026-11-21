@@ -1,4 +1,4 @@
-// Parity with Go history_test.go TestAgentCounts (plan/rust-test-parity.md, final2 workstream).
+// Parity with Go history_test.go TestAgentCounts (plan/archive/rust-test-parity.md, final2 workstream).
 // Go counts() maps to AgentTracker::running() filtered by AgentRec.background, so the public API is enough.
 // Go onToolUse/onToolResult map to on_tool_use/on_tool_result.
 

@@ -1,7 +1,7 @@
-> Source of truth: plan/rust-test-parity.md. Go paths in this file are historical (deprecated/ deleted in 0.11.3).
+> Source of truth: plan/archive/rust-test-parity.md. Go paths in this file are historical (deprecated/ deleted in 0.11.3).
 # Rust test parity vs Go, part 1 of 3
 
-> Merged into plan/rust-test-parity.md (single deduped 320-row table, recounted totals). This file is kept for per-group detail.
+> Merged into plan/archive/rust-test-parity.md (single deduped 320-row table, recounted totals). This file is kept for per-group detail.
 
 Date: 2026-11-04. Reference: 320 Go tests (`grep -rhoE '^func Test' deprecated --include='*_test.go'`).
 Columns: Go test | Rust test (path::name) | status (covered/missing/n-a/ignored) | note.

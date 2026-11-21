@@ -11,7 +11,7 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 
 ## What is it
 
-`chaude` wraps the `claude` CLI in a chat-style terminal screen. Opus is the main session. Haiku agents do lookups, small edits, and checks. When the context gets large, `chaude` writes a handoff note and continues the conversation in a new session.
+`chaude` wraps the `claude` CLI in a chat-style terminal screen. Opus is the main session. Haiku agents do lookups, small edits, and checks. When the context gets large, `chaude` writes a handoff note and continues the conversation in a new session. Run `chaude` with no arguments to open the REPL.
 
 **Pricing design.** `chaude` is built around Haiku's pricing. Haiku's rate is lower for contexts at or under 100K tokens and higher above 100K, so Haiku does the routine work and the context limits below keep Haiku contexts at or near that line.
 - Haiku agents in `chaude` rotate at 80K tokens, under the 100K line. Claude Code Haiku subagents auto-compact with a 100K window.
@@ -126,7 +126,7 @@ The binary is `target/release/chaude`. Copy it to a folder on your `PATH`.
 - **Chat**: a plain conversation in a private scratch folder (`~/.chaude/chat/`). File and shell tools are off and no harness agents run.
 - **Code**: pick a folder with the native dialog. The full harness runs with that folder as its working directory, with a file tree, file viewer and per-turn diff panel.
 
-It shows a desktop notification when a turn ends while the window is in the background. On Linux it needs the webkit2gtk runtime (for example `libwebkit2gtk-4.1-0` and `libgtk-3-0` on Debian or Ubuntu). Design notes: `plan/html-gui.md`.
+It shows a desktop notification when a turn ends while the window is in the background. On Linux it needs the webkit2gtk runtime (for example `libwebkit2gtk-4.1-0` and `libgtk-3-0` on Debian or Ubuntu). Design notes: `plan/archive/html-gui.md`.
 
 ## Quick start
 
@@ -245,7 +245,7 @@ The installers read these environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `CHAUDE_VERSION` | Version to install (default: latest), for example `v0.11.2` |
+| `CHAUDE_VERSION` | Version to install (default: latest), for example `vX.Y.Z` |
 | `CHAUDE_REPO` | GitHub repo to install from (default: `int-ttt/chaude`) |
 | `GH_TOKEN`, `GITHUB_TOKEN` | Optional token for rate limits or private forks. `gh auth token` is used when neither is set |
 
@@ -320,8 +320,6 @@ Build (Rust stable, pinned by `rust-toolchain.toml`) and test from the repo root
 cargo build --release -p chaude-cli   # binary: target/release/chaude
 cargo test
 ```
-
-The Go implementation was removed in 0.11.3. Its source is in git history at tag `v0.11.2`.
 
 Issues: report bugs and request features on [GitHub Issues](https://github.com/int-ttt/chaude/issues).
 

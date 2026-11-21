@@ -1,4 +1,4 @@
-// Parity bodies for the partial/missing rows in plan/rust-test-parity.md (final3 workstream).
+// Parity bodies for the partial/missing rows in plan/archive/rust-test-parity.md (final3 workstream).
 // Go sources: harness/resident_coder_test.go (TestMCPRoundTripFakeSession, TestResidentMCPConfigWritten),
 // resident_agent_test.go (TestMainStrictMCP), importview_test.go (TestReadClaudeTranscriptFullView),
 // idlespend_test.go (TestIdleSpendRow, TestIdleSpendLiveReplay), drain_test.go (TestAgentTrackerAndDrain).

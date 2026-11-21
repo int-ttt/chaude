@@ -13,7 +13,7 @@
 - gen-settings: if the target directory has no settings folder (.claude/ and its hooks/), create it automatically.
 
 ## Layout
-Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates/gui (eframe/egui, later; see plan/gui-parity.md).
+Cargo workspace at repo root: crates/core (lib), crates/cli (bin chaude), crates/gui (eframe/egui, later; see plan/archive/gui-parity.md).
 
 ## Phases
 1. Workspace + CI (cargo build/test on ubuntu/macos/windows) + cmd dispatch, osenv, flag parsing, settings/gen-settings (hooks embedded via include_str!).

@@ -1,4 +1,4 @@
-// Parity with Go harness group 3 (see plan/rust-test-parity-p3.md): turnspend_test.go, usagepoll_test.go
+// Parity with Go harness group 3 (see plan/archive/rust-test-parity-p3.md): turnspend_test.go, usagepoll_test.go
 // (parseUsage, pollUsageSync rows, turnCostUSD) and unit_test.go TestParseSamples.
 // Public core API only: turn_spend, usage_poll, metrics, import_view.
 

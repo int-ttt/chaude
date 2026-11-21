@@ -13,16 +13,16 @@ Git date = `git log -1 --format=%ad --date=short -- <path>`.
 | path | lines | topic | status | evidence |
 |---|---|---|---|---|
 | plan/caveman-structure.md | 58 | caveman channel format: current design (as implemented) | current | L3 `status: current design, as implemented 2026-11-12`; history in plan/archive/caveman-structure-history.md (339 lines, old design v7 and decisions) |
-| plan/gui-basic.md | 40 | GUI basic design (Tauri) | superseded | L1 `> Superseded 2026-11-12 by plan/gui-parity.md (egui instead of Tauri).`; git 2026-11-11; uncommitted edit |
-| plan/gui-parity.md | 46 | GUI parity plan (egui, 0.13.0) | current | L1 `# GUI parity plan (2026-11-12)`; L5 `## Decisions`; untracked (no git date) |
+| plan/gui-basic.md | 40 | GUI basic design (Tauri) | superseded | L1 `> Superseded 2026-11-12 by plan/archive/gui-parity.md (egui instead of Tauri).`; git 2026-11-11; uncommitted edit |
+| plan/archive/gui-parity.md | 46 | GUI parity plan (egui, 0.13.0) | current | L1 `# GUI parity plan (2026-11-12)`; L5 `## Decisions`; untracked (no git date) |
 | plan/interactive-child-resident-sessions.md | 98 | resident sessions and interactive child feasibility | planned-only | L3 `status: 계획만 작성됨. 구현·측정 미실행. 버전: v2`; git 2026-10-31 |
 | plan/rust-engine-tui.md | 24 | Rust engine and TUI design | stale | L19 "No alternate screen" vs crates/cli/src/tui/mod.rs:1 (full-screen alternate screen); git 2026-11-03 |
-| plan/rust-parity-checklist.md | 113 | Go-to-Rust user-facing feature parity | done | L4 status legend; table rows: 63 `done`, 0 `differs`, 0 `missing`; git 2026-11-04 |
+| plan/archive/rust-parity-checklist.md | 113 | Go-to-Rust user-facing feature parity | done | L4 status legend; table rows: 63 `done`, 0 `differs`, 0 `missing`; git 2026-11-04 |
 | plan/rust-port.md | 57 | Rust port plan and phase status | current | L1 `# chaude Rust port plan (decided 2026-11-03)`; phase status lines with open items (L52); git 2026-11-09 |
-| plan/rust-test-parity-p1.md | 143 | Go-to-Rust test parity, part 1 | superseded | L3 `> Merged into plan/rust-test-parity.md`; git 2026-11-04 |
-| plan/rust-test-parity-p2.md | 161 | Go-to-Rust test parity, part 2 | superseded | L3 `> Merged into plan/rust-test-parity.md`; git 2026-11-04 |
-| plan/rust-test-parity-p3.md | 248 | Go-to-Rust test parity, part 3 | superseded | L3 `> Merged into plan/rust-test-parity.md`; git 2026-11-04 |
-| plan/rust-test-parity.md | 384 | Go-to-Rust test parity, 320 tests | done | L11-20 totals: covered 237, partial 10, ignored 48, missing 0, n-a 25; git 2026-11-05 |
+| plan/archive/rust-test-parity-p1.md | 143 | Go-to-Rust test parity, part 1 | superseded | L3 `> Merged into plan/archive/rust-test-parity.md`; git 2026-11-04 |
+| plan/archive/rust-test-parity-p2.md | 161 | Go-to-Rust test parity, part 2 | superseded | L3 `> Merged into plan/archive/rust-test-parity.md`; git 2026-11-04 |
+| plan/archive/rust-test-parity-p3.md | 248 | Go-to-Rust test parity, part 3 | superseded | L3 `> Merged into plan/archive/rust-test-parity.md`; git 2026-11-04 |
+| plan/archive/rust-test-parity.md | 384 | Go-to-Rust test parity, 320 tests | done | L11-20 totals: covered 237, partial 10, ignored 48, missing 0, n-a 25; git 2026-11-05 |
 | plan/tui-parity.md | 288 | Go-to-Rust TUI parity checklist | current | L5 `Status: all items unchecked (`[ ]`)` vs 181 `[x]` and 11 `[ ]` in body; git 2026-11-05 |
 | docs/long-session-bench-plan.md | 58 | long session cost efficiency test plan | planned-only | L3 `- 상태: 계획만, 미실행 (작성일 2026-11-01)`; git 2026-11-02 |
 | docs/pingpong-bench.md | 96 | ping-pong game efficiency benchmark results | done | L1-5 `date: 2026-11-01`, runs 2 per method, results recorded; git 2026-11-02 |
@@ -51,10 +51,10 @@ Status counts (34 files): current 22, done 3, superseded 4, stale 2, planned-onl
 
 ### Overlaps and contradictions
 
-- Overlap: plan/gui-basic.md (superseded) and plan/gui-parity.md (current) both cover the GUI design.
+- Overlap: plan/gui-basic.md (superseded) and plan/archive/gui-parity.md (current) both cover the GUI design.
 - Overlap: plan/rust-engine-tui.md and plan/rust-port.md both give the Rust engine/TUI design and the same phase order (E1, T1, E2, T2, E3).
-- Overlap: plan/rust-parity-checklist.md, plan/tui-parity.md and plan/rust-test-parity.md all track Go-to-Rust parity.
-- Overlap: plan/rust-test-parity-p1/p2/p3.md duplicate plan/rust-test-parity.md (each says "Merged into").
+- Overlap: plan/archive/rust-parity-checklist.md, plan/tui-parity.md and plan/archive/rust-test-parity.md all track Go-to-Rust parity.
+- Overlap: plan/archive/rust-test-parity-p1/p2/p3.md duplicate plan/archive/rust-test-parity.md (each says "Merged into").
 - Overlap: docs/claude-lean/FRESH_START.md and docs/claude-lean/MIGRATE_NOW_PROMPT.md both cover resetting a large session.
 - Overlap: install steps appear in docs/claude-lean/APPLY_GUIDE.md, docs/claude-lean/README.md (설치) and docs/guide/cli.md (설치).
 - Overlap: docs/long-session-bench-plan.md (planned) and docs/pingpong-bench.md (results) cover the same efficiency test.
@@ -62,9 +62,9 @@ Status counts (34 files): current 22, done 3, superseded 4, stale 2, planned-onl
 - Overlap: notes/FACTS.md (API pricing) and notes/research/billing.md both cover pricing sources.
 - Contradiction: plan/tui-parity.md L5 says all items unchecked; body has 181 `[x]` and 11 `[ ]`.
 - Contradiction: plan/rust-engine-tui.md L19 and plan/rust-port.md phase 4 say inline output, no alternate screen; crates/cli/src/tui/mod.rs:1 and :43 use the alternate screen.
-- Contradiction: plan/rust-port.md L16 and L48-52 say GUI is Tauri; plan/gui-parity.md L5-6 says eframe/egui (replaces Tauri).
+- Contradiction: plan/rust-port.md L16 and L48-52 say GUI is Tauri; plan/archive/gui-parity.md L5-6 says eframe/egui (replaces Tauri).
 - Contradiction: docs/claude-lean/CHANGELOG.md newest entry 0.5.3 vs release 0.12.5.
-- Contradiction: plan/tui-parity.md and plan/rust-test-parity*.md cite `deprecated/` Go sources; deprecated/ is absent (notes/OPEN.md L6 "deprecated/ deleted"); last git commit touching it is 5de4d12 (2026-11-06).
+- Contradiction: plan/tui-parity.md and plan/archive/rust-test-parity*.md cite `deprecated/` Go sources; deprecated/ is absent (notes/OPEN.md L6 "deprecated/ deleted"); last git commit touching it is 5de4d12 (2026-11-06).
 - Contradiction: notes/DECISIONS.md L12-14 cite internal/harness (Go) paths that no longer exist.
 - Resolved 2026-11-12: plan/caveman-structure.md no longer says design v7; the old text is in plan/archive/caveman-structure-history.md. Conflicts now listed in that file under "Known conflicts".
 
@@ -73,13 +73,13 @@ Status counts (34 files): current 22, done 3, superseded 4, stale 2, planned-onl
 Applied by the docs consolidation step. Table rows above show pre-move paths. Nothing was deleted.
 
 - plan/rust-engine-tui.md -> moved (git mv) to plan/archive/rust-engine-tui.md; archive line added (superseded by plan/rust-port.md). Reference in plan/rust-port.md updated.
-- plan/gui-basic.md -> moved (git mv, uncommitted edit included) to plan/archive/gui-basic.md; archive line added (superseded by plan/gui-parity.md). Reference in plan/gui-parity.md updated.
-- plan/gui-parity.md -> kept; committed (was untracked).
+- plan/gui-basic.md -> moved (git mv, uncommitted edit included) to plan/archive/gui-basic.md; archive line added (superseded by plan/archive/gui-parity.md). Reference in plan/archive/gui-parity.md updated.
+- plan/archive/gui-parity.md -> kept; committed (was untracked).
 - plan/rust-port.md -> Tauri wording changed to eframe/egui (L3, L16, L48, L52); inline/no-alt-screen wording annotated with the code note (crates/cli/src/tui/mod.rs:1); L53 deprecated/ marked historical.
 - plan/tui-parity.md -> L5 counts set to 181 checked, 11 unchecked; L3 source marked historical.
-- plan/rust-test-parity.md -> heading marked historical (deprecated/ deleted in 0.11.3).
-- plan/rust-test-parity-p1.md, plan/rust-test-parity-p2.md, plan/rust-test-parity-p3.md -> NOT moved: crates/core/tests/parity_p12_harness.rs:1 and parity_harness_p3*.rs:1 cite them in code comments. First line "> Source of truth: plan/rust-test-parity.md" added.
-- plan/rust-parity-checklist.md -> kept; first line marks deprecated/ paths historical (Go source at tag v0.11.2).
+- plan/archive/rust-test-parity.md -> heading marked historical (deprecated/ deleted in 0.11.3).
+- plan/archive/rust-test-parity-p1.md, plan/archive/rust-test-parity-p2.md, plan/archive/rust-test-parity-p3.md -> NOT moved: crates/core/tests/parity_p12_harness.rs:1 and parity_harness_p3*.rs:1 cite them in code comments. First line "> Source of truth: plan/archive/rust-test-parity.md" added.
+- plan/archive/rust-parity-checklist.md -> kept; first line marks deprecated/ paths historical (Go source at tag v0.11.2).
 - notes/DECISIONS.md L12-14 -> "(historical, Go code removed)" appended; text not rewritten.
 - plan/caveman-structure.md -> rewritten as the current design only (58 lines; sections: Scope, Channels, Brief format, Return formats, Guard hook, Known conflicts, Proposed). Old working-tree text (339 lines with header line) moved, not deleted: plan/archive/caveman-structure-history.md. Former section 15 (session load, screen refresh) -> end of plan/rust-port.md. Former section 16 (session count, usage) -> notes/research/subagent-usage.md.
 - Not done, user confirmation needed: merge of docs/claude-lean/FRESH_START.md and MIGRATE_NOW_PROMPT.md; delete of archived files; status of docs/claude-lean/CHANGELOG.md.
@@ -207,7 +207,7 @@ Order = dependency order. Each step: own commit, gate through haiku-test-lead, T
 - [x] S2 Flaky tests: run the two key-press tests 200 times; replace sleeps with a deterministic wake signal; serialize or remove the env-var test in `lang.rs`. Accept: 200/200 passes, full cli suite passes 5 times in a row.
 - [ ] S3 Loop agent: haiku-prompter runs sub-agents foreground, may continue a coder via SendMessage, may write its log. Accept: one 3-round dry loop with a single coder ID and a written log.
   - 2026-11-13 (0.12.6 pass): not started. Acceptance needs a paid 3-round loop, which this pass did not run.
-- [ ] S4 App state to core: move `App` state, `Action`, and `apply` into a UI-neutral core module; TUI keeps key mapping, rendering, terminal and signals. Accept: existing TUI tests pass unchanged; gui can construct the state and apply an action in a test. This replaces the start of G1b in `plan/gui-parity.md`.
+- [ ] S4 App state to core: move `App` state, `Action`, and `apply` into a UI-neutral core module; TUI keeps key mapping, rendering, terminal and signals. Accept: existing TUI tests pass unchanged; gui can construct the state and apply an action in a test. This replaces the start of G1b in `plan/archive/gui-parity.md`.
   - First slice done (core `ui_state`): `Action`, `BarInput` (status-bar data) and `push_history` (prompt history rule) moved to `chaude_core::ui_state`; the TUI re-exports them. Still open: the output line list (`App.transcript`, about 145 uses in tui/mod.rs, tied to the render and wrap cache), the rest of `App` state and `apply`, `Editor` (kept in TUI), and a gui test that applies an Action.
   - 2026-11-14 (0.13.0 pass, commit 1 `core: shared input history (S4)`): history file read/append/trim and `history_file_for` moved from tui/edit.rs to `chaude_core::input_history`; the GUI loads and saves the same `<cwd>/.chaude/history.jsonl`. Hand-rolled codec kept as is (S7 replaces it). Still open: editor buffer (commit 3, if terminal-free), and the rest of this step.
   - 2026-11-14 (0.13.0 pass, commit 2 `core: status bar text and notices with i18n (S4)`): status bar text, agent rows and the orphan/budget/rotated/new-session/quiet notices moved to `chaude_core::bar_text` (pure, width-free, explicit `Lang`); keys added to core i18n. The GUI status bar and permission dialog use them. TUI output unchanged in ko and en; Korean text added in 1b68347 and 8e4f975. Still open: editor buffer (commit 3, if terminal-free) and the rest of this step.
@@ -279,7 +279,7 @@ Every step ID appears once in the phase, Deferred or Unplaced lists below. "Deci
   - S11 0.13.0 scope decision (start of phase)
   - S4 move App state and apply to core
   - S13 one session and records implementation
-  - G1 to G4 GUI steps per plan/gui-parity.md (not S-IDs; G0 status: user confirmation needed)
+  - G1 to G4 GUI steps per plan/archive/gui-parity.md (not S-IDs; G0 status: user confirmation needed)
 - Exit: S4 and S13 accept tests pass; a gui test constructs state and applies an action; S11 scope recorded before GUI work; G3 parity table has no gaps.
 
 ### P4. Engine robustness

@@ -1,4 +1,4 @@
-// Parity with Go harness tests listed in plan/rust-test-parity-p1.md and plan/rust-test-parity-p2.md
+// Parity with Go harness tests listed in plan/archive/rust-test-parity-p1.md and plan/archive/rust-test-parity-p2.md
 // (drain_test, idlespend_test, resident_agent_test, resident_coder_test, and the missing rows of
 // budget, busyslash, chaude_settings, dispatch, history_file, agentview, acceptance, idle, panel,
 // ratestatus). Uses only public core items: agent_store::AgentTracker, turn_spend::TurnSpend,

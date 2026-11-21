@@ -1,9 +1,9 @@
-> Source of truth: plan/rust-test-parity.md. Go paths in this file are historical (deprecated/ deleted in 0.11.3).
+> Source of truth: plan/archive/rust-test-parity.md. Go paths in this file are historical (deprecated/ deleted in 0.11.3).
 # Rust test parity vs Go, part 2 of 3 (deprecated/src/main/intt/internal/harness)
 
-> Merged into plan/rust-test-parity.md (single deduped 320-row table, recounted totals). This file is kept for per-group detail.
+> Merged into plan/archive/rust-test-parity.md (single deduped 320-row table, recounted totals). This file is kept for per-group detail.
 
-Date: 2026-11-04. Branch: rust-port. Shared reference: plan/rust-test-parity.md (not edited here).
+Date: 2026-11-04. Branch: rust-port. Shared reference: plan/archive/rust-test-parity.md (not edited here).
 
 ## Split (sorted by Go package directory, then file)
 
@@ -18,7 +18,7 @@ Group 2 files and counts: idle 4, idlespend 2, importview 1, input 6, links 5, l
 mode 3, multiproc_s 24, orch 3, orchws 4, panel 19, ratestatus 3, record 14, record_turn 2, resident_agent 6,
 resident_busy 1, resident_coder 6. Sum 108.
 
-record_test.go (14) is already mapped in plan/rust-test-parity.md, so group 2 has 94 unmapped rows.
+record_test.go (14) is already mapped in plan/archive/rust-test-parity.md, so group 2 has 94 unmapped rows.
 
 ## Status legend
 
@@ -38,7 +38,7 @@ record_test.go (14) is already mapped in plan/rust-test-parity.md, so group 2 ha
 
 ## Pre-mapped (not re-counted)
 
-record_test.go: 14 rows, see plan/rust-test-parity.md (harness/record_test.go section).
+record_test.go: 14 rows, see plan/archive/rust-test-parity.md (harness/record_test.go section).
 
 ## idle_test.go, idlespend_test.go, importview_test.go (7 rows)
 
@@ -159,4 +159,4 @@ TestPlainLoopCallsCloseAll, TestQuitCloseAllWithNilSess.
 
 ## Pre-existing shared rows check
 
-Group 2 rows already in plan/rust-test-parity.md: 14 (record_test.go). Not changed here.
+Group 2 rows already in plan/archive/rust-test-parity.md: 14 (record_test.go). Not changed here.

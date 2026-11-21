@@ -1,4 +1,4 @@
-// Parity stubs for the Go test body parts that the partial rows in plan/rust-test-parity.md still lack
+// Parity stubs for the Go test body parts that the partial rows in plan/archive/rust-test-parity.md still lack
 // (final3 workstream). Each test is #[ignore]d with its reason and panics when run with --ignored, so it
 // cannot pass by accident. Covered rows were removed and point at their active tests. The remaining
 // core items need a test seam. cli items are covered by #[cfg(test)] mods in crates/cli/src/tui (private access);

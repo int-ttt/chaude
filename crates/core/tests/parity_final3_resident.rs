@@ -1,4 +1,4 @@
-// Engine-level bodies for the resident MCP rows of plan/rust-test-parity.md (final3 workstream).
+// Engine-level bodies for the resident MCP rows of plan/archive/rust-test-parity.md (final3 workstream).
 // Go sources: harness/resident_agent_test.go (TestMainStrictMCP, spawn-once body) and
 // harness/resident_coder_test.go (TestResidentMCPConfigWritten, created-once body).
 // A fake claude script logs every child argv to args.log. Only the main child gets --mcp-config

@@ -126,7 +126,7 @@ cargo build --release -p chaude-cli
 - **채팅**: 비공개 임시 폴더(`~/.chaude/chat/`)에서 일반 대화를 합니다. 파일·셸 도구는 꺼져 있고 하네스 에이전트는 실행되지 않습니다.
 - **코드**: 네이티브 대화상자로 폴더를 고릅니다. 그 폴더를 작업 디렉터리로 전체 하네스가 실행되며, 파일 트리, 파일 뷰어, 턴별 diff 패널을 씁니다.
 
-창이 백그라운드에 있을 때 턴이 끝나면 데스크톱 알림을 보냅니다. Linux에서는 webkit2gtk 런타임이 필요합니다(예: Debian/Ubuntu의 `libwebkit2gtk-4.1-0`, `libgtk-3-0`). 설계 문서: `plan/html-gui.md`.
+창이 백그라운드에 있을 때 턴이 끝나면 데스크톱 알림을 보냅니다. Linux에서는 webkit2gtk 런타임이 필요합니다(예: Debian/Ubuntu의 `libwebkit2gtk-4.1-0`, `libgtk-3-0`). 설계 문서: `plan/archive/html-gui.md`.
 
 ## 빠른 시작
 
@@ -245,7 +245,7 @@ REPL 주요 플래그(`chaude repl`):
 
 | 변수 | 뜻 |
 |---|---|
-| `CHAUDE_VERSION` | 설치할 버전(기본값: 최신), 예: `v0.11.2` |
+| `CHAUDE_VERSION` | 설치할 버전(기본값: 최신), 예: `vX.Y.Z` |
 | `CHAUDE_REPO` | 설치할 GitHub 저장소(기본값: `int-ttt/chaude`) |
 | `GH_TOKEN`, `GITHUB_TOKEN` | 요청 제한이나 비공개 포크에 쓰는 선택 토큰. 둘 다 없으면 `gh auth token`을 씁니다 |
 
@@ -320,8 +320,6 @@ Rust 포트 기간 동안 장기 프로젝트를 실제로 쓴 양입니다. 메
 cargo build --release -p chaude-cli   # binary: target/release/chaude
 cargo test
 ```
-
-Go 구현은 0.11.3에서 삭제했습니다. 소스는 태그 `v0.11.2`의 git 이력에 있습니다.
 
 이슈: 버그 제보와 기능 제안은 [GitHub Issues](https://github.com/int-ttt/chaude/issues)에 남겨 주세요.
 

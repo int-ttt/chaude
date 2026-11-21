@@ -1,14 +1,14 @@
-> Source of truth: plan/rust-test-parity.md. Go paths in this file are historical (deprecated/ deleted in 0.11.3).
+> Source of truth: plan/archive/rust-test-parity.md. Go paths in this file are historical (deprecated/ deleted in 0.11.3).
 # Rust test parity vs Go, part 3 of 3 (deprecated/src/main/intt)
 
-> Merged into plan/rust-test-parity.md (single deduped 320-row table, recounted totals). This file is kept for per-group detail.
+> Merged into plan/archive/rust-test-parity.md (single deduped 320-row table, recounted totals). This file is kept for per-group detail.
 
 Date: 2026-11-04. Reference: 320 Go tests (`grep -c '^func Test'` per `*_test.go` under deprecated/).
 Columns: Go test | Rust test (path::name) | status | note.
 status: covered = Rust test of the same behaviour exists (name-level or body-level, see note);
 missing = no Rust test yet (feature or helper not found, or not body-checked); n-a = Go behaviour outside Rust scope (reason in note);
 wait: update = Go update/install test, waiting for the crates/update port.
-Shared table: plan/rust-test-parity.md (not edited here).
+Shared table: plan/archive/rust-test-parity.md (not edited here).
 
 ## Split (per brief: sort Go test files by path, 3 groups, roughly equal test counts)
 
@@ -19,7 +19,7 @@ Cumulative count over `find deprecated -name '*_test.go' | sort` (320 tests).
 - Group 3 (this file): `harness/resident_extra_test.go` through `update/update_test.go` = 103 tests (cumulative 218-320).
 
 Group 3 breakdown: harness 75 (cumulative 218-292), scripts/charcount 2 (cumulative 293-294) and settings 10 (295-304) are
-already mapped in plan/rust-test-parity.md (not repeated here), update 16 (305-320, wait: update).
+already mapped in plan/archive/rust-test-parity.md (not repeated here), update 16 (305-320, wait: update).
 
 Note on balance: group 3 has 16 update/install tests that are blocked on the update port, so only 75 harness rows here are real mapping work.
 

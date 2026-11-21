@@ -1,4 +1,4 @@
-// Parity with Go harness group 3 (see plan/rust-test-parity-p3.md).
+// Parity with Go harness group 3 (see plan/archive/rust-test-parity-p3.md).
 // Only public core API is used here; behaviour that needs crate-private items is mapped in the plan file instead.
 
 use std::time::Duration;
