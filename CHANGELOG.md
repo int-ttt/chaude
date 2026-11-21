@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- clean: `chaude reset` now deletes notes/, record/ and logs/ too, and inside `.chaude/` keeps only the history files (`history*`); the rest (settings, lock, other files) is removed. `--with-notes` is accepted as a hidden no-op.
+  - clean: `chaude reset`이 이제 notes/, record/, logs/도 삭제하고, `.chaude/`에서는 히스토리 파일(`history*`)만 남기고 나머지(설정, 잠금 파일 등)를 지웁니다. `--with-notes`는 숨겨진 무동작 별칭으로 계속 받습니다.
 - hooks: projects set up by chaude (no `.claude/settings.json` yet, or merged into one) now also get the SessionStart operating index (`session-context.py`); the main-session block message names all blocked tools and the routing to use instead.
   - hooks: chaude가 설정한 프로젝트(`.claude/settings.json`이 없거나 병합되는 경우)에도 SessionStart 운영 색인(`session-context.py`)이 설치되며, 메인 세션 차단 메시지가 차단된 도구 전부와 대신 쓸 라우팅을 안내합니다.
 

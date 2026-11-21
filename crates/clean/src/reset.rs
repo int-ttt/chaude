@@ -1,8 +1,8 @@
 //! `chaude reset`: a full reset of the current project folder. Removes what chaude put there: the whole .claude/ dir,
 //! the shipped scripts/ files (only byte-identical copies; scripts/ too when it ends up empty), the claude-lean block
-//! in CLAUDE.md (the file too when nothing else is in it) and this folder's row in ~/.chaude/recent.json. notes/,
-//! record/ and logs/ are kept unless --with-notes. Links are removed, never followed. Dry-run unless --yes or the
-//! answer to the prompt is yes.
+//! in CLAUDE.md (the file too when nothing else is in it), notes/, record/, logs/, .chaude/ minus its history files,
+//! and this folder's rows in ~/.chaude/recent.json and clients.json. Links are removed, never followed. Dry-run unless
+//! --yes or the answer to the prompt is yes.
 
 use std::env;
 use std::fs;
@@ -17,17 +17,19 @@ use serde_json::value::RawValue;
 
 use crate::{CLAUDE_MD, is_blank, strip_policy};
 
-const RESET_USAGE: &str = "usage: chaude reset [--yes] [--dry-run] [--with-notes]
-  Fully resets the current folder: removes what chaude installed here. Prints the exact list first, then asks.
-  Removes: .claude/ and .chaude/ (whole dirs), the shipped scripts/ files (only identical copies; scripts/ when then empty),
+const RESET_USAGE: &str = "usage: chaude reset [--yes] [--dry-run]
+  Fully resets the current folder: removes what chaude put here. Prints the exact list first, then asks.
+  Removes: .claude/, notes/, record/, logs/ (whole dirs), the shipped scripts/ files (only identical copies; scripts/ when then empty),
            the claude-lean block in CLAUDE.md (the file when nothing else is in it),
+           .chaude/ except the history files (history*; the lock goes too),
            this folder's row in ~/.chaude/recent.json and in clients.json
-  Keeps:   notes/, record/, logs/ (removed with --with-notes), agents.json (no per-folder key), other folders, the global install
+  Keeps:   .chaude/history* files, agents.json (no per-folder key), other folders, the global install
   --yes          remove without asking
   --dry-run      only print the list
   Refuses to run in $HOME or in a filesystem root.";
 
-const WITH_NOTES_DIRS: &[&str] = &["notes", "record", "logs"];
+/// Project dirs chaude creates: notes/ (tmp layout, notes gc, agents), record/ (turn log), logs/ (project hooks).
+const PROJECT_DIRS: &[&str] = &["notes", "record", "logs"];
 
 /// One planned change: the line shown to the user and what to do.
 #[derive(Debug)]
@@ -61,7 +63,7 @@ pub struct Plan {
 
 /// Plans the reset of dir. config is chaude's config dir (~/.chaude); state is the shared state dir (clients.json,
 /// agents.json). Fails, changing nothing, on a CLAUDE.md with a broken marker pair or a clients.json that is not JSON.
-pub fn make_plan(dir: &Path, config: &Path, state: &Path, with_notes: bool) -> io::Result<Plan> {
+pub fn make_plan(dir: &Path, config: &Path, state: &Path) -> io::Result<Plan> {
     let mut p = Plan {
         dir: dir.to_path_buf(),
         ..Plan::default()
@@ -70,7 +72,7 @@ pub fn make_plan(dir: &Path, config: &Path, state: &Path, with_notes: bool) -> i
     p.plan_local_state()?;
     p.plan_scripts()?;
     p.plan_claude_md()?;
-    p.plan_notes(with_notes)?;
+    p.plan_project_dirs()?;
     p.plan_recent(config);
     p.plan_clients(state)?;
     Ok(p)
@@ -129,18 +131,41 @@ impl Plan {
         Ok(())
     }
 
-    /// .chaude/ (chaude's project-local state) as a whole. A link is removed, never followed.
+    /// .chaude/ (chaude's project-local state): everything inside goes except the history files (history*, not the
+    /// lock). The dir itself goes only when nothing is kept. A link is removed, never followed.
     fn plan_local_state(&mut self) -> io::Result<()> {
         let path = self.dir.join(".chaude");
         let Some(st) = lstat(&path)? else {
             return Ok(());
         };
-        let op = if st.is_dir() {
-            Op::RemoveTree(path)
-        } else {
-            Op::Remove(path)
-        };
-        self.push(String::from("remove  .chaude/ (whole dir)"), op);
+        if !st.is_dir() {
+            self.push(String::from("remove  .chaude"), Op::Remove(path));
+            return Ok(());
+        }
+        let mut kids: Vec<PathBuf> = fs::read_dir(&path)?
+            .map(|e| e.map(|e| e.path()))
+            .collect::<io::Result<_>>()?;
+        kids.sort();
+        let mut kept = 0;
+        for kid in &kids {
+            if is_history(kid) {
+                kept += 1;
+                self.keep
+                    .push(format!("{} (chaude history)", rel(&self.dir, kid)));
+                continue;
+            }
+            let mut entries = Vec::new();
+            walk(kid, &mut entries)?;
+            for (p, link) in entries {
+                let shown = rel(&self.dir, &p);
+                let suffix = if link { " (link only)" } else { "" };
+                self.push(format!("remove  {shown}{suffix}"), Op::Remove(p));
+            }
+        }
+        if kept == 0 {
+            let shown = rel(&self.dir, &path);
+            self.push(format!("remove  {shown}/ (empty after)"), Op::Remove(path));
+        }
         Ok(())
     }
 
@@ -215,17 +240,13 @@ impl Plan {
         Ok(())
     }
 
-    fn plan_notes(&mut self, with_notes: bool) -> io::Result<()> {
-        for name in WITH_NOTES_DIRS {
+    /// notes/, record/, logs/ as whole folders. A link is removed, never followed.
+    fn plan_project_dirs(&mut self) -> io::Result<()> {
+        for name in PROJECT_DIRS {
             let path = self.dir.join(name);
             let Some(st) = lstat(&path)? else {
                 continue;
             };
-            if !with_notes {
-                self.keep
-                    .push(format!("{name}/ (kept; --with-notes removes it)"));
-                continue;
-            }
             if st.is_dir() {
                 self.push(
                     format!("remove  {name}/ (whole folder)"),
@@ -352,16 +373,16 @@ pub fn refusal(dir: &Path, home: Option<&Path>) -> Option<&'static str> {
     None
 }
 
-/// `reset [--yes] [--dry-run] [--with-notes]`. Runs in the current folder. Returns the process exit code.
+/// `reset [--yes] [--dry-run]`. Runs in the current folder. Returns the process exit code.
 pub fn main(args: &[String]) -> i32 {
     let mut yes = false;
     let mut dry = false;
-    let mut with_notes = false;
     for arg in args {
         match arg.as_str() {
             "--yes" | "-yes" => yes = true,
             "--dry-run" | "-dry-run" => dry = true,
-            "--with-notes" | "-with-notes" => with_notes = true,
+            // Hidden no-op: --with-notes used to keep notes/; reset now always removes them.
+            "--with-notes" | "-with-notes" => {}
             "-h" | "--help" | "help" => {
                 eprintln!("{RESET_USAGE}");
                 return 0;
@@ -384,12 +405,7 @@ pub fn main(args: &[String]) -> i32 {
         eprintln!("reset: {why}: {}", dir.display());
         return 1;
     }
-    let plan = match make_plan(
-        &dir,
-        &recent_folders::config_dir(),
-        &osenv::state_dir(),
-        with_notes,
-    ) {
+    let plan = match make_plan(&dir, &recent_folders::config_dir(), &osenv::state_dir()) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("reset: {e}");
@@ -457,6 +473,12 @@ fn walk(p: &Path, out: &mut Vec<(PathBuf, bool)>) -> io::Result<()> {
     }
     out.push((p.to_path_buf(), st.file_type().is_symlink()));
     Ok(())
+}
+
+/// A chaude history file in .chaude/: history.jsonl and its siblings, but not a lock.
+fn is_history(p: &Path) -> bool {
+    let name = p.file_name().unwrap_or_default().to_string_lossy();
+    name.starts_with("history") && !name.ends_with(".lock")
 }
 
 /// A regular file (not a link) whose bytes equal body.
