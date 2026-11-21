@@ -9,8 +9,8 @@ use crate::error::Error;
 use crate::osenv;
 use serde_json::{Map, Value};
 
-/// Project settings written when a folder has no .claude/settings.json: the main-thread guard only
-/// (same matcher and command form as the repo's .claude/settings.json; posix form, windows converted by `windows`).
+/// Project settings written when a folder has no .claude/settings.json: the main-thread guard and the SessionStart
+/// operating index (same matchers and command forms as the repo's .claude/settings.json; posix form, windows converted by `windows`).
 const GUARD_HOOKS: &str = r#"{
   "hooks": {
     "PreToolUse": [
@@ -54,25 +54,42 @@ const GUARD_HOOKS: &str = r#"{
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-context.py\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
 "#;
 
+/// Hook events whose groups the guard owns (the merge and the version reset touch only these arrays).
+const GUARD_EVENTS: &[&str] = &["PreToolUse", "SessionStart"];
+
 /// Hook scripts the guard needs (main-thread-guard.py imports _lean.py; bash-py-guard.py is standalone;
-/// haiku-read-guard.py is the Haiku-only read guard).
+/// haiku-read-guard.py is the Haiku-only read guard; session-context.py injects the operating index).
 const GUARD_FILES: &[&str] = &[
     "main-thread-guard.py",
     "bash-py-guard.py",
     "haiku-read-guard.py",
+    "session-context.py",
     "_lean.py",
 ];
 
-/// Scripts the merge looks for to tell that a PreToolUse group already runs a guard.
+/// Scripts the merge looks for to tell that a hook group already runs a guard.
 const GUARD_SCRIPTS: &[&str] = &[
     "main-thread-guard.py",
     "bash-py-guard.py",
     "haiku-read-guard.py",
+    "session-context.py",
 ];
 
 /// Package copies of the repo's .claude/agents definitions (haiku-*.md and opus-architect.md). A first-opened
@@ -423,20 +440,27 @@ fn reset_guard_settings(dst: &Path, guard: &str) -> io::Result<bool> {
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .ok_or_else(|| io::Error::other("settings.json: hooks is not an object"))?;
-    let pre = hooks
-        .entry("PreToolUse")
-        .or_insert_with(|| Value::Array(Vec::new()))
-        .as_array_mut()
-        .ok_or_else(|| io::Error::other("settings.json: hooks.PreToolUse is not an array"))?;
-    let at = pre.iter().position(is_guard_group).unwrap_or(pre.len());
-    pre.retain(|g| !is_guard_group(g));
-    for (i, group) in guard_cfg["hooks"]["PreToolUse"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .enumerate()
-    {
-        pre.insert(at + i, group.clone());
+    for event in GUARD_EVENTS {
+        let groups = hooks
+            .entry(*event)
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .ok_or_else(|| {
+                io::Error::other(format!("settings.json: hooks.{event} is not an array"))
+            })?;
+        let at = groups
+            .iter()
+            .position(is_guard_group)
+            .unwrap_or(groups.len());
+        groups.retain(|g| !is_guard_group(g));
+        for (i, group) in guard_cfg["hooks"][*event]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+        {
+            groups.insert(at + i, group.clone());
+        }
     }
     if cfg == before {
         return Ok(false);
@@ -490,24 +514,22 @@ fn merge_guard(old: &[u8], guard: &str) -> Result<Option<String>, Error> {
         .or_insert_with(|| Value::Object(Map::new()))
         .as_object_mut()
         .ok_or_else(|| msg("settings.json: hooks is not an object"))?;
-    let pre = hooks
-        .entry("PreToolUse")
-        .or_insert_with(|| Value::Array(Vec::new()))
-        .as_array_mut()
-        .ok_or_else(|| msg("settings.json: hooks.PreToolUse is not an array"))?;
     let mut changed = false;
-    for group in guard_cfg["hooks"]["PreToolUse"]
-        .as_array()
-        .into_iter()
-        .flatten()
-    {
-        let matcher = group["matcher"].as_str().unwrap_or_default();
-        let script = guard_script(group);
-        if pre.iter().any(|g| runs_guard(g, matcher, script)) {
-            continue;
+    for event in GUARD_EVENTS {
+        let groups = hooks
+            .entry(*event)
+            .or_insert_with(|| Value::Array(Vec::new()))
+            .as_array_mut()
+            .ok_or_else(|| msg(&format!("settings.json: hooks.{event} is not an array")))?;
+        for group in guard_cfg["hooks"][*event].as_array().into_iter().flatten() {
+            let matcher = group["matcher"].as_str().unwrap_or_default();
+            let script = guard_script(group);
+            if groups.iter().any(|g| runs_guard(g, matcher, script)) {
+                continue;
+            }
+            groups.push(group.clone());
+            changed = true;
         }
-        pre.push(group.clone());
-        changed = true;
     }
     if !changed {
         return Ok(None);
@@ -606,12 +628,22 @@ mod tests {
             settings.contains("\"PreToolUse\""),
             "guard hook missing:\n{settings}"
         );
+        assert!(
+            settings.contains("\"SessionStart\""),
+            "SessionStart index hook missing:\n{settings}"
+        );
         if !osenv::is_windows() {
             assert!(
                 settings.contains(
                     r#"python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/main-thread-guard.py\""#
                 ),
                 "guard command missing:\n{settings}"
+            );
+            assert!(
+                settings.contains(
+                    r#"python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-context.py\""#
+                ),
+                "session-context command missing:\n{settings}"
             );
         }
         for name in GUARD_FILES {
@@ -678,6 +710,10 @@ mod tests {
         assert!(
             first.contains("main-thread-guard.py"),
             "guard missing:\n{first}"
+        );
+        assert!(
+            first.contains("session-context.py"),
+            "SessionStart index hook missing:\n{first}"
         );
         assert!(
             !ensure_project_settings(&cwd, Some(&home)).expect("ensure"),
@@ -753,6 +789,22 @@ mod tests {
             .find(|(n, _)| *n == "squeeze-run.py")
             .expect("squeeze-run embedded");
         assert_eq!(fs::read(&script).expect("read").as_slice(), *body);
+    }
+
+    // The SessionStart group the guard writes is the repo's .claude/settings.json one (same matcher and command).
+    #[test]
+    fn session_start_matches_repo_settings() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.claude/settings.json");
+        let Ok(text) = fs::read_to_string(&repo) else {
+            eprintln!("skip: repo .claude/settings.json not reachable from here");
+            return;
+        };
+        let repo_cfg: Value = serde_json::from_str(&text).expect("repo settings.json");
+        let guard: Value = serde_json::from_str(GUARD_HOOKS).expect("guard json");
+        assert_eq!(
+            guard["hooks"]["SessionStart"], repo_cfg["hooks"]["SessionStart"],
+            "SessionStart differs from .claude/settings.json"
+        );
     }
 
     #[test]
@@ -842,6 +894,11 @@ mod tests {
             guard_groups(&text),
             guard_groups(GUARD_HOOKS),
             "guard not regenerated:\n{text}"
+        );
+        let guard: Value = serde_json::from_str(GUARD_HOOKS).expect("guard json");
+        assert_eq!(
+            cfg["hooks"]["SessionStart"], guard["hooks"]["SessionStart"],
+            "SessionStart not added:\n{text}"
         );
         let pre = cfg["hooks"]["PreToolUse"].as_array().expect("PreToolUse");
         assert_eq!(
@@ -1234,7 +1291,7 @@ mod tests {
         let out = main_guard_output(root.path(), &main);
         assert!(
             out.contains(r#""permissionDecision": "deny""#)
-                && out.contains("Main session does not use PowerShell"),
+                && out.contains("Main session blocks ALL of Read/Write/Edit/Bash/Grep/Glob/Web* (this is PowerShell)"),
             "main PowerShell not denied: {out}"
         );
         let sub = serde_json::json!({

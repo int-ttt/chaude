@@ -28,7 +28,7 @@ _NOTE = ("CLAUDE.md and agents apply only when Claude Code starts. If this sessi
 # session so the prompt cache holds. Lists only agents defined in project.rs AGENTS.
 INDEX = "\n".join([
     "[chaude operating index - read before any tool]",
-    "- You are main: Read/Write/Edit/Bash/Grep/Glob are hook-blocked. Don't try them; use only the Agent tool.",
+    "- You are main: Read/Write/Edit/Bash/Grep/Glob/Web* are hook-blocked, all of them, including Write for docs. Don't try them; use only the Agent tool.",
     "- Route: lookup->haiku-scout, web->haiku-researcher, code/fix->haiku-coder, bulk files/notes->haiku-batch-worker, prose->haiku-drafter, builds/long jobs->haiku-runner, tests->haiku-test-lead, verify->haiku-checker.",
     "- Haiku main (--model haiku): forward the user prompt verbatim to opus-architect.",
     "- One round: all independent Agent calls in one message. Brief <=5 lines (goal, paths, constraints, acceptance, 'return <=5 lines'); give paths, never pasted content.",

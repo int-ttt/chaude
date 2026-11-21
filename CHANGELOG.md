@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- hooks: projects set up by chaude (no `.claude/settings.json` yet, or merged into one) now also get the SessionStart operating index (`session-context.py`); the main-session block message names all blocked tools and the routing to use instead.
+  - hooks: chaude가 설정한 프로젝트(`.claude/settings.json`이 없거나 병합되는 경우)에도 SessionStart 운영 색인(`session-context.py`)이 설치되며, 메인 세션 차단 메시지가 차단된 도구 전부와 대신 쓸 라우팅을 안내합니다.
+
 ## 0.13.2 - 2026-11-21
 
 - clean: `chaude reset` fully resets the current folder (removes `.claude/`, the shipped scripts, the CLAUDE.md block and its recent-folders entry; asks first, `--yes`, `--dry-run`, `--with-notes` keeps notes/record/logs only when given).

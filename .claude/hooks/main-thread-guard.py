@@ -90,6 +90,6 @@ if tool in WORK_TOOLS:
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
-        "permissionDecisionReason": f"Main session does not use {tool}. Delegate: search->haiku-scout, web->haiku-researcher/`/research`, writing->haiku-drafter, verify->haiku-checker/`/check`, bulk/notes->haiku-batch-worker, jobs->haiku-runner/`/status`, code->haiku-coder, design/judgment->decide yourself (Opus main; Haiku main only: opus-architect), final check->haiku-checker. If the user wants you to work directly, tell them to type 일반모드 (or \"normal mode\")."
+        "permissionDecisionReason": f"Main session blocks ALL of Read/Write/Edit/Bash/Grep/Glob/Web* (this is {tool}). Delegate: docs/design->haiku-drafter, code->haiku-coder, lookup->haiku-scout."
     }}))
 sys.exit(0)

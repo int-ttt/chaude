@@ -1862,7 +1862,7 @@ fn main_rule_with(cfg: &Config, orch_mode: &str) -> String {
 }
 
 // Go delegationRule: default delegation of bounded code changes to the haiku-coder agent.
-pub const DELEGATION_RULE: &str = "Default to delegating bounded code changes (implementation steps, small fixes, wiring, tests) to the haiku-coder agent with an exact spec; implement yourself only design-level or tightly coupled parts, then verify Haiku's diff. Log each delegation (agent, tokens, duration, outcome, retries).";
+pub const DELEGATION_RULE: &str = "Default to delegating bounded code changes (implementation steps, small fixes, wiring, tests) to the haiku-coder agent with an exact spec.";
 
 // Go turn row: the subagent spend fields (sub_*, spawns) are merged into the row.
 fn with_spend(mut row: Value, spend: &TurnSpend) -> Value {
