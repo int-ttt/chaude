@@ -45,7 +45,7 @@ Opus 메인은 요청을 받으면 아래 표에 따라 `haiku-*`에 일을 나�
 | 찾기, 검색 | haiku-scout |
 | 웹 자료 | haiku-researcher 또는 `/research` |
 | 글쓰기 | haiku-drafter |
-| 확인 | haiku-checker 또는 `/check` |
+| 확인 | haiku-checker 또는 correction 행 D |
 | 대량 작업, 노트 정리 | haiku-batch-worker |
 | 작업 진행 상황 | haiku-runner 또는 `/status` |
 | 코드 | haiku-coder |

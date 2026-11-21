@@ -64,8 +64,8 @@ KEYWORDS = {
 # Message text is English; literals kept on purpose: '이해: ...' (misread restatement) and 맞습니다/일부/아닙니다
 # (pushback verdict) are output formats documented in .claude/skills/correction/SKILL.md.
 MSG = {
-    "C": "fact -> /fact <old> → <new>",
-    "D": "missing change -> /check, FAILs to the same haiku-drafter/haiku-coder",
+    "C": "fact -> correction row C: <old> → <new>, FACTS.md + every file",
+    "D": "missing change -> correction row D, FAILs to the same haiku-drafter/haiku-coder",
     "F": "direction change -> DECISIONS.md line via agent, re-brief",
     "A": pick("misread -> '이해: <target>에 <action>', relay user's exact words to the same agent",
               "misread -> restate as 'Understanding: <action> for <target>', relay user's exact words to the same agent"),

@@ -53,19 +53,17 @@
 
 ## 4. 스킬 목록
 
-스킬은 7개입니다. 대부분은 `context: fork`로 돌고, 지정된 에이전트에 일을 넘깁니다.
+스킬은 5개입니다. 대부분은 `context: fork`로 돌고, 지정된 에이전트에 일을 넘깁니다.
 
 | 스킬 | 호출 말 | 하는 일 | 에이전트 |
 |---|---|---|---|
-| check | 바꾼거 맞아?, 했어?, 안 바뀐 것 같은데 | 바꾼 내용이 맞는지 확인합니다. 인수는 "<무엇을 바꿨나> [대상 경로]" 형식입니다 | haiku-checker (fork) |
-| correction | 아니, 근데, 아, 그게 아니라, 아니면, 그냥, -니깐, -라고 | 정정 유형 A부터 E까지를 나눠 맞는 스킬이나 에이전트로 보냅니다 | 없음 (본문에서 /fact, /check, haiku-scout, haiku-researcher 등으로 보냄) |
+| correction | 아니, 근데, 아, 그게 아니라, 아니면, 그냥, -니깐, -라고, A가 아니라 B야, 바꾼거 맞아? | 정정 유형 A부터 G까지를 나눠 맞는 스킬이나 에이전트로 보냅니다. 행 C는 사실을 모든 파일에 고치고, 행 D는 변경이 모든 대상에 들어갔는지 확인합니다 | 없음 (본문에서 행 C는 haiku-batch-worker, 행 D는 haiku-checker, 그리고 haiku-scout, haiku-researcher 등으로 보냄) |
 | distill | 긴 대화를 정리할 때 (명시 호출) | 대화를 조각으로 나누고, `haiku-extractor`로 뽑은 뒤 `haiku-batch-worker`로 합칩니다. 에이전트는 조각 4개당 1개씩, 최대 20개입니다 | 없음 (본문에서 haiku-extractor, haiku-batch-worker 호출) |
-| fact | "A가 아니라 B야" | 사실을 바꾸고, 바꿀 파일 전체에 옮깁니다. 인수는 "<이전> → <새> [맥락]" 형식입니다 | haiku-batch-worker (fork) |
 | migrate-session | 대화 컨텍스트가 500K 이상일 때 | 긴 세션을 인계 파일로 옮깁니다. 디스크 작업은 Haiku가 합니다 | 없음 |
 | research | 웹 조사가 필요할 때 (`/research <질문>`) | 웹에서 자료를 찾고 출처를 붙입니다 | haiku-researcher (fork) |
 | status | 진행상황, 끝났어?, 상태 | `logs/*.status`를 읽어 작업 진행 상황을 보여 줍니다 | haiku-runner (fork) |
 
-`fact`는 `notes/FACTS.md`를 고칩니다. `migrate-session`은 `notes/DECISIONS.md`와 `notes/FACTS.md`를 읽고, 인계 파일을 `SESSION_HANDOFF.md` 형식으로 씁니다.
+행 C는 `notes/FACTS.md`를 고칩니다. `migrate-session`은 `notes/DECISIONS.md`와 `notes/FACTS.md`를 읽고, 인계 파일을 `SESSION_HANDOFF.md` 형식으로 씁니다.
 
 ## 5. 상태 파일과 훅의 관계
 

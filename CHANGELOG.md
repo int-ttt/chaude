@@ -6,6 +6,8 @@
   - core: Haiku 메인의 전달 규칙이 CLAUDE.md와 맞춰졌습니다. 사용자 프롬프트 원문을 opus-architect에 전달하고 결과는 haiku-output으로 중계합니다(haiku-scout/haiku-prompter 라우팅 제거). main-thread-guard의 Haiku 허용 목록(opus-architect, haiku-output)은 이미 일치하여 바꾸지 않았습니다.
 - hooks: correction-guard tags only real corrections. Markers sit at the message start or are explicit phrases (`X가 아니라 Y`, 안 바뀐, 바꾼 거 맞); questions alone, messages over 300 chars and multi-line pastes get no tag; the B (question) class is removed.
   - hooks: correction-guard는 실제 정정만 태그합니다. 표지는 메시지 맨 앞이나 명시적 표현(`X가 아니라 Y`, 안 바뀐, 바꾼 거 맞)에만 붙고, 질문만 있는 메시지, 300자를 넘는 메시지, 여러 줄 붙여넣기에는 태그가 붙지 않습니다. B(질문) 분류는 제거했습니다.
+- skills: `fact` and `check` are merged into `correction` as rows C (fact correction across every file) and D (verify a change reached every target). The `/fact` and `/check` skills are removed; hooks, docs and `chaude clean` lists now point to `correction`.
+  - skills: `fact`와 `check`를 `correction`에 행 C(모든 파일에 사실 정정)와 행 D(변경이 모든 대상에 들어갔는지 확인)로 합쳤습니다. `/fact`와 `/check` 스킬은 제거되었고, 훅, 문서, `chaude clean` 목록은 `correction`을 가리킵니다.
 
 ## 0.13.3 - 2026-11-21
 

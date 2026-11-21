@@ -61,13 +61,13 @@ class FixedCostAuditTest(unittest.TestCase):
         self.assertEqual(agent_tokens, agent_bytes // 4)
 
     def test_skill_and_memory_index_counted(self):
-        write(os.path.join(self.project, ".claude", "skills", "check", "SKILL.md"),
-              "---\nname: check\ndescription: Runs the gates.\n---\nlong body " * 50)
+        write(os.path.join(self.project, ".claude", "skills", "correction", "SKILL.md"),
+              "---\nname: correction\ndescription: Handles corrections.\n---\nlong body " * 50)
         encoded = re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(self.project))
         write(os.path.join(self.home, ".claude", "projects", encoded, "memory", "MEMORY.md"), "m" * 1200)
         out = audit(self.project, self.home)
         labels = {label for _, _, label in rows(out)}
-        self.assertIn("skill project check", labels)
+        self.assertIn("skill project correction", labels)
         self.assertIn("memory MEMORY.md", labels)
         by_label = {label: t for t, _, label in rows(out)}
         self.assertEqual(by_label["memory MEMORY.md"], 300)
