@@ -79,8 +79,6 @@ Claude Code에서 Opus를 메인으로 쓰면서 사용량을 크게 줄이는 �
 | 대화 기록 읽기 | `logs/history/*.txt` (가벼운 텍스트) |
 
 ## 더 보기
-- `APPLY_GUIDE.md`: 단계별 적용, 동작 확인, 설정 값, 문제 해결, 되돌리기
-- `FRESH_START.md`: 기존 대화를 정리하고 새로 시작하기 (`/distill`)
 - `../../CHANGELOG.md`: 버전별 변경 사항 (저장소 루트의 릴리스 기록)
 
 ## 릴리스 (GitHub)

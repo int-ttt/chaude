@@ -27,9 +27,10 @@ Claude Code를 채팅 형식의 프롬프트로 쓸 수 있고, 반복 작업은
 - 상태 줄에 비용, 5시간 사용량, 세션 교체 횟수를 보여 줍니다. `/usage`는 요금제 사용량과 한도를 보여 줍니다.
 - 프로젝트별 입력 기록을 `.chaude/history.jsonl`에 저장합니다. `chaude search-history`로 찾을 수 있습니다.
 - `/import`, `/resume claude`, `chaude --from-claude`로 Claude Code 세션을 가져옵니다.
-- 세션을 시작하면 `.claude/settings.json`이 없을 때 가드 훅이 들어간 파일을 만듭니다 (0.9.14).
-- Bash 훅 `bash-py-guard.py`는 인라인 Python이나 node로 하는 파일 편집(`open(..., 'w')`, `write_text`, `fs.writeFile*`)을 거부합니다. 읽기 전용 코드와 `python3 -m pytest`는 그대로 허용합니다 (0.11.4).
-- Windows에서는 가드 훅이 `python3`이 아니라 `py -3`(또는 `python`)으로 실행됩니다. Microsoft Store의 `python3` 스텁 때문에 가드가 열린 상태(fail open)가 되었기 때문입니다 (0.11.7). 기존 프로젝트에는 다시 적용하세요. `.claude/settings.json`의 `python3`을 `py -3` 또는 `python`으로 바꾸거나, `chaude gen-settings windows --out .claude/settings.json`으로 다시 만드세요.
+- 세션을 시작하면 `.claude/settings.json`이 없을 때 가드 훅이 들어간 파일을 만듭니다.
+- Bash 훅 `bash-py-guard.py`는 인라인 Python이나 node로 하는 파일 편집(`open(..., 'w')`, `write_text`, `fs.writeFile*`)을 거부합니다. 읽기 전용 코드와 `python3 -m pytest`는 그대로 허용합니다.
+- Windows에서는 가드 훅이 `python3`이 아니라 `py -3`(또는 `python`)으로 실행됩니다. Microsoft Store의 `python3` 스텁 때문에 가드가 열린 상태(fail open)가 되었기 때문입니다. 기존 프로젝트에는 다시 적용하세요. `.claude/settings.json`의 `python3`을 `py -3` 또는 `python`으로 바꾸거나, `chaude gen-settings windows --out .claude/settings.json`으로 다시 만드세요.
+- chaude가 설정한 프로젝트에는 세션 시작 시 운영 색인(`session-context.py`)이 들어가며, 메인 세션 차단 메시지가 차단된 도구 전부와 대신 쓸 경로를 안내합니다.
 - 세션(메인, prompter, TUI, 기본 coder, 추가 coder)은 1시간 동안 쉬어야 유휴 만료됩니다. 일반 에이전트는 메인 안에서 실행되며 자체 유휴 제한이 없습니다.
 - 메인 세션은 유휴 구간당 한 번 회전합니다. 3570 s 유휴 타이머가 1시간 캐시가 살아 있는 동안 회전시킵니다. 타이머가 발동하지 못했다면(앱 종료·재시작, 기기 절전) 다음 입력 시 마지막 API 응답이 1시간을 넘고 80K를 넘는 메인을 회전합니다.
 - `/notes-gc [--dry-run]`과 chaude 시작 시, 14일이 넘은 `notes/runs/` 파일을 `notes/archive/runs-YYYY-MM.md`로 묶습니다. 시작 시에는 `notes/runs/` 파일이 200개를 넘거나 `notes/`가 20 MB를 넘을 때만 실행합니다.

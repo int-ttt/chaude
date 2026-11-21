@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- docs: the old package guides `docs/claude-lean/APPLY_GUIDE.md`, `FRESH_START.md` and `MIGRATE_NOW_PROMPT.md` are deleted, and their links are removed. README (en/ko) drops the old migration version tags, keeps the instructions, and notes that projects get the session-start operating index and a clear main-tool block message.
+  - docs: 오래된 패키지 가이드 `docs/claude-lean/APPLY_GUIDE.md`, `FRESH_START.md`, `MIGRATE_NOW_PROMPT.md`를 삭제하고 링크를 지웠습니다. README(영/한)에서는 오래된 마이그레이션 버전 표기를 빼고 지침은 그대로 두었으며, 프로젝트에 세션 시작 운영 색인과 메인 도구 차단 안내가 들어간다는 내용을 추가했습니다.
 - clean: `chaude reset` now deletes notes/, record/ and logs/ too, and inside `.chaude/` keeps only the history files (`history*`); the rest (settings, lock, other files) is removed. `--with-notes` is accepted as a hidden no-op.
   - clean: `chaude reset`이 이제 notes/, record/, logs/도 삭제하고, `.chaude/`에서는 히스토리 파일(`history*`)만 남기고 나머지(설정, 잠금 파일 등)를 지웁니다. `--with-notes`는 숨겨진 무동작 별칭으로 계속 받습니다.
 - hooks: projects set up by chaude (no `.claude/settings.json` yet, or merged into one) now also get the SessionStart operating index (`session-context.py`); the main-session block message names all blocked tools and the routing to use instead.

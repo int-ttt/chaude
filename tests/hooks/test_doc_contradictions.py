@@ -40,9 +40,6 @@ class AgentCount(unittest.TestCase):
             with self.subTest(agent=name):
                 self.assertRegex(text, r"(?m)^\| %s \|" % re.escape(name))
 
-    def test_apply_guide_count_is_13(self):
-        self.assertIn("에이전트 13개", read("docs/claude-lean/APPLY_GUIDE.md"))
-
 
 class FinalReplyOwner(unittest.TestCase):
     def test_readme_names_haiku_output_as_final_reply_owner(self):

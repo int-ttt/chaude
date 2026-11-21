@@ -1,6 +1,6 @@
 # 변경 내역
 
-설치된 버전은 프로젝트의 `.claude/claude-lean.version`에서 확인할 수 있습니다. 업그레이드는 새 패키지로 설치를 다시 실행하면 됩니다 (`APPLY_GUIDE.md` 5-1).
+설치된 버전은 프로젝트의 `.claude/claude-lean.version`에서 확인할 수 있습니다. 업그레이드는 새 패키지로 설치를 다시 실행하면 됩니다.
 
 ## 0.5.3
 - SessionStart 훅: `/clear` 직후에도 지워진 직전 대화의 마지막 메시지를 주입 (session-context 훅, 테스트 추가)

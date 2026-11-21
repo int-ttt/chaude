@@ -27,9 +27,10 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 - Cost, 5-hour usage, and rotation count in the status line. `/usage` shows plan usage and limits.
 - Prompt history per project, saved in `.chaude/history.jsonl`. Search it with `chaude search-history`.
 - Import Claude Code sessions with `/import`, `/resume claude`, or `chaude --from-claude`.
-- Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing (0.9.14).
-- The Bash hook `bash-py-guard.py` denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `fs.writeFile*`). Read-only code and `python3 -m pytest` stay allowed (0.11.4).
-- On Windows the guard hooks run `py -3` (or `python`), not `python3`, because the Microsoft Store `python3` stub made the guard fail open (0.11.7). Re-apply on an existing project: replace `python3` in `.claude/settings.json` with `py -3` or `python`, or regenerate it with `chaude gen-settings windows --out .claude/settings.json`.
+- Starting a session creates `.claude/settings.json` with the guard hooks when the file is missing.
+- The Bash hook `bash-py-guard.py` denies file edits made by inline Python or node (`open(..., 'w')`, `write_text`, `fs.writeFile*`). Read-only code and `python3 -m pytest` stay allowed.
+- On Windows the guard hooks run `py -3` (or `python`), not `python3`, because the Microsoft Store `python3` stub made the guard fail open. Re-apply on an existing project: replace `python3` in `.claude/settings.json` with `py -3` or `python`, or regenerate it with `chaude gen-settings windows --out .claude/settings.json`.
+- Projects set up by chaude also get the session-start operating index (`session-context.py`), and the main-session block message names every blocked tool and the route to use instead.
 - Sessions (main, prompter, TUI, base coder, extra coders) wait 1 hour before idle expiry. Regular agents run inside main and have no idle limit of their own.
 - The main session rotates once per idle period: the 3570 s idle timer rotates it while the 1 hour cache is still warm. If the timer did not fire (app closed or restarted, machine asleep), the next prompt rotates a main over 80K whose last API response is over 1 hour old.
 - `/notes-gc [--dry-run]`, and chaude startup, move `notes/runs/` files older than 14 days into `notes/archive/runs-YYYY-MM.md`. Startup runs this only when `notes/runs/` has over 200 files or `notes/` is over 20 MB.
