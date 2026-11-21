@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- core: the Haiku main's forward rule now matches CLAUDE.md: the verbatim prompt goes to opus-architect and the result is relayed via haiku-output (no haiku-scout/haiku-prompter routing). main-thread-guard's Haiku allow-list (opus-architect, haiku-output) already matched and is unchanged.
+  - core: Haiku 메인의 전달 규칙이 CLAUDE.md와 맞춰졌습니다. 사용자 프롬프트 원문을 opus-architect에 전달하고 결과는 haiku-output으로 중계합니다(haiku-scout/haiku-prompter 라우팅 제거). main-thread-guard의 Haiku 허용 목록(opus-architect, haiku-output)은 이미 일치하여 바꾸지 않았습니다.
+
 ## 0.13.3 - 2026-11-21
 
 - docs: the old package guides `docs/claude-lean/APPLY_GUIDE.md`, `FRESH_START.md` and `MIGRATE_NOW_PROMPT.md` are deleted, and their links are removed. README (en/ko) drops the old migration version tags, keeps the instructions, and notes that projects get the session-start operating index and a clear main-tool block message.
