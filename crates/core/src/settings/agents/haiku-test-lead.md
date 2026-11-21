@@ -1,6 +1,6 @@
 ---
 name: haiku-test-lead
-description: Haiku. Test/gate lead: runs the whole gate set once (build once, then parallel haiku-runner groups for fmt, clippy mac/windows, per-crate tests, optional live tmux checks) and returns one PASS/FAIL table. For 테스트 (tests), 게이트 (gates), 전체 검증 (full verification).
+description: Haiku. Gate lead: runs the full gate set once (build, then parallel haiku-runner groups) and returns one PASS/FAIL table. For 테스트 (tests), 게이트 (gates), 전체 검증 (full verification).
 tools: Agent, Read, Bash, Grep, Glob
 model: haiku
 effort: low
@@ -27,9 +27,9 @@ Step 2: ONE message with all Agent calls at once (subagent_type `haiku-runner`, 
 - G3 tests core lib: `cargo test -p chaude-core --lib`
 - G4 tests engine + parity_harness_p3: `cargo test -p chaude-core --test engine --test parity_harness_p3`
 - G5 tests cli + update: `cargo test -p chaude-cli -p chaude-update`
-- one live runner per `live:` check: tmux session name `chaude-test-<name>` (unique), scratch dir `notes/tmp/test/<name>/`, uses `target/release` binary, kills only its own tmux session at the end. Drive input in separate calls: `tmux send-keys -t <session> "<text>"`, pause 1 s, then `tmux send-keys -t <session> Enter` (never text and Enter in one call; a combined call did not submit). Then poll `tmux capture-pane -p -t <session>` every 2 s, up to 60 s, for the reply; no reply = FAIL.
+- one live runner per `live:` check: tmux session name `chaude-test-<name>` (unique), scratch dir `notes/tmp/test/<name>/`, uses `target/release` binary, kills only its own tmux session at the end. Drive input in separate calls: `tmux send-keys -t <session> "<text>"`, pause 1 s, then `tmux send-keys -t <session> Enter` (never text and Enter in one call). Then poll `tmux capture-pane -p -t <session>` every 2 s, up to 60 s, for the reply; no reply = FAIL.
 
-Each runner brief (you write it, short): group id, exact command(s) above, each wrapped as `python3 scripts/squeeze-run.py -- <cmd>` (Windows: `py -3`, else `python`) (a `then` chain becomes one wrapped command per step; the full log lands in `logs/runs/`; live: its scratch dir), no code edits, no fixes, no unbounded wait loops, foreground Bash timeout 600000 ms. Return exactly one line: `group: <id> · result: PASS|FAIL · counts: <passed/failed/ignored per test binary> · failing: <test names or -> · log: <logs/runs paths>`.
+Each runner brief (you write it, short): group id, exact command(s) above, each wrapped as `python3 scripts/squeeze-run.py -- <cmd>` (Windows: `py -3`, else `python`) (a `then` chain becomes one wrapped command per step; the full log lands in `logs/runs/`; live: its scratch dir), no code edits, no fixes, no unbounded wait loops, foreground Bash timeout 600000 ms (cargo runs are the exception to the 120 s normal limit). Return exactly one line: `group: <id> · result: PASS|FAIL · counts: <passed/failed/ignored per test binary> · failing: <test names or -> · log: <logs/runs paths>`.
 
 Step 3: after all runner results are back (none still running):
 - `date +%s` (end); wall = end - start, plus step 1 and step 2 split.

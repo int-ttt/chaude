@@ -9,16 +9,16 @@ autoCompactWindow: 130000
 ---
 
 Start: resumable (skip finished items); `nohup <cmd> > logs/<job>.log 2>&1 &`; progress lines (done/total, current, failures) in `logs/<job>.status`; remote host info in `notes/ENV.md` (no secrets), check the connection with one cheap command first.
-- Status line format (append one line per step): `step: <noun phrase> / pct: <0-100>`. No prose, no Korean in the status file. Foreground commands <=120s; longer jobs run via nohup + status file. Return within 10 min per run: if the job is unfinished, status: partial, reason: time limit, done/remaining list in notes/runs/<YYMMDD>-run-<job>.md.
-Waiting: never `gh run watch` or any unbounded wait (macOS has no `timeout`; use the loop bound, or `perl -e 'alarm N; exec @ARGV'`). Poll in a loop bounded to <=9 min per Bash call: `end=$((SECONDS+540)); while [ $SECONDS -lt $end ]; do gh run view <id> --json status,conclusion,jobs -q '.jobs[] | "\(.name) \(.status) \(.conclusion)"'; sleep 60; done` (one line per job, every 60s; append each poll to `logs/<job>.status` as `step: <noun phrase> / pct: <0-100>`). Stop at the first failed job: `gh run view <id> --log-failed | tail -n 80`; do not wait for the other jobs.
+- Status line format (append one line per step): `step: <noun phrase> / pct: <0-100>`. No prose, no Korean in the status file. Bash time rule: foreground commands <=120s normal; CI poll loop <=9 min per call; longer jobs run via nohup + status file. Return within 10 min per run: if the job is unfinished, status: partial, reason: time limit, done/remaining list in notes/runs/<YYMMDD>-run-<job>.md.
+Waiting: never `gh run watch` or any unbounded wait. CI poll: a loop bounded to <=9 min per Bash call, `sleep 60` between polls, one line per job per poll (`gh run view <id> --json jobs`); append each poll to `logs/<job>.status` as `step: <noun phrase> / pct: <0-100>`. Stop at the first failed job: `gh run view <id> --log-failed | tail -n 80`; do not wait for the other jobs.
 Builds and test runs: wrap the command as `python3 scripts/squeeze-run.py -- <cmd>` (Windows: `py -3`, else `python`) (prints the head, error lines and tail; full output saved to `logs/runs/<ts>.log`). Keep that log path in the return.
 Status: read `logs/*.status` + `tail -n 20` of the log only.
 Failure: grep only the failing item's error; rerun failed items only; never repeat a fix without new evidence; after 2 failed fixes stop and report error lines.
-Return content (the final message, <=3 lines, <=300 chars) covers: done/total · failures · ETA · running/stopped.
+The relay: line (<=300 chars) covers: done/total · failures · ETA · running/stopped.
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
-Final message = 3.6 head 2 lines + R-* block (caveman). User-facing text (CHAUDE_LANG language) = haiku-output.
+Final message = 3.6 header (2 lines) + R block only, nothing else. User-facing text (CHAUDE_LANG language) = haiku-output.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
-Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.
+Agent-read files (notes/*, runs/): terse English `key: value`, Korean only inside verbatim quotes/values; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.
 
 ## Return format (caveman R-write)
 When the brief has `return: R-write` (B format, docs/claude-lean/CAVEMAN_FORMAT.md), the final message is the 3.6 status header + the R-write block:

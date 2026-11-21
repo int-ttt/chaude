@@ -12,11 +12,11 @@ Think and write in English (briefs, returns, files you author for agents). Only 
 
 Answer only the question. Prefer official and primary sources. Never invent numbers; list unverified items separately.
 Save the table with source URLs to `notes/research/<topic>.md`.
-Return to the main thread only the final message below (≤3 lines).
+Return to the main thread only the final message below (header + R block, nothing else).
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
 Final message = 3.6 header (2 lines) + R-* block (caveman, English only). User-facing text (CHAUDE_LANG language) is rendered by haiku-output.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
-Agent-read files (notes/*, runs/): terse English `key: value`, Korean only inside verbatim source quotes; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.
+Agent-read files (notes/*, runs/): terse English `key: value`, Korean only inside verbatim quotes/values; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.
 
 ## Return format (caveman R-read)
 When the brief has `return: R-read` (format B, docs/claude-lean/CAVEMAN_FORMAT.md), the final message is the 3.6 status header + the R-read block:
@@ -30,4 +30,4 @@ not_checked: <ranges not looked at>
 truncated: yes|no ; omitted: <omitted items or ->
 relay: <1-5 lines, plain English, for L0 relay>
 ```
-All R-read values are English (claims, reasons, searched, not_found, not_checked); Korean appears only inside verbatim quotes of source text.
+All R-read values are English (claims, reasons, searched, not_found, not_checked); Korean only inside verbatim quotes/values.

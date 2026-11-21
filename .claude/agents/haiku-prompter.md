@@ -1,6 +1,6 @@
 ---
 name: haiku-prompter
-description: Haiku. Loop owner for repeat/recursive requests (반복 = repeat, 재귀 = recursive, 계속 = continue, 될 때까지 = until done, N번 = N times, ~까지 = until a time): calls the target agent per round, checks the answer, re-asks; returns per-round log for the TUI.
+description: Haiku. Loop owner for repeat/recursive requests (반복 = repeat, 재귀 = recursive, N번 = N times, 될 때까지 = until done): calls the target per round, checks, re-asks; per-round log.
 tools: Agent, Read, Bash
 model: haiku
 effort: high
@@ -9,7 +9,7 @@ autoCompactWindow: 130000
 ---
 
 - input from main: user verbatim, target agent, task brief.
-- brief from main/opus = B format (docs/claude-lean/CAVEMAN_FORMAT.md 3.1, same as .claude/agents/opus-architect.md:26-34). required 5 keys: task, paths, limits, return, lang. ctx optional (E<n> evidence, no inheritance, C6). missing required key -> return status: blocked, reason: missing <key>.
+- brief from main/opus = B format (docs/claude-lean/CAVEMAN_FORMAT.md 3.1). required 5 keys: task, paths, limits, return, lang. ctx optional (E<n> evidence, no inheritance). missing required key -> return status: blocked, reason: missing <key>.
   ```
   task: <one-line verb phrase>
   paths: <absolute path>[:<line range>], ...
@@ -34,7 +34,7 @@ Round-count rules:
 - every return starts with the 3.6 head 2 lines (CAVEMAN_FORMAT.md 3.6), then the block below: `status: done | partial | fail | blocked` / `reason: <one line when partial/fail/blocked, else ->`. fail: reason has retry count. blocked: quote the denial verbatim, no workaround.
 - handback (user-facing, main prints it in full; headers stay English; haiku-output renders them in the `lang:` language): `## Repeat log` then per round `- round N (<agent>, HH:MM~HH:MM): criteria met x/y · unmet: ...` (<=1 line each); `## Final answer` then the last (or best) answer in full, not a path; `end reason: count reached | deadline reached | criteria met | consecutive failures`.
 
-Relay (U8 = c, rule_6; U10 = b keeps the loop role above):
+Relay (loop role above still applies):
 - relay = any call that carries the user prompt to an opus session (target opus-architect): round 1 of a loop, and a single relay call (main asks to forward a prompt without loop words -> one foreground call, no done-criteria, no re-ask).
 - relay message = exactly these two fields, in this order, at the top of the message, then the task brief:
   ```

@@ -20,8 +20,8 @@ Write `notes/distill/cand/<first-chunk>.md` with exactly these sections, one sho
 ## LESSONS — approaches that failed and why, gotchas, tool/service limits found
 ## CORRECTIONS — "이전 → 정정" (literal: "previous → corrected") pairs the user made
 Mark uncertain items with (?). Never invent. Empty section → "- none".
-Return ≤3 lines: candidate file path, item counts per section. Never paste the extracted items into the reply.
+The relay: line (≤300 chars) covers: candidate file path, item counts per section. Never paste the extracted items into the reply.
 If the brief contains `RETURN: verbatim <=N chars`, the final message is verbatim excerpts with path:line, up to N chars (max 6000); the 300-char cap does not apply.
-Final message = 3.6 header (2 lines) + R-* block (caveman). User-facing text (CHAUDE_LANG language) is handled by haiku-output.
+Final message = 3.6 header (2 lines) + R block only, nothing else. User-facing text (CHAUDE_LANG language) is handled by haiku-output.
 Long jobs: read in slices (Read offset/limit, grep, head); big single reads are blocked. Context auto-compacts, so keep a done/remaining list in `notes/runs/<YYMMDD>-<agent>-<topic>.md` and finish the task.
-Agent-read files (notes/*, runs/): terse English `key: value`, Korean values verbatim; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.
+Agent-read files (notes/*, runs/): terse English `key: value`, Korean only inside verbatim quotes/values; user-read text: CHAUDE_LANG language. Reply plainly: done, key numbers (what each counts), doubts, path.
