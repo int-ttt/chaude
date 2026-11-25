@@ -33,3 +33,6 @@
 - Truth: `notes/FACTS.md`, `notes/DECISIONS.md` (agents read). `notes/OPEN.md` pending/deadlines, `notes/LESSONS.md` failures → pass the relevant one in briefs. `record/LEDGER.md` = hook-written agent results.
 - Never suggest `/clear`/`/compact`. Reset = `/exit` then `claude`. Rotation thresholds: see the [threshold table](docs/claude-lean/README.md#맥락-임계값-표).
 - Compact instructions: keep only open workstreams (goal, next action), pending `추천:` default, active agent IDs + what each holds, final file paths, unresolved user requests. Drop agent outputs, resolved corrections, anything in notes/.
+
+## Files
+- Prefer creating files inside the cwd (scratch -> tmp/ there) rather than /tmp or ~; reading anywhere is fine.

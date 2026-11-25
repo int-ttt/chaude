@@ -277,9 +277,12 @@ pub fn refresh_on_version_change(
     if project {
         let claude = cwd.join(".claude");
         let stamp = claude.join(PROJECT_STAMP);
+        let settings = claude.join("settings.json");
+        if prune_missing_hooks(&settings, cwd)? {
+            changed.push(settings.clone());
+        }
         if !fs::read_to_string(&stamp).is_ok_and(|v| v.trim() == current) {
-            let settings = claude.join("settings.json");
-            if reset_guard_settings(&settings, guard)? {
+            if reset_guard_settings(&settings, guard)? && !changed.contains(&settings) {
                 changed.push(settings);
             }
             changed.extend(overwrite_shipped(cwd)?);
@@ -290,6 +293,66 @@ pub fn refresh_on_version_change(
     fs::create_dir_all(state)?;
     fs::write(state.join(VERSION_FILE), format!("{current}\n"))?;
     Ok(changed)
+}
+
+/// Drops hook entries (in every event) that run `$CLAUDE_PROJECT_DIR/.claude/hooks/<name>.py` when that file is missing
+/// under `cwd` and `<name>` is not a shipped hook, then drops the groups left empty. A settings file that is missing or
+/// is not valid JSON is left alone (the refresh and merge report those). True when the file was rewritten.
+fn prune_missing_hooks(settings: &Path, cwd: &Path) -> io::Result<bool> {
+    let old = match fs::read(settings) {
+        Ok(old) => old,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let Ok(mut cfg) = serde_json::from_slice::<Value>(&old) else {
+        return Ok(false);
+    };
+    let mut changed = false;
+    if let Some(hooks) = cfg.get_mut("hooks").and_then(Value::as_object_mut) {
+        for groups in hooks.values_mut().filter_map(|v| v.as_array_mut()) {
+            for group in groups.iter_mut() {
+                if let Some(list) = group.get_mut("hooks").and_then(Value::as_array_mut) {
+                    let before = list.len();
+                    list.retain(|h| !is_missing_hook(h, cwd));
+                    changed |= list.len() != before;
+                }
+            }
+            let before = groups.len();
+            groups.retain(|g| !g["hooks"].as_array().is_some_and(|hs| hs.is_empty()));
+            changed |= groups.len() != before;
+        }
+    }
+    if !changed {
+        return Ok(false);
+    }
+    let mut text = serde_json::to_string_pretty(&cfg).map_err(io::Error::other)?;
+    text.push('\n');
+    fs::write(settings, text)?;
+    Ok(true)
+}
+
+/// True when a hook entry runs a project hook script that is neither shipped nor present under `cwd/.claude/hooks`.
+fn is_missing_hook(h: &Value, cwd: &Path) -> bool {
+    let Some(name) = referenced_project_hook(&hook_text(h)) else {
+        return false;
+    };
+    embedded_hook(&name).is_none() && !cwd.join(".claude").join("hooks").join(&name).exists()
+}
+
+/// The `<name>.py` a command runs from `$CLAUDE_PROJECT_DIR/.claude/hooks/` (posix `$VAR` or `${VAR}` form), if any.
+fn referenced_project_hook(text: &str) -> Option<String> {
+    const MARKS: [&str; 2] = [
+        "$CLAUDE_PROJECT_DIR/.claude/hooks/",
+        "${CLAUDE_PROJECT_DIR}/.claude/hooks/",
+    ];
+    MARKS.iter().find_map(|mark| {
+        let i = text.find(mark)? + mark.len();
+        let name: String = text[i..]
+            .chars()
+            .take_while(|c| !c.is_whitespace() && !matches!(c, '"' | '\'' | '\\'))
+            .collect();
+        (name.ends_with(".py") && name.len() > 3 && !name.contains('/')).then_some(name)
+    })
 }
 
 /// Overwrites each shipped file under `cwd` (the AGENTS, GUARD_FILES and SCRIPTS set that `ensure_project_settings`
@@ -1305,6 +1368,89 @@ mod tests {
         assert!(
             out.trim().is_empty(),
             "subagent PowerShell not allowed: {out}"
+        );
+    }
+
+    #[test]
+    fn prune_drops_missing_project_hooks_in_every_event() {
+        let root = TempDir::new("prune-hooks");
+        let cwd = root.path();
+        let hooks = cwd.join(".claude").join("hooks");
+        fs::create_dir_all(&hooks).expect("mkdir hooks");
+        fs::write(hooks.join("present-custom.py"), "x").expect("write present");
+        let cmd = |n: &str| format!("python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/{n}\"");
+        let cfg = serde_json::json!({
+            "theme": "dark",
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [
+                        {"type": "command", "command": cmd("gone-custom.py")},
+                        {"type": "command", "command": cmd("main-thread-guard.py")}
+                    ]},
+                    {"matcher": "Edit", "hooks": [
+                        {"type": "command", "command": cmd("gone-custom.py")}
+                    ]}
+                ],
+                "Stop": [
+                    {"hooks": [{"type": "command", "command": cmd("present-custom.py")}]}
+                ],
+                "SessionEnd": [
+                    {"hooks": [{"type": "command", "command": "echo not-a-project-hook"}]}
+                ]
+            }
+        });
+        let settings = cwd.join(".claude").join("settings.json");
+        fs::write(&settings, cfg.to_string()).expect("write settings");
+
+        assert!(prune_missing_hooks(&settings, cwd).expect("prune"));
+        let out: Value = serde_json::from_slice(&fs::read(&settings).expect("read")).expect("json");
+        assert_eq!(out["theme"], "dark");
+        let pre = out["hooks"]["PreToolUse"].as_array().expect("pre");
+        assert_eq!(pre.len(), 1, "empty Edit group dropped: {out}");
+        assert_eq!(pre[0]["hooks"].as_array().expect("hooks").len(), 1);
+        assert!(
+            pre[0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap()
+                .contains("main-thread-guard.py")
+        );
+        assert_eq!(
+            out["hooks"]["Stop"][0]["hooks"][0]["command"],
+            cmd("present-custom.py")
+        );
+        assert_eq!(
+            out["hooks"]["SessionEnd"][0]["hooks"][0]["command"],
+            "echo not-a-project-hook"
+        );
+        assert!(!prune_missing_hooks(&settings, cwd).expect("second prune"));
+    }
+
+    #[test]
+    fn prune_ignores_missing_and_invalid_settings() {
+        let root = TempDir::new("prune-absent");
+        let cwd = root.path();
+        assert!(!prune_missing_hooks(&cwd.join("none.json"), cwd).expect("missing"));
+        let bad = cwd.join("bad.json");
+        fs::write(&bad, "{not json").expect("write bad");
+        assert!(!prune_missing_hooks(&bad, cwd).expect("invalid"));
+        assert_eq!(fs::read_to_string(&bad).expect("read"), "{not json");
+    }
+
+    #[test]
+    fn referenced_hook_name_forms() {
+        assert_eq!(
+            referenced_project_hook("python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/a-b.py\"")
+                .as_deref(),
+            Some("a-b.py")
+        );
+        assert_eq!(
+            referenced_project_hook("${CLAUDE_PROJECT_DIR}/.claude/hooks/x.py --flag").as_deref(),
+            Some("x.py")
+        );
+        assert_eq!(referenced_project_hook("python3 scripts/x.py"), None);
+        assert_eq!(
+            referenced_project_hook("$CLAUDE_PROJECT_DIR/.claude/hooks/sub/x.py"),
+            None
         );
     }
 }

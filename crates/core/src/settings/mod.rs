@@ -4,6 +4,7 @@
 
 pub mod chaude_settings;
 pub mod pickers;
+pub mod preflight;
 pub mod project;
 
 use std::env;

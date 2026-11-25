@@ -114,14 +114,9 @@ fn run_tui(args: &[String]) -> i32 {
     );
     cfg.agent_wait = settings::chaude_settings::agent_wait(cfg.cwd.as_deref());
     // Language: project settings `language` (/lang) > env CHAUDE_LANG > OS locale. Exported so child claude processes match.
-    let lang = i18n::resolve(
-        env::var(i18n::ENV_KEY).ok().as_deref(),
-        settings::chaude_settings::language(cfg.cwd.as_deref()).as_deref(),
-        i18n::os_locale().as_deref(),
-    );
+    let lang =
+        i18n::export_live(settings::chaude_settings::language(cfg.cwd.as_deref()).as_deref());
     i18n::set_current(lang);
-    // SAFETY: called from main before any other thread is spawned.
-    unsafe { env::set_var(i18n::ENV_KEY, lang.code()) };
     let cwd = cfg
         .cwd
         .clone()
@@ -163,6 +158,19 @@ fn run_tui(args: &[String]) -> i32 {
     if let Err(e) = settings::project::ensure_project_settings(Path::new(&cwd), home.as_deref()) {
         eprintln!("project settings: {e}");
     }
+    // Setup checks (trust, python3, hooks turned off, home folder): each line goes to stderr and joins the TUI notice.
+    let preflight = match home.as_deref() {
+        Some(h) => settings::preflight::check(Path::new(&cwd), h, &|k| env::var(k).ok()),
+        None => Vec::new(),
+    };
+    for w in &preflight {
+        eprintln!("chaude: {w}");
+    }
+    let notice = match (notice, preflight.is_empty()) {
+        (n, true) => n,
+        (Some(n), false) => Some(format!("{n} · {}", preflight.join(" · "))),
+        (None, false) => Some(preflight.join(" · ")),
+    };
     // Go repl.go:1357: the startup prune of old records uses the loaded SessionRetentionDays.
     let set = tui::settings::load(tui::settings::file_for(Some(Path::new(&cwd))).as_deref());
     tui::settings::prune_records_at_startup(Path::new(&cwd), &set, std::time::SystemTime::now());
@@ -225,11 +233,7 @@ fn metrics_main(args: &[String]) -> i32 {
 // The language resolves the same way as at TUI startup (settings > env > OS locale) so the printed name matches.
 fn lang_main(args: &[String]) -> i32 {
     let cwd = env::current_dir().unwrap_or_else(|_| ".".into());
-    let resolved = i18n::resolve(
-        env::var(i18n::ENV_KEY).ok().as_deref(),
-        settings::chaude_settings::language(Some(&cwd)).as_deref(),
-        i18n::os_locale().as_deref(),
-    );
+    let (resolved, _) = i18n::live_lang(settings::chaude_settings::language(Some(&cwd)).as_deref());
     i18n::set_current(resolved);
     match args {
         [] => {

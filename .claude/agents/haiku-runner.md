@@ -8,6 +8,7 @@ omitClaudeMd: true
 autoCompactWindow: 130000
 ---
 
+Prefer creating files inside the cwd (scratch -> tmp/ there) rather than /tmp or ~; reading anywhere is fine.
 Start: resumable (skip finished items); `nohup <cmd> > logs/<job>.log 2>&1 &`; progress lines (done/total, current, failures) in `logs/<job>.status`; remote host info in `notes/ENV.md` (no secrets), check the connection with one cheap command first.
 - Status line format (append one line per step): `step: <noun phrase> / pct: <0-100>`. No prose, no Korean in the status file. Bash time rule: foreground commands <=120s normal; CI poll loop <=9 min per call; longer jobs run via nohup + status file. Return within 10 min per run: if the job is unfinished, status: partial, reason: time limit, done/remaining list in notes/runs/<YYMMDD>-run-<job>.md.
 Waiting: never `gh run watch` or any unbounded wait. CI poll: a loop bounded to <=9 min per Bash call, `sleep 60` between polls, one line per job per poll (`gh run view <id> --json jobs`); append each poll to `logs/<job>.status` as `step: <noun phrase> / pct: <0-100>`. Stop at the first failed job: `gh run view <id> --log-failed | tail -n 80`; do not wait for the other jobs.

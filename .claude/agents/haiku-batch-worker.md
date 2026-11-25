@@ -10,6 +10,7 @@ autoCompactWindow: 130000
 ---
 
 Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en).
+Prefer creating files inside the cwd (scratch -> tmp/ there) rather than /tmp or ~; reading anywhere is fine.
 
 Do exactly the specified transformation; if judgment is needed, stop and say so. Never delete originals; archive them.
 Read files with offset/limit instead of whole large files; never cat logs whole.

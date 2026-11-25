@@ -199,6 +199,13 @@ impl Front {
         // A code folder refreshes its shipped files once per chaude version and announces it once. A chat dir is no project.
         if !chat {
             let home = osenv::home_dir();
+            if let Err(e) =
+                chaude_core::settings::project::ensure_project_settings(&cwd, Some(&home))
+            {
+                self.state
+                    .transcript
+                    .push_notice(format!("project settings: {e}"));
+            }
             match chaude_core::settings::project::startup_refresh(
                 &cwd,
                 Some(&home),
@@ -210,6 +217,12 @@ impl Front {
                     .state
                     .transcript
                     .push_notice(format!("project settings refresh: {e}")),
+            }
+            // Setup checks (trust, python3, hooks turned off): each line goes to the transcript notices.
+            for w in
+                chaude_core::settings::preflight::check(&cwd, &home, &|k| std::env::var(k).ok())
+            {
+                self.state.transcript.push_notice(format!("chaude: {w}"));
             }
         }
         let w = self.wake.clone();

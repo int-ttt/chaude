@@ -70,13 +70,100 @@ pub fn resolve(env: Option<&str>, config: Option<&str>, locale: Option<&str>) ->
     lang_from_locale(locale.unwrap_or_default())
 }
 
-// The OS locale string. Unix: LC_ALL, LC_MESSAGES, LANG (first non-empty). Windows: GetUserDefaultLocaleName.
+// The OS locale string. Unix: LC_ALL, LC_MESSAGES, LANG (first non-empty), then on macOS the first AppleLanguages
+// entry. Windows: GetUserDefaultLocaleName.
 #[cfg(not(windows))]
 pub fn os_locale() -> Option<String> {
+    os_locale_with(|k| std::env::var(k).ok(), apple_languages_raw)
+}
+
+// The os_locale lookup with the env reader and the macOS command injected, so tests can mock both.
+#[cfg(not(windows))]
+fn os_locale_with(
+    var: impl Fn(&str) -> Option<String>,
+    apple: impl FnOnce() -> Option<String>,
+) -> Option<String> {
     ["LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
-        .filter_map(|k| std::env::var(k).ok())
+        .filter_map(|k| var(k))
         .find(|v| !v.trim().is_empty())
+        .or_else(|| apple().and_then(|out| first_apple_language(&out)))
+}
+
+// The first quoted entry of `defaults read -g AppleLanguages`, e.g. "(\n    \"ko-KR\",\n    \"en-US\"\n)".
+#[cfg(not(windows))]
+fn first_apple_language(text: &str) -> Option<String> {
+    let rest = &text[text.find('"')? + 1..];
+    let v = rest[..rest.find('"')?].trim();
+    (!v.is_empty()).then(|| v.to_string())
+}
+
+// The AppleLanguages list from macOS defaults. None when the command fails.
+#[cfg(target_os = "macos")]
+fn apple_languages_raw() -> Option<String> {
+    let out = std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleLanguages"])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn apple_languages_raw() -> Option<String> {
+    None
+}
+
+// Set by chaude next to CHAUDE_LANG when that value is its own export for an auto pref (not a user pin).
+pub const SOURCE_KEY: &str = "CHAUDE_LANG_SOURCE";
+pub const SOURCE_AUTO: &str = "auto";
+
+// Pure live rule: settings > CHAUDE_LANG > OS locale, except that a CHAUDE_LANG marked as chaude's auto export is
+// not a pin, so a nested session follows the OS again. Returns the language and whether it came from auto (the
+// caller then exports the marker). A user-set CHAUDE_LANG under auto still wins and stays unmarked.
+pub fn live_pure(
+    env: Option<&str>,
+    marker: Option<&str>,
+    config: Option<&str>,
+    locale: Option<&str>,
+) -> (Lang, bool) {
+    let auto = !matches!(config.and_then(parse_pref), Some(Pref::Fixed(_)));
+    let env = if auto && marker.map(str::trim) == Some(SOURCE_AUTO) {
+        None
+    } else {
+        env
+    };
+    let user_pin = auto && matches!(env.and_then(parse_pref), Some(Pref::Fixed(_)));
+    (resolve(env, config, locale), auto && !user_pin)
+}
+
+// live_pure over the process env and the OS locale.
+pub fn live_lang(config: Option<&str>) -> (Lang, bool) {
+    let env = std::env::var(ENV_KEY).ok();
+    let marker = std::env::var(SOURCE_KEY).ok();
+    live_pure(
+        env.as_deref(),
+        marker.as_deref(),
+        config,
+        os_locale().as_deref(),
+    )
+}
+
+// Resolves the live language and publishes it for child processes: CHAUDE_LANG always, and the marker only when the
+// value came from auto. The caller sets it as current.
+pub fn export_live(config: Option<&str>) -> Lang {
+    let (lang, from_auto) = live_lang(config);
+    // SAFETY: called on the main thread at startup or at a /lang pick, before any other thread reads these variables.
+    unsafe {
+        std::env::set_var(ENV_KEY, lang.code());
+        if from_auto {
+            std::env::set_var(SOURCE_KEY, SOURCE_AUTO);
+        } else {
+            std::env::remove_var(SOURCE_KEY);
+        }
+    }
+    lang
 }
 
 #[cfg(windows)]
@@ -613,6 +700,45 @@ mod tests {
         assert_eq!(resolve(None, Some("auto"), Some("en_US.UTF-8")), Lang::En);
         assert_eq!(resolve(None, None, Some("ja_JP.UTF-8")), Lang::En);
         assert_eq!(resolve(None, None, None), Lang::En);
+    }
+
+    #[test]
+    fn auto_marker_env_is_not_a_pin() {
+        // chaude's own auto export (marker set) does not pin a nested session: it follows the OS locale.
+        assert_eq!(
+            live_pure(Some("en"), Some("auto"), Some("auto"), Some("ko_KR.UTF-8")),
+            (Lang::Ko, true)
+        );
+        // A user-set CHAUDE_LANG without the marker still wins under auto, and is not re-marked.
+        assert_eq!(
+            live_pure(Some("en"), None, Some("auto"), Some("ko_KR.UTF-8")),
+            (Lang::En, false)
+        );
+        assert_eq!(
+            live_pure(None, None, Some("auto"), Some("ko_KR.UTF-8")),
+            (Lang::Ko, true)
+        );
+        // A fixed pref ignores the marker: the setting wins and nothing is marked.
+        assert_eq!(
+            live_pure(Some("en"), Some("auto"), Some("ko"), Some("en_US.UTF-8")),
+            (Lang::Ko, false)
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn os_locale_falls_back_to_apple_languages() {
+        let none = |_: &str| None;
+        let apple = || Some("(\n    \"ko-KR\",\n    \"en-US\"\n)\n".to_string());
+        assert_eq!(os_locale_with(none, apple).as_deref(), Some("ko-KR"));
+        // An env locale wins, so the command is not consulted.
+        let lang = |k: &str| (k == "LANG").then(|| "en_US.UTF-8".to_string());
+        assert_eq!(
+            os_locale_with(lang, || panic!("command not needed")).as_deref(),
+            Some("en_US.UTF-8")
+        );
+        assert_eq!(os_locale_with(none, || None), None);
+        assert_eq!(first_apple_language("(\n)"), None);
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub mod resume_pick;
 pub mod rewind;
 pub mod sessview;
 pub mod settings;
+mod term_compat;
 pub mod usage;
 
 use std::cell::RefCell;
@@ -42,7 +43,7 @@ use chaude_core::ui_state::{WELCOME_MODEL, WELCOME_THRESHOLD, welcome_lines};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
     self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::terminal::{
     self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, ScrollDown, ScrollUp,
@@ -116,6 +117,8 @@ pub struct App {
     ime_shift: i32,
     // Keep the hardware cursor hidden (parked for IME only). Under JediTerm the drawn block is the one cursor; CHAUDE_IME_HIDE=0/1 overrides.
     hide_cursor: bool,
+    // ASCII glyph fallback (term_compat::ascii_glyphs), applied to every drawn row.
+    ascii: bool,
     // Terminal window focus (crossterm FocusGained/FocusLost). Without it, or without the input box as the focused
     // pane (input_active), the input cursor is drawn hollow and the hardware cursor is hidden.
     focused: bool,
@@ -280,6 +283,7 @@ impl App {
             mouse: true,
             ime_shift: 0,
             hide_cursor: false,
+            ascii: false,
             focused: true,
             sugg_sel: 0,
             usage: usage::Usage::default(),
@@ -3263,6 +3267,11 @@ fn body_shift(prev: &[String], rows: &[String], body_h: usize) -> isize {
 // so only the rows that really changed are written. Nothing is cleared on a normal update.
 pub fn draw(out: &mut impl Write, app: &App, prev: &mut Vec<String>) -> io::Result<()> {
     let (rows, body_h) = layout(app, app.cols, app.rows);
+    let rows: Vec<String> = if app.ascii {
+        rows.iter().map(|r| term_compat::asciify(r)).collect()
+    } else {
+        rows
+    };
     let shift = body_shift(prev, &rows, body_h);
     let mut moved;
     let old: &[String] = if shift == 0 {
@@ -3329,6 +3338,7 @@ fn restore_terminal() {
         Show
     );
     let _ = terminal::disable_raw_mode();
+    term_compat::restore_console();
 }
 
 // DECSCUSR (CSI Ps SP q): steady block while the TUI runs, so the shown hardware cursor does not blink.
@@ -3372,6 +3382,7 @@ struct TermGuard;
 
 impl TermGuard {
     fn enter() -> io::Result<Self> {
+        term_compat::prepare_console();
         terminal::enable_raw_mode()?;
         execute!(
             io::stdout(),
@@ -3412,6 +3423,9 @@ pub fn run(cfg: Config, startup: Option<ClaudeImport>, notice: Option<String>) -
         .is_empty();
     if stdin_is_char_device() && !plain_forced {
         tui(cfg, startup, notice)
+    } else if cfg!(windows) && !plain_forced && !std::io::IsTerminal::is_terminal(&io::stdout()) {
+        // An IDE Run console has no terminal on either side: say how to get one instead of drawing garbage.
+        Err(io::Error::other(term_compat::NO_TTY_MESSAGE))
     } else {
         plain(cfg, startup, notice)
     }
@@ -3595,6 +3609,10 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>, notice: Option<String>) -
         std::env::var("CHAUDE_IME_HIDE").ok(),
         std::env::var("TERMINAL_EMULATOR").ok(),
     );
+    app.ascii = term_compat::ascii_glyphs(
+        std::env::var("TERMINAL_EMULATOR").ok().as_deref(),
+        std::env::var("CHAUDE_ASCII").ok().as_deref(),
+    );
     if let Some(imp) = startup {
         app.show_import(&imp);
         engine.install_import(imp);
@@ -3625,7 +3643,8 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>, notice: Option<String>) -
             let mut burst = keyburst::Burst::default();
             while let Ok(ev) = event::read() {
                 let ev = match ev {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    Event::Key(key) if term_compat::accepts(key.kind) => {
+                        let key = term_compat::normalize_enter(key);
                         Event::Key(burst.filter(key, Instant::now(), || {
                             event::poll(Duration::ZERO).unwrap_or(false)
                         }))
@@ -3691,7 +3710,7 @@ fn tui(mut cfg: Config, startup: Option<ClaudeImport>, notice: Option<String>) -
                         engine.interrupt(InterruptSource::Signal);
                     }
                 }
-                Wake::Term(Event::Key(key)) if key.kind == KeyEventKind::Press => {
+                Wake::Term(Event::Key(key)) if term_compat::accepts(key.kind) => {
                     match app.on_key(key) {
                         Action::Continue => {}
                         Action::Submit(text) => engine.submit(&text),
@@ -3942,7 +3961,7 @@ fn pump(rx: &Receiver<UiEvent>, app: &mut App, turn: bool) {
 mod tests {
     use super::*;
     use chaude_core::api::TaskStatus;
-    use crossterm::event::KeyEventState;
+    use crossterm::event::{KeyEventKind, KeyEventState};
 
     // Drop the "HH:MM:SS " start stamp after an action row's lead ("● " / "· " / result "  ⎿  ") and any " → HH:MM:SS (..)" end.
     fn untime(row: &str) -> String {

@@ -24,5 +24,6 @@ record/
 tests/e2e/results/
 .chaude/
 notes/tmp/
+tmp/
 notes/runs/
 target/
