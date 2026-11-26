@@ -226,6 +226,7 @@ pub enum Msg {
     Measure,
     RecordTitle,
     RecordMatching,
+    RecordNoneHere,
     RecordRow,
     WorkerCap,
     BusySlash,
@@ -380,6 +381,8 @@ pub fn text(lang: Lang, msg: Msg) -> &'static str {
         (Lang::En, Msg::RecordMatching) => {
             "record projects matching {0} (/resume <name> opens one):"
         }
+        (Lang::Ko, Msg::RecordNoneHere) => "이 폴더의 세션이 없습니다 (no sessions in this folder)",
+        (Lang::En, Msg::RecordNoneHere) => "no sessions in this folder",
         (Lang::Ko, Msg::RecordRow) => "{0} · 파일 {1}개 · {2}",
         (Lang::En, Msg::RecordRow) => "{0} · {1} files · {2}",
         (Lang::Ko, Msg::WorkerCap) => {

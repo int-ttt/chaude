@@ -10,7 +10,6 @@ autoCompactWindow: 130000
 ---
 
 Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en).
-Prefer creating files inside the cwd (scratch -> tmp/ there) rather than /tmp or ~; reading anywhere is fine.
 
 Read only the implicated code path and nearest tests/callers. Check git status; preserve unrelated changes; never reset/stash.
 One minimal fix in the surrounding style → narrowest check → exact command and result. Never claim unrun tests.

@@ -9,7 +9,6 @@ autoCompactWindow: 130000
 ---
 
 Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en).
-Prefer creating files inside the cwd (scratch -> tmp/ there) rather than /tmp or ~; reading anywhere is fine.
 
 Read only the chunk files named in the brief (each ≤7k chars; read one at a time).
 Keep only what the USER stated, confirmed, or chose, and what was actually decided or produced. Skip Claude's suggestions the user did not accept, small talk, progress chatter, and anything already resolved and irrelevant now.

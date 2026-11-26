@@ -9,7 +9,6 @@ autoCompactWindow: 130000
 ---
 
 Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en). Exception: user deliverables keep the user's language.
-Prefer creating files inside the cwd (scratch -> tmp/ there) rather than /tmp or ~; reading anywhere is fine.
 
 First read `notes/FACTS.md` and `notes/DECISIONS.md`. Use only facts from them or the source files; missing facts → "user confirmation needed" (ko: 사용자 확인 필요), never invent.
 1. Edit in place. Apply the change to EVERY version or copy of the text (final, drafts, per-target variants) — find them with grep if the brief doesn't list all.

@@ -189,6 +189,14 @@ pub fn resume(
     Ok((Vec::new(), blocks))
 }
 
+// The bare /resume picker list (TUI and GUI): only the project folder of cwd (record_folder::project_name).
+// Empty when cwd has no folder under root.
+pub fn cwd_projects(root: &Path, cwd: &Path) -> io::Result<Vec<Project>> {
+    let name = record_folder::project_name(cwd);
+    let projects = record_folder::list_projects(root)?;
+    Ok(projects.into_iter().filter(|p| p.name == name).collect())
+}
+
 // Go recordPick: the project folders the TUI /resume picker offers: every folder for an empty arg, the hits
 // for a multi-hit query. An empty result means arg loads one folder directly (or is a number, or fails in
 // resume).
@@ -295,6 +303,29 @@ mod tests {
         assert_eq!(st.topic_for("/resume").0, "", "skipped turn saves nothing");
         st.last_reply = "switch [cat-switch: ui]".to_string();
         assert_eq!(st.topic_for("다음").0, "ui");
+    }
+
+    #[test]
+    fn cwd_projects_lists_only_the_folder_of_cwd() {
+        let tmp = TempDir::new("rt-cwd");
+        let root = tmp.path().join("record");
+        let stamp = Stamp::new(2026, 11, 4, 9, 5, 7);
+        let turn = vec![Block {
+            kind: "asst".to_string(),
+            text: "x".to_string(),
+        }];
+        record::append_turn(&root.join("alpha"), &stamp, "a", &turn, false).unwrap();
+        record::append_turn(&root.join("beta"), &stamp, "b", &turn, false).unwrap();
+        let names = |ps: Vec<Project>| ps.into_iter().map(|p| p.name).collect::<Vec<_>>();
+        assert_eq!(
+            names(cwd_projects(&root, &tmp.path().join("beta")).unwrap()),
+            vec!["beta".to_string()]
+        );
+        assert!(
+            cwd_projects(&root, &tmp.path().join("gamma"))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

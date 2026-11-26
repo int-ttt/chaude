@@ -1338,11 +1338,20 @@ impl App {
             return Action::Continue;
         }
         let arg = args.join(" ");
-        let root =
-            chaude_core::record::dir_for(&std::env::current_dir().unwrap_or_else(|_| ".".into()));
+        let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+        let root = chaude_core::record::dir_for(&cwd);
         let (terms, record) = chaude_core::record_turn::resume_target_in(&root, args);
         if !record {
             return self.open_groups(&terms);
+        }
+        // Bare /resume lists only the record folder of this cwd.
+        if arg.is_empty() {
+            match chaude_core::record_turn::cwd_projects(&root, &cwd) {
+                Err(e) => self.note(&e.to_string()),
+                Ok(ps) if ps.is_empty() => self.note(t(Msg::RecordNoneHere)),
+                Ok(ps) => self.recs = Some(chaude_core::record_pick::Picker::new(ps)),
+            }
+            return Action::Continue;
         }
         match chaude_core::record_pick::Picker::open(&root, &arg) {
             Err(e) => self.note(&e.to_string()),

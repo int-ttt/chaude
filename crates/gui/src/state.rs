@@ -187,6 +187,17 @@ impl GuiState {
     // Opens the /resume record picker over the folders under root for arg (TUI resume). With no folder that matches,
     // the core resume answers instead: its notes and blocks go to the transcript.
     pub fn open_records(&mut self, root: &Path, arg: &str) {
+        // Bare /resume lists only the record folder of this cwd.
+        if arg.is_empty() {
+            match record_turn::cwd_projects(root, Path::new(&self.cwd)) {
+                Err(e) => self.transcript.push_notice(e.to_string()),
+                Ok(ps) if ps.is_empty() => {
+                    self.transcript.push_notice(i18n::t(Msg::RecordNoneHere))
+                }
+                Ok(ps) => self.records = Some(Picker::new(ps)),
+            }
+            return;
+        }
         match Picker::open(root, arg) {
             Err(e) => self.transcript.push_notice(e.to_string()),
             Ok(Some(p)) => self.records = Some(p),
@@ -1794,7 +1805,7 @@ mod tests {
         let mut st = GuiState::default();
         st.records_step(true);
         assert!(st.records.is_none(), "stepping while closed does nothing");
-        st.open_records(&root, "");
+        st.open_records(&root, "a"); // multi-hit query: both fixture folders (bare /resume is cwd-only)
         assert!(st.records.is_some());
         let rows = st.records_rows();
         assert_eq!(rows.len(), 2);
@@ -1823,7 +1834,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&root);
         let mut st = GuiState::default();
-        st.open_records(&root, "");
+        st.open_records(&root, "a"); // multi-hit query: both fixture folders (bare /resume is cwd-only)
         assert!(st.records.is_none(), "no folder, no window");
         assert!(
             matches!(st.transcript.entries.last(), Some(Entry::Notice(_))),
@@ -1833,10 +1844,42 @@ mod tests {
     }
 
     #[test]
+    fn bare_records_lists_only_the_folder_of_cwd() {
+        let root = records_root("cwd");
+        let mut st = GuiState {
+            cwd: root.join("beta").display().to_string(),
+            ..Default::default()
+        };
+        st.open_records(&root, "");
+        let names: Vec<String> = st
+            .records
+            .as_ref()
+            .unwrap()
+            .projects
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        assert_eq!(names, vec!["beta".to_string()]);
+
+        let mut st = GuiState {
+            cwd: root.join("gamma").display().to_string(),
+            ..Default::default()
+        };
+        st.open_records(&root, "");
+        assert!(st.records.is_none(), "no folder for cwd, no window");
+        assert!(
+            matches!(st.transcript.entries.last(), Some(Entry::Notice(n)) if n.contains("no sessions in this folder")),
+            "{:?}",
+            st.transcript.entries
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn records_cancel_closes_without_loading() {
         let root = records_root("cancel");
         let mut st = GuiState::default();
-        st.open_records(&root, "");
+        st.open_records(&root, "a"); // multi-hit query: both fixture folders (bare /resume is cwd-only)
         st.close_records();
         assert!(st.records.is_none(), "cancel closes");
         assert!(st.transcript.is_empty(), "nothing loaded");
@@ -1899,7 +1942,7 @@ mod tests {
     fn records_enter_loads_the_cursor_folder_into_the_transcript() {
         let root = records_root("enter");
         let mut st = GuiState::default();
-        st.open_records(&root, "");
+        st.open_records(&root, "a"); // multi-hit query: both fixture folders (bare /resume is cwd-only)
         st.records_step(false);
         let name = st.records.as_ref().unwrap().projects[1].name.clone();
         assert!(st.records_pick(None), "enter loads the cursor row");
@@ -1925,7 +1968,7 @@ mod tests {
     fn records_click_loads_the_clicked_row() {
         let root = records_root("click");
         let mut st = GuiState::default();
-        st.open_records(&root, "");
+        st.open_records(&root, "a"); // multi-hit query: both fixture folders (bare /resume is cwd-only)
         let name = st.records.as_ref().unwrap().projects[0].name.clone();
         assert!(st.records_pick(Some(0)), "a click loads that row");
         assert!(st.records.is_none());

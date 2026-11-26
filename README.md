@@ -35,6 +35,7 @@ A way to use Claude Code through a chat-format prompt that hands the routine wor
 - The main session rotates once per idle period: the 3570 s idle timer rotates it while the 1 hour cache is still warm. If the timer did not fire (app closed or restarted, machine asleep), the next prompt rotates a main over 80K whose last API response is over 1 hour old.
 - `/notes-gc [--dry-run]`, and chaude startup, move `notes/runs/` files older than 14 days into `notes/archive/runs-YYYY-MM.md`. Startup runs this only when `notes/runs/` has over 200 files or `notes/` is over 20 MB.
 - Release usage: `python3 scripts/release-usage.py --from <prev tag> --to <tag>` writes one release cycle's token usage for this project (local transcripts only).
+- `/resume` with no argument lists only the record folder of the current directory (cwd), in the TUI and GUI pickers. Folders of other projects are not offered, and a cwd with no folder gets an empty list.
 - `/lang` switches the screen between English and Korean. The language also applies to hook messages and child agent arguments.
 - `chaude doctor` and `/doctor` check old binaries (below 0.12.0), PATH order, the install lock (macOS uchg), hook wiring, Claude login, and `target/` size. Each check prints OK, WARN, or FAIL with a fix hint.
 - `agent_wait` in `.chaude/settings.json` (default `true`): a main reply waits for its running Agent/Task calls before it finishes.

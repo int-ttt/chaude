@@ -35,6 +35,7 @@ Claude Code를 채팅 형식의 프롬프트로 쓸 수 있고, 반복 작업은
 - 메인 세션은 유휴 구간당 한 번 회전합니다. 3570 s 유휴 타이머가 1시간 캐시가 살아 있는 동안 회전시킵니다. 타이머가 발동하지 못했다면(앱 종료·재시작, 기기 절전) 다음 입력 시 마지막 API 응답이 1시간을 넘고 80K를 넘는 메인을 회전합니다.
 - `/notes-gc [--dry-run]`과 chaude 시작 시, 14일이 넘은 `notes/runs/` 파일을 `notes/archive/runs-YYYY-MM.md`로 묶습니다. 시작 시에는 `notes/runs/` 파일이 200개를 넘거나 `notes/`가 20 MB를 넘을 때만 실행합니다.
 - 릴리스 사용량: `python3 scripts/release-usage.py --from <이전 태그> --to <태그>`가 이 프로젝트의 릴리스 주기 토큰 사용량을 씁니다(로컬 기록만 사용).
+- `/resume`를 인자 없이 실행하면 현재 디렉터리(cwd)의 기록 폴더만 TUI와 GUI 선택 목록에 나옵니다. 다른 프로젝트의 폴더는 나오지 않으며, 기록 폴더가 없는 cwd에서는 목록이 비어 있습니다.
 - `/lang`으로 화면 언어를 영어와 한국어 사이에서 바꿉니다. 언어 설정은 훅 메시지와 하위 에이전트 인자에도 적용됩니다.
 - `chaude doctor`와 `/doctor`는 구버전 바이너리(0.12.0 미만), PATH 순서, 설치본 잠금(macOS uchg), 훅 연결, Claude 로그인, `target/` 크기를 점검합니다. 각 항목은 OK, WARN, FAIL 중 하나와 조치 안내를 보여 줍니다.
 - `.chaude/settings.json`의 `agent_wait`(기본값 `true`): 메인 답변은 실행 중인 Agent/Task 호출이 끝날 때까지 기다린 뒤 끝납니다.

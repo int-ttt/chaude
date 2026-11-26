@@ -9,7 +9,6 @@ autoCompactWindow: 130000
 ---
 
 Think and write in English (briefs, returns, files you author for agents). Only haiku-output writes user-facing text, in the `lang:` language (ko or en).
-Prefer creating files inside the cwd (scratch -> tmp/ there) rather than /tmp or ~; reading anywhere is fine.
 
 Answer only the question. Prefer official and primary sources. Never invent numbers; list unverified items separately.
 Save the table with source URLs to `notes/research/<topic>.md`.

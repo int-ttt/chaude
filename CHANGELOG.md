@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- resume: bare `/resume` (TUI and GUI) lists only the record folder of the current directory (cwd). Folders of other projects are not offered; a cwd with no folder gets an empty list.
+  - resume: 인자 없는 `/resume`(TUI와 GUI)은 현재 디렉터리(cwd)의 기록 폴더만 나열합니다. 다른 프로젝트의 폴더는 나오지 않으며, 기록 폴더가 없는 cwd에서는 목록이 비어 있습니다.
+- agents: the "prefer creating files inside the cwd" line is removed from the haiku-batch-worker, haiku-coder, haiku-drafter, haiku-extractor, haiku-researcher, haiku-runner and sonnet-writer agent definitions.
+  - agents: haiku-batch-worker, haiku-coder, haiku-drafter, haiku-extractor, haiku-researcher, haiku-runner, sonnet-writer 에이전트 정의에서 "임시 파일은 cwd 안에 만든다" 줄을 제거했습니다.
+
 ## 0.13.4 - 2026-11-21
 
 - core: the Haiku main's forward rule now matches CLAUDE.md: the verbatim prompt goes to opus-architect and the result is relayed via haiku-output (no haiku-scout/haiku-prompter routing). main-thread-guard's Haiku allow-list (opus-architect, haiku-output) already matched and is unchanged.
