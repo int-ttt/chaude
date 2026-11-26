@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.5 - 2026-11-26
+
 - resume: bare `/resume` (TUI and GUI) lists only the record folder of the current directory (cwd). Folders of other projects are not offered; a cwd with no folder gets an empty list.
   - resume: 인자 없는 `/resume`(TUI와 GUI)은 현재 디렉터리(cwd)의 기록 폴더만 나열합니다. 다른 프로젝트의 폴더는 나오지 않으며, 기록 폴더가 없는 cwd에서는 목록이 비어 있습니다.
 - agents: the "prefer creating files inside the cwd" line is removed from the haiku-batch-worker, haiku-coder, haiku-drafter, haiku-extractor, haiku-researcher, haiku-runner and sonnet-writer agent definitions.
