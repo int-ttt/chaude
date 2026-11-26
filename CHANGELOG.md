@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- hooks: project settings wire the PreToolUse guards (agent-model-pin, main-thread-guard, bash-py-guard, haiku-read-guard) and the context alert in `.claude/settings.json`; a new `haiku-tui` agent definition is added for the user-facing reply; the release notes and research/archive notes are committed with this release.
+  - hooks: 프로젝트 `.claude/settings.json`에 PreToolUse 가드(agent-model-pin, main-thread-guard, bash-py-guard, haiku-read-guard)와 컨텍스트 경고를 연결했고, 사용자 응답용 `haiku-tui` 에이전트 정의를 추가했습니다. 릴리즈 노트와 리서치/보관 노트도 이번 릴리즈에 함께 커밋합니다.
+
 ## 0.13.5 - 2026-11-26
 
 - resume: bare `/resume` (TUI and GUI) lists only the record folder of the current directory (cwd). Folders of other projects are not offered; a cwd with no folder gets an empty list.
